@@ -1,0 +1,11 @@
+# Fins de ligne LF, dans le dépôt comme à la sortie de checkout.
+# packages.txt en CRLF est silencieusement ignoré par Streamlit Community Cloud.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.zip binary
+*.ttf binary
+*.otf binary
