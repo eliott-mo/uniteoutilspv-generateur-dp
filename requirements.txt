@@ -1,0 +1,13 @@
+# Versions épinglées : des incompatibilités Starlette/Streamlit ont déjà
+# provoqué des plantages au déploiement sur d'autres outils du parc.
+streamlit==1.57.0
+starlette==1.0.0
+requests==2.33.1
+Pillow==12.2.0
+shapely==2.1.2
+geopandas==1.1.3
+pyogrio==0.12.1
+pyproj==3.7.2
+CairoSVG==2.9.0
+cairocffi==1.7.1
+pypdf==6.16.2
