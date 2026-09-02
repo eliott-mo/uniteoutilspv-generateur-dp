@@ -26,7 +26,7 @@ def nouvelle_planche(
     return Planche(
         titre=titre,
         numero=numero,
-        projet=projet.nom,
+        projet=projet.libelle_affiche,
         date=projet.date_francaise(),
         echelle=echelle,
     )

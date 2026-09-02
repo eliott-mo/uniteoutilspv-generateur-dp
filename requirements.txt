@@ -11,3 +11,6 @@ pyproj==3.7.2
 CairoSVG==2.9.0
 cairocffi==1.7.1
 pypdf==6.16.2
+# Lecture des métriques du TTF embarqué : c'est ce qui permet de vérifier que
+# cairo compose bien avec Aptos, et pas avec une police de substitution.
+fonttools==4.62.1

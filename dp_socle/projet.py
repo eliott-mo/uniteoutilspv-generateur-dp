@@ -31,6 +31,13 @@ class Projet:
     date: str
     emprise: str
     image_garde: str | None = None
+    #: Nom du projet tel que le chef de projet veut le voir au cartouche et sur
+    #: la page de garde. `nom` reste l'identifiant technique du dossier.
+    libelle: str | None = None
+
+    @property
+    def libelle_affiche(self) -> str:
+        return self.libelle.strip() if self.libelle and self.libelle.strip() else self.nom
 
     @property
     def chemin_emprise(self) -> Path:

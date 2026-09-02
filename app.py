@@ -43,7 +43,9 @@ def _etat_polices():
 
 
 etat = _etat_polices()
-if not etat.disponible:
+if etat.disponible:
+    st.caption(f"✅ {etat.message}")
+else:
     st.warning(f"Police : {etat.message}", icon="⚠️")
 
 with st.sidebar:
@@ -63,7 +65,8 @@ with st.sidebar:
     st.divider()
     dpi = st.number_input(
         "DPI des fonds raster", min_value=100, max_value=400, value=DPI_DEFAUT, step=25,
-        help="250 dpi en A3 donne environ 4035 x 2638 px sur la zone de dessin.",
+        help="200 dpi en A3 donne 3228 x 2110 px sur la zone de dessin. "
+        "250 dpi améliore peu à l'impression et alourdit le dossier de moitié.",
     )
 
 
@@ -99,11 +102,22 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
 st.subheader("1. Métadonnées du projet")
 colonne_gauche, colonne_droite = st.columns(2)
 with colonne_gauche:
-    nom = st.text_input("Nom du projet", value="ALR_45_Bray-Saint-Aignan")
+    nom = st.text_input(
+        "Identifiant du dossier", value="ALR_45_Bray-Saint-Aignan",
+        help="Sert à nommer le dossier de sortie. N'apparaît pas sur les planches.",
+    )
     commune = st.text_input("Commune", value="Bray-Saint-Aignan")
 with colonne_droite:
     code_postal = st.text_input("Code postal", value="45460")
     date_projet = st.date_input("Date du dossier", value=_date.today())
+
+libelle = st.text_input(
+    "Nom du projet au cartouche",
+    value="",
+    placeholder="Nom retenu par le chef de projet — à défaut, l'identifiant du dossier",
+    help="C'est ce libellé qui figure dans le cartouche des planches et sur la "
+    "page de garde.",
+)
 
 st.subheader("2. Fichiers")
 fichiers_emprise = st.file_uploader(
@@ -114,8 +128,10 @@ fichiers_emprise = st.file_uploader(
     "génération est refusée.",
 )
 image_garde = st.file_uploader(
-    "Image de perspective pour la page de garde (facultatif)",
+    "Photomontage de la page de garde (facultatif)",
     type=["jpg", "jpeg", "png"],
+    help="Occupe la moitié gauche de la page de garde. Sans image, la place "
+    "reste blanche plutôt que d'afficher un cadre vide.",
 )
 
 st.subheader("3. Génération")
@@ -147,6 +163,7 @@ def _construire_projet() -> Projet | None:
         date=date_projet.isoformat(),
         emprise=str(chemin_emprise),
         image_garde=str(chemin_image) if chemin_image else None,
+        libelle=libelle.strip() or None,
     )
 
 

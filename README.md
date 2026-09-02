@@ -72,35 +72,72 @@ python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import g
 ```json
 {
   "nom": "ALR_45_Bray-Saint-Aignan",
+  "libelle": "Centrale photovoltaïque de Bray-Saint-Aignan",
   "commune": "Bray-Saint-Aignan",
   "code_postal": "45460",
   "date": "2026-09-01",
   "emprise": "emprise.zip",
-  "image_garde": "perspective.jpg"
+  "image_garde": "photomontage.jpg"
 }
 ```
 
-Les chemins relatifs le sont par rapport au dossier du `projet.json`.
-`image_garde` est facultatif. Une correction de dernière minute se fait en
-modifiant une valeur ici puis en régénérant.
+- `nom` est l'identifiant technique du dossier : il nomme le dossier de sortie
+  et n'apparaît sur aucune planche.
+- `libelle` est le nom du projet retenu par le chef de projet. C'est lui qui
+  figure au cartouche et sur la page de garde. À défaut, `nom` est repris.
+- `image_garde` est le photomontage de la page de garde. Il occupe la moitié
+  gauche de la page ; sans lui, la place reste blanche plutôt que d'afficher un
+  cadre vide.
 
-## Police
+Les chemins relatifs le sont par rapport au dossier du `projet.json`. Une
+correction de dernière minute se fait en modifiant une valeur ici puis en
+régénérant.
 
-Le corps de texte et le cartouche sont composés en **Aptos**.
+## Typographie
 
-CairoSVG rend le texte via l'API « toy » de cairo (`cairo_select_font_face`),
-qui résout les polices **par nom de famille auprès du système** : fontconfig
-sous Linux, GDI sous Windows. CairoSVG n'implémente pas `@font-face`, donc
-référencer un chemin de TTF dans le SVG n'aurait aucun effet.
+Le corps de texte et le cartouche sont composés en **Aptos**, dont le TTF est
+embarqué dans `dp_socle/ressources/polices/`.
 
-Le fichier `Aptos.ttf` doit donc être déposé dans
-`dp_socle/ressources/polices/`. Au démarrage, `dp_socle.polices` l'installe
-dans le système de polices de la plateforme, puis **vérifie réellement** que
-cairo résout la famille demandée, en comparant les métriques obtenues avec
-celles d'une famille inexistante. Si la vérification échoue, un avertissement
-explicite est affiché dans l'interface et sur la sortie d'erreur : la chaîne de
-repli déclarée (`Carlito, Calibri, DejaVu Sans, sans-serif`) a des métriques
-différentes et décalerait la mise en page.
+### Comment CairoSVG choisit une police
+
+Vérifié dans son code source : le rendu de texte appelle
+`cairo_select_font_face`, l'API « toy » de cairo, et ne retient que **la
+première** famille de l'attribut `font-family` (`.split(',')[0]`). Une chaîne de
+repli CSS dans le SVG est donc décorative — c'est cairo qui substitue, en
+silence. CairoSVG n'implémente pas non plus `@font-face` : référencer le chemin
+du TTF dans le SVG n'a aucun effet.
+
+`dp_socle.polices` choisit donc lui-même la famille écrite dans le SVG, parmi
+celles que cairo résout vraiment, et le dit. La substitution est décidée et
+nommée, jamais subie.
+
+### Vérification
+
+Le contrôle ne se contente pas de constater la présence du fichier : il compare
+la chasse mesurée par cairo à celle calculée depuis le TTF embarqué. Un écart
+signifie que cairo compose autre chose, et l'avertissement affiché en tête de
+l'application nomme la police réellement utilisée.
+
+### Installer Aptos selon la plateforme
+
+- **Linux** (cible de déploiement) : cairo passe par FreeType et fontconfig. Le
+  TTF est copié dans `~/.local/share/fonts` et le cache rafraîchi
+  automatiquement au démarrage. Rien à faire.
+- **Windows** : cairo 1.18 passe par **DirectWrite**, qui ne voit que les
+  polices installées pour l'utilisateur ou la machine. `AddFontResourceEx`
+  (polices privées GDI), `FcConfigAppFontAddFile` et `FONTCONFIG_FILE` ont été
+  essayés et mesurés : aucun ne l'atteint. Sur un poste de développement
+  Windows, **installez Aptos** : clic droit sur
+  `dp_socle/ressources/polices/aptos.ttf` → « Installer ».
+
+### Justification
+
+SVG n'a pas de justification native, et CairoSVG n'implémente ni `textLength`
+ni `lengthAdjust`. `Planche.ajouter_paragraphe` positionne donc chaque mot
+individuellement, à partir des chasses mesurées par cairo lui-même
+(`Planche.mesurer_texte`) : mesure et rendu passent par le même moteur, la
+justification est exacte et non approchée. `tests/test_typographie.py` vérifie
+que le bord droit des lignes justifiées tombe sur la largeur demandée.
 
 ## Tests
 
@@ -115,6 +152,7 @@ python -m pytest -q
   segment est mesuré dans le flux de contenu du PDF produit. Écart admis 0,5 %.
 - `tests/test_geometrie.py` — ZIP, union multi-polygones, reprojection, refus
   explicite en l'absence de `.prj`.
+- `tests/test_typographie.py` — mesure de texte et justification.
 
 ## Architecture
 
@@ -146,9 +184,27 @@ Identifiants confirmés par GetCapabilities le 2026-09-01 :
 | WMS-R 1.3.0 | `https://data.geopf.fr/wms-r/wms` | `ORTHOIMAGERY.ORTHOPHOTOS` |
 | WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle` |
 
-Le WMS-R limite les images à 5010 px de côté ; à 250 dpi, la zone de dessin A3
-fait 4035 × 2638 px. La barre latérale de l'application permet de reconfronter
+Le WMS-R limite les images à 5010 px de côté ; à 200 dpi, la zone de dessin A3
+fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne pèse
+5,9 Mo à 150 dpi, 10,6 Mo à 200 et 16,2 Mo à 250, pour une lisibilité
+équivalente à l'impression : 200 dpi est le défaut. La barre latérale de l'application permet de reconfronter
 les identifiants au GetCapabilities.
+
+## Charte graphique
+
+Il n'existe pas de charte formalisée. Les couleurs sont relevées sur les
+plaquettes et supports de communication UNITe, et appliquées avec retenue — un
+plan d'urbanisme n'est pas une plaquette :
+
+| Usage | Couleur |
+|---|---|
+| Titres, libellés du cartouche | `#1C2445` bleu marine |
+| Filet d'accent | `#89BA44` vert |
+| Fond du bandeau | `#F7F6F5` gris clair |
+| Logo | `#2287C8` bleu, `#20A44B` vert |
+
+Les cadres, les limites parcellaires et les cotes restent en noir : ce sont des
+pièces techniques.
 
 ## Hors périmètre de ce lot
 

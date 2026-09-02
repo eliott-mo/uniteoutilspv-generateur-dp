@@ -1,30 +1,46 @@
-"""Disponibilité de la police de composition (Aptos) pour le moteur cairo.
+"""Disponibilité et métriques de la police de composition (Aptos).
 
-Contrainte du lot : Aptos est une police Microsoft, absente des environnements
-Linux et donc de Streamlit Community Cloud. Le fichier TTF est embarqué dans le
-dépôt, sous `dp_socle/ressources/polices/`.
+## Ce que fait réellement CairoSVG
 
-Point important, vérifié dans le code de CairoSVG : le rendu de texte passe par
-`cairo_select_font_face`, l'API « toy » de cairo. Elle résout les polices par
-**nom de famille auprès du système** (fontconfig sous Linux, GDI sous Windows).
-CairoSVG n'implémente pas `@font-face`, donc référencer le chemin du TTF dans le
-SVG ne sert à rien : il faut faire connaître le fichier au système de polices
-avant le rendu. C'est ce que fait `installer_polices()`.
+Vérifié dans son code source : le rendu de texte appelle
+`cairo_select_font_face`, l'API « toy » de cairo, et il ne retient que **la
+première** famille de l'attribut `font-family` (`.split(',')[0]`). Une chaîne de
+repli CSS écrite dans le SVG n'a donc aucun effet : c'est cairo qui substitue,
+en silence, ce qu'il veut. CairoSVG n'implémente pas non plus `@font-face`,
+donc référencer le chemin du TTF dans le SVG ne sert à rien.
 
-Comme une substitution silencieuse produirait des planches décalées sans que
-personne ne le voie, `etat_polices()` vérifie réellement que cairo résout la
-famille demandée, en comparant les métriques obtenues avec celles d'une famille
-volontairement inexistante.
+Conséquence : ce module choisit lui-même la famille à écrire dans le SVG, parmi
+celles que cairo résout vraiment, et le dit. Le repli est décidé et nommé, pas
+subi.
+
+## Comment cairo trouve les polices, selon la plateforme
+
+- **Linux** (cible de déploiement, Streamlit Community Cloud) : FreeType et
+  fontconfig. Copier le TTF dans `~/.local/share/fonts` puis rafraîchir le cache
+  suffit — c'est ce que fait `installer_polices()`.
+- **Windows** : cairo 1.18 passe par DirectWrite, qui ne voit **que** les
+  polices installées pour l'utilisateur ou la machine. Ni `AddFontResourceEx`
+  (polices privées GDI), ni `FcConfigAppFontAddFile`, ni `FONTCONFIG_FILE` ne
+  l'atteignent — les trois ont été essayés et mesurés. Sur un poste de
+  développement Windows, il faut donc **installer Aptos** (clic droit sur le
+  TTF, « Installer »). Voir le README.
+
+## Vérification
+
+`etat_polices()` ne se contente pas de constater la présence du fichier : il
+compare la chasse mesurée par cairo à celle calculée depuis le TTF embarqué. Un
+écart signifie que cairo compose avec une autre police, et l'avertissement dit
+laquelle sera réellement utilisée.
 """
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
 import warnings
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from .erreurs import ErreurPolice
@@ -32,16 +48,18 @@ from .erreurs import ErreurPolice
 #: Famille attendue pour le corps de texte et le cartouche.
 POLICE_PRINCIPALE = "Aptos"
 
-#: Chaîne de repli **déclarée** : elle figure telle quelle dans les attributs
-#: font-family du SVG, de sorte que le repli soit lisible dans le fichier.
-POLICES_REPLI = ("Carlito", "Calibri", "DejaVu Sans", "sans-serif")
-
-#: Valeur de l'attribut font-family écrit dans le SVG.
-FAMILLE_SVG = ", ".join((POLICE_PRINCIPALE,) + POLICES_REPLI)
+#: Replis, dans l'ordre de préférence. Le premier que cairo résout vraiment est
+#: retenu, et son emploi est signalé.
+POLICES_REPLI = ("Carlito", "Calibri", "DejaVu Sans", "Liberation Sans")
 
 DOSSIER_POLICES = Path(__file__).parent / "ressources" / "polices"
 
-_FAMILLE_INEXISTANTE = "ZzPoliceQuiNExistePas42"
+#: Texte témoin des mesures de contrôle.
+_TEMOIN = "Hamburgefonstiv 0123456789"
+_TAILLE_TEMOIN = 64.0
+
+#: Écart relatif de chasse admis entre cairo et le TTF embarqué.
+_TOLERANCE = 1e-4
 
 
 @dataclass
@@ -49,14 +67,15 @@ class EtatPolices:
     """Diagnostic à afficher au démarrage de l'application."""
 
     disponible: bool
-    fichiers_embarques: list[str] = field(default_factory=list)
+    famille_utilisee: str
+    fichiers_embarques: list = field(default_factory=list)
     message: str = ""
 
     def __bool__(self) -> bool:
         return self.disponible
 
 
-def fichiers_embarques() -> list[Path]:
+def fichiers_embarques() -> list:
     if not DOSSIER_POLICES.is_dir():
         return []
     return sorted(
@@ -64,16 +83,36 @@ def fichiers_embarques() -> list[Path]:
     )
 
 
-def installer_polices() -> list[Path]:
+def fichier_principal() -> Path | None:
+    """Le TTF embarqué dont le nom de famille est `POLICE_PRINCIPALE`."""
+    for fichier in fichiers_embarques():
+        if _famille_du_fichier(fichier) == POLICE_PRINCIPALE:
+            return fichier
+    return None
+
+
+@lru_cache(maxsize=None)
+def _famille_du_fichier(fichier: Path) -> str | None:
+    from fontTools.ttLib import TTFont
+
+    try:
+        with TTFont(str(fichier), lazy=True) as police:
+            for enregistrement in police["name"].names:
+                if enregistrement.nameID == 1:
+                    return enregistrement.toUnicode()
+    except Exception:
+        return None
+    return None
+
+
+def installer_polices() -> list:
     """Fait connaître les TTF embarqués au système de polices du poste.
 
-    Retourne la liste des fichiers pris en charge. Ne lève pas : l'échec est
-    constaté par `etat_polices()`, qui est la source de vérité.
+    Ne lève pas : le succès est constaté par `etat_polices()`, qui mesure.
     """
     fichiers = fichiers_embarques()
     if not fichiers:
         return []
-
     if sys.platform.startswith("win"):
         _installer_windows(fichiers)
     else:
@@ -81,24 +120,35 @@ def installer_polices() -> list[Path]:
     return fichiers
 
 
-def _installer_windows(fichiers: list[Path]) -> None:
+def _installer_windows(fichiers: list) -> None:
+    """Ajout aux polices privées du processus.
+
+    Sans effet sur cairo 1.18, qui passe par DirectWrite ; conservé parce que
+    c'est sans risque et que d'autres constructions de cairo utilisent GDI.
+    """
     import ctypes
 
     FR_PRIVATE = 0x10
+    gdi = ctypes.WinDLL("gdi32")
+    gdi.AddFontResourceExW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32,
+                                       ctypes.c_void_p]
     for fichier in fichiers:
         try:
-            ctypes.windll.gdi32.AddFontResourceExW(str(fichier), FR_PRIVATE, 0)
+            gdi.AddFontResourceExW(str(fichier), FR_PRIVATE, None)
         except OSError:
             pass
 
 
-def _installer_fontconfig(fichiers: list[Path]) -> None:
+def _installer_fontconfig(fichiers: list) -> None:
     cible = Path.home() / ".local" / "share" / "fonts"
     try:
         cible.mkdir(parents=True, exist_ok=True)
         for fichier in fichiers:
             destination = cible / fichier.name
-            if not destination.exists() or destination.stat().st_size != fichier.stat().st_size:
+            if (
+                not destination.exists()
+                or destination.stat().st_size != fichier.stat().st_size
+            ):
                 shutil.copy2(fichier, destination)
     except OSError:
         return
@@ -106,71 +156,154 @@ def _installer_fontconfig(fichiers: list[Path]) -> None:
     if fc_cache:
         try:
             subprocess.run(
-                [fc_cache, "-f", str(cible)],
-                check=False,
-                capture_output=True,
+                [fc_cache, "-f", str(cible)], check=False, capture_output=True,
                 timeout=60,
             )
         except (OSError, subprocess.SubprocessError):
             pass
 
 
-def _metriques(famille: str):
-    """Métriques cairo d'un texte témoin dans une famille donnée."""
+# -- mesures ----------------------------------------------------------------
+
+
+def chasse_cairo(texte: str, famille: str, taille: float, gras: bool = False) -> float:
+    """Chasse (avance horizontale) d'un texte, telle que cairo la composera.
+
+    Même moteur et même API que CairoSVG au rendu : la mesure est donc exacte,
+    quelle que soit la police que cairo aura finalement retenue. C'est cette
+    fonction qui permet de justifier les blocs de texte.
+    """
     import cairocffi
 
     surface = cairocffi.ImageSurface(cairocffi.FORMAT_A8, 8, 8)
     contexte = cairocffi.Context(surface)
-    contexte.select_font_face(famille)
-    contexte.set_font_size(64.0)
-    extents = contexte.text_extents("Hamburgefonstiv 0123456789")
-    police = contexte.font_extents()
+    contexte.select_font_face(
+        famille,
+        cairocffi.FONT_SLANT_NORMAL,
+        cairocffi.FONT_WEIGHT_BOLD if gras else cairocffi.FONT_WEIGHT_NORMAL,
+    )
+    contexte.set_font_size(taille)
+    avance = contexte.text_extents(texte)[4]
     surface.finish()
-    return tuple(round(v, 4) for v in tuple(extents) + tuple(police))
+    return float(avance)
 
 
-def police_resolue(famille: str = POLICE_PRINCIPALE) -> bool:
-    """Vrai si cairo rend réellement `famille`, et non une police de substitution."""
+def _chasse_ttf(fichier: Path, texte: str, taille: float) -> float | None:
+    """Chasse attendue, calculée depuis le fichier TTF embarqué."""
+    from fontTools.ttLib import TTFont
+
     try:
-        return _metriques(famille) != _metriques(_FAMILLE_INEXISTANTE)
-    except Exception:  # cairo indisponible : traité ailleurs, au rendu
+        with TTFont(str(fichier), lazy=True) as police:
+            unites = police["head"].unitsPerEm
+            table = police.getBestCmap()
+            metriques = police["hmtx"]
+            total = 0
+            for caractere in texte:
+                nom = table.get(ord(caractere))
+                if nom is None:
+                    return None
+                total += metriques[nom][0]
+    except Exception:
+        return None
+    return total / unites * taille
+
+
+@lru_cache(maxsize=None)
+def _famille_disponible(famille: str) -> bool:
+    """Vrai si cairo résout `famille` autrement que par sa substitution par défaut."""
+    try:
+        reference = chasse_cairo(_TEMOIN, "ZzPoliceQuiNExistePas42", _TAILLE_TEMOIN)
+        return abs(chasse_cairo(_TEMOIN, famille, _TAILLE_TEMOIN) - reference) > 1e-6
+    except Exception:
         return False
 
 
+@lru_cache(maxsize=None)
+def _controle_principale() -> tuple:
+    """(résolue, chasse cairo, chasse attendue) pour la police principale."""
+    fichier = fichier_principal()
+    if fichier is None:
+        return (False, None, None)
+    attendue = _chasse_ttf(fichier, _TEMOIN, _TAILLE_TEMOIN)
+    try:
+        mesuree = chasse_cairo(_TEMOIN, POLICE_PRINCIPALE, _TAILLE_TEMOIN)
+    except Exception:
+        return (False, None, attendue)
+    if attendue is None:
+        return (_famille_disponible(POLICE_PRINCIPALE), mesuree, None)
+    ecart = abs(mesuree - attendue) / attendue
+    return (ecart <= _TOLERANCE, mesuree, attendue)
+
+
+@lru_cache(maxsize=None)
+def famille_active() -> str:
+    """Famille effectivement écrite dans les SVG.
+
+    CairoSVG ne lit que la première famille de `font-family` : on y met donc
+    celle que cairo résout réellement, pour que la substitution soit choisie et
+    nommée plutôt que subie.
+    """
+    if _controle_principale()[0]:
+        return POLICE_PRINCIPALE
+    for repli in POLICES_REPLI:
+        if _famille_disponible(repli):
+            return repli
+    return POLICE_PRINCIPALE
+
+
+@lru_cache(maxsize=None)
 def etat_polices(installer: bool = True) -> EtatPolices:
     """Diagnostic complet, destiné à être affiché dans l'interface."""
     fichiers = installer_polices() if installer else fichiers_embarques()
     noms = [f.name for f in fichiers]
+    resolue, mesuree, attendue = _controle_principale()
+    famille = famille_active()
+
+    if resolue:
+        return EtatPolices(
+            disponible=True,
+            famille_utilisee=famille,
+            fichiers_embarques=noms,
+            message=(
+                f"Police « {POLICE_PRINCIPALE} » disponible et vérifiée "
+                f"({', '.join(noms)}) : chasse mesurée {mesuree:.3f} pour "
+                f"{attendue:.3f} attendus." if attendue
+                else f"Police « {POLICE_PRINCIPALE} » disponible ({', '.join(noms)})."
+            ),
+        )
 
     if not fichiers:
-        return EtatPolices(
-            disponible=False,
-            fichiers_embarques=noms,
-            message=(
-                f"Police « {POLICE_PRINCIPALE} » absente : aucun fichier TTF dans "
-                f"{DOSSIER_POLICES}. Les planches seront composées avec un repli "
-                f"({', '.join(POLICES_REPLI)}), dont les métriques diffèrent : "
-                "la mise en page du cartouche sera décalée. Déposez Aptos.ttf "
-                "dans ce dossier avant de produire un dossier destiné au dépôt."
-            ),
+        cause = (
+            f"aucun fichier TTF dans {DOSSIER_POLICES}"
         )
-
-    if not police_resolue(POLICE_PRINCIPALE):
-        return EtatPolices(
-            disponible=False,
-            fichiers_embarques=noms,
-            message=(
-                f"Police « {POLICE_PRINCIPALE} » embarquée ({', '.join(noms)}) mais "
-                "non résolue par cairo : le moteur de rendu ne la trouve pas dans le "
-                "système de polices. Les planches seront composées avec un repli et "
-                "la mise en page sera décalée."
-            ),
+    elif fichier_principal() is None:
+        cause = (
+            f"aucun des fichiers embarqués ({', '.join(noms)}) ne déclare la "
+            f"famille « {POLICE_PRINCIPALE} »"
         )
+    elif mesuree is not None and attendue is not None:
+        cause = (
+            f"cairo compose une autre police (chasse mesurée {mesuree:.3f} au lieu "
+            f"de {attendue:.3f})"
+        )
+    else:
+        cause = "cairo n'a pas pu mesurer la police"
 
+    conseil = (
+        "Sous Windows, cairo passe par DirectWrite : installez Aptos sur le poste "
+        "(clic droit sur le TTF, « Installer »)."
+        if sys.platform.startswith("win")
+        else "Vérifiez que fontconfig voit ~/.local/share/fonts (paquet fontconfig)."
+    )
     return EtatPolices(
-        disponible=True,
+        disponible=False,
+        famille_utilisee=famille,
         fichiers_embarques=noms,
-        message=f"Police « {POLICE_PRINCIPALE} » disponible ({', '.join(noms)}).",
+        message=(
+            f"Police « {POLICE_PRINCIPALE} » non utilisée : {cause}. Les planches "
+            f"seront composées en « {famille} », dont les métriques diffèrent : la "
+            f"mise en page du cartouche sera décalée. {conseil}"
+        ),
     )
 
 

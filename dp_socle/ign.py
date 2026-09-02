@@ -39,7 +39,10 @@ COUCHE_PARCELLES = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle"
 #: Limite annoncée par le GetCapabilities du WMS-R.
 TAILLE_MAX_PX = 5010
 
-DPI_DEFAUT = 250
+#: 200 dpi en A3 : 3228 x 2110 px sur la zone de dessin. Mesuré sur le dossier
+#: de Bray-Saint-Aignan, la photographie aérienne pèse 10,6 Mo à 200 dpi contre
+#: 16,2 Mo à 250, pour une lisibilité équivalente à l'impression.
+DPI_DEFAUT = 200
 
 _ENTETES = {"User-Agent": "generateur-dp-unite/1.0 (dossier DP photovoltaique)"}
 

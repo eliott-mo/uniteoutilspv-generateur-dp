@@ -30,7 +30,7 @@ from xml.sax.saxutils import escape
 
 from .echelle import TransformationL93, formater_echelle
 from .erreurs import ErreurEchelle, ErreurRendu
-from .polices import FAMILLE_SVG
+from .polices import chasse_cairo, famille_active
 
 # --- Gabarit A3 paysage -----------------------------------------------------
 
@@ -70,6 +70,11 @@ TAILLE_TITRE_CARTOUCHE = 12 * PT
 
 NOIR = "#000000"
 GRIS = "#555555"
+
+#: Couleurs relevées sur les supports de communication UNITe.
+BLEU_UNITE = "#1C2445"
+VERT_UNITE = "#89BA44"
+GRIS_FOND = "#F7F6F5"
 
 RESSOURCES = Path(__file__).parent / "ressources"
 LOGO_UNITE = RESSOURCES / "logo_unite.png"
@@ -296,6 +301,82 @@ class Planche:
             self.ajouter_texte(x_mm, y_mm + index * pas, ligne, taille=taille, **kwargs)
         return y_mm + len(lignes) * pas
 
+    def mesurer_texte(self, texte: str, taille: float, gras: bool = False) -> float:
+        """Largeur d'un texte en millimètres, telle que cairo la composera.
+
+        Le SVG est en millimètres et la mesure passe par le moteur qui fera le
+        rendu : la valeur est donc directement exploitable pour la mise en page.
+        """
+        return chasse_cairo(texte, famille_active(), taille, gras)
+
+    def decouper_en_lignes(self, texte: str, largeur_mm: float, taille: float,
+                           gras: bool = False) -> list:
+        """Découpe un texte en lignes tenant dans `largeur_mm`."""
+        lignes, courante = [], []
+        for mot in texte.split():
+            essai = courante + [mot]
+            if courante and self.mesurer_texte(" ".join(essai), taille, gras) > largeur_mm:
+                lignes.append(courante)
+                courante = [mot]
+            else:
+                courante = essai
+        if courante:
+            lignes.append(courante)
+        return lignes
+
+    def ajouter_paragraphe(
+        self,
+        x_mm: float,
+        y_mm: float,
+        texte: str,
+        largeur_mm: float,
+        taille: float = TAILLE_COURANTE,
+        interligne: float = 1.35,
+        justifie: bool = True,
+        gras: bool = False,
+        couleur: str = NOIR,
+        habillage: bool = True,
+    ) -> float:
+        """Bloc de texte suivi, justifié, et renvoie l'ordonnée de la ligne suivante.
+
+        SVG n'a pas de justification et CairoSVG n'implémente ni `textLength` ni
+        `lengthAdjust` : chaque mot est donc positionné individuellement, à
+        partir des chasses mesurées par cairo lui-même. La justification est
+        exacte au rendu, et non approchée.
+        """
+        cible = self._habillage if habillage else self._carto
+        lignes = self.decouper_en_lignes(texte, largeur_mm, taille, gras)
+        pas = taille * interligne
+        espace = self.mesurer_texte(" ", taille, gras)
+
+        for index, mots in enumerate(lignes):
+            ordonnee = y_mm + index * pas
+            derniere = index == len(lignes) - 1
+            if not justifie or derniere or len(mots) == 1:
+                cible.append(
+                    self._element_texte(
+                        x_mm, ordonnee, " ".join(mots), taille=taille,
+                        couleur=couleur, gras=gras,
+                    )
+                )
+                continue
+            chasses = [self.mesurer_texte(mot, taille, gras) for mot in mots]
+            blanc = (largeur_mm - sum(chasses)) / (len(mots) - 1)
+            # Une ligne trop serrée serait illisible : on retombe sur l'espace
+            # normal plutôt que de faire chevaucher les mots.
+            if blanc < espace * 0.5:
+                blanc = espace
+            abscisse = x_mm
+            for mot, chasse in zip(mots, chasses):
+                cible.append(
+                    self._element_texte(
+                        abscisse, ordonnee, mot, taille=taille,
+                        couleur=couleur, gras=gras,
+                    )
+                )
+                abscisse += chasse + blanc
+        return y_mm + len(lignes) * pas
+
     def ajouter_rectangle(
         self, x_mm, y_mm, largeur_mm, hauteur_mm, style: Style | dict = Style(),
         habillage: bool = True,
@@ -485,7 +566,7 @@ class Planche:
         gras=False, halo=False,
     ) -> str:
         commun = (
-            f'x="{_n(x_mm)}" y="{_n(y_mm)}" font-family="{FAMILLE_SVG}" '
+            f'x="{_n(x_mm)}" y="{_n(y_mm)}" font-family="{famille_active()}" '
             f'font-size="{_n(taille)}" text-anchor="{ancre}"'
             + (' font-weight="bold"' if gras else "")
         )
@@ -546,7 +627,10 @@ class Planche:
         self.ajouter_rectangle(cadre_x, cadre_y, cadre_l, cadre_h, trait)
         # Cartouche et bandeau
         self.ajouter_rectangle(cadre_x, Y_CARTOUCHE, cadre_l, CARTOUCHE_MM, trait)
-        self.ajouter_rectangle(cadre_x, Y_BANDEAU, cadre_l, BANDEAU_MM, fin)
+        self.ajouter_rectangle(
+            cadre_x, Y_BANDEAU, cadre_l, BANDEAU_MM,
+            Style(trait=NOIR, epaisseur_mm=0.25, remplissage=GRIS_FOND),
+        )
 
         cases = dict((nom, (x, largeur)) for nom, x, largeur in CASES_CARTOUCHE)
         for _, x, _largeur in CASES_CARTOUCHE[1:]:
@@ -564,7 +648,7 @@ class Planche:
         x_projet, largeur_projet = cases["projet"]
         self.ajouter_texte(
             x_projet + 2.5, Y_CARTOUCHE + 6.2, self.projet,
-            taille=TAILLE_CARTOUCHE, gras=True,
+            taille=TAILLE_CARTOUCHE, gras=True, couleur=BLEU_UNITE,
         )
         self.ajouter_texte(
             x_projet + 2.5, Y_CARTOUCHE + 11.4, "PHASE : DP", taille=TAILLE_COURANTE,
@@ -575,6 +659,7 @@ class Planche:
         self.ajouter_texte(
             x_titre + largeur_titre / 2.0, Y_CARTOUCHE + 9.6, self.titre,
             taille=TAILLE_TITRE_CARTOUCHE, ancre="middle", gras=True,
+            couleur=BLEU_UNITE,
         )
 
         # 4. Flèche nord (nord de la grille Lambert 93)
@@ -598,7 +683,13 @@ class Planche:
             self.ajouter_texte(
                 centre, Y_CARTOUCHE + 11.4, str(valeur),
                 taille=TAILLE_CARTOUCHE, ancre="middle", gras=True,
+                couleur=BLEU_UNITE,
             )
+
+        self.ajouter_ligne(
+            cadre_x, Y_CARTOUCHE, cadre_x + cadre_l, Y_CARTOUCHE,
+            Style(trait=VERT_UNITE, epaisseur_mm=0.8),
+        )
 
         # Bandeau inférieur
         y_texte = Y_BANDEAU + 2.9

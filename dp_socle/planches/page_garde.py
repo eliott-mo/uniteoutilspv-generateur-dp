@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..planche import (
+    BLEU_UNITE,
     CADRE,
     GRIS,
     LARGEUR_MM,
@@ -20,6 +21,7 @@ from ..planche import (
     MENTION_BANDEAU,
     NOIR,
     PT,
+    VERT_UNITE,
     Planche,
     Style,
 )
@@ -43,7 +45,7 @@ def generer(
     planche = Planche(
         titre=TITRE,
         numero=NUMERO,
-        projet=projet.nom,
+        projet=projet.libelle_affiche,
         date=projet.date_francaise(),
         avec_cartouche=False,
     )
@@ -60,19 +62,20 @@ def generer(
     centre = LARGEUR_MM / 2.0
     planche.ajouter_texte(
         centre, 70.0, "DÉCLARATION PRÉALABLE",
-        taille=30 * PT, ancre="middle", gras=True,
+        taille=30 * PT, ancre="middle", gras=True, couleur=BLEU_UNITE,
     )
     planche.ajouter_texte(
         centre, 85.0, "PROJET DE CENTRALE PHOTOVOLTAÏQUE AU SOL",
-        taille=17 * PT, ancre="middle",
+        taille=17 * PT, ancre="middle", couleur=BLEU_UNITE,
     )
     planche.ajouter_texte(
         centre, 98.0, f"{projet.commune.upper()}  {projet.code_postal}",
-        taille=15 * PT, ancre="middle",
+        taille=15 * PT, ancre="middle", couleur=BLEU_UNITE,
     )
+    # Filet vert court et centré, repris des plaquettes UNITe.
     planche.ajouter_ligne(
-        70.0, 105.0, LARGEUR_MM - 70.0, 105.0,
-        Style(trait=NOIR, epaisseur_mm=0.4),
+        centre - 22.0, 106.0, centre + 22.0, 106.0,
+        Style(trait=VERT_UNITE, epaisseur_mm=1.2),
     )
 
     image = projet.chemin_image_garde
@@ -85,7 +88,7 @@ def generer(
 
     planche.ajouter_texte(
         cadre_x + 3.0, cadre_h + cadre_y - 4.0,
-        f"UNITe — {projet.nom} — {projet.date_francaise()}",
+        f"UNITe — {projet.libelle_affiche} — {projet.date_francaise()}",
         taille=8 * PT, couleur=GRIS,
     )
     planche.ajouter_texte(

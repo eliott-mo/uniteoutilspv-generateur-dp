@@ -17,10 +17,11 @@ from pathlib import Path
 from shapely.geometry import box
 
 from ..echelle import echelle_adaptative
-from ..erreurs import ErreurService
+from ..erreurs import ErreurRendu, ErreurService
 from ..geometrie import Emprise
 from ..ign import telecharger_parcelles
 from ..planche import (
+    BLEU_UNITE,
     NOIR,
     STYLE_EMPRISE,
     STYLE_PARCELLE,
@@ -43,6 +44,13 @@ MARGE = 0.20
 
 #: Surface minimale d'une parcelle sur le papier, en mm², pour être étiquetée.
 SURFACE_MIN_ETIQUETTE_MM2 = 12.0
+
+#: Part minimale d'une parcelle recouverte par l'emprise pour qu'elle compte
+#: comme parcelle d'assiette. L'emprise et le Parcellaire Express ne sont pas
+#: numérisés à partir des mêmes sources : leurs limites se croisent en produisant
+#: des échardes de quelques mètres carrés, qui ne sont pas des parcelles du
+#: projet et qui pollueraient le tableau récapitulatif comme la notice.
+PART_MIN_ASSIETTE = 0.02
 
 LARGEUR_TABLEAU_MM = 72.0
 
@@ -67,11 +75,24 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
     )
 
     emprise_geom = emprise.geometrie
-    concernees = [p for p in parcelles if p.geometrie.intersects(emprise_geom)]
-    if not concernees:
+    touchees = [p for p in parcelles if p.geometrie.intersects(emprise_geom)]
+    if not touchees:
         raise ErreurService(
             "Aucune parcelle cadastrale n'intersecte l'emprise du projet. "
             "Vérifiez le fichier d'emprise et son système de coordonnées."
+        )
+    concernees, echardes = [], []
+    for parcelle in touchees:
+        aire = parcelle.geometrie.area
+        part = (
+            parcelle.geometrie.intersection(emprise_geom).area / aire if aire else 0.0
+        )
+        (concernees if part >= PART_MIN_ASSIETTE else echardes).append(parcelle)
+    if not concernees:
+        raise ErreurService(
+            f"Les {len(touchees)} parcelles rencontrées ne sont recoupées par "
+            f"l'emprise qu'à moins de {PART_MIN_ASSIETTE:.0%} de leur surface : "
+            "aucune parcelle d'assiette identifiable. Vérifiez le fichier d'emprise."
         )
 
     cadre_planche = box(minx, miny, maxx, maxy)
@@ -126,6 +147,7 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         echelle=denominateur,
         details={
             "nb_parcelles_tracees": len(parcelles),
+            "parcelles_echardes": [p.designation for p in _triees(echardes)],
             "parcelles_assiette": [
                 {
                     "idu": p.idu,
@@ -145,52 +167,74 @@ def _triees(parcelles):
 
 
 def _tableau_parcelles(planche, concernees) -> None:
-    """Tableau récapitulatif section / numéro / contenance, en haut à droite."""
-    zone_x, zone_y, zone_l, _ = planche.zone_dessin()
-    x = zone_x + zone_l - LARGEUR_TABLEAU_MM - 3.0
-    y = zone_y + 3.0
+    """Tableau récapitulatif section / numéro / contenance, en haut à droite.
 
+    Le tableau bascule sur deux colonnes plutôt que de déborder du cadre : une
+    liste tronquée passerait inaperçue à la relecture.
+    """
+    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
     lignes = _triees(concernees)
     hauteur_ligne = 4.2
-    hauteur = 2 * 2.2 + 5.0 + hauteur_ligne * (len(lignes) + 2)
+    hauteur_entete = 2 * 2.2 + 5.0 + hauteur_ligne  # cadre, titre, en-têtes
+    hauteur_dispo = zone_h - 6.0
+
+    par_colonne = max(1, int((hauteur_dispo - hauteur_entete - hauteur_ligne)
+                             // hauteur_ligne))
+    nb_colonnes = -(-len(lignes) // par_colonne)
+    if nb_colonnes > 2:
+        raise ErreurRendu(
+            f"{len(lignes)} parcelles d'assiette : le tableau récapitulatif ne "
+            f"tient pas sur la planche (au plus {2 * par_colonne}). Reportez-le "
+            "sur une planche dédiée."
+        )
+    nb_colonnes = max(1, nb_colonnes)
+
+    largeur = LARGEUR_TABLEAU_MM * nb_colonnes
+    x = zone_x + zone_l - largeur - 3.0
+    y = zone_y + 3.0
+    hauteur = hauteur_entete + hauteur_ligne * (
+        min(len(lignes), par_colonne) + 1
+    )
 
     planche.ajouter_rectangle(
-        x, y, LARGEUR_TABLEAU_MM, hauteur,
+        x, y, largeur, hauteur,
         Style(trait=NOIR, epaisseur_mm=0.25, remplissage="#ffffff",
               opacite_remplissage=0.92),
     )
     planche.ajouter_texte(
-        x + 2.2, y + 5.2, "Parcelles d'assiette", taille=TAILLE_COURANTE, gras=True
+        x + 2.2, y + 5.2, "Parcelles d'assiette", taille=TAILLE_COURANTE,
+        gras=True, couleur=BLEU_UNITE,
     )
 
-    colonnes = (x + 2.2, x + 18.0, x + 40.0)
     y_entete = y + 10.4
-    for abscisse, intitule in zip(colonnes, ("Section", "Numéro", "Contenance")):
-        planche.ajouter_texte(
-            abscisse, y_entete, intitule, taille=TAILLE_ETIQUETTE, gras=True
-        )
-    planche.ajouter_ligne(
-        x + 2.0, y_entete + 1.4, x + LARGEUR_TABLEAU_MM - 2.0, y_entete + 1.4,
-        Style(trait=NOIR, epaisseur_mm=0.2),
-    )
-
     total = 0.0
-    for index, parcelle in enumerate(lignes):
-        ordonnee = y_entete + hauteur_ligne * (index + 1)
-        total += parcelle.contenance_m2
-        valeurs = (
-            parcelle.section,
-            parcelle.numero,
-            _contenance(parcelle.contenance_m2),
-        )
-        for abscisse, valeur in zip(colonnes, valeurs):
+    for index_colonne in range(nb_colonnes):
+        gauche = x + index_colonne * LARGEUR_TABLEAU_MM
+        colonnes = (gauche + 2.2, gauche + 18.0, gauche + 40.0)
+        for abscisse, intitule in zip(colonnes, ("Section", "Numéro", "Contenance")):
             planche.ajouter_texte(
-                abscisse, ordonnee, valeur, taille=TAILLE_ETIQUETTE
+                abscisse, y_entete, intitule, taille=TAILLE_ETIQUETTE, gras=True
             )
+        planche.ajouter_ligne(
+            gauche + 2.0, y_entete + 1.4,
+            gauche + LARGEUR_TABLEAU_MM - 2.0, y_entete + 1.4,
+            Style(trait=NOIR, epaisseur_mm=0.2),
+        )
+        tranche = lignes[index_colonne * par_colonne:(index_colonne + 1) * par_colonne]
+        for index, parcelle in enumerate(tranche):
+            ordonnee = y_entete + hauteur_ligne * (index + 1)
+            total += parcelle.contenance_m2
+            valeurs = (parcelle.section, parcelle.numero,
+                       _contenance(parcelle.contenance_m2))
+            for abscisse, valeur in zip(colonnes, valeurs):
+                planche.ajouter_texte(
+                    abscisse, ordonnee, valeur, taille=TAILLE_ETIQUETTE
+                )
 
-    ordonnee = y_entete + hauteur_ligne * (len(lignes) + 1)
+    ordonnee = y + hauteur - 2.4
+    colonnes = (x + 2.2, x + 18.0, x + 40.0)
     planche.ajouter_ligne(
-        x + 2.0, ordonnee - 2.8, x + LARGEUR_TABLEAU_MM - 2.0, ordonnee - 2.8,
+        x + 2.0, ordonnee - 2.8, x + largeur - 2.0, ordonnee - 2.8,
         Style(trait=NOIR, epaisseur_mm=0.2),
     )
     planche.ajouter_texte(
