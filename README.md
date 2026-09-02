@@ -425,11 +425,41 @@ le projet à une dizaine de mètres près, pas au mètre. Un écart nord-sud ré
 de cet ordre au pré-positionnement est normal et non suspect — constaté à
 +8,6 m sur un design et −12,4 m sur l'autre, contre la même emprise.
 
+### Aperçu de calage
+
+La validation du calage par l'utilisateur est obligatoire et ne peut pas se faire
+sur des chiffres : `apercu_calage()` superpose le calepinage recalé à l'ortho
+IGN. Ce n'est pas une planche — le dessin du dossier relève du lot 4 — mais
+l'aperçu reprend la présentation du dossier de référence HOCH (modules dessinés
+un par un, bleu-vert pâle cerné de bleu, contour noir autour de la rangée) pour
+que ce qu'on valide ressemble à ce qu'on obtiendra.
+
+Deux points ont dû être corrigés pour que l'azimut se lise correctement :
+
+- `ImageDraw` ne fait pas d'anticrénelage. Une rangée à 0,44° de l'horizontale se
+  rastérise en marches d'escalier, ce qui donne à lire un calepinage aligné
+  nord-sud et décalé rangée par rangée — alors que l'azimut est correctement
+  appliqué à la géométrie, dont tous les côtés sont à 90,4441°. L'aperçu est
+  dessiné trois fois plus grand puis réduit.
+- L'accroche appliquée avant fusion des modules était au millimètre, ce qui
+  faisait osciller l'azimut des tables de ±0,027° : deux valeurs d'angle au lieu
+  d'une sur le design 7676351. Ramenée au micromètre, elle recolle toujours et ne
+  déforme plus rien.
+
+HelioScope n'encode aucun groupement en structures : sur les deux designs des
+Islettes, **tous** les écarts entre tables valent exactement une largeur de
+module. Le contour noir cerne donc la rangée, seule entité que le fichier
+permette de reconstituer — le découpage en tables de 3×9 du dossier HOCH est un
+choix de structure, pas une donnée de l'export.
+
 ### Sorties
 
-Un GeoJSON par couche en EPSG:2154 — `tables`, `zone_implantation`, `reculs`,
-`zones_evitees` — plus les paramètres du calepinage et la longitude de calage
-dans `projet.json`. **Aucune planche n'est produite** : le dessin relève du lot 4.
+Un GeoJSON par couche en EPSG:2154 — `tables`, `modules`, `zone_implantation`,
+`reculs`, `zones_evitees` — plus les paramètres du calepinage et la longitude de
+calage dans `projet.json`. La couche `modules` est celle que dessine un plan de
+masse lisible ; `tables` n'en est que le contour groupé.
+
+**Aucune planche n'est produite** : le dessin relève du lot 4.
 
 ## Hors périmètre de ce lot
 

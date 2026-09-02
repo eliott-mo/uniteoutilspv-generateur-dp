@@ -188,6 +188,9 @@ class Implantation:
     reculs: list[Polygon]
     zones_evitees: list[Polygon]
     tables: list[Polygon]
+    #: Empreinte de chaque module, dans l'ordre des tables. C'est cette couche
+    #: que dessine le plan de masse ; `tables` n'en est que le contour groupé.
+    modules: list[Polygon]
     avertissements: list[str] = field(default_factory=list)
 
 
@@ -774,18 +777,28 @@ def _rangees_et_pas(
 #: transformations de blocs imbriqués laissent des écarts de l'ordre de 1e-12 m
 #: qui empêchent `unary_union` de recoller : sans cette accroche, le design
 #: 7676351 sortait 1 178 fragments pour 530 tables, de façon instable d'une
-#: exécution à l'autre. Le millimètre est trois ordres de grandeur sous la
-#: précision de tracé d'une planche au 1/2000.
-GRILLE_FUSION_M = 1e-3
+#: exécution à l'autre.
+#:
+#: Le micromètre suffit à recoller et ne déforme rien. Un pas au millimètre,
+#: essayé d'abord, recollait aussi mais faisait osciller l'azimut des tables de
+#: ±0,027° d'une table à l'autre — sur le design 7676351, deux valeurs d'angle
+#: au lieu d'une. Invisible en position, mais c'est exactement le genre de bruit
+#: qui se voit sur un plan de masse une fois les modules dessinés.
+GRILLE_FUSION_M = 1e-6
 
 
-def empreintes_tables(msp: Modelspace) -> tuple[list[BaseGeometry], list[str]]:
-    """Empreinte au sol de chaque table, résolue depuis les blocs imbriqués.
+def empreintes_tables(
+    msp: Modelspace,
+) -> tuple[list[BaseGeometry], list[Polygon], list[str]]:
+    """Empreintes au sol des tables et des modules, blocs imbriqués résolus.
 
-    Une entrée par table, dans l'ordre des INSERT : le nombre de géométries
-    rendues doit rester égal au nombre de tables.
+    Rend une entrée par table, dans l'ordre des INSERT, et à part l'empreinte de
+    chaque module. Ce sont les modules qu'il faut pour dessiner un plan de masse
+    lisible : le dossier de référence les trace un par un, la table n'étant que
+    leur contour d'ensemble.
     """
     empreintes: list[BaseGeometry] = []
+    modules: list[Polygon] = []
     morcelees = 0
     for insert in msp.query(f'INSERT[layer=="{COUCHE_MODULES}"]'):
         morceaux = []
@@ -807,6 +820,7 @@ def empreintes_tables(msp: Modelspace) -> tuple[list[BaseGeometry], list[str]]:
                 "Une table du calque « Modules » ne contient aucun contour "
                 "exploitable après résolution des blocs."
             )
+        modules.extend(morceaux)
         union = unary_union(morceaux)
         if union.geom_type == "MultiPolygon":
             # Table dont les modules ne se touchent pas : c'est possible, mais
@@ -821,7 +835,7 @@ def empreintes_tables(msp: Modelspace) -> tuple[list[BaseGeometry], list[str]]:
             "disjoints : leur empreinte est rendue en plusieurs morceaux. "
             "Vérifiez le calepinage dans HelioScope si ce n'est pas voulu."
         )
-    return empreintes, avertissements
+    return empreintes, modules, avertissements
 
 
 # ---------------------------------------------------------------------------
@@ -860,7 +874,7 @@ def importer(chemin_export: str | Path) -> Implantation:
     avertissements.extend(avert_geom)
     calepinage, avert_calepinage = extraire_calepinage(doc, msp)
     avertissements.extend(avert_calepinage)
-    tables, avert_tables = empreintes_tables(msp)
+    tables, modules, avert_tables = empreintes_tables(msp)
     avertissements.extend(avert_tables)
     avertissements.append(
         f"{len(evitees)} zone(s) évitée(s) reconstituée(s) sur le calque "
@@ -881,6 +895,7 @@ def importer(chemin_export: str | Path) -> Implantation:
         reculs=reculs,
         zones_evitees=evitees,
         tables=tables,
+        modules=modules,
         avertissements=avertissements,
     )
 
@@ -1019,7 +1034,13 @@ def prepositionner(
 # ---------------------------------------------------------------------------
 
 #: Nom de fichier par couche produite.
-COUCHES_SORTIE = ("tables", "zone_implantation", "reculs", "zones_evitees")
+COUCHES_SORTIE = (
+    "tables",
+    "modules",
+    "zone_implantation",
+    "reculs",
+    "zones_evitees",
+)
 
 
 def geometries_l93(implantation: Implantation) -> dict[str, list[BaseGeometry]]:
@@ -1027,6 +1048,7 @@ def geometries_l93(implantation: Implantation) -> dict[str, list[BaseGeometry]]:
     calage = implantation.calage
     return {
         "tables": [projeter(g, calage) for g in implantation.tables],
+        "modules": [projeter(g, calage) for g in implantation.modules],
         "zone_implantation": [projeter(implantation.zone_implantation, calage)],
         "reculs": [projeter(g, calage) for g in implantation.reculs],
         "zones_evitees": [projeter(g, calage) for g in implantation.zones_evitees],
@@ -1081,13 +1103,6 @@ def parametres_json(implantation: Implantation) -> dict:
 # Aperçu de contrôle
 # ---------------------------------------------------------------------------
 
-#: Couleurs de l'aperçu. Ce n'est pas une planche : ces teintes servent à
-#: distinguer trois tracés à l'écran, pas à respecter la charte du dossier.
-COULEUR_EMPRISE = (255, 214, 0)
-COULEUR_ZONE = (255, 45, 45)
-COULEUR_TABLES = (0, 132, 255)
-
-
 def metres_par_degre_longitude(latitude: float) -> float:
     """Longueur d'un degré de longitude au sol, en mètres, sur l'ellipsoïde.
 
@@ -1115,6 +1130,39 @@ def decaler_longitude(calage: "Calage", metres: float) -> None:
     )
 
 
+def polygones_ou_vide(geometrie: BaseGeometry):
+    """Itère les polygones d'une géométrie simple ou multiple."""
+    if geometrie.is_empty:
+        return
+    if geometrie.geom_type == "Polygon":
+        yield geometrie
+    elif geometrie.geom_type == "MultiPolygon":
+        yield from geometrie.geoms
+    else:
+        raise ErreurHelioScope(
+            f"Type de géométrie inattendu à l'aperçu : {geometrie.geom_type}"
+        )
+
+
+#: Palette reprise du dossier de référence HOCH « Les Islettes » du 25/04/2024,
+#: relevée sur la planche DP 2 : modules en bleu-vert pâle cernés de bleu franc,
+#: table cernée de noir. L'aperçu n'est pas une planche, mais s'en rapprocher
+#: permet de juger le calage sur ce qu'on verra au lot 4.
+COULEUR_MODULE = (151, 202, 202)
+COULEUR_FILET_MODULE = (0, 0, 255)
+COULEUR_FILET_TABLE = (0, 0, 0)
+COULEUR_EMPRISE = (255, 214, 0)
+COULEUR_ZONE = (255, 45, 45)
+
+#: Facteur de suréchantillonnage du rendu.
+#:
+#: `ImageDraw` ne fait pas d'anticrénelage : une rangée à 0,44° de l'horizontale
+#: se rastérise en marches d'escalier, ce qui donne à lire un calepinage aligné
+#: nord-sud et décalé rangée par rangée, alors que l'azimut est correctement
+#: appliqué à la géométrie. On dessine donc trois fois plus grand puis on réduit.
+SURECHANTILLONNAGE = 3
+
+
 def apercu_calage(
     implantation: Implantation,
     emprise_l93: BaseGeometry,
@@ -1140,6 +1188,8 @@ def apercu_calage(
     minx, miny, maxx, maxy = minx - tampon, miny - tampon, maxx + tampon, maxy + tampon
 
     largeur_m, hauteur_m = maxx - minx, maxy - miny
+    cible_px = largeur_px
+    largeur_px = largeur_px * SURECHANTILLONNAGE
     hauteur_px = max(1, round(largeur_px * hauteur_m / largeur_m))
     largeur_mm = largeur_px / dpi * 25.4
     hauteur_mm = hauteur_px / dpi * 25.4
@@ -1167,12 +1217,28 @@ def apercu_calage(
             )
         return anneaux
 
-    for table in couches["tables"]:
-        for anneau in en_pixels(table):
-            dessin.polygon(anneau, fill=COULEUR_TABLES + (150,))
+    # Les filets sont dimensionnés dans l'image suréchantillonnée : ils
+    # retrouvent leur épaisseur nominale après réduction.
+    filet = max(1, round(px_largeur / cible_px))
+    for module in couches["modules"]:
+        for anneau in en_pixels(module):
+            dessin.polygon(
+                anneau,
+                fill=COULEUR_MODULE + (235,),
+                outline=COULEUR_FILET_MODULE,
+                width=filet,
+            )
+    # Le contour noir cerne la rangée, pas chaque table. HelioScope n'encode
+    # aucun groupement en structures — sur les deux designs des Islettes, tous
+    # les écarts entre tables valent exactement une largeur de module — et
+    # cerner les 530 colonnes une par une noie la trame bleue des modules.
+    for silhouette in polygones_ou_vide(unary_union(couches["tables"])):
+        for anneau in en_pixels(silhouette):
+            dessin.line(anneau, fill=COULEUR_FILET_TABLE, width=filet, joint="curve")
     for anneau in en_pixels(emprise_l93):
-        dessin.line(anneau, fill=COULEUR_EMPRISE, width=4)
+        dessin.line(anneau, fill=COULEUR_EMPRISE, width=filet * 4, joint="curve")
     for anneau in en_pixels(zone):
-        dessin.line(anneau, fill=COULEUR_ZONE, width=4)
+        dessin.line(anneau, fill=COULEUR_ZONE, width=filet * 4, joint="curve")
 
-    return image
+    hauteur_cible = max(1, round(cible_px * px_hauteur / px_largeur))
+    return image.resize((cible_px, hauteur_cible), Image.LANCZOS)

@@ -426,6 +426,7 @@ def test_geojson_en_lambert93(implantation, tmp_path):
     fichiers = ecrire_geojson(implantation, tmp_path)
     assert {f.stem for f in fichiers} == {
         "tables",
+        "modules",
         "zone_implantation",
         "reculs",
         "zones_evitees",
@@ -613,3 +614,70 @@ def test_les_deux_designs_ne_donnent_pas_la_meme_latitude(
     assert ecart == pytest.approx(9.94e-5, rel=0.05)
     # En mètres sur le terrain, pour que l'ordre de grandeur soit lisible.
     assert ecart * 111_320 == pytest.approx(11.0, abs=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Rendu : azimut et couche des modules
+# ---------------------------------------------------------------------------
+
+
+def _azimuts(polygone) -> set[float]:
+    """Azimuts des côtés, ramenés modulo 90° et arrondis.
+
+    Modulo 90° parce qu'un rectangle a deux directions perpendiculaires et que
+    seule compte leur commune orientation par rapport au repère du calepinage.
+    La fusion des modules laisse des sommets alignés sur les grands côtés : on
+    compare donc des directions, jamais « le plus long côté ».
+    """
+    sommets = list(polygone.exterior.coords)
+    return {
+        round(math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) % 90.0, 3)
+        for a, b in zip(sommets[:-1], sommets[1:])
+        if math.dist(a, b) > 1e-6
+    }
+
+
+@besoin_export_complet
+def test_azimut_unique_sur_toutes_les_tables(implantation):
+    """Toutes les tables partagent exactement le même azimut.
+
+    L'accroche appliquée avant fusion des modules déforme les contours si son
+    pas est trop grossier. Au millimètre, essayé d'abord, l'azimut oscillait de
+    ±0,027° et le design 7676351 sortait deux angles au lieu d'un ; au
+    micromètre, la valeur est unique. Ce n'est pas cosmétique : un calepinage
+    dont chaque table part de travers se lit comme un azimut mal appliqué.
+    """
+    attendu = round(implantation.calepinage.orientation_deg % 90.0, 3)
+    angles = set()
+    for table in implantation.tables:
+        angles |= _azimuts(table)
+    assert angles == {attendu}
+
+
+@besoin_export_complet
+def test_couche_des_modules(implantation):
+    """Le plan de masse se dessine module par module, pas table par table."""
+    calepinage = implantation.calepinage
+    assert len(implantation.modules) == calepinage.nb_modules
+    assert {m.geom_type for m in implantation.modules} == {"Polygon"}
+
+    module = calepinage.module
+    attendue = module.largeur_m * module.longueur_projetee_m
+    for empreinte in implantation.modules[:20]:
+        assert empreinte.area == pytest.approx(attendue, rel=1e-3)
+
+    attendu = round(calepinage.orientation_deg % 90.0, 3)
+    angles = set()
+    for empreinte in implantation.modules:
+        angles |= _azimuts(empreinte)
+    assert angles == {attendu}
+
+
+@besoin_export_complet_2
+def test_azimut_nul_du_design_paysage(implantation_paysage):
+    """Le design 2 est aligné sur l'axe : ses rangées sont exactement horizontales."""
+    assert implantation_paysage.calepinage.orientation_deg == 0
+    angles = set()
+    for table in implantation_paysage.tables:
+        angles |= _azimuts(table)
+    assert angles == {0.0}
