@@ -143,7 +143,8 @@ def _bloc_maitrise(planche: Planche, x: float, y: float) -> float:
 def _bloc_sommaire(planche: Planche, x: float, y: float, pages: dict) -> float:
     hauteur_titre = 7.0
     hauteur_ligne = 5.0
-    hauteur_contenu = 4.0 + hauteur_ligne * len(PIECES)
+    pieces = [p for p in PIECES if p.code]  # la page de garde ne s'y liste pas
+    hauteur_contenu = 4.0 + hauteur_ligne * len(pieces)
 
     _cellule_titre(planche, x, y, LARGEUR_COLONNE, hauteur_titre, "SOMMAIRE")
     planche.ajouter_rectangle(
@@ -151,7 +152,7 @@ def _bloc_sommaire(planche: Planche, x: float, y: float, pages: dict) -> float:
         Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
     )
 
-    for index, piece in enumerate(PIECES):
+    for index, piece in enumerate(pieces):
         ordonnee = y + hauteur_titre + 5.4 + index * hauteur_ligne
         page = pages.get(piece.code)
         couleur = NOIR if page else GRIS

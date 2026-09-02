@@ -96,15 +96,18 @@ régénérant.
 ## Ce que portent les planches
 
 **Cartouche.** Le titre porte le code de la pièce — « DP 1-3 : PLAN DE
-CADASTRE » — et la case NUMÉRO le numéro de planche, « 3/3 ». La flèche nord est
+CADASTRE » — et la case NUMÉRO le rang de la planche dans le dossier assemblé,
+page de garde comprise : le plan de cadastre est la planche 4. `assemblage.py`
+vérifie ce rang sur le PDF produit ; un cartouche qui annoncerait une planche 3
+en page 4 lève une erreur. La flèche nord est
 un contour vide au bleu des titres : elle indique le nord de la **grille**
 Lambert 93, d'où la mention « NORD (L93) », et n'affirme rien sur le nord
 géographique (la convergence des méridiens atteint 3° en métropole).
 
-**Sommaire.** Il liste les douze pièces du dossier, y compris celles des lots
-suivants et les insertions paysagères fournies : le dossier s'annonce complet
-dès maintenant. Les pièces produites portent leur numéro de page réel, les
-autres un tiret. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
+**Sommaire.** Il liste les onze pièces du dossier — la page de garde ne s'y
+liste pas elle-même — y compris celles des lots suivants et les insertions
+paysagères fournies : le dossier s'annonce complet dès maintenant. Les pièces
+produites portent leur numéro de page réel, les autres un tiret. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
 titres de cartouche — les deux ne peuvent pas diverger.
 
 **Surfaces.** Deux nombres coexistent, et ils ne se recouvrent pas :
@@ -114,9 +117,16 @@ titres de cartouche — les deux ne peuvent pas diverger.
 - la **contenance** du tableau de DP 1-3 (276 270 m²) est la surface légale
   portée au cadastre, sommée sur les parcelles d'assiette.
 
-L'écart est normal : la contenance cadastrale et la surface graphique ne sont
-pas mesurées de la même façon. Le tableau affiche donc les deux, côte à côte et
-étiquetées, plutôt que de laisser chercher l'erreur.
+L'écart est normal, et il va toujours dans le même sens : la contenance légale
+est inférieure à la surface graphique. Sur Bray-Saint-Aignan, le rapport est de
+0,987, et l'emprise dessinée coïncide à 4 m² près avec la somme des surfaces
+graphiques des 27 parcelles — autrement dit tout l'écart vient de la contenance,
+et rien du tracé. Le tableau affiche donc les deux valeurs, étiquetées, plutôt
+que de laisser chercher l'erreur.
+
+**Bâtiments.** Les emprises bâties du Parcellaire Express sont tracées en
+hachures à 45°, comme sur un plan cadastral. Une emprise en secteur agricole
+peut n'en contenir aucun : l'entrée de légende n'apparaît alors pas.
 
 **Parcelles d'assiette.** Une parcelle recoupée par l'emprise à moins de 2 % de
 sa surface est écartée : l'emprise et le Parcellaire Express ne viennent pas de
@@ -184,6 +194,7 @@ python -m pytest -q
 - `tests/test_geometrie.py` — ZIP, union multi-polygones, reprojection, refus
   explicite en l'absence de `.prj`.
 - `tests/test_typographie.py` — mesure de texte et justification.
+- `tests/test_dossier.py` — composition du dossier et numérotation des planches.
 
 ## Architecture
 
@@ -215,6 +226,7 @@ Identifiants confirmés par GetCapabilities le 2026-09-01 :
 | WMS-R 1.3.0 | `https://data.geopf.fr/wms-r/wms` | `GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2` |
 | WMS-R 1.3.0 | `https://data.geopf.fr/wms-r/wms` | `ORTHOIMAGERY.ORTHOPHOTOS` |
 | WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle` |
+| WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `CADASTRALPARCELS.PARCELLAIRE_EXPRESS:batiment` |
 
 Le WMS-R limite les images à 5010 px de côté ; à 200 dpi, la zone de dessin A3
 fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne pèse

@@ -15,6 +15,8 @@ le 2026-09-01 :
     * CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle
       attributs : idu, section, numero, feuille, contenance (m2),
                   code_insee, nom_com
+    * CADASTRALPARCELS.PARCELLAIRE_EXPRESS:batiment
+      attributs : type (« Bâtiment en dur », « Bâtiment léger »), code_insee
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ URL_WFS = "https://data.geopf.fr/wfs/ows"
 COUCHE_PLAN = "GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"
 COUCHE_ORTHO = "ORTHOIMAGERY.ORTHOPHOTOS"
 COUCHE_PARCELLES = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle"
+COUCHE_BATIMENTS = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS:batiment"
 
 #: Limite annoncée par le GetCapabilities du WMS-R.
 TAILLE_MAX_PX = 5010
@@ -172,25 +175,27 @@ class Parcelle:
         return f"{self.section} {self.numero}"
 
 
-def telecharger_parcelles(
+def _interroger_wfs(
+    typename: str,
     bbox: tuple[float, float, float, float],
-    timeout: int = 120,
-    taille_page: int = 1000,
-    maximum: int = 5000,
-) -> list[Parcelle]:
-    """Parcelles cadastrales intersectant la bbox, en Lambert 93."""
+    timeout: int,
+    taille_page: int,
+    maximum: int,
+    libelle: str,
+) -> list:
+    """GetFeature paginé, en EPSG:2154, sur une couche du Parcellaire Express."""
     minx, miny, maxx, maxy = bbox
     if maxx <= minx or maxy <= miny:
         raise ErreurService(f"BBOX dégénérée transmise au WFS : {bbox}")
 
-    resultats: list[Parcelle] = []
+    entites: list = []
     index = 0
     while index < maximum:
         parametres = {
             "SERVICE": "WFS",
             "VERSION": "2.0.0",
             "REQUEST": "GetFeature",
-            "TYPENAMES": COUCHE_PARCELLES,
+            "TYPENAMES": typename,
             "SRSNAME": "EPSG:2154",
             "BBOX": f"{minx:.3f},{miny:.3f},{maxx:.3f},{maxy:.3f},EPSG:2154",
             "OUTPUTFORMAT": "application/json",
@@ -203,42 +208,57 @@ def telecharger_parcelles(
             )
         except requests.RequestException as exc:
             raise ErreurService(
-                f"Service WFS cadastre injoignable : {exc}. "
-                "Pas de planche cadastre sans parcelles : la génération s'arrête."
+                f"Service WFS ({libelle}) injoignable : {exc}. "
+                "La planche n'est pas produite plutôt que d'être incomplète."
             ) from exc
 
         if reponse.status_code != 200:
             raise ErreurService(
-                f"Service WFS cadastre : réponse HTTP {reponse.status_code}. "
+                f"Service WFS ({libelle}) : réponse HTTP {reponse.status_code}. "
                 f"{reponse.text[:400]}"
             )
         try:
             donnees = reponse.json()
         except ValueError as exc:
             raise ErreurService(
-                "Réponse WFS cadastre illisible (du GeoJSON était attendu) : "
+                f"Réponse WFS ({libelle}) illisible, du GeoJSON était attendu : "
                 f"{reponse.text[:400]}"
             ) from exc
 
-        entites = donnees.get("features") or []
-        for entite in entites:
-            geometrie = entite.get("geometry")
-            if not geometrie:
-                continue
-            proprietes = entite.get("properties") or {}
-            resultats.append(
-                Parcelle(
-                    geometrie=shape(geometrie),
-                    idu=str(proprietes.get("idu", "")),
-                    section=str(proprietes.get("section", "")),
-                    numero=str(proprietes.get("numero", "")),
-                    contenance_m2=float(proprietes.get("contenance") or 0.0),
-                    commune=str(proprietes.get("nom_com", "")),
-                )
-            )
-        if len(entites) < taille_page:
+        page = donnees.get("features") or []
+        entites.extend(page)
+        if len(page) < taille_page:
             break
         index += taille_page
+    return entites
+
+
+def telecharger_parcelles(
+    bbox: tuple[float, float, float, float],
+    timeout: int = 120,
+    taille_page: int = 1000,
+    maximum: int = 5000,
+) -> list[Parcelle]:
+    """Parcelles cadastrales intersectant la bbox, en Lambert 93."""
+    entites = _interroger_wfs(
+        COUCHE_PARCELLES, bbox, timeout, taille_page, maximum, "cadastre"
+    )
+    resultats = []
+    for entite in entites:
+        geometrie = entite.get("geometry")
+        if not geometrie:
+            continue
+        proprietes = entite.get("properties") or {}
+        resultats.append(
+            Parcelle(
+                geometrie=shape(geometrie),
+                idu=str(proprietes.get("idu", "")),
+                section=str(proprietes.get("section", "")),
+                numero=str(proprietes.get("numero", "")),
+                contenance_m2=float(proprietes.get("contenance") or 0.0),
+                commune=str(proprietes.get("nom_com", "")),
+            )
+        )
 
     if not resultats:
         raise ErreurService(
@@ -263,3 +283,31 @@ def verifier_couches(couches=(COUCHE_PLAN, COUCHE_ORTHO), timeout: int = 120) ->
         raise ErreurService(f"GetCapabilities WMS-R inaccessible : {exc}") from exc
     texte = reponse.text
     return {couche: f"<Name>{couche}</Name>" in texte for couche in couches}
+
+
+@dataclass
+class Batiment:
+    """Emprise bâtie issue du Parcellaire Express."""
+
+    geometrie: BaseGeometry
+    type: str
+
+
+def telecharger_batiments(
+    bbox: tuple[float, float, float, float],
+    timeout: int = 120,
+    taille_page: int = 1000,
+    maximum: int = 5000,
+) -> list[Batiment]:
+    """Bâtiments cadastraux intersectant la bbox, en Lambert 93.
+
+    Une bbox sans bâtiment renvoie une liste vide : en secteur agricole c'est
+    un résultat, pas une anomalie. C'est l'appelant qui en rend compte.
+    """
+    entites = _interroger_wfs(COUCHE_BATIMENTS, bbox, timeout, taille_page, maximum,
+                              "bâtiments")
+    return [
+        Batiment(geometrie=shape(e["geometry"]), type=str((e.get("properties") or {}).get("type", "")))
+        for e in entites
+        if e.get("geometry")
+    ]

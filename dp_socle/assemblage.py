@@ -14,6 +14,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 from .erreurs import ErreurRendu
+from .dossier import numero_planche
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
 from .planches import dp1_1_situation, dp1_2_aerienne, dp1_3_cadastre, page_garde
@@ -81,6 +82,16 @@ def generer_dossier(
     sommaire = [{"numero": "—", "titre": "Page de garde", "page": 1}]
     page_courante = 2
     for sortie in sorties:
+        # La case NUMÉRO du cartouche a été composée à partir de
+        # dossier.numero_planche(), qui suppose une page par pièce. On le
+        # vérifie sur les PDF produits : un cartouche qui annonce une planche 3
+        # sur une page 4 est le genre d'erreur que personne ne rattrape.
+        attendu = numero_planche(sortie.numero)
+        if attendu != page_courante:
+            raise ErreurRendu(
+                f"{sortie.numero} : le cartouche annonce la planche {attendu} "
+                f"mais la pièce tombe en page {page_courante} du dossier assemblé."
+            )
         pages[sortie.numero] = page_courante
         sommaire.append(
             {"numero": sortie.numero, "titre": sortie.titre, "page": page_courante}

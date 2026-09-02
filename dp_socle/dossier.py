@@ -57,8 +57,7 @@ PAR_CODE = {piece.code: piece for piece in PIECES if piece.code}
 #: Pièces effectivement produites par le socle, dans l'ordre du dossier.
 PIECES_PRODUITES = tuple(piece for piece in PIECES if piece.produite)
 
-#: Planches produites, hors page de garde : c'est sur elles que porte le
-#: repère « n/N » inscrit dans la case NUMÉRO du cartouche.
+#: Planches produites, hors page de garde.
 PLANCHES_PRODUITES = tuple(piece for piece in PIECES_PRODUITES if piece.code)
 
 
@@ -66,7 +65,13 @@ def piece(code: str) -> Piece:
     return PAR_CODE[code]
 
 
-def repere(code: str) -> str:
-    """Numéro de planche, sous la forme « 2/3 »."""
-    codes = [p.code for p in PLANCHES_PRODUITES]
-    return f"{codes.index(code) + 1}/{len(codes)}"
+def numero_planche(code: str) -> int:
+    """Rang de la planche dans le dossier assemblé.
+
+    La page de garde compte comme la planche 1 : le plan de cadastre est donc
+    la planche 4, comme dans les dossiers de l'agence. Chaque pièce tenant sur
+    une page, ce rang est aussi son numéro de page ; `dp_socle.assemblage` le
+    vérifie sur le PDF produit plutôt que de s'en remettre à cette hypothèse.
+    """
+    codes = [p.code for p in PIECES_PRODUITES]
+    return codes.index(code) + 1

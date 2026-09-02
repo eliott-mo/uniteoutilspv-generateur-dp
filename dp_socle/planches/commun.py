@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..dossier import numero_planche as _numero
 from ..dossier import piece as _piece
-from ..dossier import repere as _repere
 from ..geometrie import Emprise
 from ..planche import STYLE_EMPRISE, EntreeLegende, Planche, nombre_fr
 from ..projet import Projet
@@ -28,12 +28,13 @@ def nouvelle_planche(
     """Planche d'une pièce du dossier, titrée et repérée depuis `dp_socle.dossier`.
 
     Le titre du cartouche porte le code de la pièce (« DP 1-3 : PLAN DE
-    CADASTRE ») ; la case NUMÉRO porte le numéro de planche (« 3/3 »).
+    CADASTRE ») ; la case NUMÉRO porte le rang de la planche dans le dossier
+    assemblé, page de garde comprise (« 4 »).
     """
     piece = _piece(code)
     return Planche(
         titre=piece.intitule_cartouche,
-        numero=_repere(code),
+        numero=str(_numero(code)),
         projet=projet.libelle_affiche,
         date=projet.date_francaise(),
         echelle=echelle,

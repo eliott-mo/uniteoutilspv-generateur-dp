@@ -46,10 +46,14 @@ Y_BANDEAU = HAUTEUR_MM - MARGE_MM - BANDEAU_MM
 Y_CARTOUCHE = Y_BANDEAU - CARTOUCHE_MM
 
 #: Découpage du cartouche, de gauche à droite : (identifiant, x, largeur).
+#: La case du logo est calée sur ses proportions (707 x 522 px, soit 1,35) :
+#: dans les 15 mm de haut du cartouche, il ne peut pas dépasser 17 mm de large.
+#: Une case plus large laisserait un vide autour de lui. Les millimètres gagnés
+#: vont au nom du projet.
 CASES_CARTOUCHE = (
-    ("logo", MARGE_MM, 40.0),
-    ("projet", 45.0, 70.0),
-    ("titre", 115.0, 190.0),
+    ("logo", MARGE_MM, 22.0),
+    ("projet", 27.0, 84.0),
+    ("titre", 111.0, 194.0),
     ("nord", 305.0, 20.0),
     ("echelle", 325.0, 30.0),
     ("date", 355.0, 30.0),
@@ -105,12 +109,23 @@ class Style:
         return " ".join(morceaux)
 
 
+#: Hachures à 45° des bâtiments, dans la convention des plans cadastraux.
+#: La tuile de 1 mm ne contient qu'une diagonale : le pavage la prolonge.
+MOTIF_BATIMENT = (
+    '<pattern id="hachures-bati" width="1" height="1" '
+    'patternUnits="userSpaceOnUse">'
+    '<path d="M 0 1 L 1 0" stroke="#4a4a4a" stroke-width="0.12" fill="none"/>'
+    "</pattern>"
+)
+
 #: Styles employés par les planches du socle.
 STYLE_EMPRISE = Style(trait="#d40000", epaisseur_mm=0.6, remplissage="#d40000",
                       opacite_remplissage=0.15)
 STYLE_PARCELLE = Style(trait="#7a4b00", epaisseur_mm=0.2, remplissage="none")
 STYLE_PARCELLE_CONCERNEE = Style(trait="#7a4b00", epaisseur_mm=0.35,
                                  remplissage="#ffd28a", opacite_remplissage=0.45)
+STYLE_BATIMENT = Style(trait="#4a4a4a", epaisseur_mm=0.18,
+                       remplissage="url(#hachures-bati)")
 
 
 def _style_attributs(style) -> str:
@@ -227,6 +242,14 @@ class Planche:
             f'height="{_n(y1 - y0)}" preserveAspectRatio="none" '
             f'xlink:href="data:image/jpeg;base64,{donnees}"/>'
         )
+
+    def ajouter_definition(self, element_svg: str) -> None:
+        """Ajoute un élément dans `<defs>` — motif, dégradé, masque.
+
+        Sans doublon : appeler plusieurs fois avec le même motif est sans effet.
+        """
+        if element_svg not in self._defs:
+            self._defs.append(element_svg)
 
     def ajouter_geometrie(self, geom, style: Style | dict = STYLE_EMPRISE) -> None:
         """Trace une géométrie shapely exprimée en Lambert 93."""

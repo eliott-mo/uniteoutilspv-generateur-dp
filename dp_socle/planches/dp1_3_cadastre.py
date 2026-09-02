@@ -20,15 +20,17 @@ from ..dossier import piece
 from ..echelle import echelle_adaptative
 from ..erreurs import ErreurRendu, ErreurService
 from ..geometrie import Emprise
-from ..ign import telecharger_parcelles
+from ..ign import telecharger_batiments, telecharger_parcelles
 from ..planche import (
     BLEU_UNITE,
+    GRIS,
+    MOTIF_BATIMENT,
     NOIR,
+    PT,
+    STYLE_BATIMENT,
     STYLE_EMPRISE,
     STYLE_PARCELLE,
     STYLE_PARCELLE_CONCERNEE,
-    GRIS,
-    PT,
     TAILLE_COURANTE,
     TAILLE_ETIQUETTE,
     Style,
@@ -109,6 +111,16 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
     for parcelle in concernees:
         planche.ajouter_geometrie(parcelle.geometrie, STYLE_PARCELLE_CONCERNEE)
 
+    # Bâtiments, hachurés comme sur un plan cadastral. Une emprise en secteur
+    # agricole peut n'en contenir aucun : c'est un résultat, pas une anomalie.
+    batiments = telecharger_batiments(
+        (minx - tampon, miny - tampon, maxx + tampon, maxy + tampon)
+    )
+    if batiments:
+        planche.ajouter_definition(MOTIF_BATIMENT)
+        for batiment in batiments:
+            planche.ajouter_geometrie(batiment.geometrie, STYLE_BATIMENT)
+
     # Étiquettes : seulement là où la parcelle est assez grande sur le papier.
     facteur = planche.transformation.mm_par_metre ** 2
     points, textes = [], []
@@ -131,6 +143,7 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
             ("Parcelles d'assiette du projet", STYLE_PARCELLE_CONCERNEE),
             ("Autres parcelles cadastrales", STYLE_PARCELLE),
         ]
+        + ([("Bâtiment", STYLE_BATIMENT)] if batiments else [])
     )
 
     _tableau_parcelles(planche, concernees, emprise.surface_m2)
@@ -151,6 +164,7 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         echelle=denominateur,
         details={
             "nb_parcelles_tracees": len(parcelles),
+            "nb_batiments": len(batiments),
             "parcelles_echardes": [p.designation for p in _triees(echardes)],
             "parcelles_assiette": [
                 {
@@ -179,9 +193,14 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
     zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
     lignes = _triees(concernees)
     hauteur_ligne = 4.2
-    # cadre, titre, en-têtes ; + une ligne de note sous le total
+    # cadre, titre, en-têtes ; + la note sous le total
     hauteur_entete = 2 * 2.2 + 5.0 + hauteur_ligne
-    hauteur_note = 4.0
+    taille_note = 6 * PT
+    interligne_note = 1.35
+    note = (
+        "Contenance : surface légale portée au cadastre. Surface graphique de "
+        f"l'emprise dessinée : {_contenance(surface_emprise_m2)}."
+    )
     hauteur_dispo = zone_h - 6.0
 
     par_colonne = max(1, int((hauteur_dispo - hauteur_entete - hauteur_ligne)
@@ -198,6 +217,10 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
     largeur = LARGEUR_TABLEAU_MM * nb_colonnes
     x = zone_x + zone_l - largeur - 3.0
     y = zone_y + 3.0
+    # La note est repliée sur la largeur du tableau : mesurée avec le moteur de
+    # rendu, elle ne peut pas déborder du cadre.
+    lignes_note = planche.decouper_en_lignes(note, largeur - 4.4, taille_note)
+    hauteur_note = 2.0 + taille_note * interligne_note * len(lignes_note)
     hauteur = hauteur_entete + hauteur_ligne * (
         min(len(lignes), par_colonne) + 1
     ) + hauteur_note
@@ -253,11 +276,10 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
     # Les deux surfaces ne se recouvrent pas et n'ont pas à le faire : la
     # contenance est la surface légale portée au cadastre, l'emprise est le
     # polygone dessiné. Les afficher côte à côte évite de chercher l'erreur.
-    planche.ajouter_texte(
-        colonnes[0], ordonnee + hauteur_note,
-        "Contenances cadastrales — emprise dessinée : "
-        f"{_contenance(surface_emprise_m2)}",
-        taille=6 * PT, couleur=GRIS,
+    planche.ajouter_paragraphe(
+        colonnes[0], ordonnee + 3.6, note, largeur - 4.4,
+        taille=taille_note, interligne=interligne_note, justifie=False,
+        couleur=GRIS,
     )
 
 
