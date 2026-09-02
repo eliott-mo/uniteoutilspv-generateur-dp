@@ -32,3 +32,15 @@ class ErreurPolice(ErreurDP):
 
 class ErreurRendu(ErreurDP):
     """La conversion SVG vers PDF a échoué."""
+
+
+class ErreurHelioScope(ErreurDP):
+    """L'export HelioScope est illisible, incomplet ou ne suit pas le modèle."""
+
+
+class ErreurModulesAbsents(ErreurHelioScope):
+    """Le DXF ne porte aucun module : export réalisé trop tôt."""
+
+
+class ErreurCalage(ErreurHelioScope):
+    """Le calage géographique du DXF est impossible ou invalide."""

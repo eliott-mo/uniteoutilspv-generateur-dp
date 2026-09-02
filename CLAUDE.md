@@ -9,7 +9,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | Lot | Contenu | État |
 |---|---|---|
 | 1 | Moteur de planche, page de garde, DP 1-1, DP 1-2, DP 1-3 | livré |
-| 2 | Import DXF HelioScope et calage géographique | en cours |
+| 2 | Import DXF HelioScope et calage géographique | livré |
 | 3 | Saisie des pistes, postes, clôtures | à venir |
 | 4 | DP 2, DP 3, DP 4 | à venir |
 | 5 | Notice DP 11 | à venir |

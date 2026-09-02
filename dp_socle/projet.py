@@ -34,6 +34,13 @@ class Projet:
     #: Nom du projet tel que le chef de projet veut le voir au cartouche et sur
     #: la page de garde. `nom` reste l'identifiant technique du dossier.
     libelle: str | None = None
+    #: Export CAO HelioScope du calepinage (lot 2).
+    helioscope: str | None = None
+    #: Longitude de l'origine du repère DXF, en degrés, retenue au calage et
+    #: validée par l'utilisateur. La latitude, elle, se déduit du fichier : elle
+    #: n'a pas à être stockée. Une fois cette valeur écrite, une régénération ne
+    #: redemande jamais le calage.
+    longitude_calage: float | None = None
 
     @property
     def libelle_affiche(self) -> str:
@@ -46,6 +53,15 @@ class Projet:
     @property
     def chemin_image_garde(self) -> Path | None:
         return Path(self.image_garde) if self.image_garde else None
+
+    @property
+    def chemin_helioscope(self) -> Path | None:
+        return Path(self.helioscope) if self.helioscope else None
+
+    @property
+    def cale(self) -> bool:
+        """Vrai si le calage est déjà fait et n'a pas à être redemandé."""
+        return self.longitude_calage is not None
 
     def valider(self) -> None:
         for champ in CHAMPS_OBLIGATOIRES:
@@ -70,6 +86,25 @@ class Projet:
                 f"Image de page de garde déclarée mais introuvable : {self.image_garde}. "
                 "Laissez le champ vide si vous n'en avez pas."
             )
+        chemin_hs = self.chemin_helioscope
+        if chemin_hs is not None and not chemin_hs.exists():
+            raise ErreurDP(
+                f"Export HelioScope déclaré mais introuvable : {self.helioscope}."
+            )
+        if self.longitude_calage is not None:
+            if self.helioscope is None:
+                raise ErreurDP(
+                    "longitude_calage est renseignée sans export HelioScope : "
+                    "un calage sans calepinage n'a pas de sens."
+                )
+            # Bornes larges de la France métropolitaine, Corse comprise. Une
+            # longitude hors plage signale un projet.json corrigé à la main de
+            # travers ; mieux vaut refuser que produire un plan ailleurs.
+            if not -5.5 <= self.longitude_calage <= 10.0:
+                raise ErreurDP(
+                    f"longitude_calage = {self.longitude_calage} hors de la France "
+                    "métropolitaine (-5,5° à 10,0°). Refaites le calage."
+                )
 
     def date_francaise(self) -> str:
         return _date.fromisoformat(self.date).strftime("%d/%m/%Y")
@@ -97,7 +132,7 @@ class Projet:
 
         # Les chemins relatifs le sont par rapport au dossier du projet.json.
         base = chemin.parent
-        for champ in ("emprise", "image_garde"):
+        for champ in ("emprise", "image_garde", "helioscope"):
             valeur = donnees.get(champ)
             if valeur and not Path(valeur).is_absolute():
                 candidat = (base / valeur).resolve()

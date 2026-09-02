@@ -4,10 +4,13 @@ Moteur de planche A3 paysage et planches cartographiques DP 1-1, DP 1-2, DP 1-3.
 """
 
 from .erreurs import (
+    ErreurCalage,
     ErreurCRS,
     ErreurDP,
     ErreurEchelle,
     ErreurEmprise,
+    ErreurHelioScope,
+    ErreurModulesAbsents,
     ErreurPolice,
     ErreurRendu,
     ErreurService,
@@ -23,6 +26,9 @@ __all__ = [
     "ErreurService",
     "ErreurPolice",
     "ErreurRendu",
+    "ErreurHelioScope",
+    "ErreurModulesAbsents",
+    "ErreurCalage",
 ]
 
 __version__ = "1.0.0"

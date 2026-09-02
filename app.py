@@ -19,6 +19,14 @@ preparer_cairo()
 from dp_socle.assemblage import generer_dossier
 from dp_socle.erreurs import ErreurDP
 from dp_socle.geometrie import charger_emprise
+from dp_socle.helioscope import (
+    apercu_calage,
+    decaler_longitude,
+    ecrire_geojson,
+    parametres_json,
+    prepositionner,
+)
+from dp_socle.helioscope import importer as importer_helioscope
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
 from dp_socle.projet import Projet
@@ -29,7 +37,7 @@ DOSSIER_SORTIE = Path("sortie")
 EXTENSIONS_SHAPEFILE = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qmd")
 
 st.set_page_config(page_title="Générateur de dossier DP", page_icon="📄", layout="wide")
-st.title("Générateur de dossier DP — socle")
+st.title("Générateur de dossier DP")
 st.caption(
     "Page de garde, DP 1-1 plan de situation, DP 1-2 photographie aérienne, "
     "DP 1-3 plan de cadastre. Fonds IGN Géoplateforme, Lambert 93, A3 paysage à "
@@ -241,5 +249,146 @@ if lancer:
                         mime="application/pdf",
                         key=f"dl_{sortie.numero}",
                     )
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+
+
+# ---------------------------------------------------------------------------
+# Lot 2 — calepinage HelioScope
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("4. Calepinage HelioScope")
+st.caption(
+    "Import de l'export CAO HelioScope et calage géographique. Produit les "
+    "géométries en Lambert 93 et les paramètres du calepinage ; ne dessine "
+    "aucune planche."
+)
+
+export_helioscope = st.file_uploader(
+    "Export HelioScope (le ZIP complet téléchargé depuis HelioScope)",
+    type=["zip"],
+    help="Celui qui contient le « Layout CAD ». Si le calque Modules est vide, "
+    "l'export a été fait avant la fin de la section électrique et sera refusé.",
+)
+
+for cle, defaut in (
+    ("implantation", None),
+    ("calage_valide", False),
+    ("decalage_est_ouest", 0.0),
+):
+    if cle not in st.session_state:
+        st.session_state[cle] = defaut
+
+
+def _emprise_courante():
+    """Emprise du projet, depuis les fichiers téléversés plus haut."""
+    chemin = _enregistrer_fichiers(nom.strip() or "projet", fichiers_emprise)
+    return charger_emprise(chemin) if chemin else None
+
+
+if export_helioscope is not None:
+    dossier = DOSSIER_PROJETS / (nom.strip() or "projet")
+    dossier.mkdir(parents=True, exist_ok=True)
+    chemin_export = dossier / Path(export_helioscope.name).name
+    chemin_export.write_bytes(export_helioscope.getbuffer())
+
+    if st.button("Importer et pré-positionner", width="stretch"):
+        st.session_state.calage_valide = False
+        st.session_state.decalage_est_ouest = 0.0
+        try:
+            emprise = _emprise_courante()
+            if emprise is None:
+                st.error(
+                    "Téléversez d'abord l'emprise du projet : le calage se fait "
+                    "par superposition sur elle."
+                )
+            else:
+                implantation = importer_helioscope(chemin_export)
+                diagnostic = prepositionner(implantation, emprise.geometrie)
+                st.session_state.implantation = implantation
+                st.session_state.chemin_export = str(chemin_export)
+                st.session_state.diagnostic = diagnostic
+        except ErreurDP as erreur:
+            st.session_state.implantation = None
+            st.error(f"{type(erreur).__name__} : {erreur}")
+
+implantation = st.session_state.implantation
+if implantation is not None:
+    calepinage = implantation.calepinage
+    module = calepinage.module
+    colonnes = st.columns(4)
+    colonnes[0].metric("Modules", f"{calepinage.nb_modules:,}".replace(",", " "))
+    colonnes[1].metric("Inclinaison", f"{module.inclinaison_deg:g}°")
+    colonnes[2].metric("Rangées", calepinage.nb_rangees)
+    colonnes[3].metric("Pas inter-rangées", f"{calepinage.pas_rangees_m:.2f} m")
+
+    st.caption(
+        f"Design {implantation.identifiant_design} — {calepinage.nb_tables} tables "
+        f"de {calepinage.nb_modules_par_table} modules de "
+        f"{module.largeur_m:.3f} × {module.longueur_m:.3f} m, pas inter-table "
+        f"{calepinage.pas_tables_m:.2f} m, orientation "
+        f"{calepinage.orientation_deg:.2f}°. Latitude déduite du fichier : "
+        f"{implantation.calage.latitude_origine:.6f}° (zoom {implantation.calage.zoom}, "
+        f"fraction {implantation.calage.fraction_zoom:.4f})."
+    )
+    for message in implantation.avertissements:
+        st.warning(message, icon="⚠️")
+    st.info(st.session_state.diagnostic.message)
+
+    st.markdown(
+        "**Validation du calage — obligatoire.** La latitude est verrouillée par "
+        "le fichier ; seul le décalage est-ouest est réglable. Ajustez jusqu'à ce "
+        "que l'implantation coïncide avec le terrain, puis validez."
+    )
+    decalage = st.slider(
+        "Décalage est-ouest (m)",
+        min_value=-150.0,
+        max_value=150.0,
+        value=float(st.session_state.decalage_est_ouest),
+        step=0.5,
+    )
+    try:
+        if decalage != st.session_state.decalage_est_ouest:
+            decaler_longitude(
+                implantation.calage, decalage - st.session_state.decalage_est_ouest
+            )
+            st.session_state.decalage_est_ouest = decalage
+            st.session_state.calage_valide = False
+
+        emprise = _emprise_courante()
+        with st.spinner("Téléchargement de l'ortho IGN…"):
+            apercu = apercu_calage(implantation, emprise.geometrie)
+        st.image(apercu, width="stretch")
+        st.caption(
+            "Rouge : zone d'implantation HelioScope. Jaune : emprise fournie. "
+            "Bleu : tables. La zone HelioScope est tracée à la main et ne suit "
+            "pas le parcellaire : c'est la position des tables sur le terrain "
+            "qui fait foi."
+        )
+
+        if st.button("Valider ce calage", type="primary", width="stretch"):
+            st.session_state.calage_valide = True
+
+        if st.session_state.calage_valide:
+            projet = _construire_projet()
+            if projet is not None:
+                projet.helioscope = st.session_state.chemin_export
+                projet.longitude_calage = implantation.calage.longitude_origine
+                projet.valider()
+                chemin = projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
+                dossier_geo = DOSSIER_SORTIE / projet.nom / "helioscope"
+                fichiers = ecrire_geojson(implantation, dossier_geo)
+                st.success(
+                    f"Calage enregistré dans {chemin} "
+                    f"(longitude {projet.longitude_calage:.8f}°). "
+                    f"{len(fichiers)} couches écrites dans {dossier_geo}."
+                )
+                st.code(
+                    json.dumps(
+                        parametres_json(implantation), ensure_ascii=False, indent=2
+                    ),
+                    language="json",
+                )
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")

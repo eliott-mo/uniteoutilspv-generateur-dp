@@ -7,3 +7,10 @@ venv/
 # Sorties de génération et projets locaux : volumineux, régénérables.
 sortie/
 projets/
+
+# Briefs de lot : documents de travail, non versionnés par convention.
+_briefs/
+
+# Dossiers DP de référence déposés dans exemples/ : binaires volumineux,
+# consultés en local, sans intérêt dans l'historique.
+exemples/**/*.pdf
