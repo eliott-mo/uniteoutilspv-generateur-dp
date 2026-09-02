@@ -20,7 +20,9 @@ from dp_socle.assemblage import generer_dossier
 from dp_socle.erreurs import ErreurDP
 from dp_socle.geometrie import charger_emprise
 from dp_socle.helioscope import (
+    CORRECTION_NORD_SUD_MAX_M,
     apercu_calage,
+    corriger_nord_sud,
     decaler_longitude,
     ecrire_geojson,
     parametres_json,
@@ -276,6 +278,7 @@ for cle, defaut in (
     ("implantation", None),
     ("calage_valide", False),
     ("decalage_est_ouest", 0.0),
+    ("correction_nord_sud", 0.0),
 ):
     if cle not in st.session_state:
         st.session_state[cle] = defaut
@@ -296,6 +299,7 @@ if export_helioscope is not None:
     if st.button("Importer et pré-positionner", width="stretch"):
         st.session_state.calage_valide = False
         st.session_state.decalage_est_ouest = 0.0
+        st.session_state.correction_nord_sud = 0.0
         try:
             emprise = _emprise_courante()
             if emprise is None:
@@ -337,23 +341,48 @@ if implantation is not None:
     st.info(st.session_state.diagnostic.message)
 
     st.markdown(
-        "**Validation du calage — obligatoire.** La latitude est verrouillée par "
-        "le fichier ; seul le décalage est-ouest est réglable. Ajustez jusqu'à ce "
-        "que l'implantation coïncide avec le terrain, puis validez."
+        "**Validation du calage — obligatoire.** Deux réglages indépendants, à "
+        "faire l'un après l'autre plutôt qu'en glissant l'implantation à vue : "
+        "chacun se juge sur un critère simple, alors qu'un déplacement libre "
+        "laisse compenser l'erreur d'un axe par l'autre."
     )
-    decalage = st.slider(
-        "Décalage est-ouest (m)",
-        min_value=-150.0,
-        max_value=150.0,
-        value=float(st.session_state.decalage_est_ouest),
-        step=0.5,
-    )
+    colonne_eo, colonne_ns = st.columns(2)
+    with colonne_eo:
+        decalage = st.slider(
+            "Décalage est-ouest (m)",
+            min_value=-150.0,
+            max_value=150.0,
+            value=float(st.session_state.decalage_est_ouest),
+            step=0.5,
+            help="Réglage principal : la longitude est la seule inconnue du "
+            "modèle de calage.",
+        )
+    with colonne_ns:
+        correction = st.slider(
+            "Correction nord-sud (m)",
+            min_value=-CORRECTION_NORD_SUD_MAX_M,
+            max_value=CORRECTION_NORD_SUD_MAX_M,
+            value=float(st.session_state.correction_nord_sud),
+            step=0.5,
+            help="Retouche de la latitude déduite du fichier, qui n'est bonne "
+            "qu'à une dizaine de mètres. Laissez à 0 si l'implantation tombe "
+            "juste : toute valeur saisie est conservée dans projet.json.",
+        )
+    if correction:
+        st.caption(
+            f"Latitude retouchée de {correction:+.1f} m par rapport à celle "
+            f"déduite du fichier ({implantation.calage.latitude_origine:.6f}°)."
+        )
     try:
         if decalage != st.session_state.decalage_est_ouest:
             decaler_longitude(
                 implantation.calage, decalage - st.session_state.decalage_est_ouest
             )
             st.session_state.decalage_est_ouest = decalage
+            st.session_state.calage_valide = False
+        if correction != st.session_state.correction_nord_sud:
+            corriger_nord_sud(implantation.calage, correction)
+            st.session_state.correction_nord_sud = correction
             st.session_state.calage_valide = False
 
         emprise = _emprise_courante()
@@ -375,13 +404,17 @@ if implantation is not None:
             if projet is not None:
                 projet.helioscope = st.session_state.chemin_export
                 projet.longitude_calage = implantation.calage.longitude_origine
+                projet.correction_nord_sud_m = (
+                    implantation.calage.correction_nord_sud_m or None
+                )
                 projet.valider()
                 chemin = projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
                 dossier_geo = DOSSIER_SORTIE / projet.nom / "helioscope"
                 fichiers = ecrire_geojson(implantation, dossier_geo)
                 st.success(
                     f"Calage enregistré dans {chemin} "
-                    f"(longitude {projet.longitude_calage:.8f}°). "
+                    f"(longitude {projet.longitude_calage:.8f}°, correction "
+                    f"nord-sud {implantation.calage.correction_nord_sud_m:+.1f} m). "
                     f"{len(fichiers)} couches écrites dans {dossier_geo}."
                 )
                 st.code(

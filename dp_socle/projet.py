@@ -41,6 +41,10 @@ class Projet:
     #: n'a pas à être stockée. Une fois cette valeur écrite, une régénération ne
     #: redemande jamais le calage.
     longitude_calage: float | None = None
+    #: Correction nord-sud saisie à la main, en mètres vers le nord, à partir de
+    #: la latitude déduite du fichier. Stockée en écart plutôt qu'en latitude
+    #: corrigée : la valeur du fichier reste lisible et la retouche se voit.
+    correction_nord_sud_m: float | None = None
 
     @property
     def libelle_affiche(self) -> str:
@@ -104,6 +108,22 @@ class Projet:
                 raise ErreurDP(
                     f"longitude_calage = {self.longitude_calage} hors de la France "
                     "métropolitaine (-5,5° à 10,0°). Refaites le calage."
+                )
+        if self.correction_nord_sud_m is not None:
+            if self.longitude_calage is None:
+                raise ErreurDP(
+                    "correction_nord_sud_m est renseignée sans calage est-ouest : "
+                    "corriger la latitude d'une implantation non positionnée n'a "
+                    "pas de sens."
+                )
+            # Même borne que `corriger_nord_sud`, redite ici parce qu'un
+            # projet.json se corrige à la main et n'est pas relu par le module
+            # de calage.
+            if abs(self.correction_nord_sud_m) > 30.0:
+                raise ErreurDP(
+                    f"correction_nord_sud_m = {self.correction_nord_sud_m:+.1f} m, "
+                    "au-delà des ±30 m admis. Une correction de cet ordre signale "
+                    "un calage faux, pas une retouche."
                 )
 
     def date_francaise(self) -> str:

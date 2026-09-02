@@ -307,11 +307,23 @@ z   = floor(log2(K / res))                K = 156543.03392804097
 lat = acos(res * 2**z / K)                latitude de l'origine du DXF
 ```
 
-La latitude est donc entièrement déterminée par le fichier. **La seule inconnue
-est la longitude**, réglée par superposition sur l'emprise puis validée à l'œil
-sur l'ortho IGN, avec un unique degré de liberté est-ouest. La valeur retenue est
-écrite dans `projet.json` (`longitude_calage`) : une régénération ne redemande
-jamais le calage.
+La longitude est la seule inconnue du modèle : elle est réglée par superposition
+sur l'emprise, puis validée à l'œil sur l'ortho IGN. La latitude, elle, se déduit
+du fichier — mais à une dizaine de mètres près seulement (voir plus bas), d'où un
+second réglage, **une correction nord-sud bornée à ±30 m**, à zéro par défaut.
+
+Les deux réglages restent séparés plutôt que fondus en un glissement libre à deux
+dimensions : chacun se juge sur un critère visuel simple, alors qu'un déplacement
+libre laisse compenser l'erreur d'un axe par l'autre. La correction nord-sud est
+stockée en **écart** (`correction_nord_sud_m`) et non en latitude corrigée, pour
+que la valeur du fichier reste lisible et que toute retouche se voie. Avec
+`longitude_calage`, elle est écrite dans `projet.json` : une régénération ne
+redemande jamais le calage.
+
+Au-delà de ±30 m — près de trois fois l'écart mesuré entre deux designs d'un même
+projet — la correction est refusée : à cette distance ce n'est plus une retouche
+mais le signe d'un calage faux, mauvais export ou mauvaise emprise, et le
+rattraper à la main masquerait le problème.
 
 La « Location » affichée par HelioScope n'est pas utilisable : vérifié sur
 Bray-Saint-Aignan, elle est à 176 m au nord et 220 m à l'ouest de l'origine
@@ -424,6 +436,14 @@ de référence de chaque design, et ces points diffèrent. La latitude place don
 le projet à une dizaine de mètres près, pas au mètre. Un écart nord-sud résiduel
 de cet ordre au pré-positionnement est normal et non suspect — constaté à
 +8,6 m sur un design et −12,4 m sur l'autre, contre la même emprise.
+
+C'est ce constat qui justifie le réglage nord-sud, que la recette d'origine
+interdisait en supposant la latitude verrouillée. Sur le design 7676351, saisir
+la correction de −8,6 m annoncée par le diagnostic fait passer le recouvrement
+avec l'emprise de 80 % à 88 % — exactement ce que donnerait un recalage libre en
+deux dimensions. Le pré-positionnement ne l'applique jamais de lui-même : il
+annonce l'écart et laisse l'opérateur décider, parce qu'un écart corrigé
+automatiquement ne dirait plus rien de la qualité du calage.
 
 ### Aperçu de calage
 

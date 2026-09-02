@@ -681,3 +681,122 @@ def test_azimut_nul_du_design_paysage(implantation_paysage):
     for table in implantation_paysage.tables:
         angles |= _azimuts(table)
     assert angles == {0.0}
+
+
+# ---------------------------------------------------------------------------
+# Correction nord-sud
+# ---------------------------------------------------------------------------
+
+
+@besoin_export_complet
+def test_correction_nord_sud_deplace_bien_vers_le_nord(implantation):
+    """Une correction de N mètres déplace de N mètres, et seulement en latitude."""
+    from pyproj import Geod
+    from shapely.geometry import Point
+
+    from dp_socle.helioscope import corriger_nord_sud
+
+    emprise = charger_emprise(EMPRISE_ISLETTES)
+    prepositionner(implantation, emprise.geometrie)
+    corriger_nord_sud(implantation.calage, 0.0)
+    avant = projeter(Point(0.0, 0.0), implantation.calage)
+
+    corriger_nord_sud(implantation.calage, 12.5)
+    apres = projeter(Point(0.0, 0.0), implantation.calage)
+
+    vers_wgs84 = Transformer.from_crs(2154, 4326, always_xy=True)
+    lon_avant, lat_avant = vers_wgs84.transform(avant.x, avant.y)
+    lon_apres, lat_apres = vers_wgs84.transform(apres.x, apres.y)
+
+    assert lat_apres > lat_avant
+    assert lon_apres == pytest.approx(lon_avant, abs=1e-9)
+    assert Geod(ellps="WGS84").inv(lon_avant, lat_avant, lon_apres, lat_apres)[
+        2
+    ] == pytest.approx(12.5, abs=0.01)
+
+    corriger_nord_sud(implantation.calage, 0.0)
+
+
+@besoin_export_complet
+def test_correction_nord_sud_ne_touche_pas_a_la_latitude_du_fichier(implantation):
+    """La latitude déduite reste lisible : la retouche est stockée à côté."""
+    from dp_socle.helioscope import corriger_nord_sud
+
+    emprise = charger_emprise(EMPRISE_ISLETTES)
+    prepositionner(implantation, emprise.geometrie)
+    du_fichier = implantation.calage.latitude_origine
+
+    corriger_nord_sud(implantation.calage, -8.55)
+    assert implantation.calage.latitude_origine == du_fichier
+    assert implantation.calage.correction_nord_sud_m == pytest.approx(-8.55)
+    assert implantation.calage.latitude_corrigee < du_fichier
+
+    corriger_nord_sud(implantation.calage, 0.0)
+
+
+@besoin_export_complet
+def test_correction_nord_sud_annule_l_ecart_residuel(implantation):
+    """Appliquer la correction annoncée par le diagnostic recale l'implantation."""
+    from dp_socle.helioscope import corriger_nord_sud
+
+    emprise = charger_emprise(EMPRISE_ISLETTES)
+    corriger_nord_sud(implantation.calage, 0.0)
+    avant = prepositionner(implantation, emprise.geometrie)
+    assert avant.ecart_nord_sud_m == pytest.approx(8.55, abs=0.5)
+
+    corriger_nord_sud(implantation.calage, -avant.ecart_nord_sud_m)
+    apres = prepositionner(implantation, emprise.geometrie)
+    assert apres.ecart_nord_sud_m == pytest.approx(0.0, abs=0.05)
+    # Le recouvrement gagne ce que la latitude du fichier lui coûtait.
+    assert apres.recouvrement > avant.recouvrement + 0.05
+
+    corriger_nord_sud(implantation.calage, 0.0)
+
+
+@besoin_export_complet
+@pytest.mark.parametrize("metres", [31.0, -45.0, 200.0])
+def test_correction_nord_sud_bornee(implantation, metres):
+    """Au-delà de ±30 m, ce n'est plus une retouche mais un calage faux."""
+    from dp_socle.helioscope import corriger_nord_sud
+
+    with pytest.raises(ErreurCalage, match="hors de la plage admise"):
+        corriger_nord_sud(implantation.calage, metres)
+
+
+def test_projet_json_conserve_la_correction_nord_sud(tmp_path):
+    import geopandas as gpd
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    from dp_socle.erreurs import ErreurDP
+    from dp_socle.projet import Projet
+
+    emprise = tmp_path / "emprise.shp"
+    gpd.GeoDataFrame(
+        {"id": [0]},
+        geometry=[ShapelyPolygon([(0, 0), (100, 0), (100, 100), (0, 100)])],
+        crs="EPSG:2154",
+    ).to_file(emprise)
+    export = tmp_path / "export.zip"
+    export.write_bytes(b"contenu sans importance")
+
+    projet = Projet(
+        nom="essai",
+        commune="Les Islettes",
+        code_postal="55120",
+        date="2026-09-02",
+        emprise=str(emprise),
+        helioscope=str(export),
+        longitude_calage=4.99935612,
+        correction_nord_sud_m=-8.55,
+    )
+    relu = Projet.charger(projet.ecrire(tmp_path / "projet.json"))
+    assert relu.correction_nord_sud_m == pytest.approx(-8.55)
+
+    projet.correction_nord_sud_m = -80.0
+    with pytest.raises(ErreurDP, match="au-delà des"):
+        projet.valider()
+
+    projet.correction_nord_sud_m = -8.55
+    projet.longitude_calage = None
+    with pytest.raises(ErreurDP, match="sans calage est-ouest"):
+        projet.valider()

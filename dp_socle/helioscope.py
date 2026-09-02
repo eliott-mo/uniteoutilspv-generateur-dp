@@ -102,6 +102,27 @@ class Calage:
     #: Seule inconnue du modèle, fixée par le pré-positionnement puis validée
     #: par l'utilisateur. `None` tant que le calage n'a pas été fait.
     longitude_origine: float | None = None
+    #: Correction nord-sud appliquée à la main, en mètres, comptée positivement
+    #: vers le nord et à partir de la latitude déduite du fichier.
+    #:
+    #: Stockée comme un écart et non fondue dans `latitude_origine` : la latitude
+    #: du fichier reste ainsi lisible, et toute correction saisie se voit. Elle
+    #: existe parce que la latitude déduite n'est pas exacte — les deux designs
+    #: des Islettes en donnent deux qui diffèrent de 11 m — alors que le modèle
+    #: la présentait comme verrouillée.
+    correction_nord_sud_m: float = 0.0
+
+    @property
+    def latitude_corrigee(self) -> float:
+        """Latitude effective, correction comprise. Pour affichage seulement.
+
+        Le placement n'en passe pas par là : il applique la correction en mètres
+        dans le repère métrique local, ce qui est exact et n'a pas à repasser par
+        un angle.
+        """
+        return self.latitude_origine + self.correction_nord_sud_m / (
+            math.pi / 180.0 * RAYON_MERCATOR
+        )
 
     def exige_origine(self) -> float:
         if self.longitude_origine is None:
@@ -948,7 +969,10 @@ def projeter(geometrie: BaseGeometry, calage: Calage) -> BaseGeometry:
     transformateur = _transformateur_local(calage.latitude_origine, longitude)
 
     def _vers_l93(x, y, z=None):
-        return transformateur.transform(x, y)
+        # La correction nord-sud s'ajoute en mètres dans le repère métrique
+        # local : celui-ci est orienté nord à l'origine, une translation en y est
+        # donc exactement un déplacement vers le nord.
+        return transformateur.transform(x, y + calage.correction_nord_sud_m)
 
     return transformer_geom(_vers_l93, geometrie)
 
@@ -968,7 +992,9 @@ class Prepositionnement:
     def message(self) -> str:
         return (
             f"Pré-positionnement : recouvrement {self.recouvrement:.0%} avec "
-            f"l'emprise, écart nord-sud résiduel {self.ecart_nord_sud_m:+.1f} m. "
+            f"l'emprise, écart nord-sud résiduel {self.ecart_nord_sud_m:+.1f} m "
+            f"(correction à saisir pour l'annuler : "
+            f"{-self.ecart_nord_sud_m:+.1f} m). "
             f"Zone HelioScope {self.surface_zone_ha:.2f} ha contre "
             f"{self.surface_emprise_ha:.2f} ha pour l'emprise fournie. "
             "Résultat indicatif : la zone est tracée à la main dans HelioScope "
@@ -1094,6 +1120,7 @@ def parametres_json(implantation: Implantation) -> dict:
             "zoom": calage.zoom,
             "latitude_origine": calage.latitude_origine,
             "longitude_origine": calage.longitude_origine,
+            "correction_nord_sud_m": calage.correction_nord_sud_m,
             "facteur_echelle": calage.facteur_echelle,
         },
     }
@@ -1116,6 +1143,34 @@ def metres_par_degre_longitude(latitude: float) -> float:
         1 - EXCENTRICITE2_WGS84 * math.sin(phi) ** 2
     )
     return math.pi / 180.0 * grande_normale * math.cos(phi)
+
+
+#: Correction nord-sud admise, en mètres. Les deux designs des Islettes donnent
+#: deux latitudes distantes de 11 m : la borne est à près de trois fois cet
+#: écart. Au-delà, ce n'est plus un ajustement mais le signe que le modèle de
+#: calage ne tient pas sur ce fichier, et le corriger à la main masquerait le
+#: problème au lieu de le montrer.
+CORRECTION_NORD_SUD_MAX_M = 30.0
+
+
+def corriger_nord_sud(calage: "Calage", metres: float) -> None:
+    """Fixe la correction nord-sud, comptée positivement vers le nord.
+
+    Second et dernier degré de liberté, ouvert parce que la latitude déduite du
+    fichier n'est bonne qu'à une dizaine de mètres. Il reste séparé du réglage
+    est-ouest, et non fondu dans un glissement libre en deux dimensions : deux
+    curseurs indépendants se règlent chacun sur un critère visuel simple, là où
+    un déplacement libre laisse compenser une erreur d'un axe par l'autre.
+    """
+    if not -CORRECTION_NORD_SUD_MAX_M <= metres <= CORRECTION_NORD_SUD_MAX_M:
+        raise ErreurCalage(
+            f"Correction nord-sud de {metres:+.1f} m demandée, hors de la plage "
+            f"admise (±{CORRECTION_NORD_SUD_MAX_M:.0f} m). La latitude déduite du "
+            "fichier est bonne à une dizaine de mètres près ; un écart de cet "
+            "ordre signale que le calage lui-même est faux — mauvais export, "
+            "mauvaise emprise — et non qu'il faut le rattraper à la main."
+        )
+    calage.correction_nord_sud_m = float(metres)
 
 
 def decaler_longitude(calage: "Calage", metres: float) -> None:
