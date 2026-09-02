@@ -37,6 +37,9 @@ TITRE = "PAGE DE GARDE"
 #: un rectangle vide sur une page de garde se remarque plus que du blanc.
 CADRE_IMAGE = (22.0, 118.0, 228.0, 140.0)
 
+#: Hauteur du bandeau de légende posé au-dessus du photomontage.
+HAUTEUR_LEGENDE_IMAGE = 6.5
+
 COLONNE_DROITE = 266.0
 LARGEUR_COLONNE = 132.0
 
@@ -88,7 +91,26 @@ def generer(
 
     image = projet.chemin_image_garde
     if image is not None and image.exists():
-        planche.ajouter_image_mm(image, *CADRE_IMAGE)
+        x_img, y_img, largeur_img, hauteur_img = CADRE_IMAGE
+        # L'image est posée d'abord : le bandeau de légende et le filet se calent
+        # ensuite sur la zone qu'elle occupe réellement, quelles que soient ses
+        # proportions. Sinon un cadre plus large que la photo laisse du blanc
+        # entre les deux.
+        zone = planche.ajouter_image_mm(
+            image, x_img, y_img + HAUTEUR_LEGENDE_IMAGE,
+            largeur_img, hauteur_img - HAUTEUR_LEGENDE_IMAGE,
+        )
+        x_reel, y_reel, largeur_reelle, hauteur_reelle = zone
+        # Case titrée seulement s'il y a une image : une case surmontant du vide
+        # serait pire que du blanc.
+        _cellule_titre(
+            planche, x_reel, y_reel - HAUTEUR_LEGENDE_IMAGE, largeur_reelle,
+            HAUTEUR_LEGENDE_IMAGE, "VUE EN PERSPECTIVE DU PROJET", centre=True,
+        )
+        planche.ajouter_rectangle(
+            x_reel, y_reel, largeur_reelle, hauteur_reelle,
+            Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
+        )
 
     bas = _bloc_maitrise(planche, COLONNE_DROITE, 118.0)
     _bloc_sommaire(planche, COLONNE_DROITE, bas + 8.0, pages or {})
@@ -108,15 +130,16 @@ def generer(
 
 
 def _cellule_titre(planche: Planche, x: float, y: float, largeur: float,
-                   hauteur: float, intitule: str) -> None:
+                   hauteur: float, intitule: str, centre: bool = False) -> None:
     """Case de titre fermée, à fond gris : le tableau se lit d'un coup d'œil."""
     planche.ajouter_rectangle(
         x, y, largeur, hauteur,
         Style(trait=NOIR, epaisseur_mm=0.25, remplissage=GRIS_FOND),
     )
     planche.ajouter_texte(
-        x + 4.0, y + hauteur - 2.4, intitule,
-        taille=8 * PT, couleur=GRIS, gras=True,
+        x + largeur / 2.0 if centre else x + 4.0, y + hauteur - 2.4, intitule,
+        taille=8 * PT, couleur=GRIS if not centre else BLEU_UNITE, gras=True,
+        ancre="middle" if centre else "start",
     )
 
 
@@ -141,28 +164,55 @@ def _bloc_maitrise(planche: Planche, x: float, y: float) -> float:
 
 
 def _bloc_sommaire(planche: Planche, x: float, y: float, pages: dict) -> float:
+    """Sommaire à trois colonnes : code de la pièce, intitulé, page(s).
+
+    Les pièces des lots suivants y figurent sans page. `pages` accepte un entier
+    ou un couple (première, dernière) : une pièce sur plusieurs planches, comme
+    les insertions paysagères, s'affiche « 9-10 ».
+    """
     hauteur_titre = 7.0
     hauteur_ligne = 5.0
     pieces = [p for p in PIECES if p.code]  # la page de garde ne s'y liste pas
-    hauteur_contenu = 4.0 + hauteur_ligne * len(pieces)
+    hauteur_contenu = hauteur_ligne * len(pieces)
 
-    _cellule_titre(planche, x, y, LARGEUR_COLONNE, hauteur_titre, "SOMMAIRE")
+    _cellule_titre(planche, x, y, LARGEUR_COLONNE, hauteur_titre, "SOMMAIRE",
+                   centre=True)
+    haut = y + hauteur_titre
     planche.ajouter_rectangle(
-        x, y + hauteur_titre, LARGEUR_COLONNE, hauteur_contenu,
+        x, haut, LARGEUR_COLONNE, hauteur_contenu,
         Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
     )
 
+    filet = Style(trait="#9a9a9a", epaisseur_mm=0.15)
+    colonne_titre = x + 20.0
+    colonne_page = x + LARGEUR_COLONNE - 18.0
+    for abscisse in (colonne_titre, colonne_page):
+        planche.ajouter_ligne(abscisse, haut, abscisse, haut + hauteur_contenu, filet)
+
     for index, piece in enumerate(pieces):
-        ordonnee = y + hauteur_titre + 5.4 + index * hauteur_ligne
+        sommet = haut + index * hauteur_ligne
+        ligne_de_base = sommet + 3.5
+        if index:
+            planche.ajouter_ligne(x, sommet, x + LARGEUR_COLONNE, sommet, filet)
+
         page = pages.get(piece.code)
         couleur = NOIR if page else GRIS
+        planche.ajouter_texte(x + 3.0, ligne_de_base, piece.code,
+                              taille=9 * PT, couleur=couleur)
+        planche.ajouter_texte(colonne_titre + 3.0, ligne_de_base, piece.titre,
+                              taille=9 * PT, couleur=couleur)
         planche.ajouter_texte(
-            x + 4.0, ordonnee, piece.intitule, taille=9 * PT, couleur=couleur
+            (colonne_page + x + LARGEUR_COLONNE) / 2.0, ligne_de_base,
+            _pagination(page), taille=9 * PT, ancre="middle", couleur=couleur,
         )
-        # Pas de mention de lot ici : la page de garde part en mairie, elle n'a
-        # pas à porter le découpage interne du développement.
-        planche.ajouter_texte(
-            x + LARGEUR_COLONNE - 4.0, ordonnee, str(page) if page else "—",
-            taille=9 * PT, ancre="end", couleur=couleur,
-        )
-    return y + hauteur_titre + hauteur_contenu
+    return haut + hauteur_contenu
+
+
+def _pagination(page) -> str:
+    """« 4 », « 9-10 » ou « — » pour une pièce non encore produite."""
+    if page is None:
+        return "—"
+    if isinstance(page, tuple):
+        premiere, derniere = page
+        return f"{premiere}" if premiere == derniere else f"{premiere}-{derniere}"
+    return str(page)

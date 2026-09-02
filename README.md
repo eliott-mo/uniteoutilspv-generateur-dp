@@ -104,10 +104,17 @@ un contour vide au bleu des titres : elle indique le nord de la **grille**
 Lambert 93, d'où la mention « NORD (L93) », et n'affirme rien sur le nord
 géographique (la convergence des méridiens atteint 3° en métropole).
 
-**Sommaire.** Il liste les onze pièces du dossier — la page de garde ne s'y
-liste pas elle-même — y compris celles des lots suivants et les insertions
-paysagères fournies : le dossier s'annonce complet dès maintenant. Les pièces
-produites portent leur numéro de page réel, les autres un tiret. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
+**Sommaire.** Tableau à trois colonnes — code, intitulé, page — reprenant la
+forme du sommaire des dossiers HOCH. Il liste les onze pièces du dossier, la
+page de garde ne s'y listant pas elle-même, y compris celles des lots suivants
+et les insertions paysagères fournies : le dossier s'annonce complet dès
+maintenant. Les pièces produites portent leur numéro de page réel, les autres un
+tiret. Une pièce tenant sur plusieurs planches s'affiche en plage, « 9-10 ».
+
+**Photomontage.** Il occupe la moitié gauche de la page de garde, surmonté d'un
+bandeau « VUE EN PERSPECTIVE DU PROJET » calé sur la largeur réelle de l'image.
+Sans photomontage, ni bandeau ni cadre : une case titrée surmontant du vide se
+remarquerait plus que du blanc. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
 titres de cartouche — les deux ne peuvent pas diverger.
 
 **Surfaces.** Deux nombres coexistent, et ils ne se recouvrent pas :
@@ -233,6 +240,35 @@ fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne p
 5,9 Mo à 150 dpi, 10,6 Mo à 200 et 16,2 Mo à 250, pour une lisibilité
 équivalente à l'impression : 200 dpi est le défaut. La barre latérale de l'application permet de reconfronter
 les identifiants au GetCapabilities.
+
+## Comparaison au dossier de référence
+
+Le critère de validation n°2 du brief demande de comparer le dossier produit à
+celui de l'agence. La référence est le dossier HOCH « Les Islettes (55) » du
+25/04/2024, 17 planches A3.
+
+Repris de leur dossier :
+
+- la numérotation des planches, page de garde comprise, qui met le plan de
+  cadastre en planche 4 ;
+- les intitulés des onze pièces, `dp_socle/dossier.py` ;
+- le sommaire en tableau à trois colonnes ;
+- les bâtiments hachurés sur le plan de cadastre ;
+- le bandeau de légende au-dessus du photomontage.
+
+Écarts assumés :
+
+- **l'emprise est remplie à 15 %** sur nos planches, alors qu'ils la tracent en
+  simple filet. Au 1:10 000 un terrain de 28 ha fait 5 cm² sur la feuille : un
+  aplat léger le rend repérable au premier coup d'œil ;
+- **aucune signature ni numéro d'inscription à l'ordre des architectes**, que
+  leur page de garde et leurs cartouches portent. Le brief l'interdit : le
+  dossier ne doit pas se présenter comme un dossier d'architecte ;
+- leurs pages mesurent 420,2 mm au lieu de 420,0. Les nôtres sont exactes.
+
+Leur dossier complet de 17 planches pèse 126 Mo, pour une image non compressée.
+Nos quatre planches en pèsent 17,7 : à ce rythme le dossier complet restera sous
+la cible de 25 Mo.
 
 ## Charte graphique
 

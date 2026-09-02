@@ -92,11 +92,12 @@ def generer_dossier(
                 f"{sortie.numero} : le cartouche annonce la planche {attendu} "
                 f"mais la pièce tombe en page {page_courante} du dossier assemblé."
             )
-        pages[sortie.numero] = page_courante
+        nb = _nb_pages(sortie.chemin)
+        pages[sortie.numero] = (page_courante, page_courante + nb - 1)
         sommaire.append(
             {"numero": sortie.numero, "titre": sortie.titre, "page": page_courante}
         )
-        page_courante += _nb_pages(sortie.chemin)
+        page_courante += nb
 
     garde = page_garde.generer(projet, dossier, pages=pages)
     ordre = [garde] + sorties

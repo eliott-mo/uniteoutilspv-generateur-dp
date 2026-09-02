@@ -35,21 +35,23 @@ class Piece:
         return self.intitule.upper()
 
 
-#: Ordre du dossier. Les intitulés DP 6 / DP 7 / DP 8 reprennent la
-#: nomenclature du formulaire Cerfa de déclaration préalable.
+#: Ordre et intitulés du dossier. Les libellés reprennent ceux du sommaire des
+#: dossiers HOCH (relevés sur le dossier Les Islettes du 25/04/2024) : les
+#: services instructeurs sont habitués à cette formulation, et la reprendre évite
+#: de leur faire lire un vocabulaire différent d'un dossier UNITe à l'autre.
 PIECES = (
     Piece("", "Page de garde", produite=True),
-    Piece("DP 1-1", "Plan de situation du terrain", produite=True),
-    Piece("DP 1-2", "Photographie aérienne du terrain", produite=True),
+    Piece("DP 1-1", "Plan de situation", produite=True),
+    Piece("DP 1-2", "Photo aérienne", produite=True),
     Piece("DP 1-3", "Plan de cadastre", produite=True),
-    Piece("DP 2", "Plan de masse des constructions", mention="lot 4"),
-    Piece("DP 3", "Plan en coupe du terrain et de la construction", mention="lot 4"),
-    Piece("DP 4-1", "Aspect extérieur — postes et citerne", mention="lot 4"),
-    Piece("DP 4-2", "Aspect extérieur — clôture et portails", mention="lot 4"),
-    Piece("DP 6", "Insertion du projet dans son environnement", mention="fournie"),
-    Piece("DP 7", "Photographie de l'environnement proche", mention="fournie"),
-    Piece("DP 8", "Photographie de l'environnement lointain", mention="fournie"),
-    Piece("DP 11", "Notice descriptive", mention="lot 5"),
+    Piece("DP 2", "Plan de masse", mention="lot 4"),
+    Piece("DP 3", "Coupe des tables photovoltaïques et du terrain", mention="lot 4"),
+    Piece("DP 4-1", "Poste de livraison/transformation", mention="lot 4"),
+    Piece("DP 4-2", "Citerne, portail et clôture", mention="lot 4"),
+    Piece("DP 6", "Insertions paysagères", mention="fournie"),
+    Piece("DP 7", "Photographie environnement proche", mention="fournie"),
+    Piece("DP 8", "Photographie paysage lointain", mention="fournie"),
+    Piece("DP 11", "Notice", mention="lot 5"),
 )
 
 PAR_CODE = {piece.code: piece for piece in PIECES if piece.code}
