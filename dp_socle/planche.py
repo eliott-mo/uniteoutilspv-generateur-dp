@@ -46,19 +46,24 @@ Y_BANDEAU = HAUTEUR_MM - MARGE_MM - BANDEAU_MM
 Y_CARTOUCHE = Y_BANDEAU - CARTOUCHE_MM
 
 #: Découpage du cartouche, de gauche à droite : (identifiant, x, largeur).
-#: La case du logo est calée sur ses proportions (707 x 522 px, soit 1,35) :
-#: dans les 15 mm de haut du cartouche, il ne peut pas dépasser 17 mm de large.
-#: Une case plus large laisserait un vide autour de lui. Les millimètres gagnés
+#: La case du logo est calée sur ses proportions (707 x 522 px, soit 1,35) et
+#: sur ses marges : le logo UNITe a besoin de respirer, contrairement à un
+#: bloc-marque rectangulaire qui supporte d'être collé au filet. Dans les 15 mm
+#: du cartouche, avec 2,4 mm de marge haute et basse, il fait 13,8 mm de large ;
+#: la case de 19 mm lui laisse 2,6 mm de part et d'autre. Les millimètres gagnés
 #: vont au nom du projet.
 CASES_CARTOUCHE = (
-    ("logo", MARGE_MM, 22.0),
-    ("projet", 27.0, 84.0),
+    ("logo", MARGE_MM, 19.0),
+    ("projet", 24.0, 87.0),
     ("titre", 111.0, 194.0),
     ("nord", 305.0, 20.0),
     ("echelle", 325.0, 30.0),
     ("date", 355.0, 30.0),
     ("numero", 385.0, 30.0),
 )
+
+#: Marge autour du logo dans sa case du cartouche.
+MARGE_LOGO_MM = 2.4
 
 MENTION_BANDEAU = "Ceci n'est pas un plan d'exécution"
 
@@ -669,8 +674,9 @@ class Planche:
         x_logo, largeur_logo = cases["logo"]
         if LOGO_UNITE.exists():
             self.ajouter_image_mm(
-                LOGO_UNITE, x_logo + 1.5, Y_CARTOUCHE + 1.2,
-                largeur_logo - 3.0, CARTOUCHE_MM - 2.4,
+                LOGO_UNITE, x_logo + MARGE_LOGO_MM, Y_CARTOUCHE + MARGE_LOGO_MM,
+                largeur_logo - 2 * MARGE_LOGO_MM,
+                CARTOUCHE_MM - 2 * MARGE_LOGO_MM,
             )
 
         # 2. Nom du projet et phase

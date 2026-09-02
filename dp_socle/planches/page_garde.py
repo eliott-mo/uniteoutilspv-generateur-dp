@@ -78,7 +78,7 @@ def generer(
     )
     planche.ajouter_texte(
         centre, 98.0, f"{projet.commune.upper()}  {projet.code_postal}",
-        taille=15 * PT, ancre="middle", couleur=BLEU_UNITE,
+        taille=15 * PT, ancre="middle", gras=True, couleur=BLEU_UNITE,
     )
     # Filet vert court et centré, repris des plaquettes UNITe.
     planche.ajouter_ligne(
