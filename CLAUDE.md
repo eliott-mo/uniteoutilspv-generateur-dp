@@ -14,7 +14,15 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 4 | DP 2, DP 3, DP 4 | à venir |
 | 5 | Notice DP 11 | à venir |
 
-Les briefs sont dans `_briefs/`, non versionnés.
+Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
+ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on
+ne peut les relire sans le texte d'origine.
+
+**Une conversation par lot pour le construire, une conversation neuve pour toute
+modification ultérieure.** Le dépôt est le dépôt de mémoire, pas la conversation :
+`README.md`, les tests et les messages de commit sont écrits pour être lus à
+froid. Reprendre une conversation ancienne fait raisonner sur un état du code qui
+n'existe plus, ce qui se voit rarement tout de suite.
 
 ## Règles non négociables
 
