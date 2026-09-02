@@ -8,6 +8,11 @@ et la reprojection depuis le Web Mercator — deux sources d'erreur d'échelle.
 Identifiants de couches et noms d'attributs **confirmés par GetCapabilities**
 le 2026-09-01 :
 
+Le WMS-R est réparti sur plusieurs nœuds, dont l'un répond par intermittence
+`LayerNotDefined` sur une couche pourtant publiée (constaté le 2026-09-02) :
+`telecharger_fond` redemande donc la même image un nombre borné de fois, et le
+signale. Rien n'est substitué.
+
 - WMS-R  https://data.geopf.fr/wms-r/wms   (WMS 1.3.0, MaxWidth/MaxHeight 5010)
     * GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2
     * ORTHOIMAGERY.ORTHOPHOTOS
@@ -22,6 +27,8 @@ le 2026-09-01 :
 from __future__ import annotations
 
 import io
+import time
+import warnings
 from dataclasses import dataclass
 
 import requests
@@ -49,6 +56,19 @@ DPI_DEFAUT = 200
 
 _ENTETES = {"User-Agent": "generateur-dp-unite/1.0 (dossier DP photovoltaique)"}
 
+#: Nombre de tentatives d'une requête GetMap, et attente entre deux essais.
+#:
+#: Le WMS-R est réparti sur plusieurs nœuds et l'un d'eux répond parfois
+#: `LayerNotDefined` sur une couche pourtant présente dans le GetCapabilities.
+#: Constaté le 02/09/2026 sur GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2 : la même
+#: requête échoue en HTTP 400 puis passe à l'essai suivant. Sans reprise, un
+#: aléa de quelques secondes fait échouer la génération complète du dossier.
+#:
+#: Ce n'est pas un repli : rien n'est substitué, on redemande la même chose, un
+#: nombre borné de fois, et toute reprise est signalée.
+TENTATIVES_WMS = 3
+ATTENTE_REPRISE_S = 2.0
+
 
 @dataclass
 class FondRaster:
@@ -59,6 +79,10 @@ class FondRaster:
     couche: str
     dpi: int
     format: str
+    #: Nombre de requêtes qu'il a fallu pour obtenir l'image. Au-delà de 1, le
+    #: service a flanché puis repris ; la planche est bonne, mais le fait est
+    #: remonté au rapport de génération.
+    tentatives: int = 1
 
     @property
     def taille_px(self) -> tuple[int, int]:
@@ -102,6 +126,7 @@ def telecharger_fond(
 
     dpi_reel = dpi_utilisable(largeur_mm, hauteur_mm, dpi)
     largeur_px, hauteur_px = dimensions_px(largeur_mm, hauteur_mm, dpi_reel)
+    tentatives = 0
 
     parametres = {
         "SERVICE": "WMS",
@@ -116,24 +141,41 @@ def telecharger_fond(
         "FORMAT": format_image,
         "TRANSPARENT": "FALSE",
     }
-    try:
-        reponse = requests.get(
-            URL_WMS, params=parametres, headers=_ENTETES, timeout=timeout
-        )
-    except requests.RequestException as exc:
-        raise ErreurService(
-            f"Couche WMS « {couche} » injoignable : {exc}. "
-            "Pas de fond blanc de remplacement : la planche n'est pas produite."
-        ) from exc
+    while True:
+        tentatives += 1
+        try:
+            reponse = requests.get(
+                URL_WMS, params=parametres, headers=_ENTETES, timeout=timeout
+            )
+        except requests.RequestException as exc:
+            echec = (
+                f"Couche WMS « {couche} » injoignable : {exc}. "
+                "Pas de fond blanc de remplacement : la planche n'est pas produite."
+            )
+            reponse = None
+        else:
+            type_contenu = (reponse.headers.get("content-type") or "").lower()
+            if reponse.status_code == 200 and type_contenu.startswith("image/"):
+                break
+            lisible = "xml" in type_contenu or "text" in type_contenu
+            extrait = reponse.text[:400] if lisible else ""
+            echec = (
+                f"Couche WMS « {couche} » : réponse HTTP {reponse.status_code}, "
+                f"type {type_contenu or 'inconnu'}. {extrait}"
+            )
 
-    type_contenu = (reponse.headers.get("content-type") or "").lower()
-    if reponse.status_code != 200 or not type_contenu.startswith("image/"):
-        lisible = "xml" in type_contenu or "text" in type_contenu
-        extrait = reponse.text[:400] if lisible else ""
-        raise ErreurService(
-            f"Couche WMS « {couche} » : réponse HTTP {reponse.status_code}, "
-            f"type {type_contenu or 'inconnu'}. {extrait}"
+        if tentatives >= TENTATIVES_WMS:
+            raise ErreurService(
+                f"{echec} Échec après {tentatives} tentatives."
+            )
+        warnings.warn(
+            f"Couche WMS « {couche} » : échec de la tentative {tentatives} sur "
+            f"{TENTATIVES_WMS}, nouvelle tentative dans {ATTENTE_REPRISE_S:.0f} s. "
+            f"{echec}",
+            RuntimeWarning,
+            stacklevel=2,
         )
+        time.sleep(ATTENTE_REPRISE_S)
 
     try:
         image = Image.open(io.BytesIO(reponse.content))
@@ -156,6 +198,7 @@ def telecharger_fond(
         couche=couche,
         dpi=dpi_reel,
         format=format_image,
+        tentatives=tentatives,
     )
 
 

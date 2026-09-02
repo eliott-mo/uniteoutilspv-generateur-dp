@@ -38,12 +38,21 @@ EXPORT_COMPLET = EXEMPLES / "les-islettes" / "HelioScope ABO_55_Les Islettes Exp
 EMPRISE_ISLETTES = (
     EXEMPLES / "les-islettes" / "abo_55_les-islettes-geoperso-1-02_09_2026_13_35.zip"
 )
+#: Second design du même projet, en pose paysage : sert à confronter les deux
+#: latitudes déduites, et à couvrir le cas où le rampant est le petit côté.
+EXPORT_COMPLET_2 = (
+    EXEMPLES / "les-islettes" / "HelioScope ABO_55_Les Islettes Export_2.zip"
+)
 #: Design exporté avant la fin de la section électrique : aucun module, alors
 #: que la zone, les reculs et les zones évitées sont bien là.
 EXPORT_SANS_MODULES = EXEMPLES / "bray-saint-aignan" / "helioscope_export.zip"
 
 besoin_export_complet = pytest.mark.skipif(
     not EXPORT_COMPLET.exists(), reason=f"export de référence absent : {EXPORT_COMPLET}"
+)
+besoin_export_complet_2 = pytest.mark.skipif(
+    not EXPORT_COMPLET_2.exists(),
+    reason=f"export de référence absent : {EXPORT_COMPLET_2}",
 )
 besoin_export_sans_modules = pytest.mark.skipif(
     not EXPORT_SANS_MODULES.exists(),
@@ -54,6 +63,11 @@ besoin_export_sans_modules = pytest.mark.skipif(
 @pytest.fixture(scope="module")
 def implantation():
     return importer(EXPORT_COMPLET)
+
+
+@pytest.fixture(scope="module")
+def implantation_paysage():
+    return importer(EXPORT_COMPLET_2)
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +261,7 @@ def test_comptage_des_modules(implantation):
 def test_dimensions_et_inclinaison_du_module(implantation):
     """La longueur retenue est la longueur vraie, pas la projection au sol."""
     module = implantation.calepinage.module
+    assert module.pose == "portrait"
     assert module.largeur_m == pytest.approx(1.303, abs=1e-3)
     assert module.longueur_m == pytest.approx(2.384, abs=1e-3)
     assert module.longueur_projetee_m == pytest.approx(2.1606, abs=1e-3)
@@ -534,3 +549,67 @@ def test_longitude_hors_de_france_refusee(tmp_path):
     )
     with pytest.raises(ErreurDP, match="hors de la France"):
         projet.valider()
+
+
+# ---------------------------------------------------------------------------
+# Second design du même projet
+# ---------------------------------------------------------------------------
+
+
+@besoin_export_complet_2
+def test_pose_paysage_mesuree_sur_le_cote_montant(implantation_paysage):
+    """En paysage, le rampant est le petit côté : le mesurer au plus long donne 0°.
+
+    Même panneau que le design portrait — 1,303 × 2,384 m à 25° — mais posé à
+    plat. Chercher l'inclinaison sur le côté le plus long y renvoyait 0°, ce que
+    le recoupement avec le nom du bloc a fait échouer bruyamment plutôt que de
+    laisser passer une coupe DP 3 fausse.
+    """
+    module = implantation_paysage.calepinage.module
+    assert module.pose == "paysage"
+    assert module.largeur_m == pytest.approx(2.384, abs=1e-3)
+    assert module.longueur_m == pytest.approx(1.303, abs=1e-3)
+    assert module.longueur_projetee_m == pytest.approx(1.1809, abs=1e-3)
+    assert module.inclinaison_deg == 25.0
+    assert module.inclinaison_mesuree_deg == pytest.approx(25.0, abs=1e-3)
+    # Le panneau est physiquement le même dans les deux designs.
+    assert module.dimensions_hors_tout == pytest.approx((1.303, 2.384), abs=1e-3)
+
+
+@besoin_export_complet_2
+def test_calepinage_du_design_paysage(implantation_paysage):
+    calepinage = implantation_paysage.calepinage
+    assert calepinage.nb_tables == 378
+    assert calepinage.nb_modules == 1134
+    assert calepinage.orientation_deg == 0
+    assert calepinage.nb_rangees == 13
+    assert calepinage.pas_rangees_m == pytest.approx(6.543, abs=0.01)
+    assert calepinage.pas_tables_m == pytest.approx(2.384, abs=0.01)
+
+
+@besoin_export_complet
+@besoin_export_complet_2
+def test_les_deux_designs_ne_donnent_pas_la_meme_latitude(
+    implantation, implantation_paysage
+):
+    """Mesure de la précision réelle de la latitude déduite : environ ±10 m.
+
+    Le brief annonçait deux designs d'un même projet concordant à 1e-6 degré.
+    Mesuré le 02/09/2026 sur les deux designs des Islettes, ils diffèrent de
+    9,9e-5 degré, soit 11 m nord-sud : `res` n'est pas quantifiée sur la rangée
+    de tuiles, elle est calculée au point de référence de chaque design, et ces
+    points diffèrent.
+
+    Ce test fige la limite constatée plutôt que l'affirmation du brief. La
+    latitude reste utilement contrainte — elle place le projet à une dizaine de
+    mètres près — mais elle n'est pas exacte, et un écart nord-sud résiduel de
+    cet ordre au pré-positionnement est normal, pas suspect.
+    """
+    ecart = abs(
+        implantation.calage.latitude_origine
+        - implantation_paysage.calage.latitude_origine
+    )
+    assert ecart > 1e-6, "les deux designs concorderaient : revoir ce constat"
+    assert ecart == pytest.approx(9.94e-5, rel=0.05)
+    # En mètres sur le terrain, pour que l'ordre de grandeur soit lisible.
+    assert ecart * 111_320 == pytest.approx(11.0, abs=1.0)

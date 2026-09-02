@@ -379,6 +379,7 @@ Deux pièges mesurés, tous deux capables de fausser un plan sans se voir :
 |---|---|
 | Nombre de modules | INSERT × modules par bloc table |
 | Dimensions du module | arêtes **3D** du bloc, pas la bbox 2D |
+| Pose | portrait ou paysage, déduite de la géométrie |
 | Inclinaison | nom du bloc (`_25.0deg_`), recoupée avec la géométrie 3D |
 | Orientation | `rotation` des INSERT |
 | Rangées et pas | regroupement **dans le repère du calepinage** |
@@ -389,10 +390,40 @@ au sol (longueur × cos i), pas la longueur vraie du module. Sur le design 76763
 DP 11. L'inclinaison est lue dans le nom du bloc comme prévu, et **recoupée avec
 l'angle mesuré sur la géométrie** : un désaccord de plus de 0,5° lève.
 
+C'est le côté qui prend de la hauteur qui porte l'inclinaison, pas le plus long.
+Les deux designs des Islettes le montrent — même panneau de 1,303 × 2,384 m à
+25°, posé différemment :
+
+| Design | Pose | Contour du bloc | Largeur | Rampant |
+|---|---|---|---|---|
+| 7676351 | portrait | (0,0,0) → (1,303, 0, 0) → (1,303, −2,161, −1,008) | 1,303 | 2,384 |
+| 8102502 | paysage | (0,0,0) → (2,384, 0, 0) → (2,384, −1,181, −0,551) | 2,384 | 1,303 |
+
+Chercher l'inclinaison sur le côté le plus long marche en portrait et renvoie 0°
+en paysage. Le rampant est donc identifié par son dénivelé, et la pose déduite de
+la géométrie est recoupée avec le suffixe du nom de bloc.
+
 Compter les valeurs distinctes en Y des points d'insertion suppose des rangées
 parallèles à l'axe X. Le design 7676351 est à 0,444° hors axe, et ce comptage y
 donne 530 « rangées » pour 530 tables. On repasse donc dans le repère du
 calepinage par rotation inverse avant de regrouper : 8 rangées, pas de 9,48 m.
+
+### Précision de la latitude
+
+Le brief annonçait deux designs d'un même projet concordant à 10⁻⁶ degré.
+Mesuré le 2026-09-02 sur les deux designs des Islettes, ils diffèrent de
+**9,9 × 10⁻⁵ degré, soit 11 m nord-sud** :
+
+| Design | `res` | Latitude déduite |
+|---|---|---|
+| 7676351 | 0,1954518020063469 | 49,110690462 |
+| 8102502 | 0,19545219342840345 | 49,110591106 |
+
+`res` n'est pas quantifiée sur la rangée de tuiles : elle est calculée au point
+de référence de chaque design, et ces points diffèrent. La latitude place donc
+le projet à une dizaine de mètres près, pas au mètre. Un écart nord-sud résiduel
+de cet ordre au pré-positionnement est normal et non suspect — constaté à
++8,6 m sur un design et −12,4 m sur l'autre, contre la même emprise.
 
 ### Sorties
 

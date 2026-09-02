@@ -71,11 +71,19 @@ def generer_dossier(
     if not etat.disponible:
         avertissements.append(etat.message)
 
-    sorties = [
-        dp1_1_situation.generer(projet, emprise, dossier, dpi=dpi),
-        dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi),
-        dp1_3_cadastre.generer(projet, emprise, dossier),
-    ]
+    # Les reprises du WMS-R sont émises en RuntimeWarning au plus près de la
+    # requête ; on les remonte au rapport pour qu'elles atteignent l'interface
+    # au lieu de finir dans la console.
+    with warnings.catch_warnings(record=True) as captees:
+        warnings.simplefilter("always", RuntimeWarning)
+        sorties = [
+            dp1_1_situation.generer(projet, emprise, dossier, dpi=dpi),
+            dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi),
+            dp1_3_cadastre.generer(projet, emprise, dossier),
+        ]
+    avertissements.extend(
+        str(c.message) for c in captees if issubclass(c.category, RuntimeWarning)
+    )
 
     # Numéros de page réels : la page de garde occupe la page 1.
     pages = {"": 1}

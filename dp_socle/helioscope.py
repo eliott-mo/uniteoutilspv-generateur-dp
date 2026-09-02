@@ -57,6 +57,11 @@ EXCENTRICITE2_WGS84 = 0.00669437999014
 FRACTION_ZOOM_MIN = 0.40
 FRACTION_ZOOM_MAX = 0.72
 
+#: Dénivelé au-delà duquel un côté du module est tenu pour montant, en mètres.
+#: Les côtés horizontaux du contour sont exactement à dz = 0 dans les fichiers
+#: mesurés ; la tolérance ne sert qu'à absorber un arrondi d'export.
+TOLERANCE_DENIVELE_M = 1e-6
+
 #: Tolérance sur la composante horizontale du vecteur v de l'image. Une valeur
 #: non nulle signifierait que le fond de plan est tourné, et donc que le DXF
 #: n'est pas orienté nord en haut.
@@ -108,19 +113,36 @@ class Calage:
         return self.longitude_origine
 
 
+#: Suffixes de pose employés par HelioScope dans le nom du bloc module.
+POSES = {"portrait": "portrait", "landscape": "paysage"}
+
+
 @dataclass
 class Module:
-    """Dimensions et inclinaison d'un module, mesurées dans le bloc."""
+    """Dimensions et inclinaison d'un module, mesurées dans le bloc.
 
+    Les deux côtés sont nommés par leur rôle et non par leur taille : selon la
+    pose, c'est le grand ou le petit côté qui monte la pente.
+    """
+
+    #: Côté horizontal, perpendiculaire à la ligne de plus grande pente. Sa
+    #: longueur est la même au sol et dans le plan du module.
     largeur_m: float
-    #: Longueur vraie, mesurée dans le plan incliné. Ce n'est pas la hauteur de
-    #: la bbox 2D du bloc, qui est la projection au sol (longueur × cos i).
+    #: Côté dans le plan incliné, le rampant. Ce n'est pas la hauteur de la bbox
+    #: 2D du bloc, qui en est la projection au sol (rampant × cos i).
     longueur_m: float
     longueur_projetee_m: float
     #: Inclinaison lue dans le nom du bloc, recoupée avec la géométrie 3D.
     inclinaison_deg: float
     inclinaison_mesuree_deg: float
+    #: « portrait » si le rampant est le grand côté, « paysage » sinon.
+    pose: str
     nom_bloc: str
+
+    @property
+    def dimensions_hors_tout(self) -> tuple[float, float]:
+        """Les deux dimensions vraies du panneau, du plus petit au plus grand."""
+        return tuple(sorted((self.largeur_m, self.longueur_m)))
 
 
 @dataclass
@@ -522,13 +544,23 @@ def _feuilles(entite, profondeur: int = 0):
         yield entite
 
 
-def _mesurer_module(bloc, nom_bloc: str) -> tuple[float, float, float, float]:
-    """Mesure largeur, longueur vraie, longueur projetée et inclinaison du module.
+def _mesurer_module(bloc, nom_bloc: str) -> tuple[float, float, float, float, str]:
+    """Mesure le module dans son bloc : largeur, rampant, projection, inclinaison.
 
-    Le contour du module est un rectangle **3D incliné** : sur le design 7676351,
-    (0, 0, 0) → (1,303, 0, 0) → (1,303, -2,1606, -1,0075). La bbox 2D donne donc
-    1,303 × 2,1606, qui est la projection au sol, alors que le module mesure
-    réellement 1,303 × 2,384. Le tableau de la notice DP 11 attend la seconde.
+    Le contour est un rectangle **3D incliné**, et c'est le côté qui prend de la
+    hauteur qui porte l'inclinaison — pas forcément le plus long. Mesuré le
+    02/09/2026 sur les deux designs des Islettes :
+
+        portrait (7676351)  (0,0,0) → (1,303, 0, 0) → (1,303, -2,1606, -1,0075)
+        paysage  (8102502)  (0,0,0) → (2,384, 0, 0) → (2,384, -1,1809, -0,5507)
+
+    Même panneau de 1,303 × 2,384 m à 25° dans les deux cas, mais en paysage le
+    rampant est le petit côté. Prendre le côté le plus long pour le rampant, ce
+    qui marche en portrait, donne 0° d'inclinaison en paysage. On identifie donc
+    le rampant par son dénivelé.
+
+    Dans les deux cas la bbox 2D du bloc donne la projection au sol, jamais les
+    dimensions vraies du panneau.
     """
     contours = [e for e in bloc if e.dxftype() == "POLYLINE"]
     if len(contours) != 1:
@@ -548,19 +580,37 @@ def _mesurer_module(bloc, nom_bloc: str) -> tuple[float, float, float, float]:
         )
 
     cotes = [
-        (math.dist(a, b), math.dist(a[:2], b[:2]))
+        (math.dist(a, b), math.dist(a[:2], b[:2]), abs(b[2] - a[2]))
         for a, b in zip(sommets, sommets[1:] + sommets[:1])
     ]
-    cotes.sort()
-    largeur = cotes[0][0]
-    longueur, projetee = cotes[-1]
-    if projetee <= 0 or projetee > longueur:
+    montants = [c for c in cotes if c[2] > TOLERANCE_DENIVELE_M]
+    plats = [c for c in cotes if c[2] <= TOLERANCE_DENIVELE_M]
+    if len(montants) != 2 or len(plats) != 2:
+        raise ErreurHelioScope(
+            f"Le bloc module « {nom_bloc} » n'est pas un rectangle incliné selon "
+            f"une seule direction : {len(montants)} côtés dénivelés sur 4. "
+            "Le générateur refuse d'en déduire une inclinaison."
+        )
+
+    rampant, projetee, _ = montants[0]
+    largeur = plats[0][0]
+    if projetee <= 0 or projetee > rampant:
         raise ErreurHelioScope(
             f"Géométrie du bloc module « {nom_bloc} » incohérente : projection au "
-            f"sol {projetee:.3f} m pour une longueur de {longueur:.3f} m."
+            f"sol {projetee:.3f} m pour un rampant de {rampant:.3f} m."
         )
-    inclinaison = math.degrees(math.acos(projetee / longueur))
-    return largeur, longueur, projetee, inclinaison
+    inclinaison = math.degrees(math.acos(projetee / rampant))
+    pose = "portrait" if rampant >= largeur else "paysage"
+    return largeur, rampant, projetee, inclinaison, pose
+
+
+def _pose_du_nom(nom_bloc: str, nom_bloc_minuscule: str | None = None) -> str | None:
+    """Pose annoncée par le suffixe du nom de bloc, si elle y figure."""
+    minuscule = (nom_bloc_minuscule or nom_bloc).lower()
+    for suffixe, pose in POSES.items():
+        if minuscule.endswith(suffixe):
+            return pose
+    return None
 
 
 def _inclinaison_du_nom(nom_bloc: str) -> float:
@@ -610,7 +660,7 @@ def extraire_calepinage(doc: Drawing, msp: Modelspace) -> tuple[Calepinage, list
     if bloc_module is None:
         raise ErreurHelioScope(f"Bloc module « {nom_module} » introuvable dans le DXF.")
 
-    largeur, longueur, projetee, inclinaison_mesuree = _mesurer_module(
+    largeur, longueur, projetee, inclinaison_mesuree, pose = _mesurer_module(
         bloc_module, nom_module
     )
     inclinaison = _inclinaison_du_nom(nom_module)
@@ -620,6 +670,14 @@ def extraire_calepinage(doc: Drawing, msp: Modelspace) -> tuple[Calepinage, list
             f"annonce {inclinaison}°, la géométrie 3D en mesure "
             f"{inclinaison_mesuree:.2f}°. L'une des deux sources est fausse ; le "
             "générateur refuse d'arbitrer."
+        )
+    pose_annoncee = _pose_du_nom(nom_module)
+    if pose_annoncee is not None and pose_annoncee != pose:
+        raise ErreurHelioScope(
+            f"Incohérence sur la pose du bloc « {nom_module} » : le nom annonce "
+            f"« {pose_annoncee} », la géométrie montre un rampant de "
+            f"{longueur:.3f} m pour une largeur de {largeur:.3f} m, soit "
+            f"« {pose} ». Le générateur refuse d'arbitrer."
         )
 
     rotations = {round(e.dxf.rotation, 4) for e in inserts}
@@ -645,6 +703,7 @@ def extraire_calepinage(doc: Drawing, msp: Modelspace) -> tuple[Calepinage, list
             longueur_projetee_m=projetee,
             inclinaison_deg=inclinaison,
             inclinaison_mesuree_deg=inclinaison_mesuree,
+            pose=pose,
             nom_bloc=nom_module,
         ),
         orientation_deg=orientation,
