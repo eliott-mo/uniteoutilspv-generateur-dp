@@ -12,10 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..dossier import PIECES
 from ..planche import (
     BLEU_UNITE,
     CADRE,
     GRIS,
+    GRIS_FOND,
     LARGEUR_MM,
     LOGO_UNITE,
     MENTION_BANDEAU,
@@ -40,8 +42,14 @@ LARGEUR_COLONNE = 132.0
 
 
 def generer(
-    projet: Projet, dossier: Path, sommaire: list[dict] | None = None
+    projet: Projet, dossier: Path, pages: dict | None = None
 ) -> Sortie:
+    """Compose la page de garde.
+
+    `pages` associe le code de chaque pièce produite à son numéro de page réel.
+    Les pièces des lots suivants figurent quand même au sommaire, sans numéro :
+    le dossier s'annonce complet dès maintenant.
+    """
     planche = Planche(
         titre=TITRE,
         numero=NUMERO,
@@ -82,9 +90,8 @@ def generer(
     if image is not None and image.exists():
         planche.ajouter_image_mm(image, *CADRE_IMAGE)
 
-    _bloc_maitrise(planche, COLONNE_DROITE, 120.0)
-    if sommaire:
-        _bloc_sommaire(planche, COLONNE_DROITE, 176.0, sommaire)
+    bas = _bloc_maitrise(planche, COLONNE_DROITE, 118.0)
+    _bloc_sommaire(planche, COLONNE_DROITE, bas + 8.0, pages or {})
 
     planche.ajouter_texte(
         cadre_x + 3.0, cadre_h + cadre_y - 4.0,
@@ -100,40 +107,61 @@ def generer(
     return Sortie(numero=NUMERO, titre=TITRE, chemin=chemin)
 
 
-def _bloc_maitrise(planche: Planche, x: float, y: float) -> None:
+def _cellule_titre(planche: Planche, x: float, y: float, largeur: float,
+                   hauteur: float, intitule: str) -> None:
+    """Case de titre fermée, à fond gris : le tableau se lit d'un coup d'œil."""
     planche.ajouter_rectangle(
-        x, y, LARGEUR_COLONNE, 46.0,
-        Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
-    )
-    colonnes = ((x + 4.0, "MAÎTRE D'OUVRAGE"), (x + LARGEUR_COLONNE / 2.0 + 2.0,
-                                                "MAÎTRE D'ŒUVRE"))
-    for abscisse, intitule in colonnes:
-        planche.ajouter_texte(
-            abscisse, y + 7.0, intitule, taille=8 * PT, couleur=GRIS, gras=True
-        )
-        planche.ajouter_bloc_texte(
-            abscisse, y + 14.5, (MOA_NOM, MOA_ADRESSE, MOA_VILLE),
-            taille=10 * PT, interligne=1.45,
-        )
-
-
-def _bloc_sommaire(planche: Planche, x: float, y: float, sommaire: list[dict]) -> None:
-    hauteur_ligne = 5.4
-    hauteur = 12.0 + hauteur_ligne * len(sommaire)
-    planche.ajouter_rectangle(
-        x, y, LARGEUR_COLONNE, hauteur,
-        Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
+        x, y, largeur, hauteur,
+        Style(trait=NOIR, epaisseur_mm=0.25, remplissage=GRIS_FOND),
     )
     planche.ajouter_texte(
-        x + 4.0, y + 7.5, "SOMMAIRE", taille=8 * PT, couleur=GRIS, gras=True
+        x + 4.0, y + hauteur - 2.4, intitule,
+        taille=8 * PT, couleur=GRIS, gras=True,
     )
-    for index, entree in enumerate(sommaire):
-        ordonnee = y + 14.5 + index * hauteur_ligne
-        libelle = entree["titre"].capitalize() if entree["numero"] == NUMERO else (
-            f"{entree['numero']} — {entree['titre'].capitalize()}"
+
+
+def _bloc_maitrise(planche: Planche, x: float, y: float) -> float:
+    hauteur_titre = 7.0
+    hauteur_contenu = 24.0
+    demi = LARGEUR_COLONNE / 2.0
+
+    for index, intitule in enumerate(("MAÎTRE D'OUVRAGE", "MAÎTRE D'ŒUVRE")):
+        gauche = x + index * demi
+        _cellule_titre(planche, gauche, y, demi, hauteur_titre, intitule)
+        planche.ajouter_rectangle(
+            gauche, y + hauteur_titre, demi, hauteur_contenu,
+            Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
         )
-        planche.ajouter_texte(x + 4.0, ordonnee, libelle, taille=9 * PT)
+        planche.ajouter_bloc_texte(
+            gauche + 4.0, y + hauteur_titre + 6.0,
+            (MOA_NOM, MOA_ADRESSE, MOA_VILLE),
+            taille=10 * PT, interligne=1.45,
+        )
+    return y + hauteur_titre + hauteur_contenu
+
+
+def _bloc_sommaire(planche: Planche, x: float, y: float, pages: dict) -> float:
+    hauteur_titre = 7.0
+    hauteur_ligne = 5.0
+    hauteur_contenu = 4.0 + hauteur_ligne * len(PIECES)
+
+    _cellule_titre(planche, x, y, LARGEUR_COLONNE, hauteur_titre, "SOMMAIRE")
+    planche.ajouter_rectangle(
+        x, y + hauteur_titre, LARGEUR_COLONNE, hauteur_contenu,
+        Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
+    )
+
+    for index, piece in enumerate(PIECES):
+        ordonnee = y + hauteur_titre + 5.4 + index * hauteur_ligne
+        page = pages.get(piece.code)
+        couleur = NOIR if page else GRIS
         planche.ajouter_texte(
-            x + LARGEUR_COLONNE - 4.0, ordonnee, str(entree["page"]),
-            taille=9 * PT, ancre="end",
+            x + 4.0, ordonnee, piece.intitule, taille=9 * PT, couleur=couleur
         )
+        # Pas de mention de lot ici : la page de garde part en mairie, elle n'a
+        # pas à porter le découpage interne du développement.
+        planche.ajouter_texte(
+            x + LARGEUR_COLONNE - 4.0, ordonnee, str(page) if page else "—",
+            taille=9 * PT, ancre="end", couleur=couleur,
+        )
+    return y + hauteur_titre + hauteur_contenu

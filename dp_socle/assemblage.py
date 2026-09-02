@@ -77,15 +77,17 @@ def generer_dossier(
     ]
 
     # Numéros de page réels : la page de garde occupe la page 1.
-    sommaire = [{"numero": page_garde.NUMERO, "titre": "Page de garde", "page": 1}]
+    pages = {"": 1}
+    sommaire = [{"numero": "—", "titre": "Page de garde", "page": 1}]
     page_courante = 2
     for sortie in sorties:
+        pages[sortie.numero] = page_courante
         sommaire.append(
             {"numero": sortie.numero, "titre": sortie.titre, "page": page_courante}
         )
         page_courante += _nb_pages(sortie.chemin)
 
-    garde = page_garde.generer(projet, dossier, sommaire=sommaire)
+    garde = page_garde.generer(projet, dossier, pages=pages)
     ordre = [garde] + sorties
 
     assemblage = _assembler(ordre, dossier / NOM_ASSEMBLAGE)

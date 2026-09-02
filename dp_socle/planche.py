@@ -121,6 +121,12 @@ def _style_attributs(style) -> str:
     raise TypeError(f"Style attendu (Style ou dict), reçu {type(style).__name__}")
 
 
+def nombre_fr(valeur: float, decimales: int = 2) -> str:
+    """Nombre à la française : virgule décimale, espace insécable aux milliers."""
+    texte = f"{valeur:,.{decimales}f}"
+    return texte.replace(",", " ").replace(".", ",")
+
+
 def _n(valeur: float) -> str:
     """Formatage compact et déterministe d'une coordonnée en millimètres."""
     return f"{valeur:.4f}".rstrip("0").rstrip(".") or "0"
@@ -664,8 +670,7 @@ class Planche:
 
         # 4. Flèche nord (nord de la grille Lambert 93)
         x_nord, largeur_nord = cases["nord"]
-        self._fleche_nord(x_nord + largeur_nord / 2.0, Y_CARTOUCHE + 1.5,
-                          CARTOUCHE_MM - 3.0)
+        self._fleche_nord(x_nord, largeur_nord)
 
         # 5. Échelle, date, numéro
         valeurs = (
@@ -686,11 +691,6 @@ class Planche:
                 couleur=BLEU_UNITE,
             )
 
-        self.ajouter_ligne(
-            cadre_x, Y_CARTOUCHE, cadre_x + cadre_l, Y_CARTOUCHE,
-            Style(trait=VERT_UNITE, epaisseur_mm=0.8),
-        )
-
         # Bandeau inférieur
         y_texte = Y_BANDEAU + 2.9
         self.ajouter_texte(
@@ -702,23 +702,34 @@ class Planche:
             taille=TAILLE_ETIQUETTE, ancre="end",
         )
 
-    def _fleche_nord(self, x_mm: float, y_mm: float, hauteur_mm: float) -> None:
+    def _fleche_nord(self, x_case: float, largeur_case: float) -> None:
         """Flèche orientée selon le nord de la grille Lambert 93.
 
         En Lambert 93 le nord de la grille diffère du nord géographique
         (convergence des méridiens, jusqu'à environ 3° en métropole). Les axes
         de la planche étant ceux du Lambert 93, la flèche pointe vers le haut de
-        la feuille et n'affirme rien d'autre.
+        la feuille et n'affirme rien d'autre — d'où la mention « L93 ».
         """
-        demi = 2.0
-        pointe = y_mm
-        base = y_mm + hauteur_mm - 3.2
+        centre = x_case + largeur_case / 2.0
+        self.ajouter_texte(
+            centre, Y_CARTOUCHE + 5.4, "NORD (L93)",
+            taille=TAILLE_ETIQUETTE, ancre="middle", couleur=GRIS,
+        )
+
+        axe = centre + 2.6
+        pointe = Y_CARTOUCHE + 7.0
+        base = Y_CARTOUCHE + 13.2
+        echancrure = base - 1.8
+        demi = 2.5
         self._habillage.append(
-            f'<path d="M {_n(x_mm)} {_n(pointe)} L {_n(x_mm + demi)} {_n(base)} '
-            f'L {_n(x_mm)} {_n(base - 1.4)} L {_n(x_mm - demi)} {_n(base)} Z" '
-            f'fill="{NOIR}" stroke="none"/>'
+            f'<path d="M {_n(axe)} {_n(pointe)} '
+            f'L {_n(axe + demi)} {_n(base)} '
+            f'L {_n(axe)} {_n(echancrure)} '
+            f'L {_n(axe - demi)} {_n(base)} Z" '
+            f'fill="none" stroke="{BLEU_UNITE}" stroke-width="0.4" '
+            f'stroke-linejoin="round"/>'
         )
         self.ajouter_texte(
-            x_mm, y_mm + hauteur_mm, "N (L93)",
-            taille=TAILLE_ETIQUETTE, ancre="middle",
+            axe - 6.0, Y_CARTOUCHE + 12.4, "N",
+            taille=11 * PT, ancre="middle", gras=True, couleur=BLEU_UNITE,
         )

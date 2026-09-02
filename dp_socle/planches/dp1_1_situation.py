@@ -8,20 +8,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..dossier import piece
 from ..geometrie import Emprise
 from ..ign import COUCHE_PLAN, DPI_DEFAUT, telecharger_fond
 from ..projet import Projet
 from .commun import Sortie, legende_emprise, nouvelle_planche, poser_emprise
 
 NUMERO = "DP 1-1"
-TITRE = "PLAN DE SITUATION DU TERRAIN"
+TITRE = piece("DP 1-1").titre
 ECHELLE = 10000
 
 
 def generer(
     projet: Projet, emprise: Emprise, dossier: Path, dpi: int = DPI_DEFAUT
 ) -> Sortie:
-    planche = nouvelle_planche(projet, NUMERO, TITRE, ECHELLE)
+    planche = nouvelle_planche(projet, NUMERO, ECHELLE)
     planche.centrer_sur(emprise.centre)
 
     _, _, largeur_mm, hauteur_mm = planche.zone_dessin()

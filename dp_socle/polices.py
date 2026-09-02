@@ -83,26 +83,46 @@ def fichiers_embarques() -> list:
     )
 
 
-def fichier_principal() -> Path | None:
-    """Le TTF embarqué dont le nom de famille est `POLICE_PRINCIPALE`."""
-    for fichier in fichiers_embarques():
-        if _famille_du_fichier(fichier) == POLICE_PRINCIPALE:
-            return fichier
-    return None
+def fichier_principal(gras: bool = False) -> Path | None:
+    """Le TTF embarqué de la famille `POLICE_PRINCIPALE`, dans la graisse voulue.
+
+    La sélection porte sur la graisse et non sur le nom de fichier : un dossier
+    contenant `aptos-bold.ttf` et `aptos.ttf` doit donner le romain quand on
+    demande le romain, sinon le contrôle de chasse compare des choux et des
+    carottes.
+    """
+    poids_vise = 700 if gras else 400
+    candidats = [
+        (fichier, description)
+        for fichier in fichiers_embarques()
+        if (description := _description_du_fichier(fichier))
+        and description[0] == POLICE_PRINCIPALE
+        and not description[2]
+    ]
+    if not candidats:
+        return None
+    return min(candidats, key=lambda c: abs(c[1][1] - poids_vise))[0]
 
 
 @lru_cache(maxsize=None)
-def _famille_du_fichier(fichier: Path) -> str | None:
+def _description_du_fichier(fichier: Path):
+    """(famille, poids, italique) d'un fichier de police, ou None."""
     from fontTools.ttLib import TTFont
 
     try:
         with TTFont(str(fichier), lazy=True) as police:
-            for enregistrement in police["name"].names:
-                if enregistrement.nameID == 1:
-                    return enregistrement.toUnicode()
+            famille = next(
+                (
+                    e.toUnicode()
+                    for e in police["name"].names
+                    if e.nameID == 1
+                ),
+                None,
+            )
+            os2 = police["OS/2"]
+            return (famille, int(os2.usWeightClass), bool(os2.fsSelection & 0x01))
     except Exception:
         return None
-    return None
 
 
 def installer_polices() -> list:
@@ -219,20 +239,24 @@ def _famille_disponible(famille: str) -> bool:
 
 
 @lru_cache(maxsize=None)
-def _controle_principale() -> tuple:
-    """(résolue, chasse cairo, chasse attendue) pour la police principale."""
-    fichier = fichier_principal()
+def _controle(gras: bool = False) -> tuple:
+    """(résolue, chasse cairo, chasse attendue) pour une graisse donnée."""
+    fichier = fichier_principal(gras=gras)
     if fichier is None:
         return (False, None, None)
     attendue = _chasse_ttf(fichier, _TEMOIN, _TAILLE_TEMOIN)
     try:
-        mesuree = chasse_cairo(_TEMOIN, POLICE_PRINCIPALE, _TAILLE_TEMOIN)
+        mesuree = chasse_cairo(_TEMOIN, POLICE_PRINCIPALE, _TAILLE_TEMOIN, gras)
     except Exception:
         return (False, None, attendue)
     if attendue is None:
         return (_famille_disponible(POLICE_PRINCIPALE), mesuree, None)
     ecart = abs(mesuree - attendue) / attendue
     return (ecart <= _TOLERANCE, mesuree, attendue)
+
+
+def _controle_principale() -> tuple:
+    return _controle(gras=False)
 
 
 @lru_cache(maxsize=None)
@@ -260,15 +284,20 @@ def etat_polices(installer: bool = True) -> EtatPolices:
     famille = famille_active()
 
     if resolue:
+        gras_ok, _, _ = _controle(gras=True)
+        graisse = (
+            "romain et gras vérifiés"
+            if gras_ok
+            else "romain vérifié ; le gras est simulé par cairo, faute d'un "
+            "fichier Bold résolu"
+        )
         return EtatPolices(
             disponible=True,
             famille_utilisee=famille,
             fichiers_embarques=noms,
             message=(
-                f"Police « {POLICE_PRINCIPALE} » disponible et vérifiée "
-                f"({', '.join(noms)}) : chasse mesurée {mesuree:.3f} pour "
-                f"{attendue:.3f} attendus." if attendue
-                else f"Police « {POLICE_PRINCIPALE} » disponible ({', '.join(noms)})."
+                f"Police « {POLICE_PRINCIPALE} » disponible ({', '.join(noms)}) — "
+                f"{graisse}."
             ),
         )
 

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from shapely.geometry import box
 
+from ..dossier import piece
 from ..echelle import echelle_adaptative
 from ..erreurs import ErreurRendu, ErreurService
 from ..geometrie import Emprise
@@ -26,15 +27,18 @@ from ..planche import (
     STYLE_EMPRISE,
     STYLE_PARCELLE,
     STYLE_PARCELLE_CONCERNEE,
+    GRIS,
+    PT,
     TAILLE_COURANTE,
     TAILLE_ETIQUETTE,
     Style,
+    nombre_fr,
 )
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 
 NUMERO = "DP 1-3"
-TITRE = "PLAN DE CADASTRE"
+TITRE = piece("DP 1-3").titre
 
 #: Échelles autorisées pour cette planche.
 ECHELLES_CADASTRE = (500, 1000, 2000, 5000)
@@ -56,7 +60,7 @@ LARGEUR_TABLEAU_MM = 72.0
 
 
 def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
-    planche = nouvelle_planche(projet, NUMERO, TITRE)
+    planche = nouvelle_planche(projet, NUMERO)
     zone = planche.zone_dessin()
 
     largeur_m, hauteur_m = emprise.dimensions_m
@@ -122,14 +126,14 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
 
     planche.ajouter_legende(
         [
-            (f"Emprise du projet ({emprise.surface_m2 / 10_000.0:.2f} ha)",
+            (f"Emprise du projet — {nombre_fr(emprise.surface_m2 / 10_000.0)} ha",
              STYLE_EMPRISE),
             ("Parcelles d'assiette du projet", STYLE_PARCELLE_CONCERNEE),
             ("Autres parcelles cadastrales", STYLE_PARCELLE),
         ]
     )
 
-    _tableau_parcelles(planche, concernees)
+    _tableau_parcelles(planche, concernees, emprise.surface_m2)
     planche.ajouter_texte(
         zone[0] + 3.0,
         zone[1] + zone[3] - 2.5,
@@ -166,7 +170,7 @@ def _triees(parcelles):
     return sorted(parcelles, key=lambda p: (p.section, p.numero))
 
 
-def _tableau_parcelles(planche, concernees) -> None:
+def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
     """Tableau récapitulatif section / numéro / contenance, en haut à droite.
 
     Le tableau bascule sur deux colonnes plutôt que de déborder du cadre : une
@@ -175,7 +179,9 @@ def _tableau_parcelles(planche, concernees) -> None:
     zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
     lignes = _triees(concernees)
     hauteur_ligne = 4.2
-    hauteur_entete = 2 * 2.2 + 5.0 + hauteur_ligne  # cadre, titre, en-têtes
+    # cadre, titre, en-têtes ; + une ligne de note sous le total
+    hauteur_entete = 2 * 2.2 + 5.0 + hauteur_ligne
+    hauteur_note = 4.0
     hauteur_dispo = zone_h - 6.0
 
     par_colonne = max(1, int((hauteur_dispo - hauteur_entete - hauteur_ligne)
@@ -194,7 +200,7 @@ def _tableau_parcelles(planche, concernees) -> None:
     y = zone_y + 3.0
     hauteur = hauteur_entete + hauteur_ligne * (
         min(len(lignes), par_colonne) + 1
-    )
+    ) + hauteur_note
 
     planche.ajouter_rectangle(
         x, y, largeur, hauteur,
@@ -231,7 +237,7 @@ def _tableau_parcelles(planche, concernees) -> None:
                     abscisse, ordonnee, valeur, taille=TAILLE_ETIQUETTE
                 )
 
-    ordonnee = y + hauteur - 2.4
+    ordonnee = y + hauteur - hauteur_note - 2.4
     colonnes = (x + 2.2, x + 18.0, x + 40.0)
     planche.ajouter_ligne(
         x + 2.0, ordonnee - 2.8, x + largeur - 2.0, ordonnee - 2.8,
@@ -244,7 +250,16 @@ def _tableau_parcelles(planche, concernees) -> None:
     planche.ajouter_texte(
         colonnes[2], ordonnee, _contenance(total), taille=TAILLE_ETIQUETTE, gras=True
     )
+    # Les deux surfaces ne se recouvrent pas et n'ont pas à le faire : la
+    # contenance est la surface légale portée au cadastre, l'emprise est le
+    # polygone dessiné. Les afficher côte à côte évite de chercher l'erreur.
+    planche.ajouter_texte(
+        colonnes[0], ordonnee + hauteur_note,
+        "Contenances cadastrales — emprise dessinée : "
+        f"{_contenance(surface_emprise_m2)}",
+        taille=6 * PT, couleur=GRIS,
+    )
 
 
 def _contenance(valeur_m2: float) -> str:
-    return f"{valeur_m2:,.0f}".replace(",", " ") + " m²"
+    return nombre_fr(valeur_m2, 0) + " m²"

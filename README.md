@@ -93,6 +93,37 @@ Les chemins relatifs le sont par rapport au dossier du `projet.json`. Une
 correction de dernière minute se fait en modifiant une valeur ici puis en
 régénérant.
 
+## Ce que portent les planches
+
+**Cartouche.** Le titre porte le code de la pièce — « DP 1-3 : PLAN DE
+CADASTRE » — et la case NUMÉRO le numéro de planche, « 3/3 ». La flèche nord est
+un contour vide au bleu des titres : elle indique le nord de la **grille**
+Lambert 93, d'où la mention « NORD (L93) », et n'affirme rien sur le nord
+géographique (la convergence des méridiens atteint 3° en métropole).
+
+**Sommaire.** Il liste les douze pièces du dossier, y compris celles des lots
+suivants et les insertions paysagères fournies : le dossier s'annonce complet
+dès maintenant. Les pièces produites portent leur numéro de page réel, les
+autres un tiret. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
+titres de cartouche — les deux ne peuvent pas diverger.
+
+**Surfaces.** Deux nombres coexistent, et ils ne se recouvrent pas :
+
+- la **surface de l'emprise** en légende (27,99 ha à Bray-Saint-Aignan) est
+  l'aire du polygone fourni ;
+- la **contenance** du tableau de DP 1-3 (276 270 m²) est la surface légale
+  portée au cadastre, sommée sur les parcelles d'assiette.
+
+L'écart est normal : la contenance cadastrale et la surface graphique ne sont
+pas mesurées de la même façon. Le tableau affiche donc les deux, côte à côte et
+étiquetées, plutôt que de laisser chercher l'erreur.
+
+**Parcelles d'assiette.** Une parcelle recoupée par l'emprise à moins de 2 % de
+sa surface est écartée : l'emprise et le Parcellaire Express ne viennent pas de
+la même numérisation, et leurs limites se croisent en produisant des échardes de
+quelques mètres carrés. Les parcelles écartées sont listées dans le rapport de
+génération, jamais supprimées en silence.
+
 ## Typographie
 
 Le corps de texte et le cartouche sont composés en **Aptos**, dont le TTF est
@@ -160,6 +191,7 @@ python -m pytest -q
 dp_socle/
 ├── echelle.py        conversions mm <-> m, TransformationL93  (unique et centralisée)
 ├── planche.py        moteur : gabarit A3, cartouche, SVG -> PDF vectoriel
+├── dossier.py        composition du dossier : pièces, titres, numérotation
 ├── geometrie.py      lecture d'emprise, CRS, union
 ├── ign.py            WMS-R et WFS Géoplateforme, EPSG:2154 natif
 ├── polices.py        installation et vérification d'Aptos

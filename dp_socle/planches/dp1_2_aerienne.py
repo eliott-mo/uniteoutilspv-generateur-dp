@@ -8,14 +8,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..dossier import piece
 from ..geometrie import Emprise
 from ..ign import COUCHE_ORTHO, DPI_DEFAUT, telecharger_fond
-from ..planche import Style
+from ..planche import Style, nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 
 NUMERO = "DP 1-2"
-TITRE = "PHOTOGRAPHIE AÉRIENNE DU TERRAIN"
+TITRE = piece("DP 1-2").titre
 ECHELLE = 5000
 
 #: Sur photo aérienne, l'emprise se lit mieux en contour franc sans aplat.
@@ -27,7 +28,7 @@ STYLE_EMPRISE_ORTHO = Style(
 def generer(
     projet: Projet, emprise: Emprise, dossier: Path, dpi: int = DPI_DEFAUT
 ) -> Sortie:
-    planche = nouvelle_planche(projet, NUMERO, TITRE, ECHELLE)
+    planche = nouvelle_planche(projet, NUMERO, ECHELLE)
     planche.centrer_sur(emprise.centre)
 
     zone = planche.zone_dessin()
@@ -44,7 +45,7 @@ def generer(
 
     hectares = emprise.surface_m2 / 10_000.0
     planche.ajouter_legende(
-        [(f"Emprise du projet ({hectares:.2f} ha)", STYLE_EMPRISE_ORTHO)]
+        [(f"Emprise du projet — {nombre_fr(hectares)} ha", STYLE_EMPRISE_ORTHO)]
     )
     planche.ajouter_texte(
         zone[0] + 3.0,
