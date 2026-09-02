@@ -41,17 +41,32 @@ Community Cloud lit ce fichier à la racine du dépôt).
 
 ### Sous Windows
 
-CairoSVG ne trouve pas `libcairo-2.dll` tout seul. Indiquez un dossier qui la
-contient, avec ses dépendances, via la variable d'environnement
-`DP_CAIRO_DLL_DIR` :
+CairoSVG ne trouve pas `libcairo-2.dll` tout seul. En général vous n'avez rien à
+faire : le générateur fouille les emplacements des logiciels qui embarquent
+cairo — Tesseract-OCR, runtime GTK3, Inkscape, GIMP, MSYS2 — et **affiche en
+tête de l'interface celui qu'il a retenu**. Rien n'est substitué : c'est bien la
+bibliothèque demandée qui est chargée, seulement trouvée sans qu'on l'ait dit.
+
+Si la DLL est ailleurs, désignez son dossier :
 
 ```bash
 export DP_CAIRO_DLL_DIR="$LOCALAPPDATA/Programs/Tesseract-OCR"
 ```
 
-Ce dossier convient s'il provient d'une installation Tesseract construite avec
-MSYS2 ; sinon, tout runtime GTK/cairo fait l'affaire. Sur la cible de
-déploiement (Linux), cette variable est inutile.
+Renseignée, la variable est prioritaire — et si elle pointe sur un dossier
+inexistant ou sans `libcairo-2.dll`, le lancement échoue immédiatement plutôt
+que de chercher ailleurs : une configuration explicite et fausse se corrige, elle
+ne se contourne pas.
+
+Si aucun cairo n'est trouvé, l'interface le dit **au démarrage**, en rouge, avec
+la liste des dossiers fouillés. C'est un changement du 03/09/2026 : auparavant
+l'échec ne survenait qu'au rendu de la première planche, après le téléchargement
+de tous les fonds IGN, et le diagnostic typographique accusait la police alors
+que la cause était la bibliothèque de rendu — sur un poste où Aptos était
+pourtant installée.
+
+Sur la cible de déploiement (Linux), tout ceci est inutile : `packages.txt`
+fournit `libcairo2`.
 
 ## Utilisation
 
@@ -444,6 +459,29 @@ avec l'emprise de 80 % à 88 % — exactement ce que donnerait un recalage libre
 deux dimensions. Le pré-positionnement ne l'applique jamais de lui-même : il
 annonce l'écart et laisse l'opérateur décider, parce qu'un écart corrigé
 automatiquement ne dirait plus rien de la qualité du calage.
+
+### Réglage du calage dans l'interface
+
+Le calage se règle à deux curseurs, sur un aperçu ortho. Trois choix rendent
+l'opération tenable, chacun tiré d'un essai raté le 03/09/2026 :
+
+- **Le cadre de l'aperçu est figé** au pré-positionnement. Recalculé à chaque
+  cran, il obligeait à redemander l'ortho au WMS : l'image disparaissait puis
+  revenait à chaque mouvement, et juger un déplacement devenait impossible.
+  L'ortho est donc téléchargée une fois et mise en cache ; seule la surcouche est
+  redessinée. Corollaire assumé : poussé loin, le calepinage sort du cadre — ce
+  qui est un signal utile, le pré-positionnement étant bon à quelques mètres.
+- **Le remplissage et le filet des modules sont tracés séparément.**
+  `ImageDraw.polygon` avec un `width` supérieur à 1 met 9,6 s pour les 1 590
+  modules du design 7676351, contre 0,03 s pour le même contour en `line`
+  (Pillow 12). Le redessin passe de 13 s à 1,4 s.
+- **Les curseurs sont dans un `st.fragment`**, pour ne pas relancer tout le
+  script — donc la relecture de l'emprise et le rendu des sections précédentes —
+  à chaque cran.
+
+Le sens de chaque curseur est écrit dans son intitulé (`◀ ouest · est ▶`,
+`▼ sud · nord ▲`) et rappelé sous forme de phrase sous le curseur (« 12,5 m vers
+l'est »). Le nord est en haut sur l'aperçu.
 
 ### Aperçu de calage
 

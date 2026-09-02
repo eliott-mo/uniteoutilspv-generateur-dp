@@ -40,6 +40,12 @@ une lecture du code source avant de câbler, et noter la date de vérification e
 commentaire. Plusieurs affirmations plausibles des briefs se sont révélées
 fausses à la mesure.
 
+**Une erreur d'environnement se signale au démarrage, pas au dernier
+moment.** Sans cairo, la génération échouait après le téléchargement de tous les
+fonds IGN, et le diagnostic accusait la police alors que la cause était la
+bibliothèque de rendu. Ce qui bloque doit être dit avant de travailler, et
+désigner la vraie cause.
+
 **Tester le résultat, pas l'exécution.** Le critère n'est pas « le code tourne »
 mais « le PDF produit est correct ». `tests/test_echelle_pdf.py` mesure un
 segment dans le flux de contenu du PDF de sortie, pas dans les valeurs
@@ -64,9 +70,11 @@ moteur `Planche` du lot 1.
 
 ## Pièges de l'environnement
 
-- **Windows, cairo** : CairoSVG ne trouve pas `libcairo-2.dll` seul. Exporter
-  `DP_CAIRO_DLL_DIR="$LOCALAPPDATA/Programs/Tesseract-OCR"` avant de lancer les
-  tests ou l'application. Inutile sous Linux.
+- **Windows, cairo** : CairoSVG ne trouve pas `libcairo-2.dll` seul.
+  `dp_socle/environnement.py` fouille les emplacements connus (Tesseract, GTK,
+  Inkscape, GIMP, msys2) et dit lequel il retient. `DP_CAIRO_DLL_DIR` reste
+  prioritaire si la DLL est ailleurs ; renseignée mais fausse, elle lève.
+  Inutile sous Linux.
 - **Console Windows** : préfixer les commandes Python par
   `PYTHONIOENCODING=utf-8`, sinon les accents lèvent une `UnicodeEncodeError` à
   l'affichage.

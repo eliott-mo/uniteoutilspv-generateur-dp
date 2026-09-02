@@ -1218,11 +1218,61 @@ COULEUR_ZONE = (255, 45, 45)
 SURECHANTILLONNAGE = 3
 
 
+#: Jeu laissé autour du cadre de l'aperçu, en mètres, pour que l'implantation
+#: reste visible pendant qu'on la déplace aux curseurs.
+JEU_CADRE_M = 40.0
+
+
+def cadre_apercu(
+    implantation: Implantation,
+    emprise_l93: BaseGeometry,
+    marge: float = 0.12,
+) -> tuple[float, float, float, float]:
+    """Emprise géographique de l'aperçu, **fixe pendant tout le réglage**.
+
+    Le cadre est calculé une fois, sur la position issue du pré-positionnement,
+    puis ne bouge plus : c'est ce qui permet de ne télécharger l'ortho qu'une
+    fois et de ne redessiner que la surcouche à chaque mouvement de curseur.
+    Un cadre recalculé à chaque fois obligerait à redemander l'image au WMS, et
+    l'aperçu disparaîtrait puis reviendrait à chaque cran — impossible de juger
+    un déplacement dans ces conditions.
+
+    Corollaire assumé : poussé loin, le calepinage sort du cadre. C'est un signal
+    utile, pas une gêne — le pré-positionnement est bon à quelques mètres, un
+    déplacement de cette ampleur veut dire qu'on corrige autre chose qu'un calage.
+    """
+    zone = projeter(implantation.zone_implantation, implantation.calage)
+    minx, miny, maxx, maxy = unary_union([zone, emprise_l93]).bounds
+    tampon = marge * max(maxx - minx, maxy - miny) + JEU_CADRE_M
+    return (minx - tampon, miny - tampon, maxx + tampon, maxy + tampon)
+
+
+def fond_apercu(
+    cadre: tuple[float, float, float, float],
+    largeur_px: int = 1100,
+    dpi: int = 150,
+):
+    """Ortho IGN du cadre, suréchantillonnée, à ne télécharger qu'une fois."""
+    from .ign import COUCHE_ORTHO, telecharger_fond
+
+    minx, miny, maxx, maxy = cadre
+    largeur_px = largeur_px * SURECHANTILLONNAGE
+    hauteur_px = max(1, round(largeur_px * (maxy - miny) / (maxx - minx)))
+    return telecharger_fond(
+        COUCHE_ORTHO,
+        cadre,
+        largeur_px / dpi * 25.4,
+        hauteur_px / dpi * 25.4,
+        dpi=dpi,
+    )
+
+
 def apercu_calage(
     implantation: Implantation,
     emprise_l93: BaseGeometry,
+    fond=None,
+    cadre: tuple[float, float, float, float] | None = None,
     largeur_px: int = 1100,
-    marge: float = 0.12,
     dpi: int = 150,
 ):
     """Superposition du calepinage recalé sur l'ortho IGN, pour validation.
@@ -1230,28 +1280,23 @@ def apercu_calage(
     Image de contrôle destinée à l'écran, pas une planche : le dessin du dossier
     relève du lot 4. Elle existe parce que la validation du calage par
     l'utilisateur est obligatoire et ne peut pas se faire sur des chiffres.
+
+    `fond` et `cadre` se fournissent ensemble pour rejouer l'aperçu sans
+    retélécharger l'ortho, ce que fait l'interface à chaque mouvement de curseur.
     """
     from PIL import Image, ImageDraw
 
-    from .ign import COUCHE_ORTHO, telecharger_fond
+    if cadre is None:
+        cadre = cadre_apercu(implantation, emprise_l93)
+    if fond is None:
+        fond = fond_apercu(cadre, largeur_px=largeur_px, dpi=dpi)
+
+    minx, miny, maxx, maxy = cadre
+    largeur_m, hauteur_m = maxx - minx, maxy - miny
 
     couches = geometries_l93(implantation)
     zone = couches["zone_implantation"][0]
 
-    minx, miny, maxx, maxy = unary_union([zone, emprise_l93]).bounds
-    tampon = marge * max(maxx - minx, maxy - miny)
-    minx, miny, maxx, maxy = minx - tampon, miny - tampon, maxx + tampon, maxy + tampon
-
-    largeur_m, hauteur_m = maxx - minx, maxy - miny
-    cible_px = largeur_px
-    largeur_px = largeur_px * SURECHANTILLONNAGE
-    hauteur_px = max(1, round(largeur_px * hauteur_m / largeur_m))
-    largeur_mm = largeur_px / dpi * 25.4
-    hauteur_mm = hauteur_px / dpi * 25.4
-
-    fond = telecharger_fond(
-        COUCHE_ORTHO, (minx, miny, maxx, maxy), largeur_mm, hauteur_mm, dpi=dpi
-    )
     image = fond.image.copy()
     px_largeur, px_hauteur = image.size
     dessin = ImageDraw.Draw(image, "RGBA")
@@ -1274,15 +1319,15 @@ def apercu_calage(
 
     # Les filets sont dimensionnés dans l'image suréchantillonnée : ils
     # retrouvent leur épaisseur nominale après réduction.
-    filet = max(1, round(px_largeur / cible_px))
+    filet = max(1, round(px_largeur / largeur_px))
+    # Remplissage et filet sont tracés séparément : `ImageDraw.polygon` avec un
+    # `width` supérieur à 1 met 9,6 s pour les 1 590 modules du design 7676351,
+    # contre 0,03 s pour le même contour en `line` (Pillow 12, mesuré le
+    # 03/09/2026). C'est ce qui rendait le réglage aux curseurs inutilisable.
     for module in couches["modules"]:
         for anneau in en_pixels(module):
-            dessin.polygon(
-                anneau,
-                fill=COULEUR_MODULE + (235,),
-                outline=COULEUR_FILET_MODULE,
-                width=filet,
-            )
+            dessin.polygon(anneau, fill=COULEUR_MODULE + (235,))
+            dessin.line(anneau, fill=COULEUR_FILET_MODULE, width=filet)
     # Le contour noir cerne la rangée, pas chaque table. HelioScope n'encode
     # aucun groupement en structures — sur les deux designs des Islettes, tous
     # les écarts entre tables valent exactement une largeur de module — et
@@ -1295,5 +1340,5 @@ def apercu_calage(
     for anneau in en_pixels(zone):
         dessin.line(anneau, fill=COULEUR_ZONE, width=filet * 4, joint="curve")
 
-    hauteur_cible = max(1, round(cible_px * px_hauteur / px_largeur))
-    return image.resize((cible_px, hauteur_cible), Image.LANCZOS)
+    hauteur_cible = max(1, round(largeur_px * px_hauteur / px_largeur))
+    return image.resize((largeur_px, hauteur_cible), Image.LANCZOS)

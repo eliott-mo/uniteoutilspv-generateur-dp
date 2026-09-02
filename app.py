@@ -12,7 +12,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from dp_socle.environnement import preparer_cairo
+from dp_socle.environnement import etat_cairo, preparer_cairo
 
 preparer_cairo()
 
@@ -22,8 +22,10 @@ from dp_socle.geometrie import charger_emprise
 from dp_socle.helioscope import (
     CORRECTION_NORD_SUD_MAX_M,
     apercu_calage,
+    cadre_apercu,
     corriger_nord_sud,
     decaler_longitude,
+    fond_apercu,
     ecrire_geojson,
     parametres_json,
     prepositionner,
@@ -48,9 +50,22 @@ st.caption(
 
 
 @st.cache_resource
+def _etat_cairo():
+    return etat_cairo()
+
+
+@st.cache_resource
 def _etat_polices():
     return etat_polices()
 
+
+# La bibliothèque de rendu se contrôle avant la police : sans cairo, aucune
+# mesure de police n'est possible et le diagnostic typographique n'a plus de
+# sens. Contrôlé ici plutôt qu'au rendu, pour ne pas échouer après le
+# téléchargement de tous les fonds IGN.
+cairo = _etat_cairo()
+if not cairo.disponible:
+    st.error(cairo.message, icon="🚫")
 
 etat = _etat_polices()
 if etat.disponible:
@@ -290,6 +305,23 @@ def _emprise_courante():
     return charger_emprise(chemin) if chemin else None
 
 
+@st.cache_data(show_spinner="Téléchargement de l'ortho IGN…")
+def _fond_cache(cadre: tuple, largeur_px: int = 1100):
+    """Ortho du cadre de réglage, téléchargée une fois pour toutes.
+
+    Le cadre ne bougeant pas pendant le réglage, l'image non plus : sans ce
+    cache, chaque cran de curseur relançait une requête WMS de plusieurs
+    secondes et l'aperçu disparaissait puis revenait.
+    """
+    return fond_apercu(cadre, largeur_px=largeur_px)
+
+
+def _sens(metres: float, negatif: str, positif: str) -> str:
+    if not metres:
+        return "aucun déplacement"
+    return f"{abs(metres):.1f} m vers {positif if metres > 0 else negatif}"
+
+
 if export_helioscope is not None:
     dossier = DOSSIER_PROJETS / (nom.strip() or "projet")
     dossier.mkdir(parents=True, exist_ok=True)
@@ -313,6 +345,8 @@ if export_helioscope is not None:
                 st.session_state.implantation = implantation
                 st.session_state.chemin_export = str(chemin_export)
                 st.session_state.diagnostic = diagnostic
+                # Figé au pré-positionnement : c'est ce qui rend le fond cachable.
+                st.session_state.cadre = cadre_apercu(implantation, emprise.geometrie)
         except ErreurDP as erreur:
             st.session_state.implantation = None
             st.error(f"{type(erreur).__name__} : {erreur}")
@@ -322,7 +356,7 @@ if implantation is not None:
     calepinage = implantation.calepinage
     module = calepinage.module
     colonnes = st.columns(4)
-    colonnes[0].metric("Modules", f"{calepinage.nb_modules:,}".replace(",", " "))
+    colonnes[0].metric("Modules", f"{calepinage.nb_modules:,}".replace(",", " "))
     colonnes[1].metric("Inclinaison", f"{module.inclinaison_deg:g}°")
     colonnes[2].metric("Rangées", calepinage.nb_rangees)
     colonnes[3].metric("Pas inter-rangées", f"{calepinage.pas_rangees_m:.2f} m")
@@ -330,10 +364,11 @@ if implantation is not None:
     st.caption(
         f"Design {implantation.identifiant_design} — {calepinage.nb_tables} tables "
         f"de {calepinage.nb_modules_par_table} modules de "
-        f"{module.largeur_m:.3f} × {module.longueur_m:.3f} m, pas inter-table "
-        f"{calepinage.pas_tables_m:.2f} m, orientation "
-        f"{calepinage.orientation_deg:.2f}°. Latitude déduite du fichier : "
-        f"{implantation.calage.latitude_origine:.6f}° (zoom {implantation.calage.zoom}, "
+        f"{module.largeur_m:.3f} × {module.longueur_m:.3f} m en pose "
+        f"{module.pose}, pas inter-table {calepinage.pas_tables_m:.2f} m, "
+        f"orientation {calepinage.orientation_deg:.2f}°. Latitude déduite du "
+        f"fichier : {implantation.calage.latitude_origine:.6f}° "
+        f"(zoom {implantation.calage.zoom}, "
         f"fraction {implantation.calage.fraction_zoom:.4f})."
     )
     for message in implantation.avertissements:
@@ -346,60 +381,84 @@ if implantation is not None:
         "chacun se juge sur un critère simple, alors qu'un déplacement libre "
         "laisse compenser l'erreur d'un axe par l'autre."
     )
-    colonne_eo, colonne_ns = st.columns(2)
-    with colonne_eo:
-        decalage = st.slider(
-            "Décalage est-ouest (m)",
-            min_value=-150.0,
-            max_value=150.0,
-            value=float(st.session_state.decalage_est_ouest),
-            step=0.5,
-            help="Réglage principal : la longitude est la seule inconnue du "
-            "modèle de calage.",
-        )
-    with colonne_ns:
-        correction = st.slider(
-            "Correction nord-sud (m)",
-            min_value=-CORRECTION_NORD_SUD_MAX_M,
-            max_value=CORRECTION_NORD_SUD_MAX_M,
-            value=float(st.session_state.correction_nord_sud),
-            step=0.5,
-            help="Retouche de la latitude déduite du fichier, qui n'est bonne "
-            "qu'à une dizaine de mètres. Laissez à 0 si l'implantation tombe "
-            "juste : toute valeur saisie est conservée dans projet.json.",
-        )
-    if correction:
-        st.caption(
-            f"Latitude retouchée de {correction:+.1f} m par rapport à celle "
-            f"déduite du fichier ({implantation.calage.latitude_origine:.6f}°)."
-        )
-    try:
-        if decalage != st.session_state.decalage_est_ouest:
-            decaler_longitude(
-                implantation.calage, decalage - st.session_state.decalage_est_ouest
+
+    @st.fragment
+    def _reglage_du_calage():
+        """Curseurs et aperçu, rejoués seuls à chaque cran.
+
+        En fragment : sans cela, bouger un curseur relance tout le script, y
+        compris la relecture de l'emprise et le rendu des sections précédentes.
+        """
+        try:
+            emprise = _emprise_courante()
+            if emprise is None:
+                st.error("Emprise introuvable : retéléversez-la plus haut.")
+                return
+
+            colonne_eo, colonne_ns = st.columns(2)
+            with colonne_eo:
+                decalage = st.slider(
+                    "Décalage est-ouest (m) — ◀ ouest · est ▶",
+                    min_value=-150.0,
+                    max_value=150.0,
+                    value=float(st.session_state.decalage_est_ouest),
+                    step=0.5,
+                    help="Négatif vers l'ouest (gauche), positif vers l'est "
+                    "(droite). Réglage principal : la longitude est la seule "
+                    "inconnue du modèle de calage.",
+                )
+                st.caption(_sens(decalage, "l'ouest ◀", "l'est ▶"))
+            with colonne_ns:
+                correction = st.slider(
+                    "Correction nord-sud (m) — ▼ sud · nord ▲",
+                    min_value=-CORRECTION_NORD_SUD_MAX_M,
+                    max_value=CORRECTION_NORD_SUD_MAX_M,
+                    value=float(st.session_state.correction_nord_sud),
+                    step=0.5,
+                    help="Négatif vers le sud (bas), positif vers le nord "
+                    "(haut). Retouche de la latitude déduite du fichier, qui "
+                    "n'est bonne qu'à une dizaine de mètres. Laissez à 0 si "
+                    "l'implantation tombe juste : toute valeur saisie est "
+                    "conservée dans projet.json.",
+                )
+                st.caption(_sens(correction, "le sud ▼", "le nord ▲"))
+
+            if decalage != st.session_state.decalage_est_ouest:
+                decaler_longitude(
+                    implantation.calage,
+                    decalage - st.session_state.decalage_est_ouest,
+                )
+                st.session_state.decalage_est_ouest = decalage
+                st.session_state.calage_valide = False
+            if correction != st.session_state.correction_nord_sud:
+                corriger_nord_sud(implantation.calage, correction)
+                st.session_state.correction_nord_sud = correction
+                st.session_state.calage_valide = False
+
+            cadre = st.session_state.cadre
+            apercu = apercu_calage(
+                implantation,
+                emprise.geometrie,
+                fond=_fond_cache(cadre),
+                cadre=cadre,
             )
-            st.session_state.decalage_est_ouest = decalage
-            st.session_state.calage_valide = False
-        if correction != st.session_state.correction_nord_sud:
-            corriger_nord_sud(implantation.calage, correction)
-            st.session_state.correction_nord_sud = correction
-            st.session_state.calage_valide = False
+            st.image(apercu, width="stretch")
+            st.caption(
+                "Rouge : zone d'implantation HelioScope. Jaune : emprise "
+                "fournie. Bleu-vert : modules. Le nord est en haut. La zone "
+                "HelioScope est tracée à la main et ne suit pas le parcellaire : "
+                "c'est la position des modules sur le terrain qui fait foi."
+            )
 
-        emprise = _emprise_courante()
-        with st.spinner("Téléchargement de l'ortho IGN…"):
-            apercu = apercu_calage(implantation, emprise.geometrie)
-        st.image(apercu, width="stretch")
-        st.caption(
-            "Rouge : zone d'implantation HelioScope. Jaune : emprise fournie. "
-            "Bleu : tables. La zone HelioScope est tracée à la main et ne suit "
-            "pas le parcellaire : c'est la position des tables sur le terrain "
-            "qui fait foi."
-        )
+            if st.button("Valider ce calage", type="primary", width="stretch"):
+                st.session_state.calage_valide = True
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}")
 
-        if st.button("Valider ce calage", type="primary", width="stretch"):
-            st.session_state.calage_valide = True
+    _reglage_du_calage()
 
-        if st.session_state.calage_valide:
+    if st.session_state.calage_valide:
+        try:
             projet = _construire_projet()
             if projet is not None:
                 projet.helioscope = st.session_state.chemin_export
@@ -423,5 +482,5 @@ if implantation is not None:
                     ),
                     language="json",
                 )
-    except ErreurDP as erreur:
-        st.error(f"{type(erreur).__name__} : {erreur}")
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}")

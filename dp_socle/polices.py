@@ -280,6 +280,25 @@ def etat_polices(installer: bool = True) -> EtatPolices:
     """Diagnostic complet, destiné à être affiché dans l'interface."""
     fichiers = installer_polices() if installer else fichiers_embarques()
     noms = [f.name for f in fichiers]
+
+    # Sans cairo, aucune mesure n'est possible et tous les contrôles de police
+    # échouent — mais la cause n'est pas la police. Jusqu'au 03/09/2026 ce cas
+    # sortait « Aptos non utilisée, cairo n'a pas pu mesurer la police », en
+    # conseillant d'installer Aptos, alors qu'Aptos était bien là.
+    from .environnement import etat_cairo
+
+    cairo = etat_cairo()
+    if not cairo.disponible:
+        return EtatPolices(
+            disponible=False,
+            famille_utilisee=POLICE_PRINCIPALE,
+            fichiers_embarques=noms,
+            message=(
+                f"Police « {POLICE_PRINCIPALE} » invérifiable tant que la "
+                f"bibliothèque de rendu manque. {cairo.message}"
+            ),
+        )
+
     resolue, mesuree, attendue = _controle_principale()
     famille = famille_active()
 
@@ -324,14 +343,24 @@ def etat_polices(installer: bool = True) -> EtatPolices:
         if sys.platform.startswith("win")
         else "Vérifiez que fontconfig voit ~/.local/share/fonts (paquet fontconfig)."
     )
+    # `famille_active()` retombe sur la police principale quand aucun repli ne
+    # se résout : annoncer « composées en Aptos » alors qu'Aptos est justement
+    # celle qui manque n'apprendrait rien.
+    substitution = (
+        f"Les planches seront composées en « {famille} », dont les métriques "
+        "diffèrent : la mise en page du cartouche sera décalée."
+        if famille != POLICE_PRINCIPALE
+        else "Les planches seront composées avec la police de substitution "
+        "choisie par cairo, dont les métriques diffèrent : la mise en page du "
+        "cartouche sera décalée."
+    )
     return EtatPolices(
         disponible=False,
         famille_utilisee=famille,
         fichiers_embarques=noms,
         message=(
-            f"Police « {POLICE_PRINCIPALE} » non utilisée : {cause}. Les planches "
-            f"seront composées en « {famille} », dont les métriques diffèrent : la "
-            f"mise en page du cartouche sera décalée. {conseil}"
+            f"Police « {POLICE_PRINCIPALE} » non utilisée : {cause}. "
+            f"{substitution} {conseil}"
         ),
     )
 
