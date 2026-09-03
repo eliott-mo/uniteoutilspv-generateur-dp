@@ -537,7 +537,14 @@ def test_onglet_renomme_entre_les_versions_du_tableau():
     assert "Projet" in v10
     assert set(ONGLETS_CARACTERISTIQUES) >= {"2. Caractéristiques du projet", "Projet"}
 
-    assert indices_disponibles(TABLEAU_V10) == ["IND06", "IND07", "IND08", "IND09"]
+    assert indices_disponibles(TABLEAU_V10) == [
+        "IND06",
+        "IND07",
+        "IND08",
+        "IND09",
+        "IND10A",
+        "IND10B",
+    ]
     assert indices_disponibles(TABLEAU) == ["IND05", "IND06"]
 
 
@@ -586,3 +593,40 @@ def test_azimut_negatif_du_tableau_v10():
     tableau_v10 = lire_tableau(TABLEAU_V10, "IND09")
     assert tableau_v10.structures["azimut_deg"] == pytest.approx(-24.5)
     assert tableau_v10.structures["azimut_brut"] == "-24.5"
+
+
+def test_indice_a_suffixe_alphabetique_reconnu():
+    """`IND10A` et `IND10B` étaient écartés de l'en-tête **sans rien dire**.
+
+    Le motif n'acceptait qu'un nombre. Les deux colonnes de Sarnois, deux
+    réductions du projet sous les 3 MWc, disparaissaient de la liste des
+    indices, et l'outil laissait croire que le plan était en avance sur le
+    tableau alors que les colonnes étaient là.
+    """
+    assert indice_depuis_nom("2026_08_025-IMP-DEV-Fixe-IND10a.dxf") == "IND10A"
+    assert indice_depuis_nom("2026_08_27-IMP-DEV-Fixe-IND10b.dxf") == "IND10B"
+    assert indice_depuis_nom("20260903_SCV_IND06.dxf") == "IND06"
+
+
+def test_indice_ambigu_ne_rend_rien_plutot_qu_au_hasard():
+    """Sans garde, « IND06final » rendrait l'indice « IND06F »."""
+    assert indice_depuis_nom("truc_IND06final.dxf") is None
+    assert indice_depuis_nom("plan_sans_indice.dxf") is None
+
+
+def test_variantes_d_un_meme_indice_lues_separement():
+    """Les deux réductions de Sarnois diffèrent, et les confondre serait invisible."""
+    a = lire_tableau(TABLEAU_V10, "IND10A")
+    b = lire_tableau(TABLEAU_V10, "IND10B")
+
+    assert a.structures["nb_tables"] == 85 and a.structures["nb_tables_brut"] == "84 & 1"
+    assert b.structures["nb_tables"] == 90 and b.structures["nb_tables_brut"] == "79 & 11"
+    assert a.generalites["surface_cloturee_ha"] == pytest.approx(4.87)
+    assert b.generalites["surface_cloturee_ha"] == pytest.approx(3.48)
+    assert a.generalites["lineaire_cloture_m"] == pytest.approx(949.0)
+    assert b.generalites["lineaire_cloture_m"] == pytest.approx(738.0)
+    # Deux variantes calibrées pour passer sous le seuil de 3 MWc.
+    for variante in (a, b):
+        assert variante.modules["puissance_mwc"] == pytest.approx(2.98792)
+        assert variante.generalites["nb_portails"] == 1
+        assert variante.structures["azimut_deg"] == pytest.approx(-24.5)

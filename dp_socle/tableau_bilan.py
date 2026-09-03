@@ -41,7 +41,24 @@ ONGLET_STANDARDS = "Standards UNITe"
 
 #: Motif de l'indice de révision, tel qu'il apparaît en en-tête de colonne et
 #: dans le nom du fichier DXF (`20260903_SCV_IND06.dxf`).
-MOTIF_INDICE = re.compile(r"IND\s*0*(\d+)", re.IGNORECASE)
+#:
+#: Le suffixe alphabétique est indispensable, et son absence a coûté cher : un
+#: motif sans lui écartait `IND10A` et `IND10B` de l'en-tête du tableau de
+#: Sarnois **sans rien dire**, et l'outil concluait que le plan était en avance
+#: sur le tableau alors que les deux colonnes étaient là. Ces suffixes
+#: distinguent deux variantes d'un même indice — à Sarnois, deux réductions du
+#: projet passant sous les 3 MWc.
+#:
+#: La lettre, ou le nombre lorsqu'il n'y en a pas, ne doit être suivie d'aucun
+#: autre caractère alphanumérique : sans quoi `IND06final` rendrait l'indice
+#: `IND06F`. Un nom ambigu ne rend rien plutôt que de rendre au hasard.
+MOTIF_INDICE = re.compile(r"IND\s*0*(\d+)\s*([A-Za-z])?(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _format_indice(trouve: re.Match) -> str:
+    """Forme canonique d'un indice : « IND06 », « IND10A »."""
+    lettre = (trouve.group(2) or "").upper()
+    return f"IND{int(trouve.group(1)):02d}{lettre}"
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +326,7 @@ def indice_depuis_nom(nom: str | Path) -> str | None:
     l'utilisateur, un DXF pouvant très bien être exporté sous un autre nom.
     """
     trouve = MOTIF_INDICE.search(Path(str(nom)).name)
-    return f"IND{int(trouve.group(1)):02d}" if trouve else None
+    return _format_indice(trouve) if trouve else None
 
 
 def _classeur(chemin: Path):
@@ -362,7 +379,7 @@ def _indices_de(feuille) -> tuple[list[str], dict[str, int]]:
             continue
         trouve = MOTIF_INDICE.fullmatch(str(valeur).strip())
         if trouve:
-            colonnes[f"IND{int(trouve.group(1)):02d}"] = colonne
+            colonnes[_format_indice(trouve)] = colonne
     return list(colonnes), colonnes
 
 

@@ -699,9 +699,27 @@ deux bouts de ]-90, 90] et une médiane naïve rendrait la perpendiculaire.
 
 ### Lecture du tableau bilan
 
-L'onglet `2. Caractéristiques du projet` est en colonnes, une par indice de
-révision. L'indice est **proposé** d'après le nom du DXF (`20260903_SCV_IND06`)
-et **toujours confirmé** ; son absence du tableau est signalée en évidence.
+L'onglet des caractéristiques est en colonnes, une par indice de révision. Il
+s'appelle `2. Caractéristiques du projet` en version 6 du tableau et `Projet`
+en version 10 : les deux noms sont acceptés, un nom inconnu est refusé en
+listant les onglets présents.
+
+L'indice est **proposé** d'après le nom du DXF (`20260903_SCV_IND06`) et
+**toujours confirmé** ; son absence du tableau est signalée en évidence.
+
+Un indice peut porter un **suffixe alphabétique** : `IND10A` et `IND10B`
+désignent deux variantes d'un même indice — à Sarnois, deux réductions du projet
+passant sous les 3 MWc, qui diffèrent de 85 à 90 tables et de 4,87 à 3,48 ha.
+Ne pas le reconnaître les écartait de l'en-tête sans rien dire, et l'outil
+concluait que le plan était en avance sur le tableau alors que les colonnes
+étaient là. La lettre ne doit être suivie d'aucun autre caractère
+alphanumérique : sans cette garde, `IND06final` rendrait l'indice `IND06F`.
+
+Les valeurs composites s'écrivent `13 / 26` en version 6 et `269 & 27` en
+version 10 ; les deux formes sont reconnues. Là où elles portent un nombre de
+tables, les contrôles portent sur le total, mais la chaîne d'origine est
+conservée à côté — la décomposition en deux formats de table ne doit pas
+disparaître dans la somme.
 
 **Chaque paramètre est repéré par son libellé en colonne A, jamais par son
 numéro de ligne.** Le fichier est déjà en version 6, la mise en page bouge, et
