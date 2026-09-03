@@ -17,7 +17,9 @@ fonctionnement, ce fichier pour les conventions de travail.
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
 fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE
-et devra produire le même GeoPackage que le lot 2bis.
+et devra produire le même GeoPackage que le lot 2bis : voir
+`_briefs/BRIEF_DP_lot2_alignement_geopackage.md`, à traiter dans la
+conversation du lot 2.
 
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on
