@@ -1,5 +1,8 @@
-# Versions épinglées : des incompatibilités Starlette/Streamlit ont déjà
-# provoqué des plantages au déploiement sur d'autres outils du parc.
+# Ce fichier est épinglé intégralement, au ==, dépendances transitives
+# comprises : les versions y ont été retenues ensemble, sur une pile légère
+# dont le déploiement est vérifié. Le pin de starlette ne vaut que dans cet
+# ensemble — recopié seul ailleurs, il n'y résout rien et entre en conflit
+# avec la résolution de toute pile aux contraintes lâches.
 streamlit==1.57.0
 starlette==1.0.0
 requests==2.33.1
