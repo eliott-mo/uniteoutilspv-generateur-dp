@@ -19,3 +19,7 @@ fonttools==4.62.1
 # résout ces transformations, qu'un lecteur DXF écrit à la main devrait
 # réimplémenter.
 ezdxf==1.4.4
+# Lecture du tableau bilan du bureau d'études (lot 2bis). Les valeurs sont
+# repérées par leur libellé et non par leur position : il faut un accès
+# cellule par cellule, que pandas.read_excel ne donne pas simplement.
+openpyxl==3.1.5

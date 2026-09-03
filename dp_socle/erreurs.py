@@ -44,3 +44,27 @@ class ErreurModulesAbsents(ErreurHelioScope):
 
 class ErreurCalage(ErreurHelioScope):
     """Le calage géographique du DXF est impossible ou invalide."""
+
+
+class ErreurImportBE(ErreurDP):
+    """Les fichiers fournis par le bureau d'études sont illisibles ou incohérents."""
+
+
+class ErreurGeoreferencement(ErreurImportBE):
+    """Le DXF ne tombe pas dans les bornes du Lambert 93 métropolitain."""
+
+
+class ErreurTableauBilan(ErreurImportBE):
+    """Le tableau bilan est illisible, ou un paramètre attendu y est introuvable."""
+
+
+class ErreurControleCroise(ErreurImportBE):
+    """Un contrôle croisé bloquant entre le DXF et le tableau bilan a échoué."""
+
+
+class ErreurCoupe(ErreurImportBE):
+    """La ligne de coupe A-A' est absente, dégénérée ou impossible à corriger."""
+
+
+class ErreurAltimetrie(ErreurService):
+    """Le service altimétrique de la Géoplateforme n'a pas répondu comme attendu."""

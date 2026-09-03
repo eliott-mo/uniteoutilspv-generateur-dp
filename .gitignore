@@ -11,3 +11,11 @@ projets/
 # Dossiers DP de référence déposés dans exemples/ : binaires volumineux,
 # consultés en local, sans intérêt dans l'historique.
 exemples/**/*.pdf
+
+# Sources AutoCAD des plans du BE : seul le DXF exporté est lu par l'outil.
+# Le DWG pèse dix fois plus lourd, et les fichiers de verrou n'ont aucun sens
+# hors de la session AutoCAD qui les a posés.
+exemples/**/*.dwg
+exemples/**/*.bak
+exemples/**/*.dwl
+exemples/**/*.dwl2

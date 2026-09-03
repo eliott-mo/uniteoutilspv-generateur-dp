@@ -9,3 +9,8 @@
 *.zip binary
 *.ttf binary
 *.otf binary
+*.xlsx binary
+# Le DXF est un format texte, mais c'est une pièce d'entrée fournie par le
+# bureau d'études : elle est conservée octet pour octet, comme elle a été
+# reçue et mesurée.
+*.dxf binary
