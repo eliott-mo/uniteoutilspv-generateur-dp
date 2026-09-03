@@ -665,6 +665,17 @@ ne remarque avant l'instruction du dossier.
 | Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
 
+Le seuil de 1 m² sur le débordement n'est pas arbitraire : sur le jeu de
+référence, la clôture dépasse de **0,53 m²** de l'emprise cadastrale réelle.
+C'est de l'imprécision de numérisation du parcellaire, pas un débordement — un
+vrai débordement se compte en dizaines de m².
+
+À noter sur l'export parcellaire du géoportail : il porte **deux fois le même
+polygone**, géométriquement identiques, 4,5259 ha chacun. `charger_emprise` en
+fait l'union et rend un seul polygone, ce qui évite d'en compter la surface deux
+fois — mais si un jour un export contient deux parcelles *distinctes*, elles
+seront unies de la même façon.
+
 #### Le champ « Azimut (°) » n'a pas de convention
 
 Relevé sur trois dossiers le 03/09/2026 : `0°` pour un champ plein sud, donc
@@ -851,9 +862,11 @@ lire ; le lot 2 en réserve devra produire exactement le même format.
 
 ### Valeurs mesurées sur le jeu de référence
 
-Projet Saint-Cyr-en-Val, `20260903_SCV_IND06.dxf` et
-`20260825_SCV_Tableau_Bilan_V6.xlsx`, tous deux versionnés dans
-`exemples/saint-cyr-DXF/`.
+Projet Saint-Cyr-en-Val, `20260903_SCV_IND06.dxf`,
+`20260825_SCV_Tableau_Bilan_V6.xlsx` et l'export parcellaire
+`phu_45590_…geoperso…`, tous versionnés dans `exemples/saint-cyr-DXF/`. C'est le
+seul jeu où toutes les pièces d'entrée sont présentes : un test vérifie qu'il ne
+lève ni contrôle bloquant ni avertissement.
 
 | Grandeur | Tableau | DXF |
 |---|---|---|
@@ -865,6 +878,7 @@ Projet Saint-Cyr-en-Val, `20260903_SCV_IND06.dxf` et
 | Inclinaison / azimut | 15° / 0° | azimut 0,0000° |
 | Point bas / point haut | 2,5 m / 4,0 m | — |
 | Puissance | 2,93878 MWc | — |
+| Emprise cadastrale | — | 4,5259 ha, clôture débordant de 0,53 m² |
 
 ## Hors périmètre de ces lots
 

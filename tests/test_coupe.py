@@ -816,3 +816,74 @@ def test_contrat_de_version_plus_recent_refuse(tmp_path):
     with pytest.raises(ErreurImportBE) as erreur:
         lire_parametres(tmp_path)
     assert "version" in str(erreur.value)
+
+
+# ---------------------------------------------------------------------------
+# Emprise cadastrale réelle
+# ---------------------------------------------------------------------------
+
+EMPRISE_CADASTRALE = REFERENCE / "phu_45590_saint-cyr-en-val-geoperso-1-24_10_2025_17_11"
+
+
+@pytest.fixture(scope="module")
+def cadastre():
+    from dp_socle.geometrie import charger_emprise
+
+    return charger_emprise(EMPRISE_CADASTRALE).geometrie
+
+
+def test_export_geoperso_porte_deux_fois_le_meme_polygone():
+    """Relevé le 03/09/2026 sur l'export réel, et traité par l'union.
+
+    Les deux entités sont géométriquement identiques : 4,5259 ha chacune,
+    distance de Hausdorff nulle. `charger_emprise` en fait l'union et rend un
+    seul polygone — c'est ce qui évite de compter la surface deux fois.
+    """
+    import geopandas as gpd
+
+    from dp_socle.geometrie import charger_emprise
+
+    brut = gpd.read_file(EMPRISE_CADASTRALE)
+    assert len(brut) == 2
+    assert brut.geometry.iloc[0].equals(brut.geometry.iloc[1])
+    assert brut.geometry.area.sum() / 10_000 == pytest.approx(9.052, abs=0.002)
+
+    emprise = charger_emprise(EMPRISE_CADASTRALE)
+    assert emprise.nb_polygones == 1
+    assert emprise.surface_m2 / 10_000 == pytest.approx(4.526, abs=0.002)
+
+
+def test_cloture_reelle_tenue_pour_contenue_dans_le_cadastre(plan, tableau, cadastre):
+    """Le seuil de 1 m² éprouvé sur du réel, non plus sur un polygone fabriqué.
+
+    La clôture dépasse de 0,53 m² de l'emprise cadastrale : de l'imprécision de
+    numérisation, pas un débordement. Un vrai débordement se compte en dizaines
+    de m² — celui du test synthétique voisin en fait plusieurs milliers.
+    """
+    from dp_socle.import_be import DEBORDEMENT_NEGLIGEABLE_M2
+
+    debordement = plan.polygone_cloture.difference(cadastre).area
+    assert 0.0 < debordement < DEBORDEMENT_NEGLIGEABLE_M2
+
+    controle = next(
+        c
+        for c in controler(plan, tableau, emprise_cadastrale=cadastre)
+        if c.libelle == "Clôture dans l'emprise cadastrale"
+    )
+    assert controle.statut == OK
+
+
+def test_import_complet_avec_emprise_reelle_ne_leve_aucun_bloquant(cadastre):
+    """Le jeu Saint-Cyr au complet : DXF, tableau et parcellaire réels."""
+    import_be = importer_be(
+        DXF,
+        TABLEAU,
+        "IND06",
+        emprise_cadastrale=cadastre,
+        seuil_puissance_mwc=3.0,
+    )
+    assert import_be.bloquants == []
+    assert all(c.statut == OK for c in import_be.controles)
+    # Plus aucun avertissement de contrôle : c'est le seul jeu où toutes les
+    # pièces d'entrée sont présentes.
+    assert import_be.avertissements == []

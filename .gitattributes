@@ -14,3 +14,9 @@
 # bureau d'études : elle est conservée octet pour octet, comme elle a été
 # reçue et mesurée.
 *.dxf binary
+# Composants binaires d'un shapefile. `text=auto` les détecte, mais une
+# conversion de fins de ligne sur un .shp le corromprait sans rien dire :
+# on l'écarte explicitement. Le .prj et le .cpg restent du texte.
+*.shp binary
+*.shx binary
+*.dbf binary
