@@ -73,6 +73,21 @@ STYLES = {
     "portail_exploitant": StyleCategorie(
         "Portail d'exploitation", None, (170, 0, 0), epaisseur=2
     ),
+    # Installations de chantier : hachurées en clair, ce sont des emprises
+    # temporaires qu'on ne doit pas confondre avec un ouvrage définitif.
+    "base_vie": StyleCategorie("Base vie (chantier)", (232, 216, 190), (150, 120, 70)),
+    "stockage_chantier": StyleCategorie(
+        "Stockage logistique (chantier)", (232, 216, 190), (150, 120, 70)
+    ),
+    # Éléments agrivoltaïques.
+    "limite_paddock": StyleCategorie("Limite de paddock", None, (150, 110, 20), epaisseur=2),
+    "bac_equarrissage": StyleCategorie("Bac d'équarrissage", (200, 170, 120), (0, 0, 0)),
+    "espace_vert": StyleCategorie("Espace vert", (176, 208, 140), (111, 170, 11)),
+    # Compléments de l'aire de charge BESS.
+    "citerne_refroidissement": StyleCategorie(
+        "Citerne de refroidissement", (63, 191, 191), (0, 0, 0)
+    ),
+    "zone_remise": StyleCategorie("Zone de remise", (255, 205, 120), (0, 0, 0)),
     # Absentes de la planche de référence, dérivées de la même famille.
     "local_technique": StyleCategorie(
         "Local technique", (127, 255, 191), (0, 0, 0)
@@ -104,6 +119,9 @@ ORDRE_DESSIN = (
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     "aire_aspiration",
+    "espace_vert",
+    "base_vie",
+    "stockage_chantier",
     "haie",
     "haie_existante",
     "voirie",
@@ -115,7 +133,11 @@ ORDRE_DESSIN = (
     "local_technique",
     "bess",
     "bac_retention",
+    "citerne_refroidissement",
+    "zone_remise",
+    "bac_equarrissage",
     "bache_incendie",
+    "limite_paddock",
     "recul_implantation",
     "zone_implantation_pv",
     "cloture",

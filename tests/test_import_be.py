@@ -740,3 +740,72 @@ def test_saint_cyr_reste_sans_avertissement(plan):
     """La charte élargie ne doit rien changer au jeu de référence."""
     assert plan.avertissements == []
     assert len(plan.correspondance) == 9
+
+
+def test_categories_de_chantier_agri_et_bess():
+    """Vocabulaire élargi aux objets réellement présents chez le BE."""
+    from dp_socle.import_be import CATEGORIES, categorie_proposee
+
+    attendus = {
+        "UNI_VRD_Base_vie": "base_vie",
+        "UNI_VRD_Stockage_Logistique": "stockage_chantier",
+        "UNI_Limite paddock": "limite_paddock",
+        "UNI_Bac d'équarissage": "bac_equarrissage",
+        "ESPACE VERT": "espace_vert",
+        "UNI_BESS_Refroidissement": "citerne_refroidissement",
+        "UNI_BESS_Zone_remise": "zone_remise",
+    }
+    for calque, categorie in attendus.items():
+        assert categorie_proposee(calque) == categorie, calque
+        assert categorie in CATEGORIES
+
+
+def test_zone_d_implantation_potentielle_ecartee():
+    """Seule la clôture délimite le projet au dossier."""
+    from dp_socle.import_be import categorie_proposee, motif_ecart
+
+    assert categorie_proposee("UNI_ZIP") is None
+    assert "clôture" in motif_ecart("UNI_ZIP")
+
+
+def test_remplissage_doublon_des_plateformes_ecarte():
+    """« VAL-PDL » redouble « UNI_VRD_Plateforme ».
+
+    Mesuré sur Sarnois : ses deux boucles ont le même centre et la même aire
+    que celles des plateformes, à 1 m² près (81,8 contre 82,9 m² et 94,4 contre
+    95,5 m²). Les importer dessinerait chaque plateforme deux fois.
+    """
+    from dp_socle.import_be import motif_ecart
+
+    assert motif_ecart("VAL-PDL") == "doublon du remplissage des plateformes"
+
+
+def test_calque_ecarte_ne_produit_pas_d_avertissement_de_hatch(tmp_path):
+    """Un calque écarté l'est pour toutes ses formes, remplissages compris."""
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    remplissage = espace.add_hatch(dxfattribs={"layer": "VAL-PDL"})
+    remplissage.paths.add_polyline_path(
+        [(622_920, 6_750_700), (622_930, 6_750_700), (622_930, 6_750_710)],
+        is_closed=True,
+    )
+    chemin = tmp_path / "ecarte_hatch.dxf"
+    document.saveas(str(chemin))
+
+    plan_ecarte = lire_plan_be(chemin)
+    assert not any("VAL-PDL" in m and "HATCH" in m for m in plan_ecarte.avertissements)
+    assert any("VAL-PDL" in m and "écarté" in m for m in plan_ecarte.avertissements)
+
+
+def test_toutes_les_categories_ont_un_style_et_un_rang_de_dessin():
+    """Le contrat et l'aperçu doivent rester alignés.
+
+    Une catégorie sans style ne se verrait pas sur l'écran de validation, et
+    c'est justement là qu'un appariement fautif doit sauter aux yeux.
+    """
+    from dp_socle.apercu_be import ORDRE_DESSIN, STYLES
+    from dp_socle.import_be import CATEGORIES
+
+    assert set(CATEGORIES) == set(STYLES)
+    assert set(CATEGORIES) - {"ligne_coupe"} == set(ORDRE_DESSIN)

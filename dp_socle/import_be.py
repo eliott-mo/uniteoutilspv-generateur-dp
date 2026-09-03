@@ -95,6 +95,16 @@ CATEGORIES = (
     # tableau bilan ne compte que le second, et les confondre faisait échouer
     # le contrôle du nombre de portails sur les plans de Sarnois.
     "portail_exploitant",
+    # Installations de chantier : temporaires, mais portées au dossier.
+    "base_vie",
+    "stockage_chantier",
+    # Éléments agrivoltaïques, propres aux projets d'élevage.
+    "limite_paddock",
+    "bac_equarrissage",
+    "espace_vert",
+    # Compléments d'une aire de charge BESS, comptés au tableau bilan.
+    "citerne_refroidissement",
+    "zone_remise",
     "ligne_coupe",
 )
 
@@ -131,6 +141,13 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_Portail exploitant": "portail_exploitant",
     "UNI_BESS_Batterie": "bess",
     "UNI_BESS_Rétention": "bac_retention",
+    "UNI_BESS_Refroidissement": "citerne_refroidissement",
+    "UNI_BESS_Zone_remise": "zone_remise",
+    "UNI_VRD_Base_vie": "base_vie",
+    "UNI_VRD_Stockage_Logistique": "stockage_chantier",
+    "UNI_Limite paddock": "limite_paddock",
+    "UNI_Bac d'équarissage": "bac_equarrissage",
+    "ESPACE VERT": "espace_vert",
 }
 
 #: Types d'entités traités. Les `HATCH` sont écartés : ce sont des remplissages
@@ -278,7 +295,6 @@ CALQUES_ECARTES = {
     "PVcase Topographic Mesh Polygon": "maillage topographique, non exploité",
     "PVcase Online Terrain": "points de terrain, non exploités",
     "-TopoNiveau": "points cotés du BE, non exploités",
-    "PVcase Road Center Line": "couche de travail PVcase",
     # Étude d'ombrage portée au plan, pas un ouvrage à dessiner.
     "UNI_PDL-PDT_Zone_Ombre": "étude d'ombrage",
     # Contenu de blocs décoratifs : « GREY » vient d'une illustration, « Edges »
@@ -286,6 +302,13 @@ CALQUES_ECARTES = {
     # entités qui noyaient la liste des calques inconnus.
     "GREY": "habillage décoratif d'un bloc",
     "Edges": "habillage décoratif d'un bloc",
+    # Zone d'implantation potentielle : un contour d'étude. Seule la clôture
+    # délimite le projet au dossier.
+    "UNI_ZIP": "contour d'étude, seule la clôture délimite le projet",
+    # Remplissage qui redouble les plateformes des postes : mesuré sur Sarnois,
+    # ses deux boucles ont le même centre et la même aire que celles de
+    # « UNI_VRD_Plateforme », à 1 m² près.
+    "VAL-PDL": "doublon du remplissage des plateformes",
 }
 
 _PREFIXES_ECARTES = tuple(
@@ -668,7 +691,7 @@ def lire_plan_be(
     # Un calque qui n'existe qu'en remplissage perdrait son élément : les HATCH
     # sont écartés partout, donc un calque qui n'a que ça ne produit rien.
     for calque, nombre in sorted(hatch_par_calque.items()):
-        if calque not in entites_par_calque:
+        if calque not in entites_par_calque and motif_ecart(calque) is None:
             avertissements.append(
                 f"Calque « {calque} » : {nombre} remplissage(s) HATCH et aucune "
                 "polyligne. L'élément serait perdu — demandez au BE de fournir "
@@ -711,6 +734,16 @@ def lire_plan_be(
             "entités) : son contenu n'est pas importé. Appariez-le à une "
             "catégorie si l'élément doit figurer sur les planches."
         )
+    # Un calque écarté qui n'a que des remplissages n'apparaît pas dans
+    # `calques_ignores`, faute d'entité importable. Il est rattaché ici au même
+    # regroupement : écarter n'est pas taire.
+    for calque in sorted(hatch_par_calque):
+        if calque in entites_par_calque or calque in correspondance:
+            continue
+        motif = motif_ecart(calque)
+        if motif is not None:
+            ecartes.setdefault(motif, []).append(calque)
+
     for motif, calques in sorted(ecartes.items()):
         avertissements.append(
             f"{len(calques)} calque(s) écarté(s) — {motif} : "

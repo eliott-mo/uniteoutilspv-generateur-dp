@@ -672,6 +672,12 @@ l'autre** : les mêmes objets y portent d'autres noms. Sont donc aussi appariés
 `UNI_VRD_Voirie`, `UNI_PDT`, `UNI_BESS_Batterie`, `UNI_BESS_Rétention` et
 `UNI_Portail exploitant`.
 
+Le vocabulaire s'est élargi aux objets réellement portés par ces plans :
+installations de chantier (`base_vie`, `stockage_chantier`), éléments
+agrivoltaïques (`limite_paddock`, `bac_equarrissage`, `espace_vert`) et
+compléments d'aire de charge BESS (`citerne_refroidissement`, `zone_remise`),
+tous comptés au tableau bilan.
+
 Deux distinctions valent d'être notées, parce que les manquer produit des
 mesures fausses : la **haie existante** n'est pas la haie plantée — l'une est un
 état des lieux, l'autre un aménagement — et le **portail d'exploitation** n'est
@@ -695,6 +701,14 @@ chacune** :
 | `CAD_*` | fond cadastral du BE ; le dossier prend le sien du WFS IGN |
 | `UNI_Legende`, `UNI_Echelle`, `UNI_Traits de cosntruction` | mobilier de dessin |
 | couches de travail PVcase, maillage topographique, habillage décoratif | ni ouvrage ni mesure |
+| `UNI_ZIP` | contour d'étude ; **seule la clôture délimite le projet au dossier** |
+| `UNI_PDL-PDT_Zone_Ombre` | étude d'ombrage |
+| `VAL-PDL` | doublon du remplissage des plateformes |
+
+`VAL-PDL` a demandé une mesure pour être identifié : ses deux boucles ont le
+même centre et la même aire que celles de `UNI_VRD_Plateforme`, à 1 m² près
+(81,8 contre 82,9 m², 94,4 contre 95,5 m²). Les importer dessinerait chaque
+plateforme deux fois.
 
 S'y ajoutent les **annotations** — textes, cotations, points, volumes — écartées
 et comptées en une ligne plutôt qu'un avertissement par calque.
