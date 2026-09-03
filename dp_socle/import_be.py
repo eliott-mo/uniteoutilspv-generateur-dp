@@ -85,6 +85,16 @@ CATEGORIES = (
     "bess",
     "bac_retention",
     "haie",
+    # Distinguer la haie plantée de l'existante compte pour un dossier DP :
+    # l'une est un aménagement, l'autre un état des lieux.
+    "haie_existante",
+    # Voirie dont le calque ne dit pas si elle est lourde ou légère. Le tableau
+    # bilan sépare les deux et le lot 4 doit trancher, plutôt que de supposer.
+    "voirie",
+    # Portail interne d'exploitation, distinct du portail d'accès au site : le
+    # tableau bilan ne compte que le second, et les confondre faisait échouer
+    # le contrôle du nombre de portails sur les plans de Sarnois.
+    "portail_exploitant",
     "ligne_coupe",
 )
 
@@ -106,6 +116,21 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_BESS": "bess",
     "UNI_Bac_de_retention": "bac_retention",
     "UNI_Haie": "haie",
+    # Relevés sur les plans de Sarnois le 03/09/2026. La charte du BE n'est pas
+    # figée : les mêmes objets y portent d'autres noms qu'à Saint-Cyr.
+    "UNI_Local_Stockage": "local_technique",
+    "UNI_Haies": "haie",
+    "UNI_Haies existantes": "haie_existante",
+    "UNI_VRD_Voirie": "voirie",
+    # Poste de transformation. La légende du dossier de référence n'a qu'une
+    # entrée « Poste de livraison/transformation » : les deux y sont dessinés
+    # de la même façon, et le tableau bilan les compte séparément.
+    "UNI_PDT": "pdl_ptr",
+    # Ces trois-là ne se voient qu'une fois les blocs développés : elles sont
+    # portées par le contenu des blocs, pas par leur insertion.
+    "UNI_Portail exploitant": "portail_exploitant",
+    "UNI_BESS_Batterie": "bess",
+    "UNI_BESS_Rétention": "bac_retention",
 }
 
 #: Types d'entités traités. Les `HATCH` sont écartés : ce sont des remplissages
@@ -119,6 +144,34 @@ TYPES_TRAITES = ("LWPOLYLINE", "POLYLINE", "LINE", "ARC", "CIRCLE", "ELLIPSE", "
 #: une polyligne) ; la borne existe pour qu'un fichier construit en boucle
 #: s'arrête en le disant plutôt que de tourner sans fin.
 PROFONDEUR_BLOCS_MAX = 8
+
+#: Types d'entités qui ne décrivent jamais un ouvrage : textes, cotations,
+#: points, volumes. Ils sont écartés comme les autres types non traités, mais
+#: **regroupés en une ligne** : un avertissement par calque portant une
+#: étiquette produisait dix-neuf lignes sur le plan de Sarnois, et un écran
+#: d'avertissements que personne ne lit ne protège de rien. Un type non traité
+#: qui n'est pas dans cette liste garde son avertissement propre : c'est alors
+#: une vraie surprise.
+TYPES_ANNOTATION = frozenset(
+    {
+        "TEXT",
+        "MTEXT",
+        "ATTRIB",
+        "ATTDEF",
+        "DIMENSION",
+        "LEADER",
+        "MULTILEADER",
+        "MLEADER",
+        "POINT",
+        "SOLID",
+        "3DSOLID",
+        "MESH",
+        "BODY",
+        "REGION",
+        "IMAGE",
+        "WIPEOUT",
+    }
+)
 
 #: Flèche maximale de discrétisation des arcs, en mètres. Les portails sont
 #: dessinés avec des arcs de 3,5 m de rayon et les plateformes portent des
@@ -182,6 +235,81 @@ _CORRESPONDANCE_NORMALISEE = {
 def categorie_proposee(calque: str) -> str | None:
     """Catégorie proposée pour un nom de calque, ou None s'il est inconnu."""
     return _CORRESPONDANCE_NORMALISEE.get(normaliser(calque))
+
+
+#: Calques délibérément écartés, et pourquoi.
+#:
+#: Sans cette liste, le plan de Sarnois produisait 45 calques non appariés et
+#: 71 avertissements : un écran d'avertissements que personne ne lit ne protège
+#: de rien. Ceux-ci sont regroupés en une ligne, tandis qu'un calque vraiment
+#: inconnu garde son avertissement propre et sa décision à prendre.
+#:
+#: Écarter n'est pas ignorer en silence : le regroupement est affiché, et tout
+#: calque peut être apparié à la main à l'écran de correspondance.
+CALQUES_ECARTES = {
+    # Fond cadastral importé par le BE dans son plan. Le dossier prend son
+    # cadastre du WFS IGN (lot 1), qui fait foi pour la planche DP 1-3 ; celui
+    # du DXF est une copie de travail, sans garantie de fraîcheur.
+    "prefixe:cad_": "fond cadastral du BE, remplacé par le WFS IGN",
+    # Mobilier du dessin, propre à la mise en page du BE. « cosntruction » est
+    # la faute de frappe du fichier réel : la normalisation efface les accents
+    # et les séparateurs, pas les fautes.
+    "UNI_Legende": "mobilier de dessin",
+    "UNI_Echelle": "mobilier de dessin",
+    "UNI_Traits de construction": "mobilier de dessin",
+    "UNI_Traits de cosntruction": "mobilier de dessin",
+    "Defpoints": "calque technique AutoCAD",
+    # Couches de travail de PVcase. Les modules détaillés et les cadres pleins
+    # doublent le contour déjà repris sur « (optimised) » ; le reste décrit la
+    # construction de l'implantation, pas des ouvrages à dessiner.
+    "PVcase PV Modules (detailed)": "doublon du contour de table",
+    "PVcase PV Modules (full frames)": "doublon du contour de table",
+    "PVcase Station": "couche de travail PVcase",
+    "PVcase Offsets": "couche de travail PVcase",
+    "PVcase AlignmentLine": "couche de travail PVcase",
+    "PVcase Effective Area Hatch": "couche de travail PVcase",
+    "PVcase PV Area": "couche de travail PVcase",
+    "PVcase Trees": "couche de travail PVcase",
+    # Le terrain est bien là — 1 898 points cotés et un maillage — mais le
+    # profil de la coupe vient du RGE ALTI ou d'un relevé fourni. Le reprendre
+    # d'ici demanderait de vérifier son référentiel altimétrique, ce qui n'est
+    # pas fait.
+    "PVcase Topographic Mesh": "maillage topographique, non exploité",
+    "PVcase Topographic Mesh Polygon": "maillage topographique, non exploité",
+    "PVcase Online Terrain": "points de terrain, non exploités",
+    "-TopoNiveau": "points cotés du BE, non exploités",
+    "PVcase Road Center Line": "couche de travail PVcase",
+    # Étude d'ombrage portée au plan, pas un ouvrage à dessiner.
+    "UNI_PDL-PDT_Zone_Ombre": "étude d'ombrage",
+    # Contenu de blocs décoratifs : « GREY » vient d'une illustration, « Edges »
+    # du bloc « Sheep rs », le mouton des plans agrivoltaïques. 1 594 et 195
+    # entités qui noyaient la liste des calques inconnus.
+    "GREY": "habillage décoratif d'un bloc",
+    "Edges": "habillage décoratif d'un bloc",
+}
+
+_PREFIXES_ECARTES = tuple(
+    (cle[len("prefixe:") :], motif)
+    for cle, motif in CALQUES_ECARTES.items()
+    if cle.startswith("prefixe:")
+)
+_ECARTES_NORMALISES = {
+    normaliser(nom): motif
+    for nom, motif in CALQUES_ECARTES.items()
+    if not nom.startswith("prefixe:")
+}
+
+
+def motif_ecart(calque: str) -> str | None:
+    """Raison pour laquelle un calque est délibérément écarté, ou None."""
+    normalise = normaliser(calque)
+    motif = _ECARTES_NORMALISES.get(normalise)
+    if motif is not None:
+        return motif
+    for prefixe, motif_prefixe in _PREFIXES_ECARTES:
+        if normalise.startswith(normaliser(prefixe)):
+            return motif_prefixe
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -363,11 +491,16 @@ def calques_du_dxf(chemin: str | Path) -> list[CalqueDXF]:
 
     entites: dict[str, int] = {}
     hatchs: dict[str, int] = {}
-    for entite in document.modelspace():
-        cible = hatchs if entite.dxftype() == "HATCH" else entites
-        if entite.dxftype() != "HATCH" and entite.dxftype() not in TYPES_TRAITES:
+    # Le même développement des blocs que `lire_plan_be`, et pour la même
+    # raison : sans lui, les tables et les portails de Sarnois n'apparaissaient
+    # pas à l'écran de correspondance alors que l'import les trouvait. L'écran
+    # où l'on confirme l'appariement doit montrer ce qui sera apparié.
+    for calque, entite in _developper(document.modelspace(), None, 0, {}):
+        type_dxf = entite.dxftype()
+        cible = hatchs if type_dxf == "HATCH" else entites
+        if type_dxf != "HATCH" and type_dxf not in TYPES_TRAITES:
             continue
-        cible[entite.dxf.layer] = cible.get(entite.dxf.layer, 0) + 1
+        cible[calque] = cible.get(calque, 0) + 1
 
     return [
         CalqueDXF(
@@ -470,11 +603,16 @@ def lire_plan_be(
     entites_par_calque: dict[str, list] = {}
     hatch_par_calque: dict[str, int] = {}
     types_ecartes: dict[str, set[str]] = {}
+    annotations: dict[str, int] = {}
     anomalies: dict = {}
     for calque, entite in _developper(modelspace, None, 0, anomalies):
         type_dxf = entite.dxftype()
         if type_dxf == "HATCH":
             hatch_par_calque[calque] = hatch_par_calque.get(calque, 0) + 1
+            continue
+        if type_dxf in TYPES_ANNOTATION:
+            annotations.setdefault(type_dxf, 0)
+            annotations[type_dxf] += 1
             continue
         if type_dxf not in TYPES_TRAITES:
             types_ecartes.setdefault(calque, set()).add(type_dxf)
@@ -499,6 +637,13 @@ def lire_plan_be(
         avertissements.append(
             f"Calque « {calque} » : entités de type {', '.join(sorted(types))} "
             "non traitées et absentes du plan importé."
+        )
+
+    if annotations:
+        detail = ", ".join(f"{n} {typ}" for typ, n in sorted(annotations.items()))
+        avertissements.append(
+            f"{sum(annotations.values())} annotation(s) écartée(s) ({detail}) : "
+            "textes, cotations, points et volumes ne décrivent aucun ouvrage."
         )
 
     # Les entités sans calque ne sont rattachables à aucune catégorie. Elles sont
@@ -555,11 +700,22 @@ def lire_plan_be(
         )
 
     calques_ignores = sorted(set(entites_par_calque) - set(correspondance))
+    ecartes: dict[str, list[str]] = {}
     for calque in calques_ignores:
+        motif = motif_ecart(calque)
+        if motif is not None:
+            ecartes.setdefault(motif, []).append(calque)
+            continue
         avertissements.append(
             f"Calque « {calque} » non apparié ({len(entites_par_calque[calque])} "
             "entités) : son contenu n'est pas importé. Appariez-le à une "
             "catégorie si l'élément doit figurer sur les planches."
+        )
+    for motif, calques in sorted(ecartes.items()):
+        avertissements.append(
+            f"{len(calques)} calque(s) écarté(s) — {motif} : "
+            f"{', '.join(sorted(calques))}. Appariez-en un à l'écran de "
+            "correspondance si son contenu doit figurer sur les planches."
         )
 
     entites: list[EntiteBE] = []

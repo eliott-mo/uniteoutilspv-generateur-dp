@@ -666,8 +666,49 @@ d'aspiration » est devenue un tiret (`UNI_SDIS_Aire_d-aspiration`).
 | `UNI_SDIS_Bache_incendie` | `bache_incendie` |
 | `UNI_SDIS_Aire_d-aspiration` | `aire_aspiration` |
 
-Sont aussi prévues, absentes du fichier de référence : `local_technique`,
-`bess`, `bac_retention`, `haie`, `ligne_coupe`.
+Les plans de Sarnois ont montré que **la charte n'est pas figée d'un projet à
+l'autre** : les mêmes objets y portent d'autres noms. Sont donc aussi appariés
+`UNI_Cloture`, `UNI_Haies`, `UNI_Haies existantes`, `UNI_Local_Stockage`,
+`UNI_VRD_Voirie`, `UNI_PDT`, `UNI_BESS_Batterie`, `UNI_BESS_Rétention` et
+`UNI_Portail exploitant`.
+
+Deux distinctions valent d'être notées, parce que les manquer produit des
+mesures fausses : la **haie existante** n'est pas la haie plantée — l'une est un
+état des lieux, l'autre un aménagement — et le **portail d'exploitation** n'est
+pas le portail d'accès, que seul le tableau bilan compte. Les confondre donnait
+4 portails au plan contre 1 au tableau, et faisait échouer un contrôle qui avait
+raison de se plaindre.
+
+`UNI_VRD_Voirie` est apparié à `voirie`, une catégorie qui dit son ignorance :
+le calque ne précise pas si la piste est lourde ou légère, alors que le tableau
+bilan sépare les deux. Le lot 4 doit trancher, pas supposer.
+
+### Ce qui est écarté, et pourquoi
+
+Le plan de Sarnois porte 55 calques. Sans tri, l'import produisait **71
+avertissements**, et un écran d'avertissements que personne ne lit ne protège de
+rien. Trois familles sont donc écartées d'office, **regroupées en une ligne
+chacune** :
+
+| Famille | Raison |
+|---|---|
+| `CAD_*` | fond cadastral du BE ; le dossier prend le sien du WFS IGN |
+| `UNI_Legende`, `UNI_Echelle`, `UNI_Traits de cosntruction` | mobilier de dessin |
+| couches de travail PVcase, maillage topographique, habillage décoratif | ni ouvrage ni mesure |
+
+S'y ajoutent les **annotations** — textes, cotations, points, volumes — écartées
+et comptées en une ligne plutôt qu'un avertissement par calque.
+
+Écarter n'est pas ignorer en silence : chaque groupe est affiché, et tout calque
+reste appariable à la main. Un calque vraiment inconnu, lui, garde son
+avertissement propre — c'est là qu'une décision est attendue. Après tri, Sarnois
+descend à 22 avertissements et Saint-Cyr reste à zéro.
+
+Deux détails du tri méritent d'être dits. « cosntruction » est la faute de
+frappe du fichier réel, reprise telle quelle : la normalisation efface les
+accents et les séparateurs, pas les fautes. Et `GREY` et `Edges`, 1 594 et 195
+entités qui noyaient la liste, sont l'habillage de blocs décoratifs — dont
+« Sheep rs », le mouton des plans agrivoltaïques.
 
 Trois pièges mesurés sur le fichier de référence :
 

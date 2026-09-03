@@ -630,3 +630,113 @@ def test_variantes_d_un_meme_indice_lues_separement():
         assert variante.modules["puissance_mwc"] == pytest.approx(2.98792)
         assert variante.generalites["nb_portails"] == 1
         assert variante.structures["azimut_deg"] == pytest.approx(-24.5)
+
+
+# ---------------------------------------------------------------------------
+# Charte des calques — élargie sur les plans de Sarnois
+# ---------------------------------------------------------------------------
+
+
+def test_ecran_de_correspondance_voit_ce_que_l_import_apparie(tmp_path):
+    """Les deux lectures doivent voir les mêmes calques.
+
+    `calques_du_dxf` ne développait pas les blocs : les tables et les portails
+    de Sarnois n'apparaissaient donc pas à l'écran où l'on confirme
+    l'appariement, alors que l'import les trouvait.
+    """
+    from dp_socle.import_be import calques_du_dxf
+
+    chemin = _dxf_avec_bloc(tmp_path / "ecran.dxf", "PVcase PV Modules (optimised)")
+    vus = {c.nom for c in calques_du_dxf(chemin)}
+    apparies = set(lire_plan_be(chemin).correspondance)
+    assert apparies <= vus
+    assert "PVcase PV Modules (optimised)" in vus
+
+
+def test_calques_ecartes_regroupes_en_une_ligne(tmp_path):
+    """45 calques non appariés faisaient 71 avertissements, donc aucun lu."""
+    from dp_socle.import_be import motif_ecart
+
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    for calque in ("CAD_1PARCELLE", "CAD_3BATIDUR", "UNI_Legende", "UNI_Echelle"):
+        espace.add_lwpolyline(
+            [(622_800, 6_750_600), (622_810, 6_750_600), (622_810, 6_750_610)],
+            close=True,
+            dxfattribs={"layer": calque},
+        )
+    chemin = tmp_path / "ecartes.dxf"
+    document.saveas(str(chemin))
+
+    plan_ecarte = lire_plan_be(chemin)
+    groupes = [m for m in plan_ecarte.avertissements if "calque(s) écarté(s)" in m]
+    assert len(groupes) == 2  # fond cadastral, mobilier de dessin
+    assert not [m for m in plan_ecarte.avertissements if "non apparié" in m]
+    assert motif_ecart("CAD_1PARCELLE") == "fond cadastral du BE, remplacé par le WFS IGN"
+    assert motif_ecart("UNI_Clôture") is None
+
+
+def test_calque_vraiment_inconnu_garde_son_avertissement(tmp_path):
+    """Écarter en groupe ne doit pas noyer ce qui demande une décision."""
+    chemin = _dxf_minimal(tmp_path / "inconnu.dxf", "UNI_Chose_Inconnue")
+    plan_inconnu = lire_plan_be(chemin)
+    assert any(
+        "UNI_Chose_Inconnue" in m and "non apparié" in m
+        for m in plan_inconnu.avertissements
+    )
+
+
+def test_annotations_regroupees(tmp_path):
+    """Textes et cotations produisaient un avertissement par calque."""
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    for indice, calque in enumerate(("UNI_Clôture", "UNI_PDL", "UNI_VRD_Plateforme")):
+        espace.add_text(
+            f"étiquette {indice}", dxfattribs={"layer": calque}
+        ).set_placement((622_800 + indice, 6_750_600))
+    chemin = tmp_path / "annotations.dxf"
+    document.saveas(str(chemin))
+
+    plan_annote = lire_plan_be(chemin)
+    groupes = [m for m in plan_annote.avertissements if "annotation(s) écartée(s)" in m]
+    assert len(groupes) == 1
+    assert "3 TEXT" in groupes[0]
+
+
+def test_portail_d_exploitation_distinct_du_portail_d_acces():
+    """Le tableau ne compte que les portails d'accès.
+
+    Les confondre donnait 4 portails au plan contre 1 au tableau sur Sarnois,
+    et faisait échouer un contrôle qui avait raison de se plaindre.
+    """
+    from dp_socle.import_be import CATEGORIES, categorie_proposee
+
+    assert categorie_proposee("UNI_portail") == "portail"
+    assert categorie_proposee("UNI_Portail exploitant") == "portail_exploitant"
+    assert "portail_exploitant" in CATEGORIES
+
+
+def test_noms_de_calque_de_sarnois_apparies():
+    """La charte du BE n'est pas figée d'un projet à l'autre."""
+    from dp_socle.import_be import categorie_proposee
+
+    attendus = {
+        "UNI_Cloture": "cloture",
+        "UNI_Haies": "haie",
+        "UNI_Haies existantes": "haie_existante",
+        "UNI_Local_Stockage": "local_technique",
+        "UNI_VRD_Voirie": "voirie",
+        "UNI_PDT": "pdl_ptr",
+        "UNI_BESS_Batterie": "bess",
+        "UNI_BESS_Rétention": "bac_retention",
+    }
+    for calque, categorie in attendus.items():
+        assert categorie_proposee(calque) == categorie, calque
+
+
+def test_saint_cyr_reste_sans_avertissement(plan):
+    """La charte élargie ne doit rien changer au jeu de référence."""
+    assert plan.avertissements == []
+    assert len(plan.correspondance) == 9

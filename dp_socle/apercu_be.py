@@ -65,6 +65,14 @@ STYLES = {
         "Aire d'aspiration", (215, 215, 215), (63, 191, 191), epaisseur=2
     ),
     "haie": StyleCategorie("Haie plantée", (111, 170, 11), (80, 120, 8), epaisseur=2),
+    # Absentes de la planche de référence, dérivées de la teinte voisine.
+    "haie_existante": StyleCategorie(
+        "Haie existante", (74, 112, 24), (45, 70, 12), epaisseur=2
+    ),
+    "voirie": StyleCategorie("Voirie (type non précisé)", (188, 188, 188), (90, 90, 90)),
+    "portail_exploitant": StyleCategorie(
+        "Portail d'exploitation", None, (170, 0, 0), epaisseur=2
+    ),
     # Absentes de la planche de référence, dérivées de la même famille.
     "local_technique": StyleCategorie(
         "Local technique", (127, 255, 191), (0, 0, 0)
@@ -97,6 +105,8 @@ ORDRE_DESSIN = (
     "piste_lourde_a_creer",
     "aire_aspiration",
     "haie",
+    "haie_existante",
+    "voirie",
     "tables_pv",
     # Les modules par-dessus la silhouette des rangées : c'est leur trame qui
     # rend le plan lisible, le contour groupé ne sert qu'à les cerner.
@@ -110,6 +120,7 @@ ORDRE_DESSIN = (
     "zone_implantation_pv",
     "cloture",
     "portail",
+    "portail_exploitant",
 )
 
 #: Tracé initial de l'utilisateur, montré sous la ligne corrigée pour qu'il voie
