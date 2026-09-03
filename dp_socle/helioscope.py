@@ -1127,6 +1127,423 @@ def parametres_json(implantation: Implantation) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Contrat de sortie commun avec le lot 2bis
+# ---------------------------------------------------------------------------
+
+#: Correspondance couche HelioScope → catégorie du contrat, décidée le
+#: 03/09/2026, mesures à l'appui :
+#:
+#: - `tables_pv` reçoit les **rangées**, pas les tables brutes du DXF. Une
+#:   « table » HelioScope est une colonne de 3 modules, 1,30 × 6,48 m, dont le
+#:   grand côté est *en travers* de la rangée : `azimut_tables()` y répond
+#:   -88,105° au lieu de +1,895°, et la ligne de coupe sortirait parallèle aux
+#:   rangées au lieu de perpendiculaire, sans rien de visible sur la planche.
+#:   Mettre les rangées dans `tables_pv` fait que le calcul juste est celui
+#:   qu'on obtient sans rien savoir de la provenance du fichier.
+#: - `modules_pv` reçoit le détail que le plan du BE ne donne pas. Conservé
+#:   plutôt qu'écarté : c'est cette trame qui rend un plan de masse lisible.
+#: - `zone_implantation_pv`, `recul_implantation`, `zone_evitee` n'ont pas
+#:   d'équivalent BE non plus. Aucune n'est appariée à `cloture` : la zone
+#:   HelioScope est tracée à main levée, ne suit pas le parcellaire, et en tirer
+#:   une surface clôturée ou un linéaire de clôture donnerait des chiffres faux
+#:   dans le dossier.
+CORRESPONDANCE_CONTRAT = {
+    "tables_pv": COUCHE_MODULES,
+    "modules_pv": COUCHE_MODULES,
+    "zone_implantation_pv": COUCHE_ZONE,
+    "recul_implantation": COUCHE_RECULS,
+    "zone_evitee": COUCHE_ZONES_EVITEES,
+}
+
+
+def grouper_en_rangees(tables: list[BaseGeometry]) -> list[Polygon]:
+    """Fusionne des tables contiguës en rangées, sans les reprojeter.
+
+    Séparé de `rangees()` pour l'aperçu de calage, qui a déjà ses tables
+    projetées sous la main : repasser par `geometries_l93` y ajouterait 0,9 s à
+    chaque cran de curseur, sur 1,4 s de redessin.
+    """
+    return list(polygones_ou_vide(unary_union(tables)))
+
+
+def rangees(implantation: Implantation) -> list[Polygon]:
+    """Rangées de tables, en Lambert 93 : union des colonnes contiguës.
+
+    HelioScope n'encode aucun groupement en structures — sur les deux designs
+    des Islettes, **tous** les écarts entre tables valent exactement une largeur
+    de module (mesuré le 02/09/2026). La rangée est donc le seul regroupement
+    que le fichier permette de reconstituer, et c'est aussi celui que l'aperçu
+    de calage cerne de noir.
+    """
+    return grouper_en_rangees(geometries_l93(implantation)["tables"])
+
+
+def azimut_rangees(implantation: Implantation) -> float:
+    """Azimut des rangées en Lambert 93, dans ]-90, 90], pour orienter la coupe.
+
+    **Ne pas utiliser `calepinage.orientation_deg` à sa place.** Les deux
+    diffèrent, et l'écart n'est pas du bruit : mesuré le 03/09/2026 sur le
+    design 7676351, les rangées sont à +1,895° quand `orientation_deg` ramené
+    dans ]-90, 90] vaut +0,444°, soit 1,4507° d'écart. C'est **exactement** la
+    convergence des méridiens du Lambert 93 au droit du site, que pyproj donne à
+    +1,4507° : résidu nul.
+
+    Autrement dit, `orientation_deg` est la rotation des INSERT dans le repère
+    du DXF, rapportée au **nord géographique**, tandis que la ligne de coupe se
+    trace en Lambert 93, rapporté au **nord de la grille**. La convergence est
+    nulle sur le méridien 3° E et atteint 3° aux bords de la France
+    métropolitaine : y brancher `orientation_deg` inclinerait la coupe d'autant,
+    sans que rien ne le signale.
+
+    On mesure donc sur la géométrie projetée, comme le fait le lot 2bis.
+    """
+    lignes = rangees(implantation)
+    if not lignes:
+        raise ErreurHelioScope(
+            "Aucune rangée reconstituée : l'azimut ne peut pas être calculé, et "
+            "la ligne de coupe A-A' ne peut pas être orientée."
+        )
+    from .import_be import azimut_tables
+
+    return azimut_tables(lignes)
+
+
+def entites_contrat(implantation: Implantation) -> list:
+    """Géométries de l'implantation, dans le vocabulaire du contrat commun.
+
+    `z_reel` est faux partout et les bornes Z restent nulles : le DXF HelioScope
+    est plat, vérifié sur les deux exports des Islettes. Les colonnes sont
+    conservées quand même — un schéma qui changerait selon la provenance
+    obligerait le lot 4 à savoir d'où vient le fichier avant de le lire.
+    """
+    from .import_be import EntiteBE
+
+    couches = geometries_l93(implantation)
+    contenu = {
+        "tables_pv": rangees(implantation),
+        "modules_pv": couches["modules"],
+        "zone_implantation_pv": couches["zone_implantation"],
+        "recul_implantation": couches["reculs"],
+        "zone_evitee": couches["zones_evitees"],
+    }
+    return [
+        EntiteBE(
+            categorie=categorie,
+            calque=CORRESPONDANCE_CONTRAT[categorie],
+            geometrie=geometrie,
+            z_reel=False,
+        )
+        for categorie, geometries in contenu.items()
+        for geometrie in geometries
+    ]
+
+
+def limites_helioscope(
+    implantation: Implantation,
+    emprise_cadastrale: BaseGeometry | None = None,
+) -> list:
+    """Ce que l'import HelioScope ne permet pas de contrôler, dit comme tel.
+
+    Le lot 2bis tire sa valeur d'avoir deux sources qui peuvent se contredire :
+    le plan du BE et son tableau bilan. L'import HelioScope n'en a qu'une. La
+    plupart des recoupements n'y ont donc pas d'objet — et les rendre
+    « conformes » ferait croire à une vérification qui n'a pas eu lieu. Un
+    statut à part le dit.
+
+    Seul le débordement hors de l'emprise cadastrale reste calculable, parce
+    qu'il confronte le calepinage à une source extérieure : le parcellaire.
+    """
+    from .import_be import (
+        AVERTISSEMENT,
+        DEBORDEMENT_NEGLIGEABLE_M2,
+        IMPOSSIBLE,
+        OK,
+        Controle,
+    )
+
+    controles = [
+        Controle(
+            "Recoupement avec le tableau bilan",
+            None,
+            None,
+            "",
+            IMPOSSIBLE,
+            "L'export HelioScope est la seule source : il n'y a pas de tableau "
+            "bilan à confronter au plan. Nombre de modules, puissance, "
+            "inclinaison et azimut ne sont donc pas recoupés — ils sont lus une "
+            "fois, et rien ne les contredit.",
+        ),
+        Controle(
+            "Cohérence altimétrique des tables",
+            None,
+            None,
+            "",
+            IMPOSSIBLE,
+            "Le DXF HelioScope est plat : les tables ne portent aucune altitude. "
+            "Le profil du terrain reste disponible par le RGE ALTI, mais sans "
+            "recoupement possible avec l'implantation.",
+        ),
+        Controle(
+            "Surface clôturée et linéaire de clôture",
+            None,
+            None,
+            "",
+            IMPOSSIBLE,
+            "HelioScope ne donne aucune clôture. La zone d'implantation est un "
+            "tracé d'étude à main levée qui ne suit pas le parcellaire : en "
+            "tirer une surface clôturée serait faux. À relever sur le plan du BE.",
+        ),
+    ]
+
+    if emprise_cadastrale is None or emprise_cadastrale.is_empty:
+        controles.append(
+            Controle(
+                "Implantation dans l'emprise cadastrale",
+                None,
+                None,
+                "",
+                AVERTISSEMENT,
+                "Emprise cadastrale non fournie : un débordement des tables hors "
+                "des parcelles du projet n'aurait pas été vu.",
+            )
+        )
+        return controles
+
+    lignes = rangees(implantation)
+    debordement = (
+        float(unary_union(lignes).difference(emprise_cadastrale).area)
+        if lignes
+        else 0.0
+    )
+    if debordement <= DEBORDEMENT_NEGLIGEABLE_M2:
+        controles.append(
+            Controle(
+                "Implantation dans l'emprise cadastrale",
+                0.0,
+                None,
+                "m²",
+                OK,
+                "Les rangées sont contenues dans l'emprise cadastrale fournie.",
+            )
+        )
+    else:
+        controles.append(
+            Controle(
+                "Implantation dans l'emprise cadastrale",
+                debordement,
+                None,
+                "m²",
+                AVERTISSEMENT,
+                f"Les rangées débordent de {debordement:.0f} m² hors de "
+                "l'emprise cadastrale fournie. Vérifiez la maîtrise foncière, "
+                "ou le calage est-ouest, avant le dépôt.",
+            )
+        )
+    return controles
+
+
+def parametres_contrat(
+    implantation: Implantation,
+    controles: list,
+    projet=None,
+    ligne_coupe=None,
+    profil=None,
+) -> dict:
+    """`projet.json` de sortie, au même format que celui du lot 2bis.
+
+    À ne pas confondre avec le `projet.json` du lot 1, qui vit dans
+    `projets/{nom}/` et décrit les métadonnées du dossier : celui-ci est la
+    sortie de l'import, dans `sortie/{nom}/`, et alimente le lot 4. Le champ
+    `origine` les distingue à la lecture.
+    """
+    from .import_be import ORIGINE_HELIOSCOPE, VERSION_CONTRAT
+
+    calage = implantation.calage
+    calepinage = implantation.calepinage
+    module = calepinage.module
+    lignes = rangees(implantation)
+
+    donnees = {
+        "version_contrat": VERSION_CONTRAT,
+        "origine": ORIGINE_HELIOSCOPE,
+        "sources": {
+            "export_helioscope": (
+                str(projet.helioscope) if projet is not None else None
+            ),
+            "design": implantation.identifiant_design,
+            "tableau_bilan": None,
+        },
+        "projet": {
+            "nom": projet.nom if projet is not None else None,
+            "phase": "DP",
+            "date_tableau": None,
+        },
+        "plan": {
+            "unite_dxf": "mètre",
+            "azimut_tables_deg": azimut_rangees(implantation),
+            "nb_tables": len(lignes),
+            "nb_portails": 0,
+            "surface_cloturee_m2": None,
+            "lineaire_cloture_m": None,
+            "surface_tables_m2": float(sum(g.area for g in lignes)),
+            "correspondance_calques": dict(CORRESPONDANCE_CONTRAT),
+            "calques_ignores": [],
+            "avertissements": list(implantation.avertissements),
+        },
+        # Le lot 2bis met ici les valeurs du tableau bilan ; le lot 2 met celles
+        # qu'il lit dans le DXF, seule source dont il dispose.
+        "parametres": {
+            "generalites": {
+                "azimut_rangees_l93_deg": azimut_rangees(implantation),
+                "orientation_insert_dxf_deg": calepinage.orientation_deg,
+                "nb_rangees": calepinage.nb_rangees,
+                "pas_rangees_m": calepinage.pas_rangees_m,
+                "pas_tables_m": calepinage.pas_tables_m,
+            },
+            "structures": {
+                "nb_tables_dxf": calepinage.nb_tables,
+                "nb_modules_par_table": calepinage.nb_modules_par_table,
+                "nom_bloc_table": calepinage.nom_bloc_table,
+            },
+            "modules": {
+                "nb_modules": calepinage.nb_modules,
+                "largeur_m": module.largeur_m,
+                "longueur_m": module.longueur_m,
+                "longueur_projetee_m": module.longueur_projetee_m,
+                "inclinaison_deg": module.inclinaison_deg,
+                "inclinaison_mesuree_deg": module.inclinaison_mesuree_deg,
+                "pose": module.pose,
+                "nom_bloc": module.nom_bloc,
+            },
+            "postes": {},
+        },
+        "cotes_normalisees": [],
+        "standards_unite": {},
+        "calage": {
+            "resolution_m_px": calage.resolution_m_px,
+            "zoom": calage.zoom,
+            "latitude_origine": calage.latitude_origine,
+            "longitude_origine": calage.longitude_origine,
+            "correction_nord_sud_m": calage.correction_nord_sud_m,
+            "facteur_echelle": calage.facteur_echelle,
+        },
+        "controles": [
+            {
+                "libelle": c.libelle,
+                "statut": c.statut,
+                "valeur_dxf": c.valeur_dxf,
+                "valeur_tableau": c.valeur_tableau,
+                "unite": c.unite,
+                "tolerance": c.tolerance,
+                "message": c.message,
+            }
+            for c in controles
+        ],
+        "seuil_puissance_dp_mwc": None,
+        "avertissements_tableau": [],
+    }
+
+    if ligne_coupe is not None:
+        donnees["ligne_coupe"] = {
+            "corrigee": ligne_coupe.corrigee,
+            "azimut_tables_deg": ligne_coupe.azimut_tables_deg,
+            "azimut_coupe_deg": ligne_coupe.azimut_coupe_deg,
+            "ecart_initial_deg": ligne_coupe.ecart_initial_deg,
+            "longueur_m": ligne_coupe.longueur_m,
+            "coordonnees_l93": [list(c[:2]) for c in ligne_coupe.geometrie.coords],
+            "trace_initial_l93": [
+                list(c[:2]) for c in ligne_coupe.trace_initial.coords
+            ],
+            "avertissements": ligne_coupe.avertissements,
+        }
+
+    if profil is not None:
+        donnees["profil_terrain"] = {
+            "origine": profil.origine,
+            "pas_m": profil.pas_m,
+            "denivelee_m": profil.denivelee_m,
+            "altitude_min_m": profil.altitude_min_m,
+            "altitude_max_m": profil.altitude_max_m,
+            "points": [
+                [round(s, 3), round(z, 3)]
+                for s, z in zip(profil.abscisses_m, profil.altitudes_m)
+            ],
+            "avertissements": profil.avertissements,
+        }
+
+    # Aucune cohérence altimétrique : le DXF est plat, c'est dit dans les
+    # contrôles, et la clé reste absente plutôt que remplie de valeurs nulles.
+    return donnees
+
+
+def ligne_coupe_helioscope(
+    implantation: Implantation,
+    trace,
+    emprise_cadastrale: BaseGeometry,
+    manuel: bool = False,
+):
+    """Ligne A-A' d'un projet HelioScope, orientée et étendue comme il faut.
+
+    Simple façade sur `coupe.corriger_ligne_coupe`, mais elle fige les deux
+    choix par lesquels on se trompe :
+
+    - l'azimut vient de `azimut_rangees()`, mesuré en Lambert 93 sur les
+      rangées. Ni les tables brutes, dont le grand côté est en travers de la
+      rangée, ni `orientation_deg`, qui se rapporte au nord géographique et non
+      au nord de la grille ;
+    - l'étendue vient de l'**emprise cadastrale** du lot 1. Le lot 2bis étend sa
+      coupe à l'emprise clôturée ; HelioScope n'a pas de clôture, et sa zone
+      d'implantation est un tracé d'étude à main levée qui ne suit pas le
+      parcellaire. Le cadastre est la seule limite dont on réponde.
+    """
+    from .coupe import corriger_ligne_coupe
+
+    if emprise_cadastrale is None or emprise_cadastrale.is_empty:
+        raise ErreurHelioScope(
+            "Emprise cadastrale absente : la ligne de coupe d'un projet "
+            "HelioScope s'étend sur elle, faute de clôture dans l'export. "
+            "Fournissez le shapefile d'emprise du lot 1."
+        )
+    return corriger_ligne_coupe(
+        trace,
+        azimut_rangees(implantation),
+        emprise_cadastrale,
+        manuel=manuel,
+    )
+
+
+def ecrire_sortie(
+    implantation: Implantation,
+    dossier: str | Path,
+    emprise_cadastrale: BaseGeometry | None = None,
+    projet=None,
+    ligne_coupe=None,
+    profil=None,
+) -> tuple[Path, Path, list]:
+    """Écrit le GeoPackage et le `projet.json` du contrat, comme le lot 2bis.
+
+    Rend les deux chemins et la liste des contrôles, dont ceux que l'absence de
+    tableau bilan rend impossibles : l'appelant doit les montrer.
+    """
+    from .import_be import ecrire_geopackage, ecrire_parametres
+
+    controles = limites_helioscope(implantation, emprise_cadastrale)
+    chemin_gpkg = ecrire_geopackage(
+        entites_contrat(implantation), dossier, ligne_coupe=ligne_coupe
+    )
+    chemin_json = ecrire_parametres(
+        parametres_contrat(
+            implantation,
+            controles,
+            projet=projet,
+            ligne_coupe=ligne_coupe,
+            profil=profil,
+        ),
+        dossier,
+    )
+    return chemin_gpkg, chemin_json, controles
+
+# ---------------------------------------------------------------------------
 # Aperçu de contrôle
 # ---------------------------------------------------------------------------
 
@@ -1332,7 +1749,7 @@ def apercu_calage(
     # aucun groupement en structures — sur les deux designs des Islettes, tous
     # les écarts entre tables valent exactement une largeur de module — et
     # cerner les 530 colonnes une par une noie la trame bleue des modules.
-    for silhouette in polygones_ou_vide(unary_union(couches["tables"])):
+    for silhouette in grouper_en_rangees(couches["tables"]):
         for anneau in en_pixels(silhouette):
             dessin.line(anneau, fill=COULEUR_FILET_TABLE, width=filet, joint="curve")
     for anneau in en_pixels(emprise_l93):
