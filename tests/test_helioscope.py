@@ -23,10 +23,8 @@ from dp_socle.helioscope import (
     calculer_calage,
     extraire_geometries,
     lire_dxf,
-    ecrire_geojson,
     importer,
     ouvrir_export,
-    parametres_json,
     prepositionner,
     projeter,
 )
@@ -417,44 +415,6 @@ def test_dimensions_de_table_conservees_apres_projection(implantation):
 # ---------------------------------------------------------------------------
 
 
-@besoin_export_complet
-def test_geojson_en_lambert93(implantation, tmp_path):
-    import json
-
-    emprise = charger_emprise(EMPRISE_ISLETTES)
-    prepositionner(implantation, emprise.geometrie)
-    fichiers = ecrire_geojson(implantation, tmp_path)
-    assert {f.stem for f in fichiers} == {
-        "tables",
-        "modules",
-        "zone_implantation",
-        "reculs",
-        "zones_evitees",
-    }
-
-    tables = json.loads((tmp_path / "tables.geojson").read_text(encoding="utf-8"))
-    assert tables["crs"]["properties"]["name"] == "urn:ogc:def:crs:EPSG::2154"
-    assert len(tables["features"]) == 530
-    x, y = tables["features"][0]["geometry"]["coordinates"][0][0]
-    # Des mètres Lambert 93, pas des degrés : le contrôle attrape une sortie
-    # laissée par mégarde en WGS84.
-    assert 840_000 < x < 852_000
-    assert 6_885_000 < y < 6_898_000
-
-
-@besoin_export_complet
-def test_parametres_serialisables(implantation):
-    import json
-
-    emprise = charger_emprise(EMPRISE_ISLETTES)
-    prepositionner(implantation, emprise.geometrie)
-    donnees = parametres_json(implantation)
-    json.dumps(donnees)  # doit passer sans convertisseur maison
-    assert donnees["design"] == "7676351"
-    assert donnees["calepinage"]["nb_modules"] == 1590
-    assert donnees["calage"]["longitude_origine"] == pytest.approx(4.9994, abs=1e-3)
-
-
 # ---------------------------------------------------------------------------
 # Réglage et persistance du calage
 # ---------------------------------------------------------------------------
@@ -800,3 +760,19 @@ def test_projet_json_conserve_la_correction_nord_sud(tmp_path):
     projet.longitude_calage = None
     with pytest.raises(ErreurDP, match="sans calage est-ouest"):
         projet.valider()
+
+
+def test_l_ancien_chemin_geojson_a_disparu():
+    """Un seul format de sortie, sans quoi le lot 4 devrait en lire deux.
+
+    L'import HelioScope écrivait cinq GeoJSON dans sortie/{projet}/helioscope/,
+    dont le CRS était porté par un membre `crs` que la spécification GeoJSON ne
+    prévoit pas. Le contrat GeoPackage du lot 2bis les remplace. Ce test évite
+    qu'un des deux chemins revienne sans qu'on s'en aperçoive.
+    """
+    import dp_socle.helioscope as helioscope
+
+    for disparu in ("ecrire_geojson", "COUCHES_SORTIE", "parametres_json"):
+        assert not hasattr(helioscope, disparu), disparu
+    assert hasattr(helioscope, "ecrire_sortie")
+    assert hasattr(helioscope, "parametres_contrat")

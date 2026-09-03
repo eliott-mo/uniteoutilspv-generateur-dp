@@ -16,10 +16,14 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 5 | Notice DP 11 | à venir |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
-fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE
-et devra produire le même GeoPackage que le lot 2bis : voir
-`_briefs/BRIEF_DP_lot2_alignement_geopackage.md`, à traiter dans la
-conversation du lot 2.
+fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE,
+et produit depuis le 03/09/2026 **le même contrat de sortie** que le lot 2bis :
+un `geometries.gpkg` et un `projet.json` dans `sortie/{projet}/`, à
+`version_contrat` égale, distingués par leur champ `origine`. Le lot 4 lira une
+seule structure sans savoir de quel lot vient le dossier. Le test
+`tests/test_contrat_helioscope.py::test_les_deux_lots_ecrivent_le_meme_schema`
+est ce qui empêche les deux producteurs de repartir chacun de leur côté :
+n'ajoutez une couche ou une colonne d'un côté qu'en la traitant de l'autre.
 
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on

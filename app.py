@@ -52,13 +52,16 @@ from dp_socle.geometrie import charger_emprise
 from dp_socle.helioscope import (
     CORRECTION_NORD_SUD_MAX_M,
     apercu_calage,
+    azimut_rangees,
     cadre_apercu,
     corriger_nord_sud,
     decaler_longitude,
+    ecrire_sortie,
     fond_apercu,
-    ecrire_geojson,
-    parametres_json,
+    ligne_coupe_helioscope,
+    parametres_contrat,
     prepositionner,
+    rangees,
 )
 from dp_socle.helioscope import importer as importer_helioscope
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
@@ -302,6 +305,141 @@ if lancer:
 
 
 # ---------------------------------------------------------------------------
+# Rendu des contrôles, commun aux deux imports
+# ---------------------------------------------------------------------------
+
+def _formater(valeur, unite: str) -> str:
+    """Valeur d'un contrôle croisé, lisible en tableau."""
+    if valeur is None:
+        return "—"
+    if isinstance(valeur, float):
+        texte = f"{valeur:,.2f}".replace(",", " ").replace(".", ",")
+    else:
+        texte = str(valeur)
+    return f"{texte} {unite}".strip()
+
+
+#: Icône par statut de contrôle. Écrit une fois et lu avec un défaut : un accès
+#: direct au dictionnaire levait un KeyError dès qu'un statut nouveau
+#: apparaissait — et « impossible » est arrivé avec l'alignement du lot 2.
+ICONES_STATUT = {
+    "ok": "✅",
+    "avertissement": "⚠️",
+    "bloquant": "🚫",
+    "impossible": "∅",
+}
+
+
+def _icone(statut: str) -> str:
+    return ICONES_STATUT.get(statut, "❔")
+
+
+def _tableau_controles(controles) -> None:
+    """Rend les contrôles croisés, quel que soit leur producteur."""
+    st.dataframe(
+        [
+            {
+                "": _icone(c.statut),
+                "Contrôle": c.libelle,
+                "Plan": _formater(c.valeur_dxf, c.unite),
+                "Tableau": _formater(c.valeur_tableau, c.unite),
+                "Tolérance": c.tolerance,
+                "Commentaire": c.message,
+            }
+            for c in controles
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+
+
+@st.fragment
+def _coupe_helioscope(implantation, emprise_cadastrale) -> None:
+    """Tracé, redressement et profil de la coupe A-A' d'un projet HelioScope.
+
+    Même mécanique que celle de l'import BE : on trace grossièrement sur la
+    carte, la direction est imposée par la géométrie des rangées, et le profil
+    vient du RGE ALTI. En fragment, pour que le tracé ne relance pas tout le
+    script.
+    """
+    import folium
+    from folium.plugins import Draw
+
+    from dp_socle.apercu_be import bornes_wgs84, en_wgs84, figure_profil, trace_l93
+
+    couches = en_wgs84([emprise_cadastrale] + rangees(implantation))
+    minx, miny, maxx, maxy = bornes_wgs84(emprise_cadastrale)
+    carte = folium.Map(tiles=None)
+    folium.TileLayer(
+        tiles=URL_TUILES_ORTHO, attr="IGN — BD ORTHO", name="Ortho IGN"
+    ).add_to(carte)
+    for geometrie in couches["geometries"]:
+        folium.GeoJson(
+            geometrie,
+            style_function=lambda _: {
+                "color": "#0000ff",
+                "weight": 2,
+                "fillOpacity": 0.25,
+            },
+        ).add_to(carte)
+    carte.fit_bounds([[miny, minx], [maxy, maxx]])
+    Draw(
+        draw_options={
+            "polyline": {"shapeOptions": {"color": "#ff8c00", "weight": 4}},
+            "polygon": False,
+            "rectangle": False,
+            "circle": False,
+            "marker": False,
+            "circlemarker": False,
+        },
+        edit_options={"edit": False, "remove": True},
+    ).add_to(carte)
+
+    resultat = st_folium(carte, width=None, height=480, key="carte_coupe_helioscope")
+    trace = trace_l93(resultat)
+    if trace is None:
+        st.caption(
+            "Tracez un segment en travers des rangées avec l'outil ligne. La "
+            "direction sera redressée ; seul le point milieu est conservé."
+        )
+        return
+
+    try:
+        coupe = ligne_coupe_helioscope(implantation, trace, emprise_cadastrale)
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+        return
+
+    st.session_state.coupe_helioscope = coupe
+    for message in coupe.avertissements:
+        st.warning(message, icon="⚠️")
+    colonnes = st.columns(3)
+    colonnes[0].metric("Azimut de la coupe", f"{coupe.azimut_coupe_deg:+.3f}°")
+    colonnes[1].metric("Longueur", f"{coupe.longueur_m:.1f} m")
+    colonnes[2].metric("Redressement", f"{coupe.ecart_initial_deg:.1f}°")
+
+    if st.button("Lever le profil du terrain (RGE ALTI)", width="stretch"):
+        try:
+            st.session_state.profil_helioscope = profil_terrain(coupe.geometrie)
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}")
+    profil = st.session_state.get("profil_helioscope")
+    if profil is not None:
+        st.pyplot(figure_profil(profil))
+        st.caption(
+            f"{profil.origine} — dénivelée {profil.denivelee_m:.1f} m, "
+            f"de {profil.altitude_min_m:.1f} à {profil.altitude_max_m:.1f} m NGF. "
+            "Aucun recoupement avec l'altitude des tables n'est possible : le "
+            "DXF HelioScope est plat."
+        )
+    st.caption(
+        "Relancez « Valider ce calage » pour écrire la coupe et le profil dans "
+        "le contrat."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Lot 2 — calepinage HelioScope
 # ---------------------------------------------------------------------------
 
@@ -499,20 +637,72 @@ if implantation is not None:
                 )
                 projet.valider()
                 chemin = projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
-                dossier_geo = DOSSIER_SORTIE / projet.nom / "helioscope"
-                fichiers = ecrire_geojson(implantation, dossier_geo)
+                emprise = _emprise_courante()
+
+                # Même contrat de sortie que l'import BE, dans sortie/{projet}/ :
+                # le lot 4 lira une seule structure, sans savoir de quel lot
+                # vient le dossier.
+                dossier_sortie = DOSSIER_SORTIE / projet.nom
+                gpkg, params, controles = ecrire_sortie(
+                    implantation,
+                    dossier_sortie,
+                    emprise_cadastrale=None if emprise is None else emprise.geometrie,
+                    projet=projet,
+                    ligne_coupe=st.session_state.get("coupe_helioscope"),
+                    profil=st.session_state.get("profil_helioscope"),
+                )
                 st.success(
                     f"Calage enregistré dans {chemin} "
                     f"(longitude {projet.longitude_calage:.8f}°, correction "
                     f"nord-sud {implantation.calage.correction_nord_sud_m:+.1f} m). "
-                    f"{len(fichiers)} couches écrites dans {dossier_geo}."
+                    f"Contrat écrit : {gpkg.name} et {params.name} dans "
+                    f"{dossier_sortie}."
                 )
-                st.code(
-                    json.dumps(
-                        parametres_json(implantation), ensure_ascii=False, indent=2
-                    ),
-                    language="json",
+
+                st.markdown("### Contrôles")
+                _tableau_controles(controles)
+                st.caption(
+                    "∅ marque un contrôle que la source ne permet pas de faire. "
+                    "L'export HelioScope est la seule source du dossier : il n'y "
+                    "a pas de tableau bilan à lui opposer, et la plupart des "
+                    "recoupements du plan BE n'ont donc pas d'objet ici. C'est la "
+                    "contrepartie de ce lot, à ne pas confondre avec un contrôle "
+                    "réussi."
                 )
+                for controle in controles:
+                    if controle.statut == "avertissement":
+                        st.warning(
+                            f"{controle.libelle} — {controle.message}", icon="⚠️"
+                        )
+
+                azimut = azimut_rangees(implantation)
+                st.markdown("### Coupe A-A'")
+                st.caption(
+                    "Facultative à ce stade. Elle s'étend sur l'emprise "
+                    "cadastrale, faute de clôture dans l'export HelioScope, et "
+                    "son orientation est imposée par les rangées mesurées en "
+                    f"Lambert 93 : {azimut:+.3f}°, soit une coupe à "
+                    f"{azimut + 90:+.3f}°."
+                )
+                if emprise is None:
+                    st.info(
+                        "Emprise cadastrale absente : la coupe ne peut pas être "
+                        "étendue. Téléversez le shapefile d'emprise plus haut."
+                    )
+                else:
+                    _coupe_helioscope(implantation, emprise.geometrie)
+
+                with st.expander("Paramètres écrits dans le contrat"):
+                    st.code(
+                        json.dumps(
+                            parametres_contrat(
+                                implantation, controles, projet=projet
+                            ),
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        language="json",
+                    )
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
 
@@ -585,17 +775,6 @@ seuil_puissance = st.number_input(
     "saisie ici qui sert de repère, et la puissance du projet est affichée en "
     "évidence dans tous les cas.",
 )
-
-
-def _formater(valeur, unite: str) -> str:
-    """Valeur d'un contrôle croisé, lisible en tableau."""
-    if valeur is None:
-        return "—"
-    if isinstance(valeur, float):
-        texte = f"{valeur:,.2f}".replace(",", " ").replace(".", ",")
-    else:
-        texte = str(valeur)
-    return f"{texte} {unite}".strip()
 
 
 def _deposer(fichier, defaut_nom: str = "projet") -> Path | None:
@@ -785,21 +964,7 @@ if import_be_courant is not None:
     )
 
     st.markdown("### Contrôles croisés")
-    st.dataframe(
-        [
-            {
-                "": {"ok": "✅", "avertissement": "⚠️", "bloquant": "🚫"}[c.statut],
-                "Contrôle": c.libelle,
-                "Plan": _formater(c.valeur_dxf, c.unite),
-                "Tableau": _formater(c.valeur_tableau, c.unite),
-                "Tolérance": c.tolerance,
-                "Commentaire": c.message,
-            }
-            for c in import_be_courant.controles
-        ],
-        width="stretch",
-        hide_index=True,
-    )
+    _tableau_controles(import_be_courant.controles)
     for controle in import_be_courant.bloquants:
         st.error(f"{controle.libelle} — {controle.message}", icon="🚫")
     for message in import_be_courant.avertissements:

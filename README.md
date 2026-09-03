@@ -533,12 +533,88 @@ module. Le contour noir cerne donc la rangée, seule entité que le fichier
 permette de reconstituer — le découpage en tables de 3×9 du dossier HOCH est un
 choix de structure, pas une donnée de l'export.
 
-### Sorties
+### Sorties — le contrat commun avec le lot 2bis
 
-Un GeoJSON par couche en EPSG:2154 — `tables`, `modules`, `zone_implantation`,
-`reculs`, `zones_evitees` — plus les paramètres du calepinage et la longitude de
-calage dans `projet.json`. La couche `modules` est celle que dessine un plan de
-masse lisible ; `tables` n'en est que le contour groupé.
+Depuis le 03/09/2026, le lot 2 écrit **exactement le contrat du lot 2bis** :
+`sortie/{projet}/geometries.gpkg` et `sortie/{projet}/projet.json`, à
+`version_contrat` égale, distingués par `origine` (`helioscope` contre
+`import_be`). L'ancien chemin — cinq GeoJSON dans `sortie/{projet}/helioscope/`,
+dont le CRS était porté par un membre `crs` que la spécification GeoJSON ne
+prévoit pas — a été retiré : deux formats auraient obligé le lot 4 à les lire
+tous les deux, ou à refuser les projets sans plan BE.
+
+| Couche du contrat | Contenu HelioScope | Aussi produite par le lot 2bis |
+|---|---|---|
+| `tables_pv` | les **rangées** | oui |
+| `modules_pv` | chaque module | non |
+| `zone_implantation_pv` | zone tracée dans HelioScope | non |
+| `recul_implantation` | reculs de la zone | non |
+| `zone_evitee` | bâtiments, bassins, voiries | non |
+
+Les colonnes sont les mêmes des deux côtés — `calque`, `categorie`, `z_reel`,
+`z_min`, `z_max` — y compris celles que HelioScope ne peut pas remplir : le DXF
+est plat, `z_reel` vaut donc `False` partout et les bornes restent nulles. Un
+schéma qui changerait selon la provenance obligerait le lot 4 à savoir d'où
+vient le fichier avant de le lire.
+
+**`tables_pv` reçoit les rangées, pas les tables du DXF.** Une « table »
+HelioScope est une colonne de 3 modules, 1,30 × 6,48 m, dont le grand côté est
+*en travers* de la rangée. Mesuré le 03/09/2026 sur le design 7676351 :
+
+| Entrée de `azimut_tables()` | Azimut rendu |
+|---|---|
+| couche `tables` brute | **−88,105°** |
+| rangées regroupées | **+1,895°** |
+
+Y brancher la ligne de coupe donnerait une coupe **parallèle** aux rangées au
+lieu de perpendiculaire, sans anomalie visible sur la planche. Mettre les
+rangées dans `tables_pv` fait que le calcul juste est celui qu'on obtient sans
+rien savoir de la provenance du fichier.
+
+Aucune couche n'est appariée à `cloture` ni à `portail` : la zone d'implantation
+HelioScope est tracée à main levée et ne suit pas le parcellaire — 25,05 ha
+contre 27,99 ha pour le cadastre à Bray-Saint-Aignan. En tirer une surface
+clôturée ou un linéaire de clôture donnerait des chiffres faux dans le dossier
+déposé.
+
+### `orientation_deg` n'oriente pas la coupe
+
+`calepinage.orientation_deg` s'écarte de 1,45° de l'azimut mesuré sur les
+rangées. Ce n'est pas du bruit : mesuré le 03/09/2026, l'écart vaut **1,4507°,
+et c'est exactement la convergence des méridiens du Lambert 93** au droit du
+site — pyproj donne 1,4507°, résidu nul.
+
+`orientation_deg` est la rotation des INSERT dans le repère du DXF, rapportée au
+**nord géographique** ; la ligne de coupe se trace en Lambert 93, rapporté au
+**nord de la grille**. La convergence est nulle sur le méridien 3° E et atteint
+3° aux bords de la France métropolitaine. `azimut_rangees()` mesure donc sur la
+géométrie projetée, comme le fait le lot 2bis.
+
+### Ce que le lot 2 ne peut pas fournir
+
+Le lot 2bis tire sa valeur d'avoir **deux sources qui peuvent se contredire** :
+le plan du BE et son tableau bilan. L'import HelioScope n'en a qu'une. La
+plupart des recoupements n'y ont donc pas d'objet, et les afficher en vert
+laisserait croire à une vérification qui n'a pas eu lieu : un statut
+`impossible`, marqué ∅ à l'écran, les distingue d'un contrôle réussi.
+
+| Contrôle | Statut |
+|---|---|
+| Recoupement avec le tableau bilan | impossible — pas de seconde source |
+| Cohérence altimétrique des tables | impossible — DXF plat |
+| Surface clôturée, linéaire de clôture | impossible — pas de clôture |
+| Implantation dans l'emprise cadastrale | **calculable** |
+
+Le seul recoupement qui survit confronte le calepinage à une source extérieure,
+le parcellaire. C'est la vraie perte de ce lot par rapport au 2bis, et elle est
+dite dans les données comme à l'écran.
+
+La coupe A-A' reste disponible, avec la même mécanique qu'au lot 2bis — tracé
+sur carte, redressement perpendiculaire, profil RGE ALTI. Elle s'étend sur
+l'**emprise cadastrale** du lot 1 : le lot 2bis étend la sienne à l'emprise
+clôturée, que HelioScope ne donne pas, et la zone d'implantation n'est pas un
+candidat défendable. Le profil du terrain reste levable, mais sans recoupement
+possible avec l'altitude des tables.
 
 **Aucune planche n'est produite** : le dessin relève du lot 4.
 

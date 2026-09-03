@@ -1059,16 +1059,6 @@ def prepositionner(
 # Sorties
 # ---------------------------------------------------------------------------
 
-#: Nom de fichier par couche produite.
-COUCHES_SORTIE = (
-    "tables",
-    "modules",
-    "zone_implantation",
-    "reculs",
-    "zones_evitees",
-)
-
-
 def geometries_l93(implantation: Implantation) -> dict[str, list[BaseGeometry]]:
     """Toutes les couches, projetées en Lambert 93."""
     calage = implantation.calage
@@ -1078,51 +1068,6 @@ def geometries_l93(implantation: Implantation) -> dict[str, list[BaseGeometry]]:
         "zone_implantation": [projeter(implantation.zone_implantation, calage)],
         "reculs": [projeter(g, calage) for g in implantation.reculs],
         "zones_evitees": [projeter(g, calage) for g in implantation.zones_evitees],
-    }
-
-
-def ecrire_geojson(implantation: Implantation, dossier: str | Path) -> list[Path]:
-    """Écrit un GeoJSON en EPSG:2154 par couche."""
-    dossier = Path(dossier)
-    dossier.mkdir(parents=True, exist_ok=True)
-    ecrits: list[Path] = []
-    for nom, geoms in geometries_l93(implantation).items():
-        collection = {
-            "type": "FeatureCollection",
-            # Les GeoJSON sont en WGS84 par défaut : sans ce membre, un
-            # relecteur croirait à des degrés là où il y a des mètres.
-            "crs": {
-                "type": "name",
-                "properties": {"name": "urn:ogc:def:crs:EPSG::2154"},
-            },
-            "features": [
-                {"type": "Feature", "properties": {"id": i}, "geometry": mapping(g)}
-                for i, g in enumerate(geoms)
-            ],
-        }
-        chemin = dossier / f"{nom}.geojson"
-        chemin.write_text(
-            json.dumps(collection, ensure_ascii=False, indent=1) + "\n",
-            encoding="utf-8",
-        )
-        ecrits.append(chemin)
-    return ecrits
-
-
-def parametres_json(implantation: Implantation) -> dict:
-    """Paramètres du calepinage et du calage, pour `projet.json`."""
-    calage = implantation.calage
-    return {
-        "design": implantation.identifiant_design,
-        "calepinage": asdict(implantation.calepinage),
-        "calage": {
-            "resolution_m_px": calage.resolution_m_px,
-            "zoom": calage.zoom,
-            "latitude_origine": calage.latitude_origine,
-            "longitude_origine": calage.longitude_origine,
-            "correction_nord_sud_m": calage.correction_nord_sud_m,
-            "facteur_echelle": calage.facteur_echelle,
-        },
     }
 
 
