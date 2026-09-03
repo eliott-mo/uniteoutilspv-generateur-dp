@@ -82,7 +82,7 @@ streamlit run app.py
 Ou directement, à partir du format pivot `projet.json` :
 
 ```bash
-python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import generer_dossier; generer_dossier(Projet.charger('exemples/bray-saint-aignan/projet.json'))"
+python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import generer_dossier; generer_dossier(Projet.charger('exemples/bray-saint-aignan-HELIO/projet.json'))"
 ```
 
 ### `projet.json`
