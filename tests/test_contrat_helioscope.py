@@ -57,6 +57,19 @@ DXF_BE = EXEMPLES / "saint-cyr-DXF" / "20260903_SCV_IND06.dxf"
 #: vient le fichier avant de le lire.
 COLONNES = {"calque", "categorie", "z_reel", "z_min", "z_max", "geometry"}
 
+#: La ligne de coupe est une couche à part, et ses colonnes le sont aussi. Elle
+#: est comparée séparément mais elle l'est : c'est celle dont les deux
+#: producteurs pourraient le plus facilement diverger, puisque chacun la
+#: construit depuis sa propre emprise.
+COLONNES_COUPE = {
+    "role",
+    "corrigee",
+    "azimut_tables_deg",
+    "ecart_initial_deg",
+    "longueur_m",
+    "geometry",
+}
+
 besoin_export = pytest.mark.skipif(
     not EXPORT.exists(), reason=f"export de référence absent : {EXPORT}"
 )
@@ -87,6 +100,15 @@ def sortie_lot2(tmp_path_factory, implantation, emprise_cadastrale):
         implantation, dossier, emprise_cadastrale=emprise_cadastrale
     )
     return dossier, gpkg, params, controles
+
+
+def _implantation_pour_schema():
+    """Implantation calée, indépendante de la fixture de module."""
+    emprise = charger_emprise(EMPRISE)
+    resultat = importer(EXPORT)
+    diagnostic = prepositionner(resultat, emprise.geometrie)
+    corriger_nord_sud(resultat.calage, -diagnostic.ecart_nord_sud_m)
+    return resultat
 
 
 def _schema(chemin: Path) -> dict[str, set[str]]:
@@ -120,30 +142,60 @@ def test_les_deux_lots_ecrivent_le_meme_schema(sortie_lot2, tmp_path):
     Les couches ne sont pas les mêmes — chaque source apporte ce qu'elle a — mais
     elles viennent toutes du contrat, et leurs colonnes sont identiques.
     """
-    _, gpkg_lot2, _, _ = sortie_lot2
+    from dp_socle.coupe import corriger_ligne_coupe
+
+    dossier_lot2, _, _, _ = sortie_lot2
+    implantation_lot2 = _implantation_pour_schema()
+    emprise = charger_emprise(EMPRISE).geometrie
+
+    # Les deux sorties portent une ligne de coupe : c'est la couche dont les
+    # deux producteurs pourraient le plus facilement diverger, chacun la
+    # construisant depuis sa propre emprise.
+    centre = unary_union(rangees(implantation_lot2)).centroid
+    coupe_lot2 = ligne_coupe_helioscope(
+        implantation_lot2,
+        LineString([(centre.x - 40, centre.y - 60), (centre.x + 25, centre.y + 55)]),
+        emprise,
+    )
+    gpkg_lot2 = ecrire_geopackage(
+        entites_contrat(implantation_lot2),
+        tmp_path / "lot2",
+        ligne_coupe=coupe_lot2,
+    )
+
     plan = lire_plan_be(DXF_BE)
-    gpkg_lot2bis = ecrire_geopackage(plan, tmp_path / "lot2bis")
+    centre_be = plan.polygone_cloture.centroid
+    coupe_lot2bis = corriger_ligne_coupe(
+        LineString(
+            [
+                (centre_be.x - 30, centre_be.y - 40),
+                (centre_be.x + 20, centre_be.y + 35),
+            ]
+        ),
+        azimut_tables(plan.tables),
+        plan.polygone_cloture,
+    )
+    gpkg_lot2bis = ecrire_geopackage(
+        plan, tmp_path / "lot2bis", ligne_coupe=coupe_lot2bis
+    )
 
     schema_lot2 = _schema(gpkg_lot2)
     schema_lot2bis = _schema(gpkg_lot2bis)
 
     connues = set(CATEGORIES) | {"ligne_coupe"}
-    assert set(schema_lot2) <= connues, (
-        f"couches hors contrat côté lot 2 : {sorted(set(schema_lot2) - connues)}"
-    )
-    assert set(schema_lot2bis) <= connues, (
-        f"couches hors contrat côté lot 2bis : "
-        f"{sorted(set(schema_lot2bis) - connues)}"
-    )
+    for etiquette, schema in (("lot 2", schema_lot2), ("lot 2bis", schema_lot2bis)):
+        hors = sorted(set(schema) - connues)
+        assert not hors, f"couches hors contrat côté {etiquette} : {hors}"
+        assert "tables_pv" in schema, etiquette
+        assert "ligne_coupe" in schema, etiquette
 
     for nom, colonnes in {**schema_lot2bis, **schema_lot2}.items():
-        assert colonnes == COLONNES, f"couche « {nom} » : colonnes {sorted(colonnes)}"
+        attendu = COLONNES_COUPE if nom == "ligne_coupe" else COLONNES
+        assert colonnes == attendu, f"couche « {nom} » : colonnes {sorted(colonnes)}"
 
-    # Les deux sources ont bien quelque chose à dire, et se recouvrent sur les
-    # tables : c'est le minimum pour que le lot 4 dessine sans savoir d'où vient
-    # le fichier.
-    assert "tables_pv" in schema_lot2
-    assert "tables_pv" in schema_lot2bis
+    # Et la couche commune se lit pareil des deux côtés.
+    assert schema_lot2["tables_pv"] == schema_lot2bis["tables_pv"]
+    assert schema_lot2["ligne_coupe"] == schema_lot2bis["ligne_coupe"]
 
 
 @besoin_export
