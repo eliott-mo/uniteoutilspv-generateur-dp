@@ -115,8 +115,9 @@ FLECHE_DISCRETISATION_M = 0.01
 #: plusieurs dizaines de mètres.
 TOLERANCE_REGROUPEMENT_M = 0.05
 
-#: Écart admis entre l'azimut calculé sur la géométrie et celui déclaré au
-#: tableau bilan, en degrés.
+#: Écart admis, en degrés, entre l'inclinaison des rangées mesurée sur la
+#: géométrie et celle déclarée au tableau bilan — comparées en valeur absolue,
+#: voir `_azimut` pour pourquoi.
 TOLERANCE_AZIMUT_DEG = 2.0
 
 
@@ -841,7 +842,13 @@ def controler(
         )
     )
 
-    controles.append(_azimut(plan.azimut_tables_deg, structures["azimut_deg"]))
+    controles.append(
+        _azimut(
+            plan.azimut_tables_deg,
+            structures["azimut_deg"],
+            structures["azimut_brut"],
+        )
+    )
     controles.append(_emprise(plan, emprise_cadastrale))
     controles.append(_puissance(modules["puissance_mwc"], seuil_puissance_mwc))
     return controles
@@ -905,30 +912,52 @@ def _ecart_relatif(
     )
 
 
-def _azimut(azimut_dxf: float, azimut_tableau: float) -> Controle:
-    """Recoupe l'azimut mesuré sur les tables avec celui déclaré au tableau.
+def _azimut(azimut_dxf: float, azimut_tableau: float, azimut_brut: str) -> Controle:
+    """Recoupe l'inclinaison des rangées mesurée sur les tables avec le tableau.
 
-    Les deux conventions coïncident sur le fichier de référence, où les rangées
-    est-ouest et l'azimut déclaré valent l'un et l'autre 0°. Ce contrôle attrape
-    donc un plan tourné par rapport à ce qu'annonce le tableau, pas une erreur
-    de convention : il avertit sans bloquer, et c'est toujours la géométrie qui
-    oriente la coupe A-A'.
+    **Seules les valeurs absolues sont comparées, et c'est délibéré.** Le champ
+    « Azimut (°) » du tableau bilan n'a pas de convention stable d'un projet à
+    l'autre — relevé le 03/09/2026 sur trois dossiers : « 0° » pour un champ
+    plein sud, donc 0 = sud ; « 41° SE » avec la direction en toutes lettres ;
+    et « -24,5 » sans direction et de signe contraire pour une orientation de la
+    même famille. Ailleurs encore, le sud est noté 180, en azimut compas.
+
+    Les ramener toutes dans ]-90, 90] absorbe l'origine (0 ou 180 pour le sud),
+    et la valeur absolue absorbe le sens de comptage. Ce qui subsiste — de
+    combien les rangées s'écartent de l'est-ouest — est la seule grandeur que
+    les trois écritures expriment de la même façon.
+
+    Ce que ce contrôle ne voit donc pas : un plan monté en miroir, tables à -41°
+    là où le tableau décrit +41°. Il faudrait une convention écrite au tableau
+    pour l'attraper, et il n'y en a pas. La cellule est affichée telle quelle à
+    côté de la mesure, pour que la lecture reste possible à l'œil.
+
+    Il avertit sans bloquer : c'est toujours la géométrie qui oriente la coupe
+    A-A', jamais cette valeur.
     """
-    ecart = abs(_dans_demi_tour(azimut_dxf - azimut_tableau))
+    mesure = abs(_dans_demi_tour(azimut_dxf))
+    declare = abs(_dans_demi_tour(azimut_tableau))
+    ecart = abs(mesure - declare)
     conforme = ecart <= TOLERANCE_AZIMUT_DEG
     return Controle(
-        libelle="Azimut des tables",
-        valeur_dxf=azimut_dxf,
-        valeur_tableau=azimut_tableau,
-        unite="°",
+        libelle="Inclinaison des rangées",
+        valeur_dxf=mesure,
+        valeur_tableau=declare,
+        unite="° depuis l'est-ouest",
         statut=OK if conforme else AVERTISSEMENT,
-        tolerance=f"{TOLERANCE_AZIMUT_DEG:g}°",
+        tolerance=f"{TOLERANCE_AZIMUT_DEG:g}°, en valeur absolue",
         message=(
-            f"Écart de {ecart:.2f}° entre la géométrie et le tableau."
+            f"Rangées mesurées à {mesure:.2f}° de l'est-ouest, pour « "
+            f"{azimut_brut} » au tableau : écart de {ecart:.2f}°. Seule la "
+            "valeur absolue est comparée, le champ du tableau n'ayant pas de "
+            "convention stable d'un projet à l'autre — un plan monté en miroir "
+            "ne serait donc pas vu ici."
             if conforme
-            else f"Écart de {ecart:.2f}° entre l'azimut mesuré sur les tables "
-            f"({azimut_dxf:.2f}°) et celui déclaré au tableau "
-            f"({azimut_tableau:g}°). C'est la géométrie qui oriente la coupe A-A'."
+            else f"Rangées mesurées à {mesure:.2f}° de l'est-ouest, pour « "
+            f"{azimut_brut} » au tableau : écart de {ecart:.2f}°, au-delà des "
+            f"{TOLERANCE_AZIMUT_DEG:g}° admis. Le plan et le tableau ne "
+            "décrivent pas la même orientation de rangées. C'est la géométrie "
+            "qui oriente la coupe A-A'."
         ),
     )
 

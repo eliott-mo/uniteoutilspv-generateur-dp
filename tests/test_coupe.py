@@ -63,7 +63,7 @@ def test_le_jeu_de_reference_passe_tous_les_controles(plan, tableau):
     assert statuts["Surface clôturée"] == OK
     assert statuts["Linéaire de clôture"] == OK
     assert statuts["Surface projetée des modules"] == OK
-    assert statuts["Azimut des tables"] == OK
+    assert statuts["Inclinaison des rangées"] == OK
     assert statuts["Puissance du projet"] == OK
     # Sans emprise cadastrale, le contrôle d'inclusion ne peut pas être fait :
     # il est signalé, jamais tenu pour réussi.
@@ -595,3 +595,83 @@ def test_le_nuage_du_be_concorde_avec_le_rge_alti():
     ecarts = [a - b for a, b in zip(nuage.altitudes_m, ign.altitudes_m)]
     assert max(abs(e) for e in ecarts) < 0.30
     assert nuage.denivelee_m == pytest.approx(ign.denivelee_m, abs=0.15)
+
+
+# ---------------------------------------------------------------------------
+# Azimut : trois écritures, aucune convention
+# ---------------------------------------------------------------------------
+
+
+def _controle_azimut(plan, azimut_dxf, ecrit_au_tableau):
+    """Rejoue le contrôle d'orientation avec une valeur d'azimut donnée."""
+    from dataclasses import replace
+
+    from dp_socle.tableau_bilan import _angle, _texte
+
+    tableau = lire_tableau(TABLEAU, "IND06")
+    tableau.structures["azimut_deg"] = _angle(ecrit_au_tableau, "Azimut (°)")
+    tableau.structures["azimut_brut"] = _texte(ecrit_au_tableau, "Azimut (°)")
+    plan_oriente = replace(plan, azimut_tables_deg=azimut_dxf)
+    return next(
+        c
+        for c in controler(plan_oriente, tableau)
+        if c.libelle == "Inclinaison des rangées"
+    )
+
+
+@pytest.mark.parametrize(
+    ("azimut_dxf", "ecrit_au_tableau"),
+    [
+        # Saint-Cyr : rangées est-ouest, « 0° » au tableau, 0 valant le sud.
+        (0.0, "0°"),
+        # Le même champ plein sud écrit en azimut compas ailleurs.
+        (0.0, "180"),
+        # Un projet sud-est, direction en toutes lettres.
+        (-41.0, "41° SE"),
+        (41.0, "41° SE"),
+        # Un autre projet sud-est, sans direction et de signe contraire.
+        (24.5, "-24,5"),
+        (-24.5, "-24,5"),
+    ],
+)
+def test_orientation_reconnue_quelle_que_soit_l_ecriture(
+    plan, azimut_dxf, ecrit_au_tableau
+):
+    """Les trois écritures relevées chez le BE décrivent la même grandeur.
+
+    Ramener dans ]-90, 90] absorbe l'origine (0 ou 180 pour le sud), la valeur
+    absolue absorbe le sens de comptage.
+    """
+    controle = _controle_azimut(plan, azimut_dxf, ecrit_au_tableau)
+    assert controle.statut == OK
+    # La cellule est montrée telle qu'écrite : le « SE » n'est pas avalé.
+    assert str(ecrit_au_tableau) in controle.message
+
+
+def test_orientation_franchement_differente_avertit(plan):
+    """Rangées est-ouest alors que le tableau annonce un champ à 41°."""
+    controle = _controle_azimut(plan, 0.0, "41° SE")
+    assert controle.statut == AVERTISSEMENT
+    assert "41.00°" in controle.message
+
+
+def test_plan_en_miroir_non_detecte_et_c_est_documente(plan):
+    """Limite assumée, faute de convention écrite au tableau.
+
+    Ce test existe pour que la limite soit visible et se casse si quelqu'un
+    croit un jour l'avoir corrigée sans avoir obtenu la convention.
+    """
+    assert _controle_azimut(plan, 41.0, "41° SE").statut == OK
+    assert _controle_azimut(plan, -41.0, "41° SE").statut == OK
+
+
+def test_direction_ecrite_conservee_dans_le_tableau_lu():
+    """Le convertisseur numérique avalait « SE » sans rien dire."""
+    from dp_socle.tableau_bilan import _angle, _texte
+
+    assert _angle("41° SE", "Azimut (°)") == pytest.approx(41.0)
+    assert _texte("41° SE", "Azimut (°)") == "41° SE"
+
+    tableau = lire_tableau(TABLEAU, "IND06")
+    assert tableau.structures["azimut_deg"] == pytest.approx(0.0)
+    assert tableau.structures["azimut_brut"] == "0°"

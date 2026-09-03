@@ -77,7 +77,12 @@ def _entier(valeur, libelle: str) -> int:
 
 
 def _angle(valeur, libelle: str) -> float:
-    """Angle en degrés, avec ou sans le symbole °."""
+    """Angle en degrés, avec ou sans le symbole °.
+
+    La valeur numérique seule ne suffit pas à interpréter l'azimut du tableau :
+    voir `azimut_brut` dans PARAMETRES. Ce convertisseur ne rend que le nombre,
+    et la cellule telle qu'écrite est conservée à côté.
+    """
     return _nombre(valeur, libelle)
 
 
@@ -135,6 +140,16 @@ PARAMETRES = {
         ("format_table", "Format table", _texte, True),
         ("inclinaison_deg", "Inclinaison (°)", _angle, True),
         ("azimut_deg", "Azimut (°)", _angle, True),
+        # La même cellule, lue deux fois : en nombre et telle qu'écrite.
+        #
+        # Ce champ n'a pas de convention stable d'un projet à l'autre. Relevé
+        # le 03/09/2026 sur trois dossiers : « 0° » pour un champ plein sud
+        # (0 = sud), « 41° SE » avec la direction en toutes lettres, et
+        # « -24,5 » sans direction et de signe contraire pour une orientation
+        # de la même famille. Un convertisseur numérique seul avalerait le
+        # « SE » sans rien dire : la chaîne d'origine est donc conservée, et
+        # c'est elle qui est montrée à l'écran de contrôle.
+        ("azimut_brut", "Azimut (°)", _texte, True),
         ("nb_tables", "Nombre de tables", _entier, True),
         ("inter_table_m", "Inter-table (m)", _nombre, True),
         ("pitch_m", "Pitch (m)", _nombre, True),

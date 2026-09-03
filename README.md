@@ -661,9 +661,33 @@ ne remarque avant l'instruction du dossier.
 | Surface clôturée, polygone DXF vs tableau | 2 % | bloquant |
 | Linéaire de clôture, DXF vs tableau | 2 % | avertissement |
 | Surface projetée des modules vs aires de tables | 5 % | avertissement |
-| Azimut mesuré vs azimut déclaré | 2° | avertissement |
+| Inclinaison des rangées, mesurée vs déclarée | 2°, en valeur absolue | avertissement |
 | Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
+
+#### Le champ « Azimut (°) » n'a pas de convention
+
+Relevé sur trois dossiers le 03/09/2026 : `0°` pour un champ plein sud, donc
+0 = sud ; `41° SE` avec la direction en toutes lettres ; `-24,5` sans direction
+et de signe contraire pour une orientation de la même famille. Ailleurs encore,
+le sud est noté 180, en azimut compas.
+
+Le contrôle ne compare donc que **des valeurs absolues**, après avoir ramené les
+deux angles dans ]-90, 90]. Le repliement absorbe l'origine — 0 ou 180 pour le
+sud — et la valeur absolue absorbe le sens de comptage. Ce qui subsiste, de
+combien les rangées s'écartent de l'est-ouest, est la seule grandeur que les
+trois écritures expriment de la même façon.
+
+Ce que ce contrôle ne voit pas, et qu'il faut savoir : **un plan monté en
+miroir**, tables à -41° là où le tableau décrit +41°. L'attraper demanderait une
+convention écrite au tableau, et il n'y en a pas. La cellule est affichée telle
+qu'écrite à côté de la mesure, pour que la lecture reste possible à l'œil.
+
+La cellule est d'ailleurs lue deux fois, en nombre et en texte : un
+convertisseur numérique seul avalait le « SE » de `41° SE` sans rien dire.
+
+Rien de tout cela n'atteint la coupe A-A', qui n'utilise que l'azimut mesuré sur
+la géométrie.
 
 **L'écriture des sorties est refusée tant qu'un contrôle bloquant subsiste.**
 Produire le contrat d'interface du lot 4 à partir d'entrées qui se contredisent
