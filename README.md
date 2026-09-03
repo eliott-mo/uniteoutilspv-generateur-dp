@@ -936,12 +936,28 @@ référentiel altimétrique, qui se compte en dizaines de mètres, pas la valeur
 zéro.
 
 Un relevé altimétrique en TXT prend le pas sur l'appel automatique, quand le
-service est indisponible. Deux formes sont acceptées : trois colonnes `X Y Z` en
-Lambert 93, ou deux colonnes `abscisse Z` déjà exprimées le long de la coupe. Le
-séparateur est **déterminé une fois** sur la première ligne de données puis
-annoncé : la virgule est à la fois séparateur de colonnes en CSV anglo-saxon et
-séparateur décimal en français, et `0,0;0,0;100,00` compte trois colonnes, pas
-six. Une ligne d'en-tête non numérique est sautée.
+service est indisponible. **Une seule forme est acceptée : trois colonnes
+`X Y Z` en Lambert 93**, celle que produit l'outil interne. Le séparateur est
+**déterminé une fois** sur la première ligne de données puis annoncé : la
+virgule est à la fois séparateur de colonnes en CSV anglo-saxon et séparateur
+décimal en français, et `0,0;0,0;100,00` compte trois colonnes, pas six. Une
+ligne d'en-tête non numérique est sautée.
+
+Une forme à deux colonnes « abscisse ; altitude » avait d'abord été acceptée,
+écrite sans exemple à la main. Elle a été retirée : aucun outil du parc n'en
+produit, et le lecteur ne devinait le format que sur le nombre de colonnes. Un
+export `matricule ; altitude`, que tout géomètre peut fournir, était lu comme un
+profil — altitudes justes, placées à des abscisses de 11 700 m sur une coupe de
+250 m, donc toutes hors de la coupe et rabattues sur la première valeur. Un
+profil plat, crédible, faux.
+
+Trois colonnes ne suffisent pas non plus : encore faut-il que la dernière soit
+une cote. Rien dans un fichier de nombres ne dit ce que chaque colonne signifie,
+et le seul garde-fou possible est l'ordre de grandeur. Les altitudes doivent
+tenir entre **−50 et 5 000 m**, du polder du Nord au mont Blanc. La fourchette
+est large à dessein : elle ne valide pas un relevé, elle refuse un fichier dont
+la troisième colonne n'en est pas une. Un export `X Y` sans altitude passait
+sans rien dire et rendait un profil plat à 6 954 200 m.
 
 **Un relevé à trois colonnes est un nuage, pas un profil.** Le fichier de
 référence `exemples/rosnay-lhopital-topo/` porte 202 399 points sur une grille au

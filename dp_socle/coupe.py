@@ -76,6 +76,16 @@ DEMI_COULOIR_M = 2.0
 #: projettent au même endroit, pas à rééchantillonner.
 _PAS_REGROUPEMENT_M = 0.25
 
+#: Bornes d'une altitude NGF plausible en France métropolitaine, en mètres.
+#:
+#: Le point le plus bas est aux environs de -4 m dans les polders du Nord, le
+#: plus haut au mont Blanc à 4 809 m. La fourchette est large à dessein : elle
+#: ne cherche pas à valider un relevé, mais à refuser un fichier dont la
+#: troisième colonne n'est pas une altitude. Un export « X Y » sans altitude
+#: passait sans rien dire et rendait un profil plat à 6 954 200 m.
+ALTITUDE_MIN_PLAUSIBLE_M = -50.0
+ALTITUDE_MAX_PLAUSIBLE_M = 5000.0
+
 #: Trou admis dans le couloir sans le signaler, en mètres. Au-delà, le profil
 #: est interpolé en ligne droite sur une distance où le terrain peut faire
 #: n'importe quoi.
@@ -363,6 +373,29 @@ def _decouper(texte: str, motif: re.Pattern, decimale_virgule: bool):
 
 
 
+def _verifier_altitudes(releves: list[tuple[float, ...]], chemin: Path) -> None:
+    """Refuse un fichier dont la troisième colonne n'est pas une altitude.
+
+    Rien dans un fichier de nombres ne dit ce que chaque colonne signifie. Le
+    seul garde-fou possible est l'ordre de grandeur : un export « X Y » sans
+    altitude passait sans rien dire et rendait un profil plat à 6 954 200 m —
+    absurde, mais tracé sans anomalie.
+    """
+    hors_bornes = [
+        z
+        for *_, z in releves
+        if not ALTITUDE_MIN_PLAUSIBLE_M <= z <= ALTITUDE_MAX_PLAUSIBLE_M
+    ]
+    if hors_bornes:
+        raise ErreurCoupe(
+            f"{chemin.name} : {len(hors_bornes)} altitude(s) hors de toute "
+            f"valeur plausible en France, de {min(hors_bornes):.1f} à "
+            f"{max(hors_bornes):.1f} m (attendu entre "
+            f"{ALTITUDE_MIN_PLAUSIBLE_M:.0f} et {ALTITUDE_MAX_PLAUSIBLE_M:.0f} m). "
+            "La troisième colonne n'est probablement pas une altitude."
+        )
+
+
 def _detecter_format(chemin: Path, utiles: list[str]):
     """Séparateur, convention décimale et première ligne de données du relevé.
 
@@ -378,11 +411,11 @@ def _detecter_format(chemin: Path, utiles: list[str]):
         for motif, nom in SEPARATEURS_COLONNES:
             for decimale_virgule in (nom != "virgule", False):
                 valeurs = _decouper(texte, motif, decimale_virgule)
-                if valeurs is not None and len(valeurs) in (2, 3):
+                if valeurs is not None and len(valeurs) == 3:
                     return motif, nom, decimale_virgule, premiere
     raise ErreurCoupe(
         f"{chemin.name} : impossible de lire « {utiles[0]} » comme 3 colonnes "
-        "« X Y Z » en Lambert 93 ou 2 colonnes « abscisse Z ». Séparateurs "
+        "« X Y Z » en Lambert 93. Séparateurs "
         "acceptés : point-virgule, tabulation, espace, virgule."
     )
 
@@ -391,13 +424,18 @@ def _profil_depuis_fichier(
 ) -> tuple[list[float], str, list[str]]:
     """Lit un relevé altimétrique en TXT et le rééchantillonne sur la coupe.
 
-    Deux formes sont acceptées, faute d'un exemple de sortie de l'outil interne
-    d'extraction topographique au moment de l'écriture (03/09/2026) :
+    Une seule forme est acceptée : **trois colonnes `X Y Z` en Lambert 93**,
+    celle que produit l'outil interne d'extraction topographique.
 
-    - trois colonnes `X Y Z` en Lambert 93, projetées sur la ligne de coupe ;
-    - deux colonnes `abscisse Z`, déjà exprimées le long de la coupe.
+    Une forme à deux colonnes « abscisse ; altitude » avait d'abord été
+    acceptée, écrite sans exemple à la main. Elle a été retirée le 03/09/2026 :
+    aucun outil du parc n'en produit, et le lecteur ne devinait le format que
+    sur le nombre de colonnes. Un export « matricule ; altitude », que tout
+    géomètre peut fournir, était lu comme un profil — altitudes justes, placées
+    à des abscisses de 11 700 m sur une coupe de 250 m, donc toutes hors de la
+    coupe et rabattues sur la première valeur. Un profil plat, crédible, faux.
 
-    Toute autre forme est refusée : un fichier mal interprété donnerait une
+    Toute autre forme est donc refusée : un fichier mal interprété donnerait une
     coupe plausible et fausse.
     """
     if not chemin.exists():
@@ -422,11 +460,13 @@ def _profil_depuis_fichier(
                 f"{chemin.name}, ligne de données {numero} : « {texte} » n'est "
                 f"pas une suite de nombres séparés par {nom_separateur}."
             )
-        if len(valeurs) not in (2, 3):
+        if len(valeurs) != 3:
             raise ErreurCoupe(
                 f"{chemin.name}, ligne de données {numero} : {len(valeurs)} "
                 f"colonnes séparées par {nom_separateur}. Attendu 3 colonnes "
-                "« X Y Z » en Lambert 93, ou 2 colonnes « abscisse Z »."
+                "« X Y Z » en Lambert 93. Un fichier à deux colonnes n'est pas "
+                "lu : rien n'y distingue une abscisse d'un matricule, et le "
+                "confondre donnerait un profil crédible et faux."
             )
         releves.append(valeurs)
 
@@ -435,24 +475,16 @@ def _profil_depuis_fichier(
             f"{chemin.name} ne contient que {len(releves)} point(s) : un profil "
             "demande au moins deux relevés."
         )
-    nb_colonnes = {len(v) for v in releves}
-    if len(nb_colonnes) > 1:
-        raise ErreurCoupe(
-            f"{chemin.name} mélange des lignes à 2 et à 3 colonnes : le format "
-            "est ambigu."
-        )
+    _verifier_altitudes(releves, chemin)
 
     avertissements = [
         f"Profil altimétrique lu dans {chemin.name} ({len(releves)} points, "
-        f"{next(iter(nb_colonnes))} colonnes séparées par {nom_separateur}, "
-        f"décimale « {',' if decimale_virgule else '.'} ») : ce fichier prend le "
-        "pas sur l'interrogation du RGE ALTI."
+        f"3 colonnes séparées par {nom_separateur}, décimale "
+        f"« {',' if decimale_virgule else '.'} ») : ce fichier prend le pas sur "
+        "l'interrogation du RGE ALTI."
     ]
-    if nb_colonnes == {3}:
-        couples, avertissements_nuage = _couloir_de_coupe(releves, ligne, chemin)
-        avertissements.extend(avertissements_nuage)
-    else:
-        couples = sorted((s, z) for s, z in releves)
+    couples, avertissements_nuage = _couloir_de_coupe(releves, ligne, chemin)
+    avertissements.extend(avertissements_nuage)
 
     abscisses_fichier = [c[0] for c in couples]
     altitudes_fichier = [c[1] for c in couples]

@@ -1023,3 +1023,88 @@ def test_reprise_d_un_trace_d_un_autre_projet_refusee(tmp_path, plan, emprise):
     autre_site = translate(emprise, xoff=200_000, yoff=150_000)
     with pytest.raises(ErreurCoupe):
         reprendre_coupe(enregistree, plan.azimut_tables_deg, autre_site)
+
+
+# ---------------------------------------------------------------------------
+# Format du relevé altimétrique : trois colonnes, et rien d'autre
+# ---------------------------------------------------------------------------
+
+
+def test_fichier_a_deux_colonnes_refuse(tmp_path):
+    """La forme « abscisse ; altitude » avait été écrite sans exemple à la main.
+
+    Aucun outil du parc n'en produit, et le lecteur ne devinait le format que
+    sur le nombre de colonnes. Un export « matricule ; altitude », que tout
+    géomètre peut fournir, était lu comme un profil : altitudes justes, placées
+    à des abscisses de 11 700 m sur une coupe de 250 m, donc toutes hors de la
+    coupe et rabattues sur la première valeur. Un profil plat, crédible, faux.
+    """
+    fichier = tmp_path / "matricule.txt"
+    fichier.write_text(
+        "\n".join(f"{11_700 + i};192.{i:02d}" for i in range(0, 40, 4)),
+        encoding="utf-8",
+    )
+    with pytest.raises(ErreurCoupe) as erreur:
+        profil_terrain(
+            LineString([(621_765, 6_954_200), (621_765, 6_954_450)]),
+            pas_m=50.0,
+            fichier_altimetrie=fichier,
+        )
+    assert "3 colonnes" in str(erreur.value)
+
+
+def test_export_sans_altitude_refuse(tmp_path):
+    """Un fichier « X Y » a deux colonnes, comme un profil en avait."""
+    fichier = tmp_path / "sans_altitude.txt"
+    fichier.write_text(
+        "\n".join(f"621765.00;{6_954_200 + i}.00" for i in range(0, 250, 10)),
+        encoding="utf-8",
+    )
+    with pytest.raises(ErreurCoupe):
+        profil_terrain(
+            LineString([(621_765, 6_954_200), (621_765, 6_954_450)]),
+            pas_m=50.0,
+            fichier_altimetrie=fichier,
+        )
+
+
+def test_troisieme_colonne_qui_n_est_pas_une_altitude_refusee(tmp_path):
+    """Trois colonnes ne suffisent pas : encore faut-il que la dernière soit une cote.
+
+    Rien dans un fichier de nombres ne dit ce que chaque colonne signifie. Le
+    seul garde-fou possible est l'ordre de grandeur.
+    """
+    from dp_socle.coupe import ALTITUDE_MAX_PLAUSIBLE_M
+
+    fichier = tmp_path / "xy_matricule.txt"
+    fichier.write_text(
+        "\n".join(
+            f"621765.0;{6_954_200 + i}.0;{11_700 + i}" for i in range(0, 250, 5)
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ErreurCoupe) as erreur:
+        profil_terrain(
+            LineString([(621_765, 6_954_200), (621_765, 6_954_450)]),
+            pas_m=50.0,
+            fichier_altimetrie=fichier,
+        )
+    assert "pas une altitude" in str(erreur.value)
+    assert f"{ALTITUDE_MAX_PLAUSIBLE_M:.0f}" in str(erreur.value)
+
+
+def test_altitudes_metropolitaines_acceptees(tmp_path):
+    """La fourchette est large : elle refuse un non-sens, pas un relevé."""
+    from dp_socle.coupe import _verifier_altitudes
+
+    # Du polder du Nord au mont Blanc.
+    _verifier_altitudes([(0.0, 0.0, -4.0), (0.0, 0.0, 4_809.0)], tmp_path / "x.txt")
+    with pytest.raises(ErreurCoupe):
+        _verifier_altitudes([(0.0, 0.0, 6_954_200.0)], tmp_path / "x.txt")
+
+
+def test_le_nuage_reel_reste_lu(tmp_path):
+    """Le format de l'outil interne n'est pas affecté par ce durcissement."""
+    profil = profil_terrain(COUPE_NUAGE, pas_m=25.0, fichier_altimetrie=NUAGE)
+    assert len(profil.altitudes_m) > 10
+    assert all(100.0 < z < 130.0 for z in profil.altitudes_m)
