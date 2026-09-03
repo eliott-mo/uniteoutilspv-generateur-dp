@@ -23,3 +23,11 @@ ezdxf==1.4.4
 # repérées par leur libellé et non par leur position : il faut un accès
 # cellule par cellule, que pandas.read_excel ne donne pas simplement.
 openpyxl==3.1.5
+# Carte interactive du tracé de la ligne de coupe A-A' (lot 2bis). Le tracé
+# se fait forcément sur un fond ortho : le chef de projet doit voir où il
+# coupe. `folium.plugins.Draw` est le seul outil de dessin disponible dans
+# Streamlit sans écrire un composant React.
+folium==0.20.0
+streamlit-folium==0.27.2
+# Tracé du profil altimétrique de la coupe.
+matplotlib==3.10.9

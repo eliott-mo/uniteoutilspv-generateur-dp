@@ -9,10 +9,15 @@ fonctionnement, ce fichier pour les conventions de travail.
 | Lot | Contenu | État |
 |---|---|---|
 | 1 | Moteur de planche, page de garde, DP 1-1, DP 1-2, DP 1-3 | livré |
-| 2 | Import DXF HelioScope et calage géographique | livré |
-| 3 | Saisie des pistes, postes, clôtures | à venir |
+| 2 | Import DXF HelioScope et calage géographique | livré, en réserve |
+| 2bis | Import du plan du BE interne, contrôles croisés, coupe A-A' | livré |
+| 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
 | 4 | DP 2, DP 3, DP 4 | à venir |
 | 5 | Notice DP 11 | à venir |
+
+Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
+fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE
+et devra produire le même GeoPackage que le lot 2bis.
 
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on

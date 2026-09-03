@@ -1,10 +1,13 @@
-# Générateur de dossier DP — socle (lot 1) et calepinage HelioScope (lot 2)
+# Générateur de dossier DP
 
 Production interne des dossiers de déclaration préalable pour les centrales
 photovoltaïques au sol de moins de 3 MWc.
 
-Ce lot couvre le **moteur de planche** et les **trois planches
-cartographiques** :
+Lots livrés : le **socle** (lot 1, moteur de planche et planches DP 1), le
+**calepinage HelioScope** (lot 2, en réserve) et l'**import du plan du bureau
+d'études** (lot 2bis).
+
+Le lot 1 couvre le moteur de planche et les trois planches cartographiques :
 
 | Pièce | Contenu | Échelle |
 |---|---|---|
@@ -221,9 +224,25 @@ python -m pytest -q
   des contours, paramètres du calepinage, et **contrôle d'échelle vraie** —
   une longueur du DXF est comparée à la distance géodésique entre ses deux
   extrémités projetées.
+- `tests/test_import_be.py` — lecture du DXF et du tableau bilan du BE, mesurées
+  contre le relevé manuel du jeu Saint-Cyr-en-Val, plus les cas d'erreur :
+  coordonnées hors des bornes L93, calque renommé avec une variante
+  d'accentuation, calque qui n'existe qu'en `HATCH`, paramètre absent du
+  tableau.
+- `tests/test_coupe.py` — contrôles croisés, correction de perpendicularité de
+  la coupe A-A', profil altimétrique et contrat de sortie GeoPackage.
 
 Les tests du lot 2 s'appuient sur les deux exports réels de `exemples/` et se
-mettent en `skip` si ces fichiers sont absents.
+mettent en `skip` si ces fichiers sont absents. Ceux des lots 2bis s'appuient
+sur les fichiers de `exemples/saint-cyr-DXF/`, versionnés.
+
+Les tests marqués `reseau` interrogent un service IGN en ligne — le seul moyen
+de savoir si un point d'entrée ou un format de réponse a changé. Pour s'en
+passer :
+
+```bash
+python -m pytest -q -m "not reseau"
+```
 
 ## Architecture
 
@@ -234,6 +253,10 @@ dp_socle/
 ├── dossier.py        composition du dossier : pièces, titres, numérotation
 ├── geometrie.py      lecture d'emprise, CRS, union
 ├── helioscope.py     import DXF HelioScope, calage géographique, GeoJSON L93
+├── import_be.py      import DXF du BE, contrôles croisés, sorties GeoPackage
+├── tableau_bilan.py  lecture du tableau bilan Excel du BE
+├── coupe.py          ligne de coupe A-A' et profil du terrain naturel
+├── apercu_be.py      aperçu du plan importé, palette de la légende DP
 ├── ign.py            WMS-R et WFS Géoplateforme, EPSG:2154 natif
 ├── polices.py        installation et vérification d'Aptos
 ├── projet.py         modèle projet.json
@@ -519,7 +542,270 @@ masse lisible ; `tables` n'en est que le contour groupé.
 
 **Aucune planche n'est produite** : le dessin relève du lot 4.
 
-## Hors périmètre de ce lot
+## Import du plan du bureau d'études (lot 2bis)
 
-Saisie des pistes, postes et clôtures (lot 3), DP 2 / DP 3 / DP 4 (lot 4),
-notice DP 11 (lot 5).
+Pour les premiers dossiers, le BE interne fournit le plan final déjà
+géoréférencé en Lambert 93 et un tableau bilan Excel. Il n'y a donc ni calage à
+faire ni élément technique à saisir. Le travail est de **lire, normaliser et
+recouper** ces deux fichiers avant de les transmettre au lot 4.
+
+Ce lot **remplace les lots 2 et 3** pour ces dossiers ; l'import HelioScope
+reste en réserve pour les projets sans plan BE.
+
+Entrées : le DXF du plan BE et le tableau bilan `.xlsx` (obligatoires), le
+shapefile d'emprise cadastrale du lot 1, éventuellement le PDF du plan BE pour
+comparaison visuelle et un relevé altimétrique `.txt` de repli.
+
+Le PDF de vue de profil du BE n'est pas une entrée et n'a pas à l'être : ses
+quatre cotes (inclinaison, point bas, point haut, inter-table) figurent déjà au
+tableau bilan, et la coupe DP 3 au 1/50 sera générée en paramétrique au lot 4.
+Vérifié sur le fichier de référence, la coupe n'est pas non plus dans le DXF :
+aucun calque de coupe, aucun texte, aucune cote, présentations vides.
+
+### Lecture du DXF
+
+**L'en-tête `$INSUNITS` n'est pas lu.** Sur le fichier de référence il vaut 4,
+c'est-à-dire millimètres, alors que les coordonnées sont en mètres — un outil
+qui le croirait diviserait tout le plan par mille. L'unité est déduite de
+l'ordre de grandeur des coordonnées : le facteur retenu est celui qui place le
+centre du dessin dans les bornes du Lambert 93 métropolitain (X entre 100 000 et
+1 300 000, Y entre 6 000 000 et 7 200 000). Aucun facteur ne convient, ou
+plusieurs conviennent : le fichier est refusé.
+
+La correspondance calque → catégorie est **proposée puis confirmée** à l'écran.
+La comparaison est tolérante : décomposition Unicode NFKD, repli de casse, et
+suppression des tirets, espaces, underscores et apostrophes. Nécessaire, et pas
+par excès de prudence : dans le fichier de référence l'apostrophe de « aire
+d'aspiration » est devenue un tiret (`UNI_SDIS_Aire_d-aspiration`).
+
+| Calque | Catégorie |
+|---|---|
+| `PVcase PV Modules (optimised)` | `tables_pv` |
+| `UNI_Clôture` | `cloture` |
+| `UNI_portail` | `portail` |
+| `UNI_PDL` | `pdl_ptr` |
+| `UNI_VRD_Plateforme` | `plateforme` |
+| `UNI_VRD_Piste_lourde_existante` | `piste_lourde_existante` |
+| `UNI_VRD_Piste_lourde_à_créer` | `piste_lourde_a_creer` |
+| `UNI_SDIS_Bache_incendie` | `bache_incendie` |
+| `UNI_SDIS_Aire_d-aspiration` | `aire_aspiration` |
+
+Sont aussi prévues, absentes du fichier de référence : `local_technique`,
+`bess`, `bac_retention`, `haie`, `ligne_coupe`.
+
+Trois pièges mesurés sur le fichier de référence :
+
+- **les `HATCH` doublent les polylignes.** Les 13 remplissages du fichier
+  redessinent exactement des contours déjà présents sur le même calque (aire
+  identique au centième de m²). Ils sont écartés — mais un calque qui n'aurait
+  *que* des `HATCH` perdrait son élément, et c'est signalé ;
+- **les polylignes portent des arcs en bulge**, invisibles dans la liste des
+  sommets et absents du brief. Les deux plateformes en portent. Sans
+  discrétisation, celle du PDL sort à 133,8 m² au lieu de 131,4 ;
+- **les tables sont des polylignes 3D**, avec des sommets qui peuvent se
+  superposer en plan. Le dédoublonnage se fait sur (x, y) **en préservant
+  l'ordre** ; un `set()` détruirait la géométrie.
+
+`ezdxf.path.make_path` traite d'une seule main les bulges, les polylignes 3D,
+les lignes et les arcs, en conservant Z. C'est ce qui évite de réimplémenter la
+discrétisation à la main.
+
+Les portails sont dessinés en cinq entités jointives (deux vantaux, leur
+débattement en arcs, l'ouverture). Ils sont donc comptés par regroupement au
+contact, à 5 cm près, et non en comptant les entités.
+
+**L'azimut des tables se calcule sur la géométrie**, pas sur le tableau :
+rectangle englobant orienté de chaque table, direction de son grand côté,
+médiane sur l'ensemble. Sur le fichier de référence il vaut 0,0000°, soit des
+rangées est-ouest. La médiane est prise après recalage sur la moyenne axiale :
+sur des rangées nord-sud, des directions voisines sur le terrain tombent aux
+deux bouts de ]-90, 90] et une médiane naïve rendrait la perpendiculaire.
+
+### Lecture du tableau bilan
+
+L'onglet `2. Caractéristiques du projet` est en colonnes, une par indice de
+révision. L'indice est **proposé** d'après le nom du DXF (`20260903_SCV_IND06`)
+et **toujours confirmé** ; son absence du tableau est signalée en évidence.
+
+**Chaque paramètre est repéré par son libellé en colonne A, jamais par son
+numéro de ligne.** Le fichier est déjà en version 6, la mise en page bouge, et
+un accès par index produirait des valeurs fausses sans aucune erreur visible. Un
+libellé qui apparaîtrait deux fois est refusé plutôt que lu au hasard.
+
+Les convertisseurs sont tolérants sur la forme — `0°` avec le symbole degré,
+`13 / 26` pour les deux longueurs de table, dates en `datetime` — et
+**échouent explicitement** quand le motif ne correspond pas.
+
+L'onglet `Dimensions postes et pieux` fournit les cotes normalisées pour la
+génération paramétrique des DP 4 au lot 4. **L'ordre des cotes n'est pas le même
+d'une section à l'autre** : « largeur x longueur x hauteur » pour le PTR,
+« longueur x largeur x hauteur » pour le PDL/PTR. Il est conservé avec chaque
+cote ; le lot 4 doit le lire, pas le supposer.
+
+L'onglet `Standards UNITe` fournit les valeurs de référence du type de projet.
+Elles sont **affichées en regard**, jamais opposées au projet : sur le fichier
+de référence, quatre d'entre elles s'écartent du projet (format de table,
+inter-table, hauteurs) sans que ce soit une anomalie. Un standard n'est pas une
+contrainte.
+
+### Contrôles croisés
+
+C'est la valeur de ce lot. Le scénario d'erreur réaliste n'est pas le fichier
+corrompu : c'est le plan mis à jour sans le tableau, ou l'inverse, que personne
+ne remarque avant l'instruction du dossier.
+
+| Contrôle | Tolérance | Si échec |
+|---|---|---|
+| Nombre de tables, DXF vs tableau | égalité stricte | bloquant |
+| Nombre de portails, DXF vs tableau | égalité stricte | bloquant |
+| Surface clôturée, polygone DXF vs tableau | 2 % | bloquant |
+| Linéaire de clôture, DXF vs tableau | 2 % | avertissement |
+| Surface projetée des modules vs aires de tables | 5 % | avertissement |
+| Azimut mesuré vs azimut déclaré | 2° | avertissement |
+| Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement |
+| Puissance vs seuil de recevabilité en DP | saisie | avertissement |
+
+**L'écriture des sorties est refusée tant qu'un contrôle bloquant subsiste.**
+Produire le contrat d'interface du lot 4 à partir d'entrées qui se contredisent
+reviendrait à fabriquer un dossier plausible et faux.
+
+Le seuil de recevabilité en déclaration préalable **n'est pas codé en dur** :
+c'est une règle d'urbanisme, qui change, et la figer dans le code reviendrait à
+faire dire au générateur ce qu'il n'a pas à dire. Il est saisi par
+l'utilisateur, et la puissance du projet est affichée en évidence dans tous les
+cas, avec la phase et la date du tableau — le chef de projet doit voir sur quel
+indice il engage le dossier.
+
+### Ligne de coupe A-A'
+
+Elle n'existe ni dans le DXF ni dans le tableau : le chef de projet la trace sur
+une carte interactive, sur fond d'ortho IGN, avec les tables et la clôture en
+surimpression.
+
+**Seul le point milieu du tracé est conservé** : c'est lui qui exprime
+l'intention, l'endroit où l'on veut couper. La direction vient de l'azimut
+mesuré sur les tables, perpendiculairement aux rangées — une coupe de terrain
+n'a de sens que dans cette direction, et quelques degrés d'oblique allongent
+toutes les distances lues sur la planche du facteur 1/cos θ, sans que rien ne le
+signale.
+
+La ligne est étendue à toute l'emprise clôturée avec 10 m de marge de chaque
+côté. L'étendue se calcule en projetant les sommets de l'emprise sur la
+direction de coupe, et non sur la diagonale de sa boîte englobante : une emprise
+allongée en biais donnait sinon une coupe deux fois trop longue.
+
+Un tracé à plus de 45° de la perpendiculaire attendue est corrigé quand même,
+mais l'utilisateur en est averti : il a probablement voulu couper dans l'autre
+sens. Un mode manuel conserve la direction tracée ; il est désactivé par défaut
+et reste un choix explicite.
+
+Sur le fichier de référence, les rangées étant est-ouest, la coupe ressort
+strictement nord-sud.
+
+### Profil altimétrique
+
+Récupéré automatiquement auprès du RGE ALTI de la Géoplateforme, échantillonné
+tous les 5 m le long de la coupe corrigée.
+
+Mesuré sur le service réel le 03/09/2026, et différent de ce qu'annonçait le
+brief : ce n'est pas le nombre de points qui limite une requête mais **la
+longueur de l'URL**. 200 points passent (URL de 4 736 caractères), 500 sont
+refusés en HTTP 414 (11 636 caractères). Le POST répond 500 ou 400 sous ses deux
+formes ; seul le GET fonctionne. Les requêtes ne sont pas parallélisées. Une
+coupe de site tient en une requête : 355 m au pas de 5 m font 73 points.
+
+Le contrôle de cohérence compare le profil au **bord bas** des tables voisines
+de la coupe. Attention à ce qu'il mesure : le Z des tables est celui du plan des
+modules, pas du sol. Sur le fichier de référence, le bord bas se tient 1,70 m
+au-dessus du RGE ALTI en médiane (de 1,15 m à 2,00 m selon la table) — c'est la
+garde au sol de la structure, pas une erreur. Le contrôle compare donc la
+**médiane** des écarts au seuil de 2 m : ce qu'il cherche est un décalage de
+référentiel altimétrique, qui se compte en dizaines de mètres, pas la valeur
+zéro.
+
+Un relevé altimétrique en TXT prend le pas sur l'appel automatique — service
+indisponible, ou relevé drone plus précis. Faute d'un exemple de sortie de
+l'outil interne d'extraction topographique, deux formes sont acceptées :
+trois colonnes `X Y Z` en Lambert 93, projetées sur la coupe, ou deux colonnes
+`abscisse Z`. Le séparateur est **déterminé une fois** sur la première ligne de
+données puis annoncé : la virgule est à la fois séparateur de colonnes en CSV
+anglo-saxon et séparateur décimal en français, et `0,0;0,0;100,00` compte trois
+colonnes, pas six.
+
+### Écran de validation
+
+Rien ne se poursuit sans validation explicite. L'écran présente l'aperçu des
+géométries sur fond d'ortho IGN, la correspondance des calques, les paramètres
+extraits, le résultat des contrôles, la ligne corrigée superposée au tracé
+initial, et le profil tracé avec sa dénivelée.
+
+**Les couleurs du DXF ne sont pas héritées.** Les codes ACI y sont des couleurs
+de travail CAO, non signifiantes : sur le fichier de référence, la clôture, le
+PDL et les portails partagent la valeur 1. La palette est celle de la légende
+DP, relevée au pixel le 03/09/2026 sur la planche DP 2 du dossier HOCH
+« Les Islettes » : poste de livraison (127, 255, 191), citerne (63, 191, 191),
+piste lourde (162, 162, 162), piste légère (215, 215, 215), haie (111, 170, 11),
+clôture et portail en rouge franc, modules (151, 202, 202) cernés de bleu.
+Les catégories absentes de cette planche — BESS, bac de rétention, local
+technique — sont dérivées de la même famille, et signalées comme telles dans le
+code.
+
+L'ordre de dessin est explicite : surfaces de sol, puis ouvrages posés dessus,
+puis tables, puis linéaires. Suivre l'ordre du dictionnaire faisait passer les
+pistes par-dessus le poste de livraison, qui disparaissait de l'aperçu —
+exactement ce que cette image sert à contrôler.
+
+L'échelle verticale du profil est exagérée, l'exagération étant **mesurée sur
+les axes réellement composés** et écrite sur la figure. Sans cela, 0,96 m de
+dénivelée sur 355 m de coupe donnerait une ligne parfaitement plate.
+
+### Sorties — contrat d'interface avec le lot 4
+
+```
+sortie/{projet}/
+    geometries.gpkg   GeoPackage EPSG:2154, une couche par catégorie,
+                      dont la ligne de coupe corrigée
+    projet.json       paramètres techniques, azimut des tables,
+                      profil altimétrique le long de la coupe
+```
+
+**GeoPackage et non GeoJSON** : la spécification GeoJSON impose le WGS84, et y
+stocker du Lambert 93 est non conforme — cela se paie tôt ou tard par une
+reprojection silencieuse chez le lecteur. Le GeoPackage porte son système de
+coordonnées explicitement.
+
+La coordonnée Z est conservée telle que le DXF la porte, et la colonne `z_reel`
+dit si elle décrit le terrain (les tables) ou seulement l'élévation d'une
+polyligne 2D (tout le reste sur le fichier de référence). Le champ
+`version_contrat` permettra au lot 4 de refuser une sortie qu'il ne sait pas
+lire ; le lot 2 en réserve devra produire exactement le même format.
+
+⚠️ Ce `projet.json` **n'est pas celui du lot 1**. Celui du lot 1 vit dans
+`projets/{nom}/` et décrit les métadonnées du dossier ; celui-ci vit dans
+`sortie/{nom}/` et est la sortie de l'import BE. Son champ `origine` vaut
+`import_be` et les distingue à la lecture.
+
+**Aucune planche n'est produite** : le dessin relève du lot 4.
+
+### Valeurs mesurées sur le jeu de référence
+
+Projet Saint-Cyr-en-Val, `20260903_SCV_IND06.dxf` et
+`20260825_SCV_Tableau_Bilan_V6.xlsx`, tous deux versionnés dans
+`exemples/saint-cyr-DXF/`.
+
+| Grandeur | Tableau | DXF |
+|---|---|---|
+| Tables | 96 | 96 |
+| Modules | 4 628 | — |
+| Surface clôturée | 4,52 ha | 4,5216 ha |
+| Linéaire de clôture | 875 m | 871,88 m |
+| Portails | 3 | 3 |
+| Inclinaison / azimut | 15° / 0° | azimut 0,0000° |
+| Point bas / point haut | 2,5 m / 4,0 m | — |
+| Puissance | 2,93878 MWc | — |
+
+## Hors périmètre de ces lots
+
+DP 2 / DP 3 / DP 4 (lot 4), notice DP 11 (lot 5). L'import HelioScope et le
+calage géographique (lot 2) restent en réserve pour les projets sans plan BE ;
+la saisie manuelle des éléments techniques (lot 3) est remplacée par le lot 2bis.

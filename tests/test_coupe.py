@@ -391,3 +391,100 @@ def test_csv_a_la_virgule_avec_decimale_au_point(tmp_path):
     )
     assert profil.altitudes_m == pytest.approx([100.0, 102.0, 104.0])
     assert any("virgule" in m for m in profil.avertissements)
+
+
+# ---------------------------------------------------------------------------
+# Carte interactive du tracé (étape F)
+# ---------------------------------------------------------------------------
+
+
+def test_geojson_de_la_carte_est_une_featurecollection(plan):
+    """Régression : folium ne sait pas cadrer sur une `GeometryCollection`.
+
+    Sa descente de l'arbre des couches lève `KeyError: 'coordinates'` et la
+    carte de tracé ne s'affiche pas du tout — donc plus de ligne de coupe.
+    """
+    import folium
+
+    from dp_socle.apercu_be import URL_TUILES_ORTHO, en_wgs84
+
+    collection = en_wgs84(plan.geometries("tables_pv"))
+    assert collection["type"] == "FeatureCollection"
+    assert len(collection["features"]) == 96
+
+    carte = folium.Map(tiles=None)
+    folium.TileLayer(tiles=URL_TUILES_ORTHO, attr="IGN").add_to(carte)
+    folium.GeoJson(collection).add_to(carte)
+    sud, ouest, nord, est = [c for paire in carte.get_bounds() for c in paire]
+    assert 47.8 < sud < nord < 47.9  # Saint-Cyr-en-Val
+    assert 1.9 < ouest < est < 2.0
+
+
+def test_trace_de_la_carte_revient_en_lambert_93(plan):
+    """Le tracé arrive en WGS84 ; tout ce qui est mesuré reste en L93."""
+    from dp_socle.apercu_be import bornes_wgs84, trace_l93
+
+    sud, ouest, nord, est = bornes_wgs84(plan.polygone_cloture)
+    trace = trace_l93(
+        {
+            "last_active_drawing": {
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[ouest, sud], [est, nord]],
+                }
+            }
+        }
+    )
+    assert trace is not None
+    minx, miny, maxx, maxy = plan.polygone_cloture.bounds
+    assert trace.coords[0] == pytest.approx((minx, miny), abs=0.5)
+    assert trace.coords[-1] == pytest.approx((maxx, maxy), abs=0.5)
+
+
+def test_carte_sans_trace_ne_renvoie_rien():
+    from dp_socle.apercu_be import trace_l93
+
+    assert trace_l93(None) is None
+    assert trace_l93({}) is None
+    assert trace_l93({"all_drawings": []}) is None
+    # Un polygone dessiné par erreur n'est pas une ligne de coupe.
+    assert (
+        trace_l93(
+            {
+                "last_active_drawing": {
+                    "geometry": {"type": "Polygon", "coordinates": [[[0, 0]]]}
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_apercu_du_plan_sur_fond_ortho(plan, emprise):
+    """L'aperçu se compose sans planter, avec la coupe superposée."""
+    from dp_socle.apercu_be import apercu_plan, cadre_apercu, legende_presente
+
+    class _FondFactice:
+        """Ortho remplacée par une image unie : ce test mesure le dessin des
+        géométries, pas la disponibilité du WMS."""
+
+        def __init__(self, taille):
+            from PIL import Image
+
+            self.image = Image.new("RGB", taille, (120, 120, 120))
+
+    centre = emprise.centroid
+    coupe = corriger_ligne_coupe(
+        LineString([(centre.x - 30, centre.y - 30), (centre.x + 30, centre.y + 30)]),
+        plan.azimut_tables_deg,
+        emprise,
+    )
+    cadre = cadre_apercu(plan)
+    minx, miny, maxx, maxy = cadre
+    largeur = 900
+    fond = _FondFactice((largeur, round(largeur * (maxy - miny) / (maxx - minx))))
+
+    image = apercu_plan(plan, ligne_coupe=coupe, fond=fond, cadre=cadre, largeur_px=450)
+    assert image.size[0] == 450
+    categories = {categorie for categorie, _, _ in legende_presente(plan)}
+    assert "tables_pv" in categories and "cloture" in categories

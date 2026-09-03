@@ -305,6 +305,51 @@ def _compter_ouvrages(geometries: list[BaseGeometry]) -> int:
     return len(tampon.geoms) if hasattr(tampon, "geoms") else 1
 
 
+
+@dataclass(frozen=True)
+class CalqueDXF:
+    """Un calque du DXF, avec ce qu'il contient et la catégorie proposée."""
+
+    nom: str
+    nb_entites: int
+    nb_hatch: int
+    categorie_proposee: str | None
+
+
+def calques_du_dxf(chemin: str | Path) -> list[CalqueDXF]:
+    """Liste les calques peuplés du DXF, pour l'écran de correspondance.
+
+    Lu avant l'import complet : la correspondance des calques est soumise à
+    confirmation, et l'utilisateur doit voir ce qu'il apparie. Les calques sans
+    entité sont écartés — le fichier de référence en porte cinq, ce n'est pas
+    une anomalie.
+    """
+    chemin = Path(chemin)
+    if not chemin.exists():
+        raise ErreurImportBE(f"DXF du plan BE introuvable : {chemin}")
+    try:
+        document = ezdxf.readfile(str(chemin))
+    except (OSError, ezdxf.DXFError) as exc:
+        raise ErreurImportBE(f"DXF illisible ({chemin.name}) : {exc}") from exc
+
+    entites: dict[str, int] = {}
+    hatchs: dict[str, int] = {}
+    for entite in document.modelspace():
+        cible = hatchs if entite.dxftype() == "HATCH" else entites
+        if entite.dxftype() != "HATCH" and entite.dxftype() not in TYPES_TRAITES:
+            continue
+        cible[entite.dxf.layer] = cible.get(entite.dxf.layer, 0) + 1
+
+    return [
+        CalqueDXF(
+            nom=nom,
+            nb_entites=entites.get(nom, 0),
+            nb_hatch=hatchs.get(nom, 0),
+            categorie_proposee=categorie_proposee(nom),
+        )
+        for nom in sorted(set(entites) | set(hatchs))
+    ]
+
 # ---------------------------------------------------------------------------
 # Étape A — lecture du DXF
 # ---------------------------------------------------------------------------

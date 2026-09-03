@@ -10,14 +10,33 @@ import json
 from datetime import date as _date
 from pathlib import Path
 
+import folium
 import streamlit as st
+from folium.plugins import Draw
+from streamlit_folium import st_folium
 
 from dp_socle.environnement import etat_cairo, preparer_cairo
 
 preparer_cairo()
 
+# Le lot 2 (HelioScope) et le lot 2bis (plan BE) ont chacun leur aperçu, avec
+# les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
+# dans leur module, pour ne pas toucher au lot 2.
+from dp_socle.apercu_be import (
+    URL_TUILES_ORTHO,
+    apercu_plan,
+    bornes_wgs84,
+    en_wgs84,
+    figure_profil,
+    legende_presente,
+    trace_l93,
+)
+from dp_socle.apercu_be import cadre_apercu as cadre_apercu_be
+from dp_socle.apercu_be import fond_apercu as fond_apercu_be
 from dp_socle.assemblage import generer_dossier
+from dp_socle.coupe import controler_coherence, corriger_ligne_coupe, profil_terrain
 from dp_socle.erreurs import ErreurDP
+from dp_socle.import_be import CATEGORIES, calques_du_dxf, importer_be
 from dp_socle.geometrie import charger_emprise
 from dp_socle.helioscope import (
     CORRECTION_NORD_SUD_MAX_M,
@@ -34,6 +53,7 @@ from dp_socle.helioscope import importer as importer_helioscope
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
 from dp_socle.projet import Projet
+from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
 DOSSIER_PROJETS = Path("projets")
 DOSSIER_SORTIE = Path("sortie")
@@ -482,5 +502,474 @@ if implantation is not None:
                     ),
                     language="json",
                 )
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}")
+
+
+# ---------------------------------------------------------------------------
+# Lot 2bis — plan du bureau d'études interne
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("5. Plan du bureau d'études")
+st.caption(
+    "Import du DXF et du tableau bilan fournis par le BE, recoupement des deux, "
+    "tracé de la ligne de coupe A-A' et profil du terrain. Produit "
+    "`geometries.gpkg` et `projet.json` pour le dessin des planches ; ne dessine "
+    "aucune planche."
+)
+
+for cle, defaut in (
+    ("import_be", None),
+    ("coupe_be", None),
+    ("profil_be", None),
+    ("correspondance_be", None),
+    ("cadre_apercu_be", None),
+):
+    if cle not in st.session_state:
+        st.session_state[cle] = defaut
+
+
+colonne_dxf, colonne_tableau = st.columns(2)
+with colonne_dxf:
+    fichier_dxf = st.file_uploader(
+        "Plan BE (DXF géoréférencé en Lambert 93)",
+        type=["dxf"],
+        help="L'unité est déduite des coordonnées, jamais de l'en-tête $INSUNITS "
+        "— sur les fichiers du BE il annonce des millimètres alors que le plan "
+        "est en mètres. Un plan hors des bornes du Lambert 93 est refusé.",
+    )
+with colonne_tableau:
+    fichier_tableau = st.file_uploader(
+        "Tableau bilan (.xlsx)",
+        type=["xlsx"],
+        help="Onglets lus : « 2. Caractéristiques du projet », « Dimensions "
+        "postes et pieux », « Standards UNITe ».",
+    )
+
+colonne_pdf, colonne_alti = st.columns(2)
+with colonne_pdf:
+    fichier_pdf_be = st.file_uploader(
+        "Plan BE en PDF (facultatif)",
+        type=["pdf"],
+        help="Sert uniquement de référence visuelle pour comparer l'aperçu à ce "
+        "que le BE a dessiné. Aucune donnée n'en est extraite.",
+    )
+with colonne_alti:
+    fichier_altimetrie = st.file_uploader(
+        "Relevé altimétrique (.txt, facultatif)",
+        type=["txt", "csv"],
+        help="Repli quand le RGE ALTI est indisponible, ou relevé drone plus "
+        "précis. Trois colonnes « X Y Z » en Lambert 93, ou deux colonnes "
+        "« abscisse Z ». Ce fichier prend le pas sur l'appel automatique.",
+    )
+
+seuil_puissance = st.number_input(
+    "Seuil de recevabilité en déclaration préalable (MWc)",
+    min_value=0.0,
+    max_value=50.0,
+    value=3.0,
+    step=0.1,
+    help="Aucune règle d'urbanisme n'est codée dans l'outil : c'est la valeur "
+    "saisie ici qui sert de repère, et la puissance du projet est affichée en "
+    "évidence dans tous les cas.",
+)
+
+
+def _formater(valeur, unite: str) -> str:
+    """Valeur d'un contrôle croisé, lisible en tableau."""
+    if valeur is None:
+        return "—"
+    if isinstance(valeur, float):
+        texte = f"{valeur:,.2f}".replace(",", " ").replace(".", ",")
+    else:
+        texte = str(valeur)
+    return f"{texte} {unite}".strip()
+
+
+def _deposer(fichier, defaut_nom: str = "projet") -> Path | None:
+    """Écrit un fichier téléversé dans le dossier du projet et rend son chemin."""
+    if fichier is None:
+        return None
+    dossier = DOSSIER_PROJETS / (nom.strip() or defaut_nom)
+    dossier.mkdir(parents=True, exist_ok=True)
+    cible = dossier / Path(fichier.name).name
+    cible.write_bytes(fichier.getbuffer())
+    return cible
+
+
+@st.cache_data(show_spinner="Lecture des calques du DXF…")
+def _calques_caches(chemin: str, taille: int):
+    """Calques du DXF. `taille` fait partie de la clé de cache : un DXF
+    retéléversé sous le même nom doit être relu."""
+    return calques_du_dxf(chemin)
+
+
+@st.cache_data(show_spinner="Téléchargement de l'ortho IGN…")
+def _fond_be_cache(cadre: tuple, largeur_px: int = 1100):
+    return fond_apercu_be(cadre, largeur_px=largeur_px)
+
+
+if fichier_dxf is not None and fichier_tableau is not None:
+    chemin_dxf = _deposer(fichier_dxf)
+    chemin_tableau = _deposer(fichier_tableau)
+    chemin_pdf_be = _deposer(fichier_pdf_be)
+    chemin_altimetrie = _deposer(fichier_altimetrie)
+
+    try:
+        indices = indices_disponibles(chemin_tableau)
+        propose = indice_depuis_nom(fichier_dxf.name)
+
+        st.markdown("**Indice de révision — à confirmer.**")
+        if propose is None:
+            st.warning(
+                f"Le nom « {fichier_dxf.name} » ne porte pas d'indice de "
+                "révision : choisissez-le à la main.",
+                icon="⚠️",
+            )
+        elif propose not in indices:
+            st.error(
+                f"Le DXF annonce l'indice {propose}, absent du tableau bilan "
+                f"(indices présents : {', '.join(indices)}). Le plan et le "
+                "tableau ne sont probablement pas de la même version.",
+                icon="🚫",
+            )
+        indice = st.selectbox(
+            "Colonne du tableau bilan à lire",
+            indices,
+            index=indices.index(propose) if propose in indices else len(indices) - 1,
+            help="Le nom du DXF sert à proposer l'indice ; la confirmation reste "
+            "obligatoire, un export peut être renommé.",
+        )
+
+        with st.expander("Correspondance des calques — modifiable", expanded=False):
+            st.caption(
+                "Proposée d'après la charte de nommage `UNI_` du BE, en ignorant "
+                "accents, tirets, espaces et underscores. Un calque laissé sur "
+                "« (ignorer) » n'est pas importé, et l'élément n'apparaîtra sur "
+                "aucune planche."
+            )
+            calques = _calques_caches(str(chemin_dxf), chemin_dxf.stat().st_size)
+            choix = {}
+            options = ["(ignorer)"] + list(CATEGORIES)
+            for calque in calques:
+                colonne_nom, colonne_categorie = st.columns([2, 1])
+                with colonne_nom:
+                    detail = f"{calque.nb_entites} entité(s)"
+                    if calque.nb_hatch:
+                        detail += f", {calque.nb_hatch} remplissage(s) ignoré(s)"
+                    st.text_input(
+                        "Calque",
+                        value=f"{calque.nom} — {detail}",
+                        disabled=True,
+                        key=f"be_calque_{calque.nom}",
+                        label_visibility="collapsed",
+                    )
+                with colonne_categorie:
+                    defaut = calque.categorie_proposee or "(ignorer)"
+                    retenu = st.selectbox(
+                        "Catégorie",
+                        options,
+                        index=options.index(defaut),
+                        key=f"be_categorie_{calque.nom}",
+                        label_visibility="collapsed",
+                    )
+                if retenu != "(ignorer)":
+                    choix[calque.nom] = retenu
+            st.session_state.correspondance_be = choix
+
+        if st.button("Importer et contrôler", type="primary", width="stretch"):
+            st.session_state.coupe_be = None
+            st.session_state.profil_be = None
+            emprise_cadastrale = None
+            chemin_emprise = _enregistrer_fichiers(
+                nom.strip() or "projet", fichiers_emprise
+            )
+            if chemin_emprise is not None:
+                emprise_cadastrale = charger_emprise(chemin_emprise).geometrie
+            st.session_state.import_be = importer_be(
+                chemin_dxf,
+                chemin_tableau,
+                indice,
+                correspondance=st.session_state.correspondance_be or None,
+                emprise_cadastrale=emprise_cadastrale,
+                seuil_puissance_mwc=float(seuil_puissance),
+            )
+            st.session_state.emprise_cadastrale_be = emprise_cadastrale
+            st.session_state.chemin_pdf_be = (
+                str(chemin_pdf_be) if chemin_pdf_be else None
+            )
+            st.session_state.chemin_altimetrie_be = (
+                str(chemin_altimetrie) if chemin_altimetrie else None
+            )
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+
+
+import_be_courant = st.session_state.import_be
+if import_be_courant is not None:
+    plan = import_be_courant.plan
+    tableau = import_be_courant.tableau
+    emprise_cloturee = plan.polygone_cloture
+
+    st.markdown("### Ce sur quoi le dossier est engagé")
+    colonnes = st.columns(4)
+    colonnes[0].metric("Phase", tableau.generalites["phase"])
+    colonnes[1].metric(
+        "Date du tableau", tableau.generalites["date"].strftime("%d/%m/%Y")
+    )
+    colonnes[2].metric("Indice", tableau.indice)
+    colonnes[3].metric(
+        "Puissance", f"{tableau.modules['puissance_mwc']:.5f} MWc".replace(".", ",")
+    )
+
+    st.markdown("### Contrôles croisés")
+    st.dataframe(
+        [
+            {
+                "": {"ok": "✅", "avertissement": "⚠️", "bloquant": "🚫"}[c.statut],
+                "Contrôle": c.libelle,
+                "Plan": _formater(c.valeur_dxf, c.unite),
+                "Tableau": _formater(c.valeur_tableau, c.unite),
+                "Tolérance": c.tolerance,
+                "Commentaire": c.message,
+            }
+            for c in import_be_courant.controles
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    for controle in import_be_courant.bloquants:
+        st.error(f"{controle.libelle} — {controle.message}", icon="🚫")
+    for message in import_be_courant.avertissements:
+        st.warning(message, icon="⚠️")
+
+    with st.expander("Paramètres extraits du tableau bilan"):
+        for titre, valeurs in (
+            ("Généralités", tableau.generalites),
+            ("Structures", tableau.structures),
+            ("Modules", tableau.modules),
+            ("Postes et locaux", tableau.postes),
+        ):
+            st.markdown(f"**{titre}**")
+            st.dataframe(
+                [
+                    {"Paramètre": cle, "Valeur": str(valeur)}
+                    for cle, valeur in valeurs.items()
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        if tableau.standards:
+            st.markdown(
+                f"**Standards UNITe pour « {tableau.generalites['type_projet']} »** "
+                "— repère de vraisemblance, pas une contrainte."
+            )
+            st.dataframe(
+                [
+                    {"Référence": cle, "Standard": str(valeur)}
+                    for cle, valeur in tableau.standards.items()
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        if tableau.cotes:
+            st.markdown("**Cotes normalisées** — pour la génération des DP 4 au lot 4.")
+            st.dataframe(
+                [
+                    {
+                        "Ouvrage": cote.ouvrage,
+                        "Dimensions": cote.dimensions,
+                        "Ordre des cotes": cote.ordre_cotes,
+                        "Surface (m²)": cote.surface_m2,
+                        "Plateforme (m²)": cote.surface_plateforme_m2,
+                    }
+                    for cote in tableau.cotes
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+
+    if st.session_state.get("chemin_pdf_be"):
+        with open(st.session_state["chemin_pdf_be"], "rb") as fichier:
+            st.download_button(
+                "Ouvrir le plan PDF du BE pour comparaison visuelle",
+                data=fichier.read(),
+                file_name=Path(st.session_state["chemin_pdf_be"]).name,
+                mime="application/pdf",
+                width="stretch",
+            )
+
+    # -----------------------------------------------------------------------
+    # Ligne de coupe A-A'
+    # -----------------------------------------------------------------------
+    st.markdown("### Ligne de coupe A-A'")
+    st.caption(
+        "Tracez un segment là où la coupe doit passer. Seul son **point milieu** "
+        "est retenu : la direction vient de l'azimut mesuré sur les tables "
+        f"({plan.azimut_tables_deg:.2f}° depuis l'est), et la ligne est étendue "
+        "à toute l'emprise clôturée avec 10 m de marge."
+    )
+
+    manuel = st.checkbox(
+        "Conserver la direction tracée (contournement)",
+        value=False,
+        help="À n'utiliser que si la perpendiculaire aux rangées ne convient "
+        "pas. Une coupe oblique allonge toutes les distances qu'on y lit.",
+    )
+
+    carte = folium.Map(tiles=None, control_scale=True)
+    folium.TileLayer(
+        tiles=URL_TUILES_ORTHO,
+        attr="IGN — Géoplateforme",
+        name="Ortho IGN",
+        max_zoom=21,
+    ).add_to(carte)
+    for couche, style in (
+        ("tables_pv", {"color": "#0000ff", "weight": 1, "fillColor": "#97caca"}),
+        ("cloture", {"color": "#ff0000", "weight": 3, "fill": False}),
+    ):
+        collection = en_wgs84(plan.geometries(couche))
+        if collection["features"]:
+            folium.GeoJson(
+                collection,
+                style_function=lambda _trait, style=style: style,
+                name=couche,
+            ).add_to(carte)
+    sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
+    carte.fit_bounds([[sud, ouest], [nord, est]])
+    Draw(
+        export=False,
+        draw_options={
+            "polyline": {"shapeOptions": {"color": "#ff8c00", "weight": 4}},
+            "polygon": False,
+            "rectangle": False,
+            "circle": False,
+            "marker": False,
+            "circlemarker": False,
+        },
+        edit_options={"edit": False, "remove": True},
+    ).add_to(carte)
+
+    resultat_carte = st_folium(carte, width=None, height=520, key="carte_coupe_be")
+    trace = trace_l93(resultat_carte)
+
+    if trace is not None and st.button("Corriger et relever le profil", width="stretch"):
+        try:
+            coupe = corriger_ligne_coupe(
+                trace, plan.azimut_tables_deg, emprise_cloturee, manuel=manuel
+            )
+            st.session_state.coupe_be = coupe
+            with st.spinner("Interrogation du RGE ALTI…"):
+                st.session_state.profil_be = profil_terrain(
+                    coupe,
+                    fichier_altimetrie=st.session_state.get("chemin_altimetrie_be"),
+                )
+            import_be_courant.ligne_coupe = coupe
+            import_be_courant.profil = st.session_state.profil_be
+            import_be_courant.coherence = controler_coherence(
+                st.session_state.profil_be, coupe, plan.tables
+            )
+        except ErreurDP as erreur:
+            st.session_state.coupe_be = None
+            st.error(f"{type(erreur).__name__} : {erreur}")
+    elif trace is None:
+        st.info(
+            "Aucun tracé sur la carte : utilisez l'outil ligne (icône polyligne) "
+            "à gauche de la carte."
+        )
+
+    # -----------------------------------------------------------------------
+    # Aperçu et validation
+    # -----------------------------------------------------------------------
+    st.markdown("### Aperçu des géométries importées")
+    try:
+        emprise_cadastrale = st.session_state.get("emprise_cadastrale_be")
+        if st.session_state.cadre_apercu_be is None:
+            st.session_state.cadre_apercu_be = cadre_apercu_be(plan, emprise_cadastrale)
+        image = apercu_plan(
+            plan,
+            ligne_coupe=st.session_state.coupe_be,
+            emprise_cadastrale=emprise_cadastrale,
+            fond=_fond_be_cache(st.session_state.cadre_apercu_be),
+            cadre=st.session_state.cadre_apercu_be,
+        )
+        st.image(image, width="stretch")
+        st.caption(
+            "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier "
+            "de référence HOCH « Les Islettes » : "
+            + " · ".join(
+                f"{style.libelle} ({nombre})"
+                for _, style, nombre in legende_presente(plan)
+            )
+            + ". Jaune : emprise cadastrale. Orange : tracé initial de la coupe. "
+            "Noir : coupe corrigée. Les couleurs du DXF ne sont pas reprises, "
+            "les codes ACI y sont des couleurs de travail."
+        )
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+
+    coupe = st.session_state.coupe_be
+    profil = st.session_state.profil_be
+    if coupe is not None:
+        colonnes = st.columns(3)
+        colonnes[0].metric("Longueur de la coupe", f"{coupe.longueur_m:.0f} m")
+        colonnes[1].metric(
+            "Écart redressé", f"{coupe.ecart_initial_deg:.1f}°",
+            help="Angle entre le tracé initial et la perpendiculaire aux rangées.",
+        )
+        colonnes[2].metric(
+            "Azimut de la coupe", f"{coupe.azimut_coupe_deg:.2f}° depuis l'est"
+        )
+
+    if profil is not None:
+        st.image(figure_profil(profil), width="stretch")
+        colonnes = st.columns(3)
+        colonnes[0].metric("Dénivelée totale", f"{profil.denivelee_m:.2f} m")
+        colonnes[1].metric("Altitude mini", f"{profil.altitude_min_m:.2f} m NGF")
+        colonnes[2].metric("Altitude maxi", f"{profil.altitude_max_m:.2f} m NGF")
+        st.caption(f"Source du profil : {profil.origine}.")
+        coherence = import_be_courant.coherence
+        if coherence is not None:
+            (st.success if coherence.conforme else st.warning)(
+                coherence.message, icon="📐" if coherence.conforme else "⚠️"
+            )
+
+    st.markdown("### Validation")
+    if import_be_courant.bloquants:
+        st.error(
+            "Des contrôles croisés bloquants subsistent : corrigez les fichiers "
+            "d'entrée. Les assouplir reviendrait à déposer un dossier faux.",
+            icon="🚫",
+        )
+    elif coupe is None:
+        st.info(
+            "Tracez et corrigez la ligne de coupe avant de valider : le lot 4 en "
+            "a besoin pour la coupe DP 3."
+        )
+    elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
+        try:
+            dossier_sortie = DOSSIER_SORTIE / (nom.strip() or "projet")
+            gpkg, parametres = import_be_courant.ecrire(dossier_sortie)
+            st.success(
+                f"Import validé. {gpkg} et {parametres} écrits — c'est le contrat "
+                "d'entrée du lot 4."
+            )
+            with open(gpkg, "rb") as fichier:
+                st.download_button(
+                    "Télécharger geometries.gpkg",
+                    data=fichier.read(),
+                    file_name=f"{nom.strip() or 'projet'}_geometries.gpkg",
+                    mime="application/geopackage+sqlite3",
+                    width="stretch",
+                )
+            st.code(
+                json.dumps(
+                    json.loads(parametres.read_text(encoding="utf-8")),
+                    ensure_ascii=False,
+                    indent=2,
+                )[:4000],
+                language="json",
+            )
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
