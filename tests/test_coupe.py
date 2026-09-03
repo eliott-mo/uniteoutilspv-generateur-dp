@@ -887,3 +887,106 @@ def test_import_complet_avec_emprise_reelle_ne_leve_aucun_bloquant(cadastre):
     # Plus aucun avertissement de contrôle : c'est le seul jeu où toutes les
     # pièces d'entrée sont présentes.
     assert import_be.avertissements == []
+
+
+# ---------------------------------------------------------------------------
+# Contrôle du profil par les altitudes embarquées dans le DXF
+# ---------------------------------------------------------------------------
+
+
+def _points_autour(ligne, decalage_m, bruit_m=0.0, pas_m=5.0, altitude=100.0):
+    """Points d'altitude le long d'une ligne, décalés d'une constante."""
+    import random
+
+    alea = random.Random(0)
+    longueur = ligne.length
+    points = []
+    s = 0.0
+    while s <= longueur:
+        p = ligne.interpolate(s)
+        secousse = alea.uniform(-bruit_m, bruit_m) if bruit_m else 0.0
+        points.append((p.x, p.y, altitude + decalage_m + secousse))
+        s += pas_m
+    return points
+
+
+def test_terrain_du_dxf_concordant_ne_declenche_rien():
+    from dp_socle.coupe import controler_terrain_embarque
+
+    ligne = LineString([(0, 0), (0, 200)])
+    profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
+    resultats = controler_terrain_embarque(
+        profil,
+        ligne,
+        {"-TopoNiveau": _points_autour(ligne, -0.13, bruit_m=0.10)},
+        {"-TopoNiveau": "points cotés du géomètre"},
+    )
+    assert len(resultats) == 1
+    assert resultats[0].conforme
+    assert "même terrain" in resultats[0].message
+
+
+def test_decalage_de_referentiel_distingue_du_bruit():
+    """Une dispersion faible autour d'une médiane non nulle n'est pas du bruit.
+
+    Mesuré sur Sarnois : « PVcase Online Terrain » se tient 0,80 m sous le RGE
+    ALTI avec une dispersion de 0,04 m — la même forme de terrain, dans un
+    autre référentiel altimétrique. Le nom du calque dit probablement
+    pourquoi : un modèle téléchargé, pas un relevé.
+    """
+    from dp_socle.coupe import controler_terrain_embarque
+
+    ligne = LineString([(0, 0), (0, 200)])
+    profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
+
+    decale = controler_terrain_embarque(
+        profil, ligne, {"PVcase Online Terrain": _points_autour(ligne, -0.80, 0.04)}
+    )[0]
+    assert not decale.conforme
+    assert decale.ecart_median_m == pytest.approx(-0.80, abs=0.05)
+    assert "décalage constant" in decale.message
+
+    bruyant = controler_terrain_embarque(
+        profil, ligne, {"Relevé bruyant": _points_autour(ligne, -0.80, 1.50)}
+    )[0]
+    assert not bruyant.conforme
+    assert "terrains différents" in bruyant.message
+
+
+def test_chaque_source_du_dxf_est_jugee_separement():
+    """Les fusionner masquerait leur désaccord, et c'est lui qu'on veut voir."""
+    from dp_socle.coupe import controler_terrain_embarque
+
+    ligne = LineString([(0, 0), (0, 200)])
+    profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
+    resultats = controler_terrain_embarque(
+        profil,
+        ligne,
+        {
+            "-TopoNiveau": _points_autour(ligne, -0.13, 0.10),
+            "PVcase Online Terrain": _points_autour(ligne, -0.80, 0.04),
+        },
+    )
+    par_source = {r.source: r.conforme for r in resultats}
+    assert par_source == {"-TopoNiveau": True, "PVcase Online Terrain": False}
+
+
+def test_points_hors_du_couloir_ignores():
+    """Comparer des points éloignés reviendrait à comparer deux endroits."""
+    from dp_socle.coupe import controler_terrain_embarque
+
+    ligne = LineString([(0, 0), (0, 200)])
+    profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
+    loin = [(500.0, y, 130.0) for y in range(0, 200, 5)]
+    assert controler_terrain_embarque(profil, ligne, {"Ailleurs": loin}) == []
+
+
+def test_dxf_sans_altitude_ne_produit_aucun_controle():
+    """Saint-Cyr ne porte pas de calque de terrain, et ce n'est pas une anomalie."""
+    from dp_socle.coupe import controler_terrain_embarque
+
+    plan_sans_terrain = lire_plan_be(DXF)
+    assert plan_sans_terrain.points_terrain == {}
+    ligne = LineString([(0, 0), (0, 200)])
+    profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
+    assert controler_terrain_embarque(profil, ligne, {}) == []

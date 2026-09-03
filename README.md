@@ -949,6 +949,35 @@ Mesuré le 03/09/2026, le profil s'écartait du profil réel de 2,57 m, d'amplit
 filtre par boîte englobante préalable fait au passage tomber la lecture de 4,1 s
 à 0,4 s.
 
+#### Les altitudes portées par le DXF servent de contrôle, pas de source
+
+Certains plans du BE embarquent leur propre terrain. Ceux de Sarnois en portent
+**trois**, et ils ne disent pas la même chose. Comparés au RGE ALTI le
+03/09/2026 :
+
+| Source | écart médian | dispersion |
+|---|---|---|
+| `-TopoNiveau`, points cotés du géomètre | −0,13 m | 0,11 m |
+| `PVcase Topographic Mesh`, bâti sur ces points | −0,14 m | 0,19 m |
+| `PVcase Online Terrain` | **−0,80 m** | **0,04 m** |
+
+La dernière ligne est la plus instructive : 4 cm de dispersion pour 80 cm
+d'écart, c'est **le même terrain à un décalage constant près** — donc un autre
+référentiel altimétrique, pas un relevé imprécis. Le nom du calque dit
+probablement pourquoi : un modèle téléchargé, pas un levé de géomètre.
+
+Le profil du dossier reste donc celui du **RGE ALTI**, référence altimétrique
+nationale que l'instructeur peut vérifier, et les altitudes du DXF le
+**contrôlent**. Chaque source est jugée séparément — les fusionner masquerait
+précisément le désaccord qu'on veut voir — et l'écart est qualifié : une
+dispersion faible autour d'une médiane non nulle est signalée comme un décalage
+de référentiel, une dispersion large comme deux terrains différents.
+
+Le seuil est de 25 cm : il laisse passer le levé du géomètre et attrape le
+terrain téléchargé.
+
+Ces points ne sont jamais dessinés, et leurs calques restent écartés du plan.
+
 Ce relevé est un repli, pas une source à préférer. Sur le segment de contrôle, le
 nuage du BE et le RGE ALTI s'accordent à ±0,10 m avec un écart-type de 0,02 m :
 l'outil topographique interne rééchantillonne le RGE ALTI, il n'apporte pas une

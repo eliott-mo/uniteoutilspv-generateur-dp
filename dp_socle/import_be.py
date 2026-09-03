@@ -291,10 +291,12 @@ CALQUES_ECARTES = {
     # profil de la coupe vient du RGE ALTI ou d'un relevé fourni. Le reprendre
     # d'ici demanderait de vérifier son référentiel altimétrique, ce qui n'est
     # pas fait.
-    "PVcase Topographic Mesh": "maillage topographique, non exploité",
-    "PVcase Topographic Mesh Polygon": "maillage topographique, non exploité",
-    "PVcase Online Terrain": "points de terrain, non exploités",
-    "-TopoNiveau": "points cotés du BE, non exploités",
+    # Ceux-ci portent des altitudes, relevées à part pour contrôler le profil
+    # du RGE ALTI. Écartés du dessin, pas de la mesure : voir CALQUES_TERRAIN.
+    "PVcase Topographic Mesh": "altitudes relevées, non dessinées",
+    "PVcase Topographic Mesh Polygon": "altitudes relevées, non dessinées",
+    "PVcase Online Terrain": "altitudes relevées, non dessinées",
+    "-TopoNiveau": "altitudes relevées, non dessinées",
     # Étude d'ombrage portée au plan, pas un ouvrage à dessiner.
     "UNI_PDL-PDT_Zone_Ombre": "étude d'ombrage",
     # Contenu de blocs décoratifs : « GREY » vient d'une illustration, « Edges »
@@ -373,6 +375,11 @@ class PlanBE:
     calques_ignores: list[str]
     calques_vides: list[str]
     source: str
+    #: Points d'altitude du DXF, par calque. Non dessinés : ils servent à
+    #: contrôler le profil du RGE ALTI, voir `CALQUES_TERRAIN`.
+    points_terrain: dict[str, list[tuple[float, float, float]]] = field(
+        default_factory=dict
+    )
     avertissements: list[str] = field(default_factory=list)
 
     def par_categorie(self, categorie: str) -> list[EntiteBE]:
@@ -602,6 +609,69 @@ def _developper(entites, calque_insert: str | None, profondeur: int, anomalies: 
             ) from exc
         yield from _developper(sous_entites, calque, profondeur + 1, anomalies)
 
+#: Calques portant une altitude de terrain, avec leur nature.
+#:
+#: Ces points ne sont **pas** dessinés : le profil de la coupe vient du RGE
+#: ALTI, référence altimétrique nationale que l'instructeur peut vérifier. Ils
+#: servent de **contrôle** de ce profil, ce qui suppose de les garder séparés
+#: par calque — mesuré sur Sarnois le 03/09/2026, les trois sources d'un même
+#: fichier ne disent pas la même chose :
+#:
+#: - `-TopoNiveau`, points cotés du géomètre (matricule et altitude en
+#:   attributs) : médiane -0,13 m par rapport au RGE ALTI, dispersion 0,11 m ;
+#: - `PVcase Topographic Mesh`, construit sur ces points : -0,14 m, 0,19 m ;
+#: - `PVcase Online Terrain` : **-0,80 m** avec une dispersion de 0,04 m, soit
+#:   la même forme de terrain à 4 cm près mais 80 cm plus bas. Le nom dit
+#:   probablement pourquoi : un modèle téléchargé, pas un relevé.
+#:
+#: Les fusionner masquerait ce désaccord, et c'est précisément lui qu'on veut
+#: voir.
+CALQUES_TERRAIN = {
+    "-TopoNiveau": "points cotés du géomètre",
+    "PVcase Online Terrain": "terrain téléchargé par PVcase",
+    "PVcase Topographic Mesh": "maillage topographique PVcase",
+}
+
+_TERRAIN_NORMALISES = {normaliser(nom): nom for nom in CALQUES_TERRAIN}
+
+#: Altitude en deçà de laquelle un sommet de maillage est tenu pour un
+#: enregistrement de face sans altitude, et non pour un point de terrain. Les
+#: maillages polyface du DXF portent des sommets à Z nul qui ne décrivent aucun
+#: relief.
+_Z_TERRAIN_MINIMAL_M = 1.0
+
+
+def _points_terrain(modelspace) -> dict[str, list[tuple[float, float, float]]]:
+    """Points d'altitude du DXF, par calque, sans développer les blocs.
+
+    Les points cotés sont des références de bloc dont c'est le **point
+    d'insertion** qui porte l'altitude : les développer donnerait le dessin du
+    symbole, pas la cote.
+    """
+    releves: dict[str, list[tuple[float, float, float]]] = {}
+    for entite in modelspace:
+        calque = _calque_de(entite)
+        if calque is None:
+            continue
+        nom = _TERRAIN_NORMALISES.get(normaliser(calque))
+        if nom is None:
+            continue
+        type_dxf = entite.dxftype()
+        if type_dxf == "POINT":
+            p = entite.dxf.location
+            releves.setdefault(nom, []).append((p.x, p.y, p.z))
+        elif type_dxf == "INSERT":
+            p = entite.dxf.insert
+            releves.setdefault(nom, []).append((p.x, p.y, p.z))
+        elif type_dxf == "POLYLINE":
+            for sommet in entite.vertices:
+                if not sommet.dxf.hasattr("location"):
+                    continue
+                p = sommet.dxf.location
+                if p.z > _Z_TERRAIN_MINIMAL_M:
+                    releves.setdefault(nom, []).append((p.x, p.y, p.z))
+    return releves
+
 def lire_plan_be(
     chemin: str | Path,
     correspondance: dict[str, str] | None = None,
@@ -648,6 +718,7 @@ def lire_plan_be(
             f"(types attendus : {', '.join(TYPES_TRAITES)})."
         )
 
+    points_terrain = _points_terrain(modelspace)
     unite, facteur = _detecter_unite(entites_par_calque, chemin.name)
     if facteur != 1.0:
         avertissements.append(
@@ -820,6 +891,10 @@ def lire_plan_be(
         calques_ignores=calques_ignores,
         calques_vides=calques_vides,
         source=chemin.name,
+        points_terrain={
+            nom: [(x * facteur, y * facteur, z * facteur) for x, y, z in pts]
+            for nom, pts in points_terrain.items()
+        },
         avertissements=avertissements,
     )
 
@@ -1479,6 +1554,7 @@ def parametres_json(
     profil=None,
     coherence=None,
     seuil_puissance_mwc: float | None = None,
+    terrain_be=None,
 ) -> dict:
     """Paramètres techniques, azimut et profil, prêts à être écrits en JSON."""
     import datetime as _dt
@@ -1586,6 +1662,23 @@ def parametres_json(
             "avertissements": profil.avertissements,
         }
 
+    if terrain_be:
+        # Le profil du dossier reste celui du RGE ALTI ; ces sources le
+        # contrôlent. Les consigner permet au lot 4 de savoir sur quoi la coupe
+        # a été recoupée, et avec quel résultat.
+        donnees["controle_terrain_dxf"] = [
+            {
+                "source": c.source,
+                "nature": c.nature,
+                "nb_points": c.nb_points,
+                "ecart_median_m": c.ecart_median_m,
+                "dispersion_m": c.dispersion_m,
+                "conforme": c.conforme,
+                "message": c.message,
+            }
+            for c in terrain_be
+        ]
+
     if coherence is not None:
         donnees["coherence_altimetrique"] = {
             "nb_tables_comparees": coherence.nb_tables_comparees,
@@ -1672,6 +1765,8 @@ class ImportBE:
     ligne_coupe: object | None = None
     profil: object | None = None
     coherence: object | None = None
+    #: Contrôles du profil par les altitudes embarquées dans le DXF.
+    terrain_be: list = field(default_factory=list)
     seuil_puissance_mwc: float | None = None
 
     @property
@@ -1690,6 +1785,9 @@ class ImportBE:
             messages.extend(self.profil.avertissements)
         if self.coherence is not None and not self.coherence.conforme:
             messages.append(self.coherence.message)
+        for controle in self.terrain_be:
+            if not controle.conforme:
+                messages.append(controle.message)
         return messages
 
     def ecrire(self, dossier: str | Path) -> tuple[Path, Path]:
@@ -1715,6 +1813,7 @@ class ImportBE:
                 self.profil,
                 self.coherence,
                 self.seuil_puissance_mwc,
+                self.terrain_be,
             ),
             dossier,
         )

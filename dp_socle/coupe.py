@@ -745,3 +745,135 @@ def controler_coherence(
             "ne sont probablement pas dans le même référentiel altimétrique."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Contrôle du profil par les altitudes embarquées dans le DXF
+# ---------------------------------------------------------------------------
+
+#: Écart médian admis entre le profil du RGE ALTI et une source d'altitude
+#: embarquée dans le DXF, en mètres.
+#:
+#: Deux modèles du même terrain doivent s'accorder bien mieux que le terrain ne
+#: s'accorde avec le bas des tables : 25 cm sépare l'imprécision d'un relevé
+#: d'un décalage de référentiel. Mesuré sur Sarnois le 03/09/2026, ce seuil
+#: laisse passer les points cotés du géomètre (-0,13 m) et le maillage bâti sur
+#: eux (-0,14 m), et attrape le terrain téléchargé par PVcase (-0,80 m).
+ECART_TERRAIN_BE_MAX_M = 0.25
+
+#: Dispersion en deçà de laquelle un écart est tenu pour un décalage constant
+#: du référentiel, et non pour du bruit de mesure, en mètres.
+DISPERSION_DECALAGE_M = 0.15
+
+
+@dataclass
+class ControleTerrainBE:
+    """Comparaison du profil RGE ALTI à une source d'altitude du DXF."""
+
+    source: str
+    nature: str
+    nb_points: int
+    ecart_median_m: float
+    dispersion_m: float
+    ecart_min_m: float
+    ecart_max_m: float
+    conforme: bool
+    message: str
+
+
+def controler_terrain_embarque(
+    profil: ProfilTerrain,
+    ligne: LigneCoupe | LineString,
+    points_terrain: dict[str, list[tuple[float, float, float]]],
+    natures: dict[str, str] | None = None,
+    seuil_m: float = ECART_TERRAIN_BE_MAX_M,
+    demi_couloir_m: float = DEMI_COULOIR_M,
+) -> list[ControleTerrainBE]:
+    """Recoupe le profil du RGE ALTI avec les altitudes portées par le DXF.
+
+    Le profil de la coupe reste celui du RGE ALTI : c'est la référence
+    altimétrique nationale, celle que l'instructeur du dossier peut vérifier.
+    Les altitudes du DXF ne le remplacent pas, elles le **contrôlent** — et ce
+    contrôle a de la valeur parce que les sources d'un même fichier se
+    contredisent parfois entre elles.
+
+    Chaque source est traitée séparément, et l'écart est qualifié : une
+    dispersion faible autour d'une médiane non nulle est un décalage de
+    référentiel, pas du bruit. C'est ce qui distingue un relevé imprécis d'un
+    modèle pris dans un autre système altimétrique.
+    """
+    geometrie = ligne.geometrie if isinstance(ligne, LigneCoupe) else ligne
+    natures = natures or {}
+    resultats: list[ControleTerrainBE] = []
+
+    for source, points in sorted(points_terrain.items()):
+        ecarts = _ecarts_au_profil(profil, geometrie, points, demi_couloir_m)
+        if len(ecarts) < 3:
+            continue
+        median = statistics.median(ecarts)
+        dispersion = statistics.pstdev(ecarts)
+        conforme = abs(median) <= seuil_m
+        nature = natures.get(source, "source d'altitude du DXF")
+        if conforme:
+            message = (
+                f"« {source} » ({nature}) : {len(ecarts)} points comparés, écart "
+                f"médian de {median:+.2f} m au RGE ALTI, dispersion {dispersion:.2f} m. "
+                "Les deux décrivent le même terrain."
+            )
+        elif dispersion <= DISPERSION_DECALAGE_M:
+            message = (
+                f"« {source} » ({nature}) : {len(ecarts)} points comparés, "
+                f"{median:+.2f} m par rapport au RGE ALTI pour une dispersion de "
+                f"seulement {dispersion:.2f} m. C'est le même terrain à un "
+                "décalage constant près, donc un référentiel altimétrique "
+                "différent, pas une imprécision de relevé. Le profil du dossier "
+                "reste celui du RGE ALTI."
+            )
+        else:
+            message = (
+                f"« {source} » ({nature}) : {len(ecarts)} points comparés, écart "
+                f"médian de {median:+.2f} m au RGE ALTI, dispersion {dispersion:.2f} m "
+                f"(de {min(ecarts):+.2f} à {max(ecarts):+.2f} m). Les deux "
+                "décrivent des terrains différents. Le profil du dossier reste "
+                "celui du RGE ALTI."
+            )
+        resultats.append(
+            ControleTerrainBE(
+                source=source,
+                nature=nature,
+                nb_points=len(ecarts),
+                ecart_median_m=median,
+                dispersion_m=dispersion,
+                ecart_min_m=min(ecarts),
+                ecart_max_m=max(ecarts),
+                conforme=conforme,
+                message=message,
+            )
+        )
+    return resultats
+
+
+def _ecarts_au_profil(
+    profil: ProfilTerrain,
+    ligne: LineString,
+    points: list[tuple[float, float, float]],
+    demi_couloir_m: float,
+) -> list[float]:
+    """Écarts point à profil, dans le couloir de la coupe.
+
+    Même couloir que pour un relevé fourni en repli : comparer des points
+    éloignés de la coupe reviendrait à comparer deux endroits du terrain.
+    """
+    minx, miny, maxx, maxy = ligne.bounds
+    ecarts = []
+    for x, y, z in points:
+        if not (
+            minx - demi_couloir_m <= x <= maxx + demi_couloir_m
+            and miny - demi_couloir_m <= y <= maxy + demi_couloir_m
+        ):
+            continue
+        point = Point(x, y)
+        if ligne.distance(point) > demi_couloir_m:
+            continue
+        ecarts.append(z - profil.altitude_a(float(ligne.project(point))))
+    return ecarts

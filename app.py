@@ -36,6 +36,7 @@ from dp_socle.apercu_be import fond_apercu as fond_apercu_be
 from dp_socle.assemblage import generer_dossier
 from dp_socle.coupe import (
     controler_coherence,
+    controler_terrain_embarque,
     corriger_ligne_coupe,
     coupe_enregistree,
     profil_terrain,
@@ -43,6 +44,7 @@ from dp_socle.coupe import (
 )
 from dp_socle.erreurs import ErreurDP
 from dp_socle.import_be import (
+    CALQUES_TERRAIN,
     CATEGORIES,
     calques_du_dxf,
     importer_be,
@@ -844,6 +846,9 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
     import_be.coherence = controler_coherence(
         st.session_state.profil_be, coupe, plan.tables
     )
+    import_be.terrain_be = controler_terrain_embarque(
+        st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
+    )
 
 if fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf)
@@ -1112,6 +1117,9 @@ if import_be_courant is not None:
             import_be_courant.coherence = controler_coherence(
                 st.session_state.profil_be, coupe, plan.tables
             )
+            import_be_courant.terrain_be = controler_terrain_embarque(
+                st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
+            )
         except ErreurDP as erreur:
             st.session_state.coupe_be = None
             st.error(f"{type(erreur).__name__} : {erreur}")
@@ -1180,6 +1188,17 @@ if import_be_courant is not None:
         if coherence is not None:
             (st.success if coherence.conforme else st.warning)(
                 coherence.message, icon="📐" if coherence.conforme else "⚠️"
+            )
+        for controle in import_be_courant.terrain_be:
+            (st.success if controle.conforme else st.warning)(
+                controle.message, icon="📐" if controle.conforme else "⚠️"
+            )
+        if import_be_courant.terrain_be:
+            st.caption(
+                "Le profil du dossier reste celui du RGE ALTI, référence "
+                "altimétrique nationale que l'instructeur peut vérifier. Les "
+                "altitudes portées par le DXF le contrôlent, elles ne le "
+                "remplacent pas."
             )
 
     st.markdown("### Validation")
