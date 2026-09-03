@@ -800,6 +800,22 @@ def lire_plan_be(
         if motif is not None:
             ecartes.setdefault(motif, []).append(calque)
             continue
+        if normaliser(calque) == "0":
+            # Le calque 0 est celui par défaut d'AutoCAD : ce qui s'y trouve y
+            # est presque toujours par oubli. Sur Sarnois il porte la citerne
+            # incendie (103,9 m² pour 104 déclarés) et l'aire d'aspiration
+            # (32,0 m² pour 32 déclarés), deux ouvrages du dossier qui seraient
+            # perdus — plus douze polygones à 2 km du site, qui n'ont rien à y
+            # faire. L'apparier en bloc mélangerait les trois.
+            avertissements.append(
+                f"Le calque par défaut « {calque} » porte "
+                f"{len(entites_par_calque[calque])} entités non appariées. C'est "
+                "le calque où l'on dessine par oubli : son contenu est souvent "
+                "un mélange, et il peut cacher des ouvrages du dossier. "
+                "Demandez au BE de les répartir sur des calques nommés plutôt "
+                "que d'apparier celui-ci en bloc."
+            )
+            continue
         avertissements.append(
             f"Calque « {calque} » non apparié ({len(entites_par_calque[calque])} "
             "entités) : son contenu n'est pas importé. Appariez-le à une "

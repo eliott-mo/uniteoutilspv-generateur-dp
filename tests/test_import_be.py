@@ -809,3 +809,28 @@ def test_toutes_les_categories_ont_un_style_et_un_rang_de_dessin():
 
     assert set(CATEGORIES) == set(STYLES)
     assert set(CATEGORIES) - {"ligne_coupe"} == set(ORDRE_DESSIN)
+
+
+def test_calque_par_defaut_signale_a_part(tmp_path):
+    """Le calque 0 est celui où l'on dessine par oubli.
+
+    Sur Sarnois il porte la citerne incendie (103,9 m² pour 104 déclarés) et
+    l'aire d'aspiration (32,0 m² pour 32 déclarés), deux ouvrages du dossier —
+    plus douze polygones à 2 km du site. L'apparier en bloc mélangerait les
+    trois, et ne rien dire les perdrait.
+    """
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    espace.add_lwpolyline(
+        [(622_940, 6_750_700), (622_948, 6_750_700), (622_948, 6_750_704)],
+        close=True,
+        dxfattribs={"layer": "0"},
+    )
+    chemin = tmp_path / "calque_zero.dxf"
+    document.saveas(str(chemin))
+
+    plan_zero = lire_plan_be(chemin)
+    message = next(m for m in plan_zero.avertissements if "calque par défaut" in m)
+    assert "cacher des ouvrages" in message
+    assert "calques nommés" in message
