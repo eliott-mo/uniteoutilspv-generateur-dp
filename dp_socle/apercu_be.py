@@ -153,13 +153,24 @@ COULEUR_EMPRISE_CADASTRALE = (255, 215, 0)
 
 
 def cadre_apercu(plan, extra: BaseGeometry | None = None, marge: float = 0.08):
-    """Emprise géographique de l'aperçu, en Lambert 93."""
-    geometries = [e.geometrie for e in plan.entites]
+    """Emprise géographique de l'aperçu, en Lambert 93.
+
+    L'enveloppe est prise sur les bornes de chaque géométrie, sans les unir.
+    Une union coûte cher pour un simple rectangle, et surtout elle **échoue** sur
+    une géométrie invalide : le plan de Sarnois porte un polygone
+    auto-intersectant sur « ESPACE VERT », et `unary_union` levait là-dessus une
+    `GEOSException` qui emportait tout l'aperçu. Les bornes, elles, se lisent sur
+    n'importe quelle géométrie.
+    """
+    boites = [e.geometrie.bounds for e in plan.entites if not e.geometrie.is_empty]
     if extra is not None and not extra.is_empty:
-        geometries.append(extra)
-    if not geometries:
+        boites.append(extra.bounds)
+    if not boites:
         raise ErreurImportBE("Plan vide : aucun aperçu possible.")
-    minx, miny, maxx, maxy = unary_union(geometries).bounds
+    minx = min(b[0] for b in boites)
+    miny = min(b[1] for b in boites)
+    maxx = max(b[2] for b in boites)
+    maxy = max(b[3] for b in boites)
     tampon = marge * max(maxx - minx, maxy - miny) + JEU_CADRE_M
     return (minx - tampon, miny - tampon, maxx + tampon, maxy + tampon)
 

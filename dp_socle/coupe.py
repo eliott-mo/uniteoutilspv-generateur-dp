@@ -171,6 +171,19 @@ def corriger_ligne_coupe(
             )
 
     geometrie = _etendre(milieu, direction, emprise_cloturee, marge_m)
+    # Une coupe qui ne rencontre pas le site n'est pas une coupe de ce site.
+    # Le cas se produit à la reprise d'un import précédent : le dossier de
+    # sortie garde le tracé du projet d'avant, et le rejouer sur un autre plan
+    # donnait une ligne à 185 km de là — avec un profil du terrain d'apparence
+    # parfaitement normale, relevé quelque part entre les deux sites.
+    if not geometrie.intersects(emprise_cloturee):
+        raise ErreurCoupe(
+            f"La ligne de coupe obtenue ne traverse pas l'emprise clôturée : son "
+            f"point milieu en est distant de "
+            f"{milieu.distance(emprise_cloturee):,.0f} m. Ce tracé décrit un "
+            "autre site — tracez la coupe sur ce plan-ci."
+            .replace(",", " ")
+        )
     return LigneCoupe(
         geometrie=geometrie,
         trace_initial=LineString([depart, arrivee]),

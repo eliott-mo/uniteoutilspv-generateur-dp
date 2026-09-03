@@ -990,3 +990,36 @@ def test_dxf_sans_altitude_ne_produit_aucun_controle():
     ligne = LineString([(0, 0), (0, 200)])
     profil = ProfilTerrain([0.0, 200.0], [100.0, 100.0], "RGE ALTI", 5.0)
     assert controler_terrain_embarque(profil, ligne, {}) == []
+
+
+def test_coupe_qui_manque_le_site_refusee(plan, emprise):
+    """Une coupe qui ne rencontre pas le site n'est pas une coupe de ce site.
+
+    Le cas se produit à la reprise : le dossier de sortie garde le tracé du
+    projet d'avant. Rejoué sur un autre plan, il donnait une ligne à 185 km de
+    là — avec un profil du terrain d'apparence parfaitement normale, relevé
+    quelque part entre les deux sites, et un simple avertissement.
+    """
+    minx, miny, _, _ = emprise.bounds
+    ailleurs = LineString(
+        [(minx - 200_000, miny - 200_000), (minx - 199_900, miny - 199_800)]
+    )
+    with pytest.raises(ErreurCoupe) as erreur:
+        corriger_ligne_coupe(ailleurs, plan.azimut_tables_deg, emprise)
+    assert "ne traverse pas l'emprise clôturée" in str(erreur.value)
+    assert "autre site" in str(erreur.value)
+
+
+def test_reprise_d_un_trace_d_un_autre_projet_refusee(tmp_path, plan, emprise):
+    """Deux projets sous le même identifiant de dossier partagent la sortie."""
+    from dp_socle.coupe import coupe_enregistree, reprendre_coupe
+    from dp_socle.import_be import lire_parametres
+
+    _sortie_avec_coupe(tmp_path, emprise, plan)
+    enregistree = coupe_enregistree(lire_parametres(tmp_path))
+
+    from shapely.affinity import translate
+
+    autre_site = translate(emprise, xoff=200_000, yoff=150_000)
+    with pytest.raises(ErreurCoupe):
+        reprendre_coupe(enregistree, plan.azimut_tables_deg, autre_site)

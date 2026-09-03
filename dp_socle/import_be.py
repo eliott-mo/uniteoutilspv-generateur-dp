@@ -19,6 +19,7 @@ Vérifications faites sur le jeu de référence Saint-Cyr-en-Val
 
 from __future__ import annotations
 
+import hashlib
 import statistics
 import unicodedata
 from dataclasses import dataclass, field
@@ -325,6 +326,22 @@ _ECARTES_NORMALISES = {
 }
 
 
+def empreinte_charte() -> str:
+    """Empreinte des tables d'appariement, pour invalider les caches d'écran.
+
+    L'interface met en cache la lecture des calques d'un DXF, qui coûte
+    plusieurs secondes sur un fichier de 47 Mo. Sa clé porte le chemin et la
+    taille du fichier — ni l'un ni l'autre ne change quand la charte s'élargit,
+    et l'écran de correspondance continuait alors d'afficher l'ancien
+    appariement. Constaté en pilotant l'application sur Sarnois : 34 calques
+    présentés « à décider » là où la charte n'en laissait plus que 3.
+    """
+    contenu = repr(sorted(CORRESPONDANCE_DEFAUT.items())) + repr(
+        sorted(CALQUES_ECARTES.items())
+    )
+    return hashlib.sha256(contenu.encode("utf-8")).hexdigest()[:12]
+
+
 def motif_ecart(calque: str) -> str | None:
     """Raison pour laquelle un calque est délibérément écarté, ou None."""
     normalise = normaliser(calque)
@@ -501,6 +518,10 @@ class CalqueDXF:
     nb_entites: int
     nb_hatch: int
     categorie_proposee: str | None
+    #: Raison pour laquelle le calque est écarté d'office, ou None s'il demande
+    #: une décision. L'écran de correspondance s'en sert pour ne pas mettre sur
+    #: le même plan les 45 calques à écarter et les 8 qui comptent.
+    motif_ecart: str | None = None
 
 
 def calques_du_dxf(chemin: str | Path) -> list[CalqueDXF]:
@@ -538,6 +559,7 @@ def calques_du_dxf(chemin: str | Path) -> list[CalqueDXF]:
             nb_entites=entites.get(nom, 0),
             nb_hatch=hatchs.get(nom, 0),
             categorie_proposee=categorie_proposee(nom),
+            motif_ecart=motif_ecart(nom),
         )
         for nom in sorted(set(entites) | set(hatchs))
     ]
@@ -890,6 +912,20 @@ def lire_plan_be(
                 "calculer la surface clôturée, ce qui invente un segment que le BE "
                 "n'a pas dessiné — vérifiez la surface annoncée."
             )
+
+    # Une géométrie auto-intersectante rend fausses les surfaces qu'on en tire,
+    # et fait échouer toute opération d'union — c'est ce qui emportait l'aperçu
+    # sur le plan de Sarnois. Elle est importée telle quelle, mais dite.
+    invalides: dict[str, int] = {}
+    for entite in entites:
+        if not entite.geometrie.is_valid:
+            invalides[entite.calque] = invalides.get(entite.calque, 0) + 1
+    for calque, nombre in sorted(invalides.items()):
+        avertissements.append(
+            f"Calque « {calque} » : {nombre} géométrie(s) invalide(s), "
+            "auto-intersectante(s) le plus souvent. Les surfaces calculées "
+            "dessus sont douteuses — demandez au BE de reprendre le tracé."
+        )
 
     tables = [
         e.geometrie

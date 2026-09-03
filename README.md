@@ -895,6 +895,15 @@ fournit un nouvel indice. Rejouer la correction sur le tracé d'origine redonne
 une coupe juste ; recharger la ligne corrigée telle quelle la figerait sur un
 plan qui n'existe plus, et elle ne serait plus perpendiculaire aux rangées.
 
+**Une coupe qui ne rencontre pas le site est refusée.** Deux projets enregistrés
+sous le même identifiant de dossier partagent leur dossier de sortie : rejouer
+le tracé de l'un sur le plan de l'autre donnait une ligne à 185 km de là, avec
+un profil du terrain d'apparence parfaitement normale relevé quelque part entre
+les deux sites. Le déplacement était bien signalé, mais un avertissement ne
+suffit pas quand le résultat se dessine sans anomalie. Le critère est
+géométrique et sans seuil arbitraire : la ligne corrigée doit couper l'emprise
+clôturée.
+
 Le profil déjà relevé n'est réutilisé que si la ligne recalculée retombe au même
 endroit, à 0,1 m près — bien en dessous du pas d'échantillonnage de 5 m. Sinon il
 est relevé à nouveau, et le déplacement est annoncé. Le mode manuel est repris
@@ -1009,6 +1018,32 @@ exactement ce que cette image sert à contrôler.
 L'échelle verticale du profil est exagérée, l'exagération étant **mesurée sur
 les axes réellement composés** et écrite sur la figure. Sans cela, 0,96 m de
 dénivelée sur 355 m de coupe donnerait une ligne parfaitement plate.
+
+### Ce que le pilotage de l'application sur Sarnois a corrigé
+
+Les écrans avaient été éprouvés sur Saint-Cyr — 9 calques, 9 catégories. Sarnois
+en porte 55 et 18, et le DXF pèse 47 Mo. Trois défauts n'apparaissaient qu'à
+cette échelle :
+
+- **L'aperçu plantait** sur une `GEOSException`. `cadre_apercu` unissait toutes
+  les géométries pour en prendre les bornes, et l'union échoue sur le polygone
+  auto-intersectant du calque « ESPACE VERT ». L'enveloppe se lit maintenant sur
+  les bornes de chaque géométrie, ce qui est plus rapide et marche sur
+  n'importe quelle forme. Une géométrie invalide est signalée à l'import : les
+  surfaces qu'on en tire sont douteuses.
+- **L'écran de correspondance alignait les 55 calques à plat**, obligeant à
+  faire défiler le fond cadastral pour trouver ce qui compte. Il est désormais
+  en trois blocs : appariés, à décider, écartés d'office repliés. Sur Sarnois :
+  21, **3**, 31 — et les trois à décider sont exactement les trois questions
+  en suspens avec le BE.
+- **Le cache de l'écran servait un appariement périmé.** Sa clé portait le
+  chemin et la taille du fichier, que l'élargissement de la charte ne change
+  pas : l'écran présentait 34 calques « à décider » là où il n'en restait que 3.
+  La clé porte maintenant une empreinte des tables d'appariement.
+
+Un quatrième, trouvé au passage et plus grave, est décrit au paragraphe de la
+ligne de coupe : un tracé repris d'un autre projet produisait un profil
+d'apparence normale relevé à 185 km du site.
 
 ### Sorties — contrat d'interface avec le lot 4
 

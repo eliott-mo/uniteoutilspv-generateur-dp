@@ -42,11 +42,12 @@ from dp_socle.coupe import (
     profil_terrain,
     reprendre_coupe,
 )
-from dp_socle.erreurs import ErreurDP
+from dp_socle.erreurs import ErreurCoupe, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
     CATEGORIES,
     calques_du_dxf,
+    empreinte_charte,
     importer_be,
     lire_parametres,
 )
@@ -791,9 +792,13 @@ def _deposer(fichier, defaut_nom: str = "projet") -> Path | None:
 
 
 @st.cache_data(show_spinner="Lecture des calques du DXF…")
-def _calques_caches(chemin: str, taille: int):
-    """Calques du DXF. `taille` fait partie de la clé de cache : un DXF
-    retéléversé sous le même nom doit être relu."""
+def _calques_caches(chemin: str, taille: int, charte: str):
+    """Calques du DXF, avec la catégorie proposée par la charte.
+
+    `taille` fait partie de la clé : un DXF retéléversé sous le même nom doit
+    être relu. `charte` aussi : sans elle, élargir la correspondance ne changeait
+    rien à l'écran, qui continuait de servir l'appariement d'avant.
+    """
     return calques_du_dxf(chemin)
 
 
@@ -828,9 +833,20 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
         )
         return
 
-    coupe, profil_reutilisable = reprendre_coupe(
-        enregistree, plan.azimut_tables_deg, emprise_cloturee
-    )
+    try:
+        coupe, profil_reutilisable = reprendre_coupe(
+            enregistree, plan.azimut_tables_deg, emprise_cloturee
+        )
+    except ErreurCoupe as erreur:
+        # Le dossier de sortie porte le tracé d'un autre projet : on ne le
+        # reprend pas, et on le dit plutôt que de repartir en silence.
+        st.warning(
+            f"Tracé de coupe de la sortie précédente non repris — {erreur} "
+            "Il venait probablement d'un autre projet enregistré sous le même "
+            "identifiant de dossier.",
+            icon="⚠️",
+        )
+        return
     st.session_state.coupe_be = coupe
     st.session_state.manuel_be = enregistree.manuel
     import_be.ligne_coupe = coupe
@@ -889,15 +905,32 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 "« (ignorer) » n'est pas importé, et l'élément n'apparaîtra sur "
                 "aucune planche."
             )
-            calques = _calques_caches(str(chemin_dxf), chemin_dxf.stat().st_size)
+            calques = _calques_caches(
+                str(chemin_dxf), chemin_dxf.stat().st_size, empreinte_charte()
+            )
             choix = {}
             options = ["(ignorer)"] + list(CATEGORIES)
-            for calque in calques:
+
+            # Trois blocs plutôt qu'une liste à plat. Le plan de Sarnois porte
+            # 55 calques dont 12 appariés et une trentaine écartés d'office :
+            # les aligner tous demandait de faire défiler le fond cadastral et
+            # le mobilier de dessin pour trouver les huit qui comptent.
+            apparies = [c for c in calques if c.categorie_proposee]
+            a_decider = [
+                c for c in calques if not c.categorie_proposee and not c.motif_ecart
+            ]
+            ecartes = [
+                c for c in calques if not c.categorie_proposee and c.motif_ecart
+            ]
+
+            def _ligne_calque(calque, aide=""):
                 colonne_nom, colonne_categorie = st.columns([2, 1])
                 with colonne_nom:
                     detail = f"{calque.nb_entites} entité(s)"
                     if calque.nb_hatch:
                         detail += f", {calque.nb_hatch} remplissage(s) ignoré(s)"
+                    if aide:
+                        detail += f" — {aide}"
                     st.text_input(
                         "Calque",
                         value=f"{calque.nom} — {detail}",
@@ -916,7 +949,29 @@ if fichier_dxf is not None and fichier_tableau is not None:
                     )
                 if retenu != "(ignorer)":
                     choix[calque.nom] = retenu
+
+            if apparies:
+                st.markdown(f"**Appariés ({len(apparies)})**")
+                for calque in apparies:
+                    _ligne_calque(calque)
+            if a_decider:
+                st.markdown(
+                    f"**À décider ({len(a_decider)})** — inconnus de la charte, "
+                    "leur contenu n'est pas importé tant qu'ils restent sur "
+                    "« (ignorer) »."
+                )
+                for calque in a_decider:
+                    _ligne_calque(calque)
+            if ecartes:
+                with st.expander(
+                    f"Écartés d'office ({len(ecartes)}) — repliés, appariables "
+                    "quand même",
+                    expanded=False,
+                ):
+                    for calque in ecartes:
+                        _ligne_calque(calque, aide=calque.motif_ecart)
             st.session_state.correspondance_be = choix
+
 
         if st.button("Importer et contrôler", type="primary", width="stretch"):
             st.session_state.coupe_be = None
