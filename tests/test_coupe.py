@@ -675,3 +675,144 @@ def test_direction_ecrite_conservee_dans_le_tableau_lu():
     tableau = lire_tableau(TABLEAU, "IND06")
     assert tableau.structures["azimut_deg"] == pytest.approx(0.0)
     assert tableau.structures["azimut_brut"] == "0°"
+
+
+# ---------------------------------------------------------------------------
+# Reprise d'un import précédent — « une régénération ne redemande jamais
+# le tracé » (brief, étape D, critère 4)
+# ---------------------------------------------------------------------------
+
+
+def _sortie_avec_coupe(dossier: Path, emprise, plan, azimut=None):
+    """Écrit une sortie d'import complète, coupe et profil compris."""
+    import_be = importer_be(DXF, TABLEAU, "IND06", seuil_puissance_mwc=3.0)
+    centre = emprise.centroid
+    coupe = corriger_ligne_coupe(
+        LineString([(centre.x - 40, centre.y - 28), (centre.x + 40, centre.y + 28)]),
+        plan.azimut_tables_deg if azimut is None else azimut,
+        emprise,
+    )
+    import_be.ligne_coupe = coupe
+    import_be.profil = ProfilTerrain(
+        [0.0, coupe.longueur_m], [100.0, 103.0], "profil de test", 5.0
+    )
+    import_be.ecrire(dossier)
+    return coupe
+
+
+def test_le_trace_est_repris_sans_etre_redemande(tmp_path, plan, emprise):
+    from dp_socle.coupe import coupe_enregistree, reprendre_coupe
+    from dp_socle.import_be import lire_parametres
+
+    origine = _sortie_avec_coupe(tmp_path, emprise, plan)
+
+    enregistree = coupe_enregistree(lire_parametres(tmp_path))
+    assert enregistree is not None
+    assert not enregistree.manuel
+    assert enregistree.profil is not None
+
+    reprise, profil_reutilisable = reprendre_coupe(
+        enregistree, plan.azimut_tables_deg, emprise
+    )
+    assert profil_reutilisable
+    assert reprise.geometrie.hausdorff_distance(origine.geometrie) < 0.01
+    assert reprise.trace_initial.equals_exact(origine.trace_initial, tolerance=1e-6)
+    assert any("repris de l'import précédent" in m for m in reprise.avertissements)
+
+
+def test_reprise_rejoue_la_correction_sur_le_plan_du_jour(tmp_path, plan, emprise):
+    """Un nouvel indice qui tourne les tables doit tourner la coupe avec.
+
+    Recharger la ligne corrigée telle quelle la figerait sur un plan qui
+    n'existe plus, et la coupe ne serait plus perpendiculaire aux rangées.
+    """
+    from shapely.affinity import rotate
+
+    from dp_socle.coupe import coupe_enregistree, reprendre_coupe
+    from dp_socle.import_be import lire_parametres
+
+    _sortie_avec_coupe(tmp_path, emprise, plan)
+    enregistree = coupe_enregistree(lire_parametres(tmp_path))
+
+    pivot = emprise.centroid
+    emprise_tournee = rotate(emprise, 20.0, origin=pivot)
+    reprise, profil_reutilisable = reprendre_coupe(
+        enregistree, 20.0, emprise_tournee
+    )
+
+    # Toujours perpendiculaire aux rangées, sur leur nouvelle orientation.
+    assert (reprise.azimut_coupe_deg - 20.0) % 180.0 == pytest.approx(90.0, abs=1e-6)
+    # Le profil ne peut pas être réutilisé sous une ligne qui a bougé.
+    assert not profil_reutilisable
+    assert any("s'est déplacée" in m for m in reprise.avertissements)
+
+
+def test_mode_manuel_repris_tel_quel(tmp_path, plan, emprise):
+    from dp_socle.coupe import coupe_enregistree, reprendre_coupe
+    from dp_socle.import_be import lire_parametres
+
+    import_be = importer_be(DXF, TABLEAU, "IND06")
+    centre = emprise.centroid
+    import_be.ligne_coupe = corriger_ligne_coupe(
+        LineString([(centre.x - 40, centre.y - 28), (centre.x + 40, centre.y + 28)]),
+        plan.azimut_tables_deg,
+        emprise,
+        manuel=True,
+    )
+    import_be.ecrire(tmp_path)
+
+    enregistree = coupe_enregistree(lire_parametres(tmp_path))
+    assert enregistree.manuel
+    reprise, _ = reprendre_coupe(enregistree, plan.azimut_tables_deg, emprise)
+    assert not reprise.corrigee
+    assert reprise.azimut_coupe_deg == pytest.approx(35.0, abs=0.1)
+
+
+def test_premier_import_sans_sortie_precedente(tmp_path):
+    """L'absence de fichier est le cas normal, pas une erreur."""
+    from dp_socle.coupe import coupe_enregistree
+    from dp_socle.import_be import lire_parametres
+
+    assert lire_parametres(tmp_path) is None
+    assert coupe_enregistree(None) is None
+
+
+def test_sortie_ecrite_sans_coupe_ne_rend_pas_de_trace(tmp_path):
+    from dp_socle.coupe import coupe_enregistree
+    from dp_socle.import_be import lire_parametres
+
+    importer_be(DXF, TABLEAU, "IND06").ecrire(tmp_path)
+    donnees = lire_parametres(tmp_path)
+    assert donnees is not None and "ligne_coupe" not in donnees
+    assert coupe_enregistree(donnees) is None
+
+
+def test_projet_json_du_lot_1_refuse(tmp_path):
+    """Les deux fichiers portent le même nom, dans deux dossiers différents."""
+    import json
+
+    from dp_socle.erreurs import ErreurImportBE
+    from dp_socle.import_be import lire_parametres
+
+    (tmp_path / "projet.json").write_text(
+        json.dumps({"nom": "ALR_45", "commune": "Bray-Saint-Aignan"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ErreurImportBE) as erreur:
+        lire_parametres(tmp_path)
+    assert "lot 1" in str(erreur.value)
+
+
+def test_contrat_de_version_plus_recent_refuse(tmp_path):
+    import json
+
+    from dp_socle.erreurs import ErreurImportBE
+    from dp_socle.import_be import VERSION_CONTRAT, lire_parametres
+
+    (tmp_path / "projet.json").write_text(
+        json.dumps({"origine": "import_be", "version_contrat": VERSION_CONTRAT + 1}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ErreurImportBE) as erreur:
+        lire_parametres(tmp_path)
+    assert "version" in str(erreur.value)

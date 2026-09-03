@@ -726,6 +726,25 @@ et reste un choix explicite.
 Sur le fichier de référence, les rangées étant est-ouest, la coupe ressort
 strictement nord-sud.
 
+**Une régénération ne redemande jamais le tracé.** Rouvrir un dossier qui a déjà
+une sortie dans `sortie/{projet}/` reprend la coupe et le profil.
+
+Ce qui est repris est le **tracé initial**, pas la ligne corrigée : la correction
+dépend de l'azimut des tables et de l'emprise clôturée, qui changent si le BE
+fournit un nouvel indice. Rejouer la correction sur le tracé d'origine redonne
+une coupe juste ; recharger la ligne corrigée telle quelle la figerait sur un
+plan qui n'existe plus, et elle ne serait plus perpendiculaire aux rangées.
+
+Le profil déjà relevé n'est réutilisé que si la ligne recalculée retombe au même
+endroit, à 0,1 m près — bien en dessous du pas d'échantillonnage de 5 m. Sinon il
+est relevé à nouveau, et le déplacement est annoncé. Le mode manuel est repris
+avec le tracé.
+
+Le `projet.json` du lot 1, qui porte le même nom dans `projets/`, est refusé à la
+relecture sur son champ `origine` : y chercher une ligne de coupe ne rendrait
+rien de bon. Une version de contrat plus récente que celle que l'outil sait lire
+est refusée aussi, plutôt que reprise à moitié.
+
 ### Profil altimétrique
 
 Récupéré automatiquement auprès du RGE ALTI de la Géoplateforme, échantillonné

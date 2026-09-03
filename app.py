@@ -34,9 +34,20 @@ from dp_socle.apercu_be import (
 from dp_socle.apercu_be import cadre_apercu as cadre_apercu_be
 from dp_socle.apercu_be import fond_apercu as fond_apercu_be
 from dp_socle.assemblage import generer_dossier
-from dp_socle.coupe import controler_coherence, corriger_ligne_coupe, profil_terrain
+from dp_socle.coupe import (
+    controler_coherence,
+    corriger_ligne_coupe,
+    coupe_enregistree,
+    profil_terrain,
+    reprendre_coupe,
+)
 from dp_socle.erreurs import ErreurDP
-from dp_socle.import_be import CATEGORIES, calques_du_dxf, importer_be
+from dp_socle.import_be import (
+    CATEGORIES,
+    calques_du_dxf,
+    importer_be,
+    lire_parametres,
+)
 from dp_socle.geometrie import charger_emprise
 from dp_socle.helioscope import (
     CORRECTION_NORD_SUD_MAX_M,
@@ -610,6 +621,51 @@ def _fond_be_cache(cadre: tuple, largeur_px: int = 1100):
     return fond_apercu_be(cadre, largeur_px=largeur_px)
 
 
+def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) -> None:
+    """Recharge le tracé de coupe laissé par un import précédent, s'il y en a un.
+
+    Le brief est explicite : une régénération ne redemande jamais le tracé.
+    C'est le tracé **initial** qui est repris, pas la ligne corrigée — la
+    correction est rejouée sur le plan d'aujourd'hui, qui peut avoir tourné
+    depuis. Le profil déjà relevé n'est réutilisé que si la ligne recalculée
+    tombe au même endroit ; sinon il est redemandé au RGE ALTI.
+    """
+    st.session_state.coupe_be = None
+    st.session_state.profil_be = None
+
+    enregistree = coupe_enregistree(lire_parametres(dossier))
+    if enregistree is None:
+        return
+
+    plan = import_be.plan
+    emprise_cloturee = plan.polygone_cloture
+    if emprise_cloturee is None:
+        st.warning(
+            "Un tracé de coupe existe dans la sortie précédente, mais le plan "
+            "importé n'a pas de contour de clôture : il ne peut pas être repris.",
+            icon="⚠️",
+        )
+        return
+
+    coupe, profil_reutilisable = reprendre_coupe(
+        enregistree, plan.azimut_tables_deg, emprise_cloturee
+    )
+    st.session_state.coupe_be = coupe
+    st.session_state.manuel_be = enregistree.manuel
+    import_be.ligne_coupe = coupe
+
+    if profil_reutilisable and enregistree.profil is not None:
+        st.session_state.profil_be = enregistree.profil
+    else:
+        with st.spinner("Relevé du profil du terrain…"):
+            st.session_state.profil_be = profil_terrain(
+                coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+            )
+    import_be.profil = st.session_state.profil_be
+    import_be.coherence = controler_coherence(
+        st.session_state.profil_be, coupe, plan.tables
+    )
+
 if fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf)
     chemin_tableau = _deposer(fichier_tableau)
@@ -696,6 +752,11 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 seuil_puissance_mwc=float(seuil_puissance),
             )
             st.session_state.emprise_cadastrale_be = emprise_cadastrale
+            _reprendre_import_precedent(
+                DOSSIER_SORTIE / (nom.strip() or "projet"),
+                st.session_state.import_be,
+                emprise_cadastrale,
+            )
             st.session_state.chemin_pdf_be = (
                 str(chemin_pdf_be) if chemin_pdf_be else None
             )
@@ -814,6 +875,7 @@ if import_be_courant is not None:
     manuel = st.checkbox(
         "Conserver la direction tracée (contournement)",
         value=False,
+        key="manuel_be",
         help="À n'utiliser que si la perpendiculaire aux rangées ne convient "
         "pas. Une coupe oblique allonge toutes les distances qu'on y lit.",
     )
@@ -835,6 +897,21 @@ if import_be_courant is not None:
                 collection,
                 style_function=lambda _trait, style=style: style,
                 name=couche,
+            ).add_to(carte)
+    # La coupe déjà retenue est montrée sur la carte : sans elle, l'écran
+    # inviterait à retracer ce qui existe déjà.
+    if st.session_state.coupe_be is not None:
+        for geometrie, couleur in (
+            (st.session_state.coupe_be.trace_initial, "#ff8c00"),
+            (st.session_state.coupe_be.geometrie, "#000000"),
+        ):
+            folium.GeoJson(
+                en_wgs84([geometrie]),
+                style_function=lambda _trait, couleur=couleur: {
+                    "color": couleur,
+                    "weight": 4,
+                },
+                name="coupe",
             ).add_to(carte)
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
     carte.fit_bounds([[sud, ouest], [nord, est]])
@@ -873,10 +950,15 @@ if import_be_courant is not None:
         except ErreurDP as erreur:
             st.session_state.coupe_be = None
             st.error(f"{type(erreur).__name__} : {erreur}")
-    elif trace is None:
+    elif trace is None and st.session_state.coupe_be is None:
         st.info(
             "Aucun tracé sur la carte : utilisez l'outil ligne (icône polyligne) "
             "à gauche de la carte."
+        )
+    elif trace is None:
+        st.caption(
+            "Coupe déjà retenue, montrée sur la carte en noir avec le tracé "
+            "d'origine en orange. Tracez une nouvelle ligne pour la remplacer."
         )
 
     # -----------------------------------------------------------------------

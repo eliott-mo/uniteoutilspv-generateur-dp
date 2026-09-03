@@ -1272,6 +1272,48 @@ def ecrire_parametres(donnees: dict, dossier: str | Path) -> Path:
     return chemin
 
 
+def lire_parametres(dossier: str | Path) -> dict | None:
+    """Relit le `projet.json` d'un import précédent, ou None s'il n'y en a pas.
+
+    Sert à ne jamais redemander le tracé de la coupe : rouvrir un dossier
+    reprend ce que le chef de projet avait tracé. L'absence de fichier est un
+    cas normal — c'est le premier import — et rend None. Un fichier présent mais
+    illisible lève : le reprendre à moitié serait pire que de le rejeter.
+    """
+    import json
+
+    chemin = Path(dossier) / NOM_PARAMETRES
+    if not chemin.exists():
+        return None
+    try:
+        donnees = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ErreurImportBE(
+            f"{chemin} est présent mais illisible : {exc}. Supprimez-le pour "
+            "repartir d'un import neuf."
+        ) from exc
+
+    if not isinstance(donnees, dict):
+        raise ErreurImportBE(f"{chemin} ne contient pas un objet JSON.")
+
+    origine = donnees.get("origine")
+    if origine != "import_be":
+        # Le `projet.json` du lot 1, dans projets/{nom}/, porte le même nom. Y
+        # chercher une ligne de coupe ne rendrait rien de bon.
+        raise ErreurImportBE(
+            f"{chemin} n'est pas une sortie d'import BE (origine « {origine} »). "
+            "Le projet.json du lot 1 vit dans projets/, pas dans sortie/."
+        )
+
+    version = donnees.get("version_contrat")
+    if not isinstance(version, int) or version > VERSION_CONTRAT:
+        raise ErreurImportBE(
+            f"{chemin} annonce la version de contrat {version!r}, alors que cet "
+            f"outil lit jusqu'à la version {VERSION_CONTRAT}. Régénérez la "
+            "sortie avec une version plus récente de l'outil."
+        )
+    return donnees
+
 @dataclass
 class ImportBE:
     """Résultat complet d'un import : plan, tableau, contrôles, coupe, profil."""

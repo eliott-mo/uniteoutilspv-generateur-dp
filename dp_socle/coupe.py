@@ -541,6 +541,136 @@ def _couloir_de_coupe(
 
 
 # ---------------------------------------------------------------------------
+# Reprise d'un import précédent
+# ---------------------------------------------------------------------------
+
+#: Écart, en mètres, en deçà duquel la coupe recalculée est tenue pour identique
+#: à celle enregistrée, et le profil déjà relevé réutilisable. Le dixième de
+#: mètre est bien en dessous du pas d'échantillonnage de 5 m : à cette distance,
+#: le RGE ALTI rendrait les mêmes altitudes.
+TOLERANCE_REPRISE_M = 0.1
+
+
+@dataclass
+class CoupeEnregistree:
+    """Ce qu'un import précédent a laissé du travail de coupe.
+
+    C'est le **tracé initial** qui est la donnée à conserver, pas la ligne
+    corrigée : la correction dépend de l'azimut des tables et de l'emprise
+    clôturée, qui changent si le BE fournit un nouvel indice. Rejouer la
+    correction sur le tracé d'origine redonne une coupe juste ; recharger la
+    ligne corrigée telle quelle la figerait sur un plan qui n'existe plus.
+    """
+
+    trace_initial: LineString
+    #: La ligne corrigée telle qu'elle avait été enregistrée, pour savoir si le
+    #: recalcul la déplace.
+    geometrie_enregistree: LineString
+    azimut_tables_deg: float
+    manuel: bool
+    profil: ProfilTerrain | None
+
+
+def coupe_enregistree(donnees: dict | None) -> CoupeEnregistree | None:
+    """Extrait la coupe d'une sortie d'import relue, ou None s'il n'y en a pas."""
+    if not donnees:
+        return None
+    brut = donnees.get("ligne_coupe")
+    if not isinstance(brut, dict):
+        return None
+
+    trace = _ligne_depuis_coordonnees(brut.get("trace_initial_l93"), "trace_initial_l93")
+    enregistree = _ligne_depuis_coordonnees(
+        brut.get("coordonnees_l93"), "coordonnees_l93"
+    )
+    if trace is None or enregistree is None:
+        raise ErreurCoupe(
+            "La sortie précédente porte une ligne de coupe incomplète : le tracé "
+            "ne peut pas être repris. Retracez la coupe."
+        )
+    return CoupeEnregistree(
+        trace_initial=trace,
+        geometrie_enregistree=enregistree,
+        azimut_tables_deg=float(brut.get("azimut_tables_deg", 0.0)),
+        manuel=not bool(brut.get("corrigee", True)),
+        profil=profil_enregistre(donnees),
+    )
+
+
+def _ligne_depuis_coordonnees(brut, champ: str) -> LineString | None:
+    if not isinstance(brut, list) or len(brut) < 2:
+        return None
+    try:
+        return LineString([(float(x), float(y)) for x, y, *_ in brut])
+    except (TypeError, ValueError) as exc:
+        raise ErreurCoupe(
+            f"Le champ « {champ} » de la sortie précédente n'est pas une suite "
+            f"de coordonnées : {exc}"
+        ) from exc
+
+
+def profil_enregistre(donnees: dict | None) -> ProfilTerrain | None:
+    """Profil relevé lors d'un import précédent, ou None."""
+    if not donnees:
+        return None
+    brut = donnees.get("profil_terrain")
+    if not isinstance(brut, dict):
+        return None
+    points = brut.get("points")
+    if not isinstance(points, list) or len(points) < 2:
+        return None
+    try:
+        couples = [(float(s), float(z)) for s, z in points]
+    except (TypeError, ValueError) as exc:
+        raise ErreurCoupe(
+            f"Le profil de la sortie précédente est illisible : {exc}"
+        ) from exc
+    return ProfilTerrain(
+        abscisses_m=[s for s, _ in couples],
+        altitudes_m=[z for _, z in couples],
+        origine=str(brut.get("origine", "import précédent")),
+        pas_m=float(brut.get("pas_m", PAS_ECHANTILLONNAGE_M)),
+    )
+
+
+def reprendre_coupe(
+    enregistree: CoupeEnregistree,
+    azimut_tables_deg: float,
+    emprise_cloturee: BaseGeometry,
+    marge_m: float = MARGE_COUPE_M,
+) -> tuple[LigneCoupe, bool]:
+    """Rejoue la correction sur le tracé conservé, avec le plan d'aujourd'hui.
+
+    Renvoie la coupe et un booléen disant si le profil enregistré reste
+    utilisable — c'est-à-dire si la ligne recalculée tombe au même endroit. Un
+    nouvel indice qui tourne les tables ou déplace la clôture déplace la coupe,
+    et le profil doit alors être relevé à nouveau plutôt que réutilisé sous une
+    ligne qui a bougé.
+    """
+    coupe = corriger_ligne_coupe(
+        enregistree.trace_initial,
+        azimut_tables_deg,
+        emprise_cloturee,
+        marge_m=marge_m,
+        manuel=enregistree.manuel,
+    )
+    ecart = float(
+        coupe.geometrie.hausdorff_distance(enregistree.geometrie_enregistree)
+    )
+    inchangee = ecart <= TOLERANCE_REPRISE_M
+    coupe.avertissements.insert(
+        0,
+        "Tracé de coupe repris de l'import précédent."
+        if inchangee
+        else f"Tracé de coupe repris de l'import précédent, mais la ligne "
+        f"corrigée s'est déplacée de {ecart:.1f} m : l'azimut des tables ou "
+        "l'emprise clôturée ont changé depuis. Le profil du terrain est relevé "
+        "à nouveau.",
+    )
+    return coupe, inchangee
+
+
+# ---------------------------------------------------------------------------
 # Contrôle de cohérence altimétrique
 # ---------------------------------------------------------------------------
 
