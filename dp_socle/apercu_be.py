@@ -72,6 +72,18 @@ STYLES = {
     "bess": StyleCategorie("Conteneurs BESS", (255, 205, 120), (0, 0, 0)),
     "bac_retention": StyleCategorie("Bac de rétention", (63, 191, 191), (0, 0, 0)),
     "ligne_coupe": StyleCategorie("Ligne de coupe A-A'", None, (0, 0, 0), epaisseur=4),
+    # Produites par le seul import HelioScope. Les modules reprennent la teinte
+    # des tables du dossier de référence, dont ils sont le détail ; la zone
+    # d'implantation et les reculs sont des tracés d'étude, en trait fin et
+    # sans remplissage pour qu'on ne les prenne pas pour des ouvrages.
+    "modules_pv": StyleCategorie("Modules photovoltaïques", (151, 202, 202), (0, 0, 255)),
+    "zone_implantation_pv": StyleCategorie(
+        "Zone d'implantation (étude)", None, (255, 45, 45), epaisseur=2
+    ),
+    "recul_implantation": StyleCategorie(
+        "Recul d'implantation (étude)", None, (200, 120, 40), epaisseur=1
+    ),
+    "zone_evitee": StyleCategorie("Zone évitée", (215, 215, 215), (110, 110, 110)),
 }
 
 #: Ordre de dessin : d'abord les surfaces de sol, puis les ouvrages posés
@@ -79,17 +91,23 @@ STYLES = {
 #: dictionnaire faisait passer les pistes par-dessus le poste de livraison, qui
 #: disparaissait de l'aperçu — exactement ce que cette image sert à contrôler.
 ORDRE_DESSIN = (
+    "zone_evitee",
     "plateforme",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     "aire_aspiration",
     "haie",
     "tables_pv",
+    # Les modules par-dessus la silhouette des rangées : c'est leur trame qui
+    # rend le plan lisible, le contour groupé ne sert qu'à les cerner.
+    "modules_pv",
     "pdl_ptr",
     "local_technique",
     "bess",
     "bac_retention",
     "bache_incendie",
+    "recul_implantation",
+    "zone_implantation_pv",
     "cloture",
     "portail",
 )

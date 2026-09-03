@@ -19,3 +19,9 @@ exemples/**/*.dwg
 exemples/**/*.bak
 exemples/**/*.dwl
 exemples/**/*.dwl2
+# DXF du BE trop lourds pour l'historique : ceux de Sarnois pèsent 47 et
+# 50 Mo, essentiellement le maillage topographique (4 044 points cotés en
+# blocs, 1 898 points de terrain, des 3DSOLID par module). Le jeu de
+# référence versionné reste Saint-Cyr, à 1,4 Mo ; les mécanismes qu'ils ont
+# révélés sont couverts par des DXF synthétiques dans les tests.
+exemples/sarnois-*/*.dxf

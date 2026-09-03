@@ -329,3 +329,139 @@ def test_paramètre_absent_leve_plutot_que_de_rendre_une_valeur_par_defaut(tmp_p
     with pytest.raises(ErreurTableauBilan) as erreur:
         lire_tableau(chemin, "IND06")
     assert "introuvable" in str(erreur.value)
+
+
+# ---------------------------------------------------------------------------
+# Références de bloc — révélées par les plans de Sarnois
+# ---------------------------------------------------------------------------
+
+
+class _NamespaceSansCalque:
+    """Espace de noms DXF dont `layer` lève, comme celui d'un GEOMAPIMAGE."""
+
+    @property
+    def layer(self):
+        raise ezdxf.DXFAttributeError(
+            'Invalid DXF attribute "layer" for entity GEOMAPIMAGE'
+        )
+
+
+class _EntiteSansCalque:
+    """Entité DXF sans attribut de calque.
+
+    Une doublure plutôt qu'un vrai GEOMAPIMAGE : ezdxf n'offre pas de fabrique
+    pour cette entité, et le plan de Sarnois qui en porte un pèse 47 Mo, trop
+    lourd pour l'historique du dépôt.
+    """
+
+    def __init__(self):
+        self.dxf = _NamespaceSansCalque()
+
+    def dxftype(self):
+        return "GEOMAPIMAGE"
+
+
+def test_calque_absent_ne_leve_pas_d_exception_nue():
+    """Toutes les entités DXF ne portent pas d'attribut de calque.
+
+    Le plan de Sarnois contient un `GEOMAPIMAGE`, l'image géoréférencée du fond
+    de plan, qui n'en a pas. Y accéder levait une `DXFAttributeError` nue,
+    remontée jusqu'à l'écran en trace brute.
+    """
+    from dp_socle.import_be import _calque_de
+
+    assert _calque_de(_EntiteSansCalque()) is None
+
+
+def test_entites_sans_calque_ecartees_et_comptees(tmp_path):
+    from dp_socle.import_be import _developper
+
+    anomalies: dict = {}
+    entites = [_EntiteSansCalque(), _EntiteSansCalque()]
+    assert list(_developper(entites, None, 0, anomalies)) == []
+    assert anomalies["sans_calque"] == {"GEOMAPIMAGE": 2}
+
+
+def _dxf_avec_bloc(chemin: Path, calque_contenu: str, rotation: float = 0.0) -> Path:
+    """DXF dont la table est une référence de bloc, comme chez le BE.
+
+    Sur Sarnois, les 85 tables, les 4 portails et la citerne sont des `INSERT` :
+    dessinés à plat, ils seraient invisibles à l'import.
+    """
+    document = ezdxf.new(setup=True)
+    bloc = document.blocks.new("TABLE_PV")
+    bloc.add_lwpolyline(
+        [(0, 0), (15, 0), (15, 4.6), (0, 4.6)],
+        close=True,
+        dxfattribs={"layer": calque_contenu},
+    )
+    espace = document.modelspace()
+    espace.add_blockref(
+        "TABLE_PV",
+        (622_900, 6_750_700),
+        dxfattribs={"layer": CALQUE_TABLES, "rotation": rotation},
+    )
+    espace.add_lwpolyline(
+        [(622_880, 6_750_680), (622_960, 6_750_680), (622_960, 6_750_760)],
+        close=True,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    document.saveas(str(chemin))
+    return chemin
+
+
+def test_table_en_reference_de_bloc_importee(tmp_path):
+    chemin = _dxf_avec_bloc(tmp_path / "bloc.dxf", "PVcase PV Modules (optimised)")
+    plan_bloc = lire_plan_be(chemin)
+    assert plan_bloc.nb_tables == 1
+    assert plan_bloc.tables[0].area == pytest.approx(69.0, abs=0.1)
+
+
+def test_calque_zero_dans_un_bloc_herite_de_l_insertion(tmp_path):
+    """Convention AutoCAD qu'ezdxf 1.4.4 n'applique pas de lui-même.
+
+    Vérifié le 03/09/2026 : `virtual_entities()` rend une sous-entité déclarée
+    sur « 0 » toujours sur « 0 ». Sans cette règle, tout le contenu des blocs
+    dessinés sur le calque 0 tomberait dans un fourre-tout et serait perdu.
+    """
+    chemin = _dxf_avec_bloc(tmp_path / "herite.dxf", "0")
+    plan_herite = lire_plan_be(chemin)
+    assert plan_herite.nb_tables == 1
+    assert plan_herite.par_categorie("tables_pv")[0].calque == CALQUE_TABLES
+
+
+def test_rotation_de_la_reference_de_bloc_appliquee(tmp_path):
+    """`virtual_entities()` applique la transformation de l'insertion.
+
+    Les 85 tables de Sarnois sont posées à 245,5° : sans cette résolution,
+    elles ressortiraient toutes parallèles à l'axe du dessin.
+    """
+    from dp_socle.import_be import azimut_tables
+
+    droit = lire_plan_be(_dxf_avec_bloc(tmp_path / "droit.dxf", "0", rotation=0.0))
+    tourne = lire_plan_be(_dxf_avec_bloc(tmp_path / "tourne.dxf", "0", rotation=24.5))
+    assert azimut_tables(droit.tables) == pytest.approx(0.0, abs=0.01)
+    assert azimut_tables(tourne.tables) == pytest.approx(24.5, abs=0.01)
+
+
+def test_blocs_imbriques_developpes(tmp_path):
+    document = ezdxf.new(setup=True)
+    interieur = document.blocks.new("CONTOUR")
+    interieur.add_lwpolyline(
+        [(0, 0), (15, 0), (15, 4.6), (0, 4.6)], close=True, dxfattribs={"layer": "0"}
+    )
+    exterieur = document.blocks.new("TABLE")
+    exterieur.add_blockref("CONTOUR", (0, 0), dxfattribs={"layer": "0"})
+    espace = document.modelspace()
+    espace.add_blockref("TABLE", (622_900, 6_750_700), dxfattribs={"layer": CALQUE_TABLES})
+    espace.add_lwpolyline(
+        [(622_880, 6_750_680), (622_960, 6_750_680), (622_960, 6_750_760)],
+        close=True,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    chemin = tmp_path / "imbrique.dxf"
+    document.saveas(str(chemin))
+
+    plan_imbrique = lire_plan_be(chemin)
+    assert plan_imbrique.nb_tables == 1
+    assert plan_imbrique.tables[0].area == pytest.approx(69.0, abs=0.1)

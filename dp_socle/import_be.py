@@ -24,6 +24,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from math import atan2, degrees, hypot
 from pathlib import Path
+from typing import Sequence
 
 import ezdxf
 from ezdxf import path as ezpath
@@ -60,6 +61,18 @@ FACTEURS_UNITE = {
 #: porte l'une d'elles ; les calques non appariés sont écartés en le disant.
 CATEGORIES = (
     "tables_pv",
+    # Catégories que seul l'import HelioScope (lot 2) produit : le plan du BE
+    # ne descend pas au module, et n'a ni zone d'implantation ni recul.
+    # Ajoutées au contrat commun plutôt que laissées hors format, pour que le
+    # lot 4 lise une seule structure et voie par l'absence de couche ce que la
+    # source ne fournit pas. Aucune ne doit être confondue avec `cloture` :
+    # `zone_implantation_pv` est un tracé à main levée qui ne suit pas le
+    # parcellaire, et en tirer une surface clôturée ou un linéaire de clôture
+    # donnerait des chiffres faux dans le dossier.
+    "modules_pv",
+    "zone_implantation_pv",
+    "recul_implantation",
+    "zone_evitee",
     "cloture",
     "portail",
     "pdl_ptr",
@@ -100,6 +113,12 @@ CORRESPONDANCE_DEFAUT = {
 #: fichier de référence, aire identique au centième de m²). Les reprendre
 #: dessinerait chaque élément deux fois.
 TYPES_TRAITES = ("LWPOLYLINE", "POLYLINE", "LINE", "ARC", "CIRCLE", "ELLIPSE", "SPLINE")
+
+#: Profondeur maximale d'imbrication des blocs développés. Les blocs du BE sont
+#: imbriqués sur deux niveaux au plus (une table est un bloc dont le contour est
+#: une polyligne) ; la borne existe pour qu'un fichier construit en boucle
+#: s'arrête en le disant plutôt que de tourner sans fin.
+PROFONDEUR_BLOCS_MAX = 8
 
 #: Flèche maximale de discrétisation des arcs, en mètres. Les portails sont
 #: dessinés avec des arcs de 3,5 m de rayon et les plateformes portent des
@@ -356,6 +375,68 @@ def calques_du_dxf(chemin: str | Path) -> list[CalqueDXF]:
 # ---------------------------------------------------------------------------
 
 
+def _calque_de(entite) -> str | None:
+    """Calque d'une entité, ou None si elle n'en porte pas.
+
+    Toutes les entités DXF n'ont pas d'attribut `layer` : le plan de Sarnois
+    porte un `GEOMAPIMAGE`, l'image géoréférencée du fond de plan, qui n'en a
+    pas. Y accéder directement levait une `DXFAttributeError` nue, remontée
+    jusqu'à l'écran en trace brute au lieu d'une erreur nommée.
+    """
+    try:
+        return entite.dxf.layer
+    except ezdxf.DXFError:
+        return None
+
+
+def _developper(entites, calque_insert: str | None, profondeur: int, anomalies: dict):
+    """Parcourt les entités en résolvant les références de bloc.
+
+    Les éléments du plan ne sont pas tous dessinés à plat. Sur Sarnois, les
+    85 tables, les 4 portails et la citerne sont des `INSERT`, c'est-à-dire des
+    références de bloc avec leur propre rotation et leur propre échelle :
+    `virtual_entities()` applique ces transformations, qu'un lecteur écrit à la
+    main devrait réimplémenter.
+
+    Le calque retenu est celui de la sous-entité, **sauf s'il vaut « 0 »**,
+    auquel cas elle hérite du calque de l'INSERT — c'est la convention AutoCAD,
+    et ezdxf 1.4.4 ne l'applique pas de lui-même (vérifié le 03/09/2026 : une
+    sous-entité déclarée sur « 0 » ressort sur « 0 »). Sans cette règle, le
+    contenu des blocs dessinés sur le calque 0 se retrouverait tout entier dans
+    un fourre-tout, et l'élément serait perdu.
+    """
+    for entite in entites:
+        calque = _calque_de(entite)
+        type_dxf = entite.dxftype()
+
+        if calque is None:
+            anomalies.setdefault("sans_calque", {})
+            anomalies["sans_calque"][type_dxf] = (
+                anomalies["sans_calque"].get(type_dxf, 0) + 1
+            )
+            continue
+
+        # Convention AutoCAD : le calque « 0 » dans un bloc signifie « celui de
+        # l'insertion ».
+        if calque_insert is not None and calque == "0":
+            calque = calque_insert
+
+        if type_dxf != "INSERT":
+            yield calque, entite
+            continue
+
+        if profondeur >= PROFONDEUR_BLOCS_MAX:
+            anomalies.setdefault("blocs_trop_imbriques", set()).add(calque)
+            continue
+        try:
+            sous_entites = list(entite.virtual_entities())
+        except Exception as exc:  # noqa: BLE001 - remonté en erreur nommée
+            raise ErreurImportBE(
+                f"Bloc « {entite.dxf.get('name', '?')} » du calque « {calque} » "
+                f"impossible à développer : {exc}"
+            ) from exc
+        yield from _developper(sous_entites, calque, profondeur + 1, anomalies)
+
 def lire_plan_be(
     chemin: str | Path,
     correspondance: dict[str, str] | None = None,
@@ -380,8 +461,8 @@ def lire_plan_be(
     entites_par_calque: dict[str, list] = {}
     hatch_par_calque: dict[str, int] = {}
     types_ecartes: dict[str, set[str]] = {}
-    for entite in modelspace:
-        calque = entite.dxf.layer
+    anomalies: dict = {}
+    for calque, entite in _developper(modelspace, None, 0, anomalies):
         type_dxf = entite.dxftype()
         if type_dxf == "HATCH":
             hatch_par_calque[calque] = hatch_par_calque.get(calque, 0) + 1
@@ -409,6 +490,25 @@ def lire_plan_be(
         avertissements.append(
             f"Calque « {calque} » : entités de type {', '.join(sorted(types))} "
             "non traitées et absentes du plan importé."
+        )
+
+    # Les entités sans calque ne sont rattachables à aucune catégorie. Elles sont
+    # écartées, mais comptées et dites : c'est la seule façon de savoir qu'un
+    # élément a été laissé de côté.
+    sans_calque = anomalies.get("sans_calque")
+    if sans_calque:
+        detail = ", ".join(f"{n} {typ}" for typ, n in sorted(sans_calque.items()))
+        avertissements.append(
+            f"{sum(sans_calque.values())} entité(s) sans calque écartée(s) "
+            f"({detail}). Ces types ne portent pas d'attribut de calque et ne "
+            "peuvent être rattachés à aucune catégorie."
+        )
+    trop_imbriques = anomalies.get("blocs_trop_imbriques")
+    if trop_imbriques:
+        avertissements.append(
+            f"Blocs imbriqués au-delà de {PROFONDEUR_BLOCS_MAX} niveaux sur les "
+            f"calques {', '.join(sorted(trop_imbriques))} : leur contenu n'est "
+            "pas importé."
         )
 
     # Un calque qui n'existe qu'en remplissage perdrait son élément : les HATCH
@@ -702,6 +802,11 @@ DEBORDEMENT_NEGLIGEABLE_M2 = 1.0
 OK = "ok"
 AVERTISSEMENT = "avertissement"
 BLOQUANT = "bloquant"
+#: Contrôle que la source ne permet pas de faire — pas un contrôle réussi.
+#: L'import HelioScope n'a qu'une source, là où l'import BE en recoupe deux :
+#: la plupart des recoupements n'y ont simplement pas d'objet. Les afficher en
+#: vert laisserait croire à une vérification qui n'a pas eu lieu.
+IMPOSSIBLE = "impossible"
 
 
 @dataclass
@@ -1056,15 +1161,26 @@ def controles_bloquants(controles: list[Controle]) -> list[Controle]:
 NOM_GEOPACKAGE = "geometries.gpkg"
 NOM_PARAMETRES = "projet.json"
 
-#: Version du contrat de sortie. Le lot 2 (import HelioScope), gardé en
-#: réserve, devra produire exactement le même format : la version permettra au
-#: lot 4 de refuser une sortie qu'il ne sait pas lire, plutôt que de dessiner
-#: une planche fausse.
-VERSION_CONTRAT = 1
+#: Producteurs reconnus du contrat. Le champ `origine` du `projet.json` les
+#: distingue, et distingue surtout ces sorties du `projet.json` du lot 1, qui
+#: porte le même nom dans `projets/`.
+ORIGINE_IMPORT_BE = "import_be"
+ORIGINE_HELIOSCOPE = "helioscope"
+ORIGINES = (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE)
+
+#: Version du contrat de sortie. Elle permet au lot 4 de refuser une sortie
+#: qu'il ne sait pas lire, plutôt que de dessiner une planche fausse.
+#:
+#: Version 2, le 03/09/2026 : alignement du lot 2 (import HelioScope) sur ce
+#: contrat. Le schéma gagne quatre couches — `modules_pv`,
+#: `zone_implantation_pv`, `recul_implantation`, `zone_evitee` — et le champ
+#: `origine` peut désormais valoir « helioscope ». Les sorties en version 1
+#: restent lisibles ; l'inverse ne l'est pas, d'où la montée de version.
+VERSION_CONTRAT = 2
 
 
 def ecrire_geopackage(
-    plan: PlanBE,
+    source: "PlanBE | Sequence[EntiteBE]",
     dossier: str | Path,
     ligne_coupe=None,
 ) -> Path:
@@ -1073,8 +1189,19 @@ def ecrire_geopackage(
     La coordonnée Z est conservée telle que le DXF la porte ; la colonne
     `z_reel` dit si elle décrit le terrain (les tables) ou seulement l'élévation
     d'une polyligne 2D (tout le reste sur le fichier de référence).
+
+    `source` accepte un `PlanBE` ou une simple liste d'`EntiteBE` : l'import
+    HelioScope produit des entités du même contrat sans avoir de plan BE, et
+    `PlanBE` porte `unite`, `facteur_unite`, `calques_ignores`, qui ne veulent
+    rien dire pour lui. Fabriquer un faux `PlanBE` pour satisfaire la signature
+    reviendrait à inventer ces valeurs.
     """
     import geopandas as gpd
+
+    entites = list(source.entites if isinstance(source, PlanBE) else source)
+    par_categorie: dict[str, list[EntiteBE]] = {}
+    for entite in entites:
+        par_categorie.setdefault(entite.categorie, []).append(entite)
 
     dossier = Path(dossier)
     dossier.mkdir(parents=True, exist_ok=True)
@@ -1086,18 +1213,18 @@ def ecrire_geopackage(
 
     couches = 0
     for categorie in CATEGORIES:
-        entites = plan.par_categorie(categorie)
-        if not entites:
+        lot = par_categorie.get(categorie)
+        if not lot:
             continue
         gdf = gpd.GeoDataFrame(
             {
-                "calque": [e.calque for e in entites],
-                "categorie": [e.categorie for e in entites],
-                "z_reel": [e.z_reel for e in entites],
-                "z_min": [e.z_min for e in entites],
-                "z_max": [e.z_max for e in entites],
+                "calque": [e.calque for e in lot],
+                "categorie": [e.categorie for e in lot],
+                "z_reel": [e.z_reel for e in lot],
+                "z_min": [e.z_min for e in lot],
+                "z_max": [e.z_max for e in lot],
             },
-            geometry=[e.geometrie for e in entites],
+            geometry=[e.geometrie for e in lot],
             crs=CRS_PROJET,
         )
         gdf.to_file(chemin, layer=categorie, driver="GPKG")
@@ -1121,6 +1248,12 @@ def ecrire_geopackage(
     if not couches:
         raise ErreurImportBE(
             "Aucune couche à écrire : le plan importé est vide."
+        )
+    inconnues = sorted(set(par_categorie) - set(CATEGORIES))
+    if inconnues:
+        raise ErreurImportBE(
+            f"Catégories hors contrat, non écrites : {', '.join(inconnues)}. "
+            f"Attendu parmi : {', '.join(CATEGORIES)}."
         )
     return chemin
 
@@ -1146,7 +1279,7 @@ def parametres_json(
 
     donnees = {
         "version_contrat": VERSION_CONTRAT,
-        "origine": "import_be",
+        "origine": ORIGINE_IMPORT_BE,
         "sources": {
             "dxf": plan.source,
             "tableau_bilan": tableau.source,
@@ -1297,12 +1430,14 @@ def lire_parametres(dossier: str | Path) -> dict | None:
         raise ErreurImportBE(f"{chemin} ne contient pas un objet JSON.")
 
     origine = donnees.get("origine")
-    if origine != "import_be":
+    if origine not in ORIGINES:
         # Le `projet.json` du lot 1, dans projets/{nom}/, porte le même nom. Y
-        # chercher une ligne de coupe ne rendrait rien de bon.
+        # chercher une ligne de coupe ne rendrait rien de bon. On accepte les
+        # deux producteurs du contrat et on continue de refuser tout le reste.
         raise ErreurImportBE(
-            f"{chemin} n'est pas une sortie d'import BE (origine « {origine} »). "
-            "Le projet.json du lot 1 vit dans projets/, pas dans sortie/."
+            f"{chemin} n'est pas une sortie du contrat (origine « {origine} », "
+            f"attendu parmi : {', '.join(sorted(ORIGINES))}). Le projet.json du "
+            "lot 1 vit dans projets/, pas dans sortie/."
         )
 
     version = donnees.get("version_contrat")
