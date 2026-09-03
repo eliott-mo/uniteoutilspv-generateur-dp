@@ -33,10 +33,11 @@ from dataclasses import dataclass
 
 import requests
 from PIL import Image
+from pyproj import Transformer
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from .erreurs import ErreurService
+from .erreurs import ErreurAltimetrie, ErreurService
 
 URL_WMS = "https://data.geopf.fr/wms-r/wms"
 URL_WFS = "https://data.geopf.fr/wfs/ows"
@@ -354,3 +355,125 @@ def telecharger_batiments(
         for e in entites
         if e.get("geometry")
     ]
+
+
+# ---------------------------------------------------------------------------
+# Service altimétrique (RGE ALTI)
+# ---------------------------------------------------------------------------
+
+#: Point d'entrée du calcul altimétrique de la Géoplateforme, et ressource
+#: RGE ALTI. Vérifiés en réponse réelle le 03/09/2026 : le service répond en
+#: GET, `{"elevations": [z, ...]}` avec `zonly=true`, altitudes en NGF.
+URL_ALTIMETRIE = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
+RESSOURCE_ALTIMETRIE = "ign_rge_alti_wld"
+
+#: Nombre de points par requête.
+#:
+#: Le brief annonçait un plafond « de l'ordre de 2 000 points ». Mesuré le
+#: 03/09/2026, ce n'est pas le nombre de points qui limite mais la longueur de
+#: l'URL : 200 points passent (URL de 4 736 caractères), 500 sont refusés en
+#: HTTP 414 (11 636 caractères). Le POST, essayé sous ses deux formes,
+#: répond 500 ou 400 : seul le GET fonctionne.
+#:
+#: Une coupe de site échantillonnée tous les 5 m tient donc en une ou deux
+#: requêtes.
+POINTS_PAR_REQUETE = 200
+
+#: Attente entre deux requêtes successives, en secondes. Le service annonce une
+#: limitation de l'ordre de 5 requêtes par seconde ; les requêtes ne sont pas
+#: parallélisées.
+ATTENTE_ALTIMETRIE_S = 0.25
+
+_VERS_WGS84 = Transformer.from_crs(2154, 4326, always_xy=True)
+
+
+def telecharger_altitudes(
+    points_l93: list[tuple[float, float]], timeout: int = 60
+) -> list[float]:
+    """Altitudes NGF du RGE ALTI aux points donnés en Lambert 93.
+
+    Les points sont interrogés dans l'ordre reçu, par paquets, sans
+    parallélisation. Une altitude manquante ou hors service lève plutôt que de
+    trouer le profil : une coupe avec un point à zéro se dessinerait sans que
+    personne ne le voie.
+    """
+    if not points_l93:
+        raise ErreurAltimetrie(
+            "Aucun point transmis au service altimétrique : la ligne de coupe "
+            "est vide."
+        )
+
+    altitudes: list[float] = []
+    for debut in range(0, len(points_l93), POINTS_PAR_REQUETE):
+        paquet = points_l93[debut : debut + POINTS_PAR_REQUETE]
+        if debut:
+            time.sleep(ATTENTE_ALTIMETRIE_S)
+        altitudes.extend(_paquet_altitudes(paquet, timeout))
+
+    if len(altitudes) != len(points_l93):
+        raise ErreurAltimetrie(
+            f"Le service altimétrique a renvoyé {len(altitudes)} altitudes pour "
+            f"{len(points_l93)} points demandés."
+        )
+    return altitudes
+
+
+def _paquet_altitudes(paquet: list[tuple[float, float]], timeout: int) -> list[float]:
+    lons, lats = _VERS_WGS84.transform([p[0] for p in paquet], [p[1] for p in paquet])
+    parametres = {
+        "lon": "|".join(f"{v:.6f}" for v in lons),
+        "lat": "|".join(f"{v:.6f}" for v in lats),
+        "resource": RESSOURCE_ALTIMETRIE,
+        "delimiter": "|",
+        "zonly": "true",
+        "indent": "false",
+    }
+    try:
+        reponse = requests.get(
+            URL_ALTIMETRIE, params=parametres, headers=_ENTETES, timeout=timeout
+        )
+    except requests.RequestException as exc:
+        raise ErreurAltimetrie(
+            f"Service altimétrique de la Géoplateforme injoignable : {exc}. "
+            "Fournissez un fichier d'altimétrie en repli."
+        ) from exc
+    if reponse.status_code != 200:
+        raise ErreurAltimetrie(
+            f"Service altimétrique : HTTP {reponse.status_code} sur "
+            f"{len(paquet)} points. {reponse.text[:200]}"
+        )
+    try:
+        donnees = reponse.json()
+    except ValueError as exc:
+        raise ErreurAltimetrie(
+            f"Réponse du service altimétrique illisible : {reponse.text[:200]}"
+        ) from exc
+
+    brutes = donnees.get("elevations")
+    if not isinstance(brutes, list) or len(brutes) != len(paquet):
+        raise ErreurAltimetrie(
+            f"Réponse altimétrique inattendue : {len(brutes) if isinstance(brutes, list) else 'aucune'} "
+            f"altitude(s) pour {len(paquet)} points demandés."
+        )
+
+    altitudes = []
+    for indice, valeur in enumerate(brutes):
+        # Avec `zonly=true` la réponse est une liste de nombres ; le format
+        # complet renvoie des objets. Les deux sont acceptés, la valeur
+        # sentinelle du service (-99999) est refusée plutôt que dessinée.
+        if isinstance(valeur, dict):
+            valeur = valeur.get("z")
+        try:
+            altitude = float(valeur)
+        except (TypeError, ValueError) as exc:
+            raise ErreurAltimetrie(
+                f"Altitude illisible au point {indice + 1} : {valeur!r}."
+            ) from exc
+        if altitude < -1000.0:
+            raise ErreurAltimetrie(
+                f"Le RGE ALTI ne couvre pas le point {indice + 1} de la coupe "
+                f"(altitude {altitude:g}). Fournissez un fichier d'altimétrie "
+                "en repli."
+            )
+        altitudes.append(altitude)
+    return altitudes

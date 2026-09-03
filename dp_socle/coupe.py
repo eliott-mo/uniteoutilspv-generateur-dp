@@ -1,0 +1,532 @@
+"""Ligne de coupe A-A' et profil du terrain naturel (lot 2bis, étapes D et E).
+
+La coupe DP 3 se lit au 1/300 pour le terrain et au 1/50 pour la structure. La
+ligne A-A' n'existe ni dans le DXF ni dans le tableau bilan : elle est tracée à
+la main par le chef de projet, **puis corrigée pour être perpendiculaire aux
+rangées**.
+
+Pourquoi cette correction est obligatoire : une coupe de terrain n'a de sens que
+perpendiculairement aux rangées, c'est la direction dans laquelle le terrain fait
+varier la hauteur des tables. Un tracé à main levée est toujours approximatif, et
+quelques degrés d'oblique allongent toutes les distances lues sur la planche du
+facteur 1/cos θ, sans que rien ne le signale.
+
+Le profil du terrain est récupéré automatiquement auprès du RGE ALTI de la
+Géoplateforme ; un fichier d'altimétrie fourni à la main prend le pas sur cet
+appel, en le disant.
+"""
+
+from __future__ import annotations
+
+import re
+import statistics
+from dataclasses import dataclass, field
+from math import atan2, cos, degrees, hypot, radians, sin
+from pathlib import Path
+
+from shapely.geometry import LineString, Point
+from shapely.geometry.base import BaseGeometry
+
+from .erreurs import ErreurCoupe
+from .ign import telecharger_altitudes
+
+#: Marge ajoutée de chaque côté de l'emprise clôturée, en mètres, pour que la
+#: coupe la traverse entièrement et montre le terrain de part et d'autre.
+MARGE_COUPE_M = 10.0
+
+#: Écart au-delà duquel le tracé de l'utilisateur est jugé pris à l'envers, en
+#: degrés. Au-delà de 45°, il a probablement voulu couper dans l'autre sens ou
+#: s'est trompé de repère. La correction s'applique quand même, jamais en
+#: silence.
+ECART_SUSPECT_DEG = 45.0
+
+#: Pas d'échantillonnage du profil, en mètres. Sur une coupe de site de quelques
+#: centaines de mètres, cela fait quelques dizaines de points, soit une requête.
+PAS_ECHANTILLONNAGE_M = 5.0
+
+#: Écart systématique admis entre le profil du terrain et le bas des tables, en
+#: mètres.
+#:
+#: Mesuré sur le fichier de référence : le bord bas des tables se tient 1,70 m
+#: au-dessus du RGE ALTI en médiane (de 1,15 m à 2,00 m selon la table). C'est
+#: la garde au sol de la structure, pas une erreur. Ce contrôle ne cherche donc
+#: pas la valeur zéro : il cherche un décalage de référentiel altimétrique, qui
+#: se compte en dizaines de mètres, et c'est la **médiane** des écarts qu'on
+#: compare au seuil pour qu'une table isolée ne le déclenche pas.
+ECART_ALTIMETRIQUE_MAX_M = 2.0
+
+#: Distance en deçà de laquelle une table est tenue pour proche de la coupe, en
+#: mètres. Un peu plus que le pitch inter-rangées du fichier de référence
+#: (9,5 m) : la coupe passe forcément près d'une table de chaque rangée
+#: traversée.
+DISTANCE_TABLE_COUPE_M = 12.0
+
+
+# ---------------------------------------------------------------------------
+# Étape D — correction de perpendicularité
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LigneCoupe:
+    """Ligne A-A', corrigée ou assumée manuelle, avec le tracé d'origine."""
+
+    geometrie: LineString
+    trace_initial: LineString
+    azimut_tables_deg: float
+    #: Écart, en degrés, entre le tracé de l'utilisateur et la perpendiculaire
+    #: aux rangées. Conservé pour montrer à l'écran ce qui a été redressé.
+    ecart_initial_deg: float
+    corrigee: bool
+    avertissements: list[str] = field(default_factory=list)
+
+    @property
+    def longueur_m(self) -> float:
+        return float(self.geometrie.length)
+
+    @property
+    def azimut_coupe_deg(self) -> float:
+        (x1, y1), (x2, y2) = self.geometrie.coords[0][:2], self.geometrie.coords[-1][:2]
+        return degrees(atan2(y2 - y1, x2 - x1))
+
+
+def corriger_ligne_coupe(
+    trace: LineString,
+    azimut_tables_deg: float,
+    emprise_cloturee: BaseGeometry,
+    marge_m: float = MARGE_COUPE_M,
+    manuel: bool = False,
+) -> LigneCoupe:
+    """Redresse le tracé perpendiculairement aux rangées et l'étend à l'emprise.
+
+    Le **point milieu** du tracé est conservé : c'est lui qui exprime l'intention
+    du chef de projet, l'endroit où il veut couper. La direction, elle, est
+    imposée par la géométrie des tables.
+
+    `manuel=True` conserve la direction tracée. C'est un contournement, désactivé
+    par défaut : il doit rester un choix explicite, pour les rares cas où la
+    perpendicularité ne conviendrait pas.
+    """
+    if trace is None or trace.is_empty or len(trace.coords) < 2:
+        raise ErreurCoupe(
+            "Aucune ligne de coupe tracée : la coupe DP 3 ne peut pas être "
+            "générée sans elle."
+        )
+    if emprise_cloturee is None or emprise_cloturee.is_empty:
+        raise ErreurCoupe(
+            "Emprise clôturée absente : la ligne de coupe ne peut pas être "
+            "étendue à la largeur du site."
+        )
+
+    depart = trace.coords[0][:2]
+    arrivee = trace.coords[-1][:2]
+    if hypot(arrivee[0] - depart[0], arrivee[1] - depart[1]) < 1e-6:
+        raise ErreurCoupe(
+            "Le tracé de la ligne de coupe est réduit à un point : tracez un "
+            "segment traversant le site."
+        )
+
+    milieu = trace.interpolate(0.5, normalized=True)
+    direction_tracee = degrees(atan2(arrivee[1] - depart[1], arrivee[0] - depart[0]))
+    perpendiculaire = azimut_tables_deg + 90.0
+    ecart = abs(_dans_demi_tour(direction_tracee - perpendiculaire))
+
+    avertissements: list[str] = []
+    if manuel:
+        direction = direction_tracee
+        avertissements.append(
+            "Mode manuel : la direction tracée est conservée telle quelle. La "
+            f"coupe fait {ecart:.1f}° avec la perpendiculaire aux rangées ; les "
+            "distances qu'on y lira seront allongées d'autant."
+        )
+    else:
+        direction = perpendiculaire
+        if ecart > ECART_SUSPECT_DEG:
+            avertissements.append(
+                f"Le tracé fait {ecart:.0f}° avec la perpendiculaire aux rangées, "
+                f"au-delà des {ECART_SUSPECT_DEG:g}° attendus. Vous avez "
+                "probablement voulu couper dans l'autre sens, ou vous êtes trompé "
+                "de repère. La ligne a été redressée malgré tout — vérifiez-la "
+                "sur l'aperçu."
+            )
+
+    geometrie = _etendre(milieu, direction, emprise_cloturee, marge_m)
+    return LigneCoupe(
+        geometrie=geometrie,
+        trace_initial=LineString([depart, arrivee]),
+        azimut_tables_deg=azimut_tables_deg,
+        ecart_initial_deg=ecart,
+        corrigee=not manuel,
+        avertissements=avertissements,
+    )
+
+
+def _etendre(
+    milieu: Point, direction_deg: float, emprise: BaseGeometry, marge_m: float
+) -> LineString:
+    """Segment centré sur `milieu`, de direction donnée, traversant l'emprise.
+
+    L'étendue se calcule en projetant les sommets de l'emprise sur la direction
+    de coupe, plutôt qu'en prenant la diagonale de sa boîte englobante : une
+    emprise allongée en biais donnerait sinon une coupe deux fois trop longue.
+    """
+    ux, uy = cos(radians(direction_deg)), sin(radians(direction_deg))
+    projections = [
+        (x - milieu.x) * ux + (y - milieu.y) * uy for x, y in _sommets(emprise)
+    ]
+    if not projections:
+        raise ErreurCoupe(
+            "L'emprise clôturée ne porte aucun sommet exploitable : la ligne de "
+            "coupe ne peut pas être dimensionnée."
+        )
+    debut, fin = min(projections) - marge_m, max(projections) + marge_m
+    return LineString(
+        [
+            (milieu.x + debut * ux, milieu.y + debut * uy),
+            (milieu.x + fin * ux, milieu.y + fin * uy),
+        ]
+    )
+
+
+def _sommets(geometrie: BaseGeometry):
+    if hasattr(geometrie, "geoms"):
+        for partie in geometrie.geoms:
+            yield from _sommets(partie)
+        return
+    if geometrie.geom_type == "Polygon":
+        for x, y, *_ in geometrie.exterior.coords:
+            yield x, y
+    else:
+        for x, y, *_ in geometrie.coords:
+            yield x, y
+
+
+def _dans_demi_tour(angle: float) -> float:
+    """Ramène un angle dans ]-90, 90] : une coupe n'a pas de sens de parcours."""
+    angle = (angle + 90.0) % 180.0 - 90.0
+    return 90.0 if angle == -90.0 else angle
+
+
+# ---------------------------------------------------------------------------
+# Étape E — profil altimétrique
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProfilTerrain:
+    """Profil du terrain naturel le long de la coupe A-A'."""
+
+    #: Abscisses curvilignes depuis l'origine A, en mètres.
+    abscisses_m: list[float]
+    #: Altitudes NGF, en mètres.
+    altitudes_m: list[float]
+    origine: str
+    pas_m: float
+    avertissements: list[str] = field(default_factory=list)
+
+    @property
+    def denivelee_m(self) -> float:
+        return max(self.altitudes_m) - min(self.altitudes_m)
+
+    @property
+    def altitude_min_m(self) -> float:
+        return min(self.altitudes_m)
+
+    @property
+    def altitude_max_m(self) -> float:
+        return max(self.altitudes_m)
+
+    def altitude_a(self, abscisse_m: float) -> float:
+        """Altitude interpolée linéairement à une abscisse donnée."""
+        if abscisse_m <= self.abscisses_m[0]:
+            return self.altitudes_m[0]
+        if abscisse_m >= self.abscisses_m[-1]:
+            return self.altitudes_m[-1]
+        for indice in range(1, len(self.abscisses_m)):
+            if self.abscisses_m[indice] >= abscisse_m:
+                s0, s1 = self.abscisses_m[indice - 1], self.abscisses_m[indice]
+                z0, z1 = self.altitudes_m[indice - 1], self.altitudes_m[indice]
+                if s1 == s0:
+                    return z0
+                return z0 + (z1 - z0) * (abscisse_m - s0) / (s1 - s0)
+        return self.altitudes_m[-1]
+
+
+def echantillonner(ligne: LineString, pas_m: float = PAS_ECHANTILLONNAGE_M):
+    """Abscisses et points L93 le long de la ligne, extrémités comprises."""
+    if pas_m <= 0:
+        raise ErreurCoupe(f"Pas d'échantillonnage invalide : {pas_m} m.")
+    longueur = float(ligne.length)
+    if longueur <= 0:
+        raise ErreurCoupe("Ligne de coupe de longueur nulle.")
+    nombre = max(int(longueur // pas_m), 1)
+    abscisses = [i * pas_m for i in range(nombre + 1)]
+    if abscisses[-1] < longueur - 1e-6:
+        abscisses.append(longueur)
+    points = [ligne.interpolate(s) for s in abscisses]
+    return abscisses, [(p.x, p.y) for p in points]
+
+
+def profil_terrain(
+    ligne: LigneCoupe | LineString,
+    pas_m: float = PAS_ECHANTILLONNAGE_M,
+    fichier_altimetrie: str | Path | None = None,
+) -> ProfilTerrain:
+    """Profil du terrain le long de la coupe, RGE ALTI ou fichier de repli.
+
+    Le fichier fourni prend le pas sur l'appel automatique : il sert quand le
+    service est indisponible, ou quand un relevé drone plus précis existe. Ce
+    remplacement est signalé, il n'est jamais silencieux.
+    """
+    geometrie = ligne.geometrie if isinstance(ligne, LigneCoupe) else ligne
+    abscisses, points = echantillonner(geometrie, pas_m)
+
+    if fichier_altimetrie is not None:
+        altitudes, origine, avertissements = _profil_depuis_fichier(
+            Path(fichier_altimetrie), geometrie, abscisses
+        )
+    else:
+        altitudes = telecharger_altitudes(points)
+        origine = "RGE ALTI (Géoplateforme IGN)"
+        avertissements = []
+
+    return ProfilTerrain(
+        abscisses_m=list(abscisses),
+        altitudes_m=list(altitudes),
+        origine=origine,
+        pas_m=pas_m,
+        avertissements=avertissements,
+    )
+
+
+#: Séparateurs de colonnes essayés, dans l'ordre, avec leur nom lisible.
+#:
+#: La virgule est à la fois séparateur de colonnes en CSV anglo-saxon et
+#: séparateur décimal en français : `0,0;0,0;100,00` compte trois colonnes et
+#: non six. Le séparateur n'est donc pas deviné ligne à ligne, il est
+#: **déterminé une fois** sur la première ligne de données — celui qui donne
+#: 2 ou 3 nombres — puis appliqué à tout le fichier, et le choix retenu est
+#: annoncé à l'utilisateur.
+SEPARATEURS_COLONNES = (
+    (re.compile(r"\s*;\s*"), "point-virgule"),
+    (re.compile(r"\s*\t\s*"), "tabulation"),
+    (re.compile(r"\s+"), "espace"),
+    (re.compile(r"\s*,\s*"), "virgule"),
+)
+
+
+def _decouper(texte: str, motif: re.Pattern, decimale_virgule: bool):
+    """Nombres d'une ligne, ou None si elle ne se lit pas avec ce séparateur."""
+    morceaux = [m for m in motif.split(texte.strip()) if m]
+    valeurs = []
+    for morceau in morceaux:
+        if decimale_virgule:
+            morceau = morceau.replace(",", ".")
+        try:
+            valeurs.append(float(morceau))
+        except ValueError:
+            return None
+    return tuple(valeurs)
+
+
+
+def _detecter_format(chemin: Path, utiles: list[str]):
+    """Séparateur, convention décimale et première ligne de données du relevé.
+
+    Essayés dans l'ordre sur la première ligne qui se lit en 2 ou 3 nombres :
+    point-virgule, tabulation, espace, virgule. Une ligne d'en-tête textuelle
+    est sautée, mais pas plus d'une : un fichier qui ne se lit qu'à partir de sa
+    troisième ligne n'est pas le format attendu.
+    """
+    for premiere in (1, 2):
+        if premiere > len(utiles):
+            break
+        texte = utiles[premiere - 1]
+        for motif, nom in SEPARATEURS_COLONNES:
+            for decimale_virgule in (nom != "virgule", False):
+                valeurs = _decouper(texte, motif, decimale_virgule)
+                if valeurs is not None and len(valeurs) in (2, 3):
+                    return motif, nom, decimale_virgule, premiere
+    raise ErreurCoupe(
+        f"{chemin.name} : impossible de lire « {utiles[0]} » comme 3 colonnes "
+        "« X Y Z » en Lambert 93 ou 2 colonnes « abscisse Z ». Séparateurs "
+        "acceptés : point-virgule, tabulation, espace, virgule."
+    )
+
+def _profil_depuis_fichier(
+    chemin: Path, ligne: LineString, abscisses: list[float]
+) -> tuple[list[float], str, list[str]]:
+    """Lit un relevé altimétrique en TXT et le rééchantillonne sur la coupe.
+
+    Deux formes sont acceptées, faute d'un exemple de sortie de l'outil interne
+    d'extraction topographique au moment de l'écriture (03/09/2026) :
+
+    - trois colonnes `X Y Z` en Lambert 93, projetées sur la ligne de coupe ;
+    - deux colonnes `abscisse Z`, déjà exprimées le long de la coupe.
+
+    Toute autre forme est refusée : un fichier mal interprété donnerait une
+    coupe plausible et fausse.
+    """
+    if not chemin.exists():
+        raise ErreurCoupe(f"Fichier d'altimétrie introuvable : {chemin}")
+    lignes = [
+        texte.strip()
+        for texte in chemin.read_text(encoding="utf-8", errors="replace").splitlines()
+    ]
+    utiles = [t for t in lignes if t and not t.startswith(("#", "//"))]
+    if not utiles:
+        raise ErreurCoupe(f"{chemin.name} ne contient aucune ligne de données.")
+
+    motif, nom_separateur, decimale_virgule, premiere = _detecter_format(chemin, utiles)
+
+    releves: list[tuple[float, ...]] = []
+    for numero, texte in enumerate(utiles, start=1):
+        if numero < premiere:
+            continue  # ligne d'en-tête, écartée avec le format retenu
+        valeurs = _decouper(texte, motif, decimale_virgule)
+        if valeurs is None:
+            raise ErreurCoupe(
+                f"{chemin.name}, ligne de données {numero} : « {texte} » n'est "
+                f"pas une suite de nombres séparés par {nom_separateur}."
+            )
+        if len(valeurs) not in (2, 3):
+            raise ErreurCoupe(
+                f"{chemin.name}, ligne de données {numero} : {len(valeurs)} "
+                f"colonnes séparées par {nom_separateur}. Attendu 3 colonnes "
+                "« X Y Z » en Lambert 93, ou 2 colonnes « abscisse Z »."
+            )
+        releves.append(valeurs)
+
+    if len(releves) < 2:
+        raise ErreurCoupe(
+            f"{chemin.name} ne contient que {len(releves)} point(s) : un profil "
+            "demande au moins deux relevés."
+        )
+    nb_colonnes = {len(v) for v in releves}
+    if len(nb_colonnes) > 1:
+        raise ErreurCoupe(
+            f"{chemin.name} mélange des lignes à 2 et à 3 colonnes : le format "
+            "est ambigu."
+        )
+
+    avertissements = [
+        f"Profil altimétrique lu dans {chemin.name} ({len(releves)} points, "
+        f"{next(iter(nb_colonnes))} colonnes séparées par {nom_separateur}, "
+        f"décimale « {',' if decimale_virgule else '.'} ») : ce fichier prend le "
+        "pas sur l'interrogation du RGE ALTI."
+    ]
+    if nb_colonnes == {3}:
+        couples = sorted(
+            (float(ligne.project(Point(x, y))), z) for x, y, z in releves
+        )
+        ecart_max = max(
+            Point(x, y).distance(ligne) for x, y, _ in releves
+        )
+        if ecart_max > 5.0:
+            avertissements.append(
+                f"Les points du relevé s'écartent jusqu'à {ecart_max:.0f} m de la "
+                "ligne de coupe ; ils sont projetés dessus."
+            )
+    else:
+        couples = sorted((s, z) for s, z in releves)
+
+    abscisses_fichier = [c[0] for c in couples]
+    altitudes_fichier = [c[1] for c in couples]
+    if abscisses_fichier[0] > abscisses[0] + 1.0 or abscisses_fichier[-1] < (
+        abscisses[-1] - 1.0
+    ):
+        avertissements.append(
+            f"Le relevé couvre de {abscisses_fichier[0]:.0f} m à "
+            f"{abscisses_fichier[-1]:.0f} m alors que la coupe va de "
+            f"{abscisses[0]:.0f} m à {abscisses[-1]:.0f} m : les extrémités sont "
+            "prolongées à la dernière altitude connue."
+        )
+
+    provisoire = ProfilTerrain(
+        abscisses_m=abscisses_fichier,
+        altitudes_m=altitudes_fichier,
+        origine=chemin.name,
+        pas_m=0.0,
+    )
+    return (
+        [provisoire.altitude_a(s) for s in abscisses],
+        f"Fichier d'altimétrie « {chemin.name} »",
+        avertissements,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Contrôle de cohérence altimétrique
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CoherenceAltimetrique:
+    """Comparaison du profil du terrain aux altitudes des tables du DXF."""
+
+    nb_tables_comparees: int
+    ecart_median_m: float | None
+    ecart_min_m: float | None
+    ecart_max_m: float | None
+    conforme: bool
+    message: str
+
+
+def controler_coherence(
+    profil: ProfilTerrain,
+    ligne: LigneCoupe | LineString,
+    tables: list[BaseGeometry],
+    seuil_m: float = ECART_ALTIMETRIQUE_MAX_M,
+    distance_max_m: float = DISTANCE_TABLE_COUPE_M,
+) -> CoherenceAltimetrique:
+    """Recoupe le profil du terrain avec le bord bas des tables voisines.
+
+    Le Z des tables est celui du plan des modules, pas celui du sol : le bord
+    bas se tient au-dessus du terrain de la garde au sol de la structure. Ce
+    contrôle ne cherche donc pas l'égalité, mais un décalage de référentiel
+    altimétrique, qui se compte en dizaines de mètres. C'est la médiane des
+    écarts qui est comparée au seuil, pour qu'une table isolée ne le déclenche
+    pas.
+    """
+    geometrie = ligne.geometrie if isinstance(ligne, LigneCoupe) else ligne
+    ecarts = []
+    for table in tables:
+        if not table.has_z:
+            continue
+        centre = table.centroid
+        if centre.distance(geometrie) > distance_max_m:
+            continue
+        z_bas = min(c[2] for c in table.exterior.coords)
+        ecarts.append(z_bas - profil.altitude_a(float(geometrie.project(centre))))
+
+    if not ecarts:
+        return CoherenceAltimetrique(
+            0,
+            None,
+            None,
+            None,
+            False,
+            f"Aucune table à moins de {distance_max_m:g} m de la ligne de coupe : "
+            "la cohérence du profil avec les altitudes du DXF n'a pas pu être "
+            "contrôlée.",
+        )
+
+    median = statistics.median(ecarts)
+    conforme = abs(median) <= seuil_m
+    return CoherenceAltimetrique(
+        nb_tables_comparees=len(ecarts),
+        ecart_median_m=median,
+        ecart_min_m=min(ecarts),
+        ecart_max_m=max(ecarts),
+        conforme=conforme,
+        message=(
+            f"{len(ecarts)} tables comparées : le bord bas des tables se tient "
+            f"{median:+.2f} m au-dessus du terrain ({min(ecarts):+.2f} à "
+            f"{max(ecarts):+.2f} m). Cohérent avec la garde au sol de la structure."
+            if conforme
+            else f"{len(ecarts)} tables comparées : écart systématique de "
+            f"{median:+.2f} m entre le bord bas des tables et le profil du "
+            f"terrain, au-delà des {seuil_m:g} m admis. Les deux jeux de données "
+            "ne sont probablement pas dans le même référentiel altimétrique."
+        ),
+    )

@@ -31,7 +31,11 @@ from shapely.geometry import LineString, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from .erreurs import ErreurGeoreferencement, ErreurImportBE
+from .erreurs import (
+    ErreurControleCroise,
+    ErreurGeoreferencement,
+    ErreurImportBE,
+)
 
 CRS_PROJET = "EPSG:2154"
 
@@ -633,3 +637,647 @@ def _dans_demi_tour(angle: float) -> float:
     """Ramène un angle dans ]-90, 90] : une rangée n'a pas de sens de parcours."""
     angle = (angle + 90.0) % 180.0 - 90.0
     return 90.0 if angle == -90.0 else angle
+
+
+# ---------------------------------------------------------------------------
+# Étape C — contrôles croisés
+# ---------------------------------------------------------------------------
+
+#: Tolérances des contrôles croisés, en fraction de la valeur du tableau.
+TOLERANCE_SURFACE_CLOTURE = 0.02
+TOLERANCE_LINEAIRE_CLOTURE = 0.02
+TOLERANCE_SURFACE_MODULES = 0.05
+
+#: Débordement de la clôture hors de l'emprise cadastrale en deçà duquel on ne
+#: dit rien, en m². Absorbe l'imprécision de numérisation du parcellaire ; un
+#: vrai débordement se compte en dizaines de m².
+DEBORDEMENT_NEGLIGEABLE_M2 = 1.0
+
+OK = "ok"
+AVERTISSEMENT = "avertissement"
+BLOQUANT = "bloquant"
+
+
+@dataclass
+class Controle:
+    """Résultat d'un recoupement entre le DXF, le tableau bilan et l'emprise.
+
+    Le scénario redouté n'est pas le fichier corrompu, c'est le plan mis à jour
+    sans le tableau : ces contrôles sont la seule chose qui l'attrape avant le
+    dépôt du dossier. Ils ne s'assouplissent pas pour faire passer une entrée.
+    """
+
+    libelle: str
+    valeur_dxf: float | int | None
+    valeur_tableau: float | int | None
+    unite: str
+    statut: str
+    message: str
+    tolerance: str = ""
+
+    @property
+    def ecart_relatif(self) -> float | None:
+        if not self.valeur_tableau or self.valeur_dxf is None:
+            return None
+        return (self.valeur_dxf - self.valeur_tableau) / self.valeur_tableau
+
+    @property
+    def bloquant(self) -> bool:
+        return self.statut == BLOQUANT
+
+
+def controler(
+    plan: PlanBE,
+    tableau,
+    emprise_cadastrale: BaseGeometry | None = None,
+    seuil_puissance_mwc: float | None = None,
+) -> list[Controle]:
+    """Recoupe le plan, le tableau bilan et l'emprise cadastrale.
+
+    `tableau` est un `TableauBilan` de `dp_socle.tableau_bilan` — importé au
+    seul titre du typage, d'où l'absence d'annotation : le module des tableaux
+    dépend déjà de celui-ci pour la normalisation des libellés.
+
+    `seuil_puissance_mwc` est le seuil de recevabilité en déclaration
+    préalable : il vient de l'utilisateur et n'est pas codé en dur, une règle
+    d'urbanisme n'ayant pas sa place ici.
+    """
+    generalites = tableau.generalites
+    structures = tableau.structures
+    modules = tableau.modules
+    controles: list[Controle] = []
+
+    controles.append(
+        _egalite_stricte(
+            "Nombre de tables",
+            plan.nb_tables,
+            structures["nb_tables"],
+            "tables",
+            "Le plan et le tableau ne décrivent pas la même implantation : l'un "
+            "des deux n'a pas été mis à jour.",
+        )
+    )
+    controles.append(
+        _egalite_stricte(
+            "Nombre de portails",
+            plan.nb_portails,
+            generalites["nb_portails"],
+            "portails",
+            "Les entités du calque portail sont regroupées par contact ; un "
+            "écart signale un portail ajouté ou retiré d'un seul côté.",
+        )
+    )
+
+    surface_tableau_m2 = generalites["surface_cloturee_ha"] * 10_000.0
+    surface_dxf = plan.surface_cloturee_m2
+    if surface_dxf is None:
+        controles.append(
+            Controle(
+                "Surface clôturée",
+                None,
+                surface_tableau_m2,
+                "m²",
+                BLOQUANT,
+                "Aucun contour de clôture dans le DXF : la surface clôturée ne "
+                "peut pas être recoupée avec le tableau.",
+                "2 %",
+            )
+        )
+    else:
+        controles.append(
+            _ecart_relatif(
+                "Surface clôturée",
+                surface_dxf,
+                surface_tableau_m2,
+                "m²",
+                TOLERANCE_SURFACE_CLOTURE,
+                BLOQUANT,
+                "La surface clôturée du plan et celle du tableau divergent.",
+            )
+        )
+
+    lineaire_dxf = plan.lineaire_cloture_m
+    if lineaire_dxf is None:
+        controles.append(
+            Controle(
+                "Linéaire de clôture",
+                None,
+                generalites["lineaire_cloture_m"],
+                "m",
+                AVERTISSEMENT,
+                "Aucun contour de clôture dans le DXF : linéaire non contrôlé.",
+                "2 %",
+            )
+        )
+    else:
+        controles.append(
+            _ecart_relatif(
+                "Linéaire de clôture",
+                lineaire_dxf,
+                generalites["lineaire_cloture_m"],
+                "m",
+                TOLERANCE_LINEAIRE_CLOTURE,
+                AVERTISSEMENT,
+                "Le tableau arrondit souvent le linéaire ; au-delà de 2 % c'est "
+                "le tracé qui a changé.",
+            )
+        )
+
+    controles.append(
+        _ecart_relatif(
+            "Surface projetée des modules",
+            plan.surface_tables_m2,
+            modules["surface_projetee_m2"],
+            "m²",
+            TOLERANCE_SURFACE_MODULES,
+            AVERTISSEMENT,
+            "La somme des aires de tables du plan englobe les jeux entre modules "
+            "d'une même table ; quelques pour cent d'écart sont normaux.",
+        )
+    )
+
+    controles.append(_azimut(plan.azimut_tables_deg, structures["azimut_deg"]))
+    controles.append(_emprise(plan, emprise_cadastrale))
+    controles.append(_puissance(modules["puissance_mwc"], seuil_puissance_mwc))
+    return controles
+
+
+def _egalite_stricte(
+    libelle: str, valeur_dxf, valeur_tableau, unite: str, explication: str
+) -> Controle:
+    conforme = valeur_dxf == valeur_tableau
+    return Controle(
+        libelle=libelle,
+        valeur_dxf=valeur_dxf,
+        valeur_tableau=valeur_tableau,
+        unite=unite,
+        statut=OK if conforme else BLOQUANT,
+        tolerance="égalité stricte",
+        message=(
+            f"{valeur_dxf} au plan comme au tableau."
+            if conforme
+            else f"{valeur_dxf} au plan contre {valeur_tableau} au tableau. "
+            + explication
+        ),
+    )
+
+
+def _ecart_relatif(
+    libelle: str,
+    valeur_dxf: float,
+    valeur_tableau: float,
+    unite: str,
+    tolerance: float,
+    statut_echec: str,
+    explication: str,
+) -> Controle:
+    if not valeur_tableau:
+        return Controle(
+            libelle,
+            valeur_dxf,
+            valeur_tableau,
+            unite,
+            statut_echec,
+            f"La valeur du tableau est nulle : l'écart avec le plan "
+            f"({valeur_dxf:.1f} {unite}) n'est pas calculable.",
+            f"{tolerance:.0%}",
+        )
+    ecart = abs(valeur_dxf - valeur_tableau) / abs(valeur_tableau)
+    conforme = ecart <= tolerance
+    return Controle(
+        libelle=libelle,
+        valeur_dxf=valeur_dxf,
+        valeur_tableau=valeur_tableau,
+        unite=unite,
+        statut=OK if conforme else statut_echec,
+        tolerance=f"{tolerance:.0%}",
+        message=(
+            f"Écart de {ecart:.1%} entre le plan et le tableau."
+            if conforme
+            else f"Écart de {ecart:.1%}, au-delà des {tolerance:.0%} admis. "
+            + explication
+        ),
+    )
+
+
+def _azimut(azimut_dxf: float, azimut_tableau: float) -> Controle:
+    """Recoupe l'azimut mesuré sur les tables avec celui déclaré au tableau.
+
+    Les deux conventions coïncident sur le fichier de référence, où les rangées
+    est-ouest et l'azimut déclaré valent l'un et l'autre 0°. Ce contrôle attrape
+    donc un plan tourné par rapport à ce qu'annonce le tableau, pas une erreur
+    de convention : il avertit sans bloquer, et c'est toujours la géométrie qui
+    oriente la coupe A-A'.
+    """
+    ecart = abs(_dans_demi_tour(azimut_dxf - azimut_tableau))
+    conforme = ecart <= TOLERANCE_AZIMUT_DEG
+    return Controle(
+        libelle="Azimut des tables",
+        valeur_dxf=azimut_dxf,
+        valeur_tableau=azimut_tableau,
+        unite="°",
+        statut=OK if conforme else AVERTISSEMENT,
+        tolerance=f"{TOLERANCE_AZIMUT_DEG:g}°",
+        message=(
+            f"Écart de {ecart:.2f}° entre la géométrie et le tableau."
+            if conforme
+            else f"Écart de {ecart:.2f}° entre l'azimut mesuré sur les tables "
+            f"({azimut_dxf:.2f}°) et celui déclaré au tableau "
+            f"({azimut_tableau:g}°). C'est la géométrie qui oriente la coupe A-A'."
+        ),
+    )
+
+
+def _emprise(plan: PlanBE, emprise_cadastrale: BaseGeometry | None) -> Controle:
+    polygone = plan.polygone_cloture
+    if emprise_cadastrale is None:
+        return Controle(
+            "Clôture dans l'emprise cadastrale",
+            None,
+            None,
+            "",
+            AVERTISSEMENT,
+            "Emprise cadastrale non fournie : un débordement de la clôture hors "
+            "des parcelles du projet n'aurait pas été vu.",
+        )
+    if polygone is None:
+        return Controle(
+            "Clôture dans l'emprise cadastrale",
+            None,
+            None,
+            "",
+            AVERTISSEMENT,
+            "Aucun contour de clôture dans le DXF : contrôle impossible.",
+        )
+    surface = float(polygone.difference(emprise_cadastrale).area)
+    if surface <= DEBORDEMENT_NEGLIGEABLE_M2:
+        return Controle(
+            "Clôture dans l'emprise cadastrale",
+            0.0,
+            None,
+            "m²",
+            OK,
+            "L'emprise clôturée est contenue dans l'emprise cadastrale fournie.",
+        )
+    return Controle(
+        "Clôture dans l'emprise cadastrale",
+        surface,
+        None,
+        "m²",
+        AVERTISSEMENT,
+        f"L'emprise clôturée déborde de {surface:.0f} m² hors de l'emprise "
+        "cadastrale fournie. Vérifiez la maîtrise foncière avant le dépôt.",
+    )
+
+
+def _puissance(puissance_mwc: float, seuil_mwc: float | None) -> Controle:
+    """Rappelle la puissance du projet face au seuil de recevabilité en DP.
+
+    Le seuil n'est pas codé en dur : c'est une règle d'urbanisme, qui change, et
+    la figer ici reviendrait à faire dire au générateur ce qu'il n'a pas à dire.
+    L'outil affiche la puissance en évidence et la compare au seuil saisi.
+    """
+    if seuil_mwc is None:
+        return Controle(
+            "Puissance du projet",
+            puissance_mwc,
+            None,
+            "MWc",
+            AVERTISSEMENT,
+            f"Puissance du projet : {puissance_mwc:.5f} MWc. Aucun seuil de "
+            "recevabilité en déclaration préalable n'a été saisi ; contrôlez la "
+            "recevabilité du dossier avant le dépôt.",
+        )
+    conforme = puissance_mwc <= seuil_mwc
+    return Controle(
+        libelle="Puissance du projet",
+        valeur_dxf=puissance_mwc,
+        valeur_tableau=seuil_mwc,
+        unite="MWc",
+        statut=OK if conforme else AVERTISSEMENT,
+        tolerance=f"≤ {seuil_mwc:g} MWc",
+        message=(
+            f"Puissance du projet : {puissance_mwc:.5f} MWc, sous le seuil de "
+            f"{seuil_mwc:g} MWc saisi."
+            if conforme
+            else f"Puissance du projet : {puissance_mwc:.5f} MWc, AU-DESSUS du "
+            f"seuil de {seuil_mwc:g} MWc saisi. Le dossier n'est peut-être pas "
+            "recevable en déclaration préalable."
+        ),
+    )
+
+
+def controles_bloquants(controles: list[Controle]) -> list[Controle]:
+    return [c for c in controles if c.bloquant]
+
+
+# ---------------------------------------------------------------------------
+# Sorties — contrat d'interface avec le lot 4
+# ---------------------------------------------------------------------------
+
+#: Noms des deux fichiers produits. Le GeoPackage plutôt que du GeoJSON : la
+#: spécification GeoJSON impose le WGS84, et y écrire du Lambert 93 est non
+#: conforme — cela se paie tôt ou tard par une reprojection silencieuse chez le
+#: lecteur. Le GeoPackage porte son système de coordonnées explicitement.
+NOM_GEOPACKAGE = "geometries.gpkg"
+NOM_PARAMETRES = "projet.json"
+
+#: Version du contrat de sortie. Le lot 2 (import HelioScope), gardé en
+#: réserve, devra produire exactement le même format : la version permettra au
+#: lot 4 de refuser une sortie qu'il ne sait pas lire, plutôt que de dessiner
+#: une planche fausse.
+VERSION_CONTRAT = 1
+
+
+def ecrire_geopackage(
+    plan: PlanBE,
+    dossier: str | Path,
+    ligne_coupe=None,
+) -> Path:
+    """Écrit les géométries en GeoPackage, une couche par catégorie.
+
+    La coordonnée Z est conservée telle que le DXF la porte ; la colonne
+    `z_reel` dit si elle décrit le terrain (les tables) ou seulement l'élévation
+    d'une polyligne 2D (tout le reste sur le fichier de référence).
+    """
+    import geopandas as gpd
+
+    dossier = Path(dossier)
+    dossier.mkdir(parents=True, exist_ok=True)
+    chemin = dossier / NOM_GEOPACKAGE
+    # Une écriture par-dessus un GeoPackage existant y empilerait les couches
+    # d'un import précédent : on repart d'un fichier neuf.
+    if chemin.exists():
+        chemin.unlink()
+
+    couches = 0
+    for categorie in CATEGORIES:
+        entites = plan.par_categorie(categorie)
+        if not entites:
+            continue
+        gdf = gpd.GeoDataFrame(
+            {
+                "calque": [e.calque for e in entites],
+                "categorie": [e.categorie for e in entites],
+                "z_reel": [e.z_reel for e in entites],
+                "z_min": [e.z_min for e in entites],
+                "z_max": [e.z_max for e in entites],
+            },
+            geometry=[e.geometrie for e in entites],
+            crs=CRS_PROJET,
+        )
+        gdf.to_file(chemin, layer=categorie, driver="GPKG")
+        couches += 1
+
+    if ligne_coupe is not None:
+        gdf = gpd.GeoDataFrame(
+            {
+                "role": ["coupe_AA"],
+                "corrigee": [ligne_coupe.corrigee],
+                "azimut_tables_deg": [ligne_coupe.azimut_tables_deg],
+                "ecart_initial_deg": [ligne_coupe.ecart_initial_deg],
+                "longueur_m": [ligne_coupe.longueur_m],
+            },
+            geometry=[ligne_coupe.geometrie],
+            crs=CRS_PROJET,
+        )
+        gdf.to_file(chemin, layer="ligne_coupe", driver="GPKG")
+        couches += 1
+
+    if not couches:
+        raise ErreurImportBE(
+            "Aucune couche à écrire : le plan importé est vide."
+        )
+    return chemin
+
+
+def parametres_json(
+    plan: PlanBE,
+    tableau,
+    controles: list[Controle],
+    ligne_coupe=None,
+    profil=None,
+    coherence=None,
+    seuil_puissance_mwc: float | None = None,
+) -> dict:
+    """Paramètres techniques, azimut et profil, prêts à être écrits en JSON."""
+    import datetime as _dt
+
+    def _lisible(valeur):
+        if isinstance(valeur, (_dt.date, _dt.datetime)):
+            return valeur.isoformat()
+        if isinstance(valeur, tuple):
+            return list(valeur)
+        return valeur
+
+    donnees = {
+        "version_contrat": VERSION_CONTRAT,
+        "origine": "import_be",
+        "sources": {
+            "dxf": plan.source,
+            "tableau_bilan": tableau.source,
+            "indice": tableau.indice,
+        },
+        "projet": {
+            "nom": tableau.nom_projet,
+            "phase": _lisible(tableau.generalites.get("phase")),
+            "date_tableau": _lisible(tableau.generalites.get("date")),
+        },
+        "plan": {
+            "unite_dxf": plan.unite,
+            "azimut_tables_deg": plan.azimut_tables_deg,
+            "nb_tables": plan.nb_tables,
+            "nb_portails": plan.nb_portails,
+            "surface_cloturee_m2": plan.surface_cloturee_m2,
+            "lineaire_cloture_m": plan.lineaire_cloture_m,
+            "surface_tables_m2": plan.surface_tables_m2,
+            "correspondance_calques": plan.correspondance,
+            "calques_ignores": plan.calques_ignores,
+            "avertissements": plan.avertissements,
+        },
+        "parametres": {
+            groupe: {cle: _lisible(valeur) for cle, valeur in valeurs.items()}
+            for groupe, valeurs in (
+                ("generalites", tableau.generalites),
+                ("structures", tableau.structures),
+                ("modules", tableau.modules),
+                ("postes", tableau.postes),
+            )
+        },
+        "cotes_normalisees": [
+            {
+                "ouvrage": cote.ouvrage,
+                "dimensions": cote.dimensions,
+                "ordre_cotes": cote.ordre_cotes,
+                "surface_m2": cote.surface_m2,
+                "surface_plateforme_m2": cote.surface_plateforme_m2,
+            }
+            for cote in tableau.cotes
+        ],
+        "standards_unite": {
+            cle: _lisible(valeur) for cle, valeur in tableau.standards.items()
+        },
+        "controles": [
+            {
+                "libelle": c.libelle,
+                "statut": c.statut,
+                "valeur_dxf": c.valeur_dxf,
+                "valeur_tableau": c.valeur_tableau,
+                "unite": c.unite,
+                "tolerance": c.tolerance,
+                "message": c.message,
+            }
+            for c in controles
+        ],
+        "seuil_puissance_dp_mwc": seuil_puissance_mwc,
+        "avertissements_tableau": tableau.avertissements,
+    }
+
+    if ligne_coupe is not None:
+        donnees["ligne_coupe"] = {
+            "corrigee": ligne_coupe.corrigee,
+            "azimut_tables_deg": ligne_coupe.azimut_tables_deg,
+            "azimut_coupe_deg": ligne_coupe.azimut_coupe_deg,
+            "ecart_initial_deg": ligne_coupe.ecart_initial_deg,
+            "longueur_m": ligne_coupe.longueur_m,
+            # Les deux tracés sont conservés : la régénération ne redemande
+            # jamais le tracé, et l'écran de validation doit pouvoir remontrer
+            # ce qui a été redressé.
+            "coordonnees_l93": [list(c[:2]) for c in ligne_coupe.geometrie.coords],
+            "trace_initial_l93": [
+                list(c[:2]) for c in ligne_coupe.trace_initial.coords
+            ],
+            "avertissements": ligne_coupe.avertissements,
+        }
+
+    if profil is not None:
+        donnees["profil_terrain"] = {
+            "origine": profil.origine,
+            "pas_m": profil.pas_m,
+            "denivelee_m": profil.denivelee_m,
+            "altitude_min_m": profil.altitude_min_m,
+            "altitude_max_m": profil.altitude_max_m,
+            # Abscisse curviligne depuis A et altitude NGF, dans l'ordre du
+            # parcours de la ligne de coupe.
+            "points": [
+                [round(s, 3), round(z, 3)]
+                for s, z in zip(profil.abscisses_m, profil.altitudes_m)
+            ],
+            "avertissements": profil.avertissements,
+        }
+
+    if coherence is not None:
+        donnees["coherence_altimetrique"] = {
+            "nb_tables_comparees": coherence.nb_tables_comparees,
+            "ecart_median_m": coherence.ecart_median_m,
+            "ecart_min_m": coherence.ecart_min_m,
+            "ecart_max_m": coherence.ecart_max_m,
+            "conforme": coherence.conforme,
+            "message": coherence.message,
+        }
+
+    return donnees
+
+
+def ecrire_parametres(donnees: dict, dossier: str | Path) -> Path:
+    """Écrit `projet.json` dans le dossier de sortie de l'import BE.
+
+    À ne pas confondre avec le `projet.json` du lot 1, qui vit dans
+    `projets/{nom}/` et décrit les métadonnées du dossier : celui-ci est la
+    sortie de l'import BE, dans `sortie/{nom}/`, et alimente le lot 4. Le champ
+    `origine` les distingue à la lecture.
+    """
+    import json
+
+    dossier = Path(dossier)
+    dossier.mkdir(parents=True, exist_ok=True)
+    chemin = dossier / NOM_PARAMETRES
+    chemin.write_text(
+        json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return chemin
+
+
+@dataclass
+class ImportBE:
+    """Résultat complet d'un import : plan, tableau, contrôles, coupe, profil."""
+
+    plan: PlanBE
+    tableau: object
+    controles: list[Controle]
+    ligne_coupe: object | None = None
+    profil: object | None = None
+    coherence: object | None = None
+    seuil_puissance_mwc: float | None = None
+
+    @property
+    def bloquants(self) -> list[Controle]:
+        return controles_bloquants(self.controles)
+
+    @property
+    def avertissements(self) -> list[str]:
+        messages = list(self.plan.avertissements) + list(self.tableau.avertissements)
+        for controle in self.controles:
+            if controle.statut == AVERTISSEMENT:
+                messages.append(f"{controle.libelle} : {controle.message}")
+        if self.ligne_coupe is not None:
+            messages.extend(self.ligne_coupe.avertissements)
+        if self.profil is not None:
+            messages.extend(self.profil.avertissements)
+        if self.coherence is not None and not self.coherence.conforme:
+            messages.append(self.coherence.message)
+        return messages
+
+    def ecrire(self, dossier: str | Path) -> tuple[Path, Path]:
+        """Écrit le GeoPackage et `projet.json`, après refus des bloquants.
+
+        L'écriture est refusée tant qu'un contrôle bloquant subsiste : produire
+        le contrat d'interface du lot 4 à partir d'entrées qui se contredisent
+        reviendrait à fabriquer un dossier plausible et faux.
+        """
+        bloquants = self.bloquants
+        if bloquants:
+            raise ErreurControleCroise(
+                "Contrôles croisés bloquants, sortie non écrite :\n"
+                + "\n".join(f"— {c.libelle} : {c.message}" for c in bloquants)
+            )
+        gpkg = ecrire_geopackage(self.plan, dossier, self.ligne_coupe)
+        parametres = ecrire_parametres(
+            parametres_json(
+                self.plan,
+                self.tableau,
+                self.controles,
+                self.ligne_coupe,
+                self.profil,
+                self.coherence,
+                self.seuil_puissance_mwc,
+            ),
+            dossier,
+        )
+        return gpkg, parametres
+
+
+def importer_be(
+    chemin_dxf: str | Path,
+    chemin_tableau: str | Path,
+    indice: str,
+    correspondance: dict[str, str] | None = None,
+    emprise_cadastrale: BaseGeometry | None = None,
+    seuil_puissance_mwc: float | None = None,
+) -> ImportBE:
+    """Lit les deux fichiers du BE et les recoupe. Ne trace pas la coupe A-A'.
+
+    La ligne de coupe demande un tracé de l'utilisateur : elle s'ajoute ensuite
+    au résultat, avec le profil du terrain.
+    """
+    from .tableau_bilan import lire_tableau
+
+    plan = lire_plan_be(chemin_dxf, correspondance)
+    tableau = lire_tableau(chemin_tableau, indice)
+    controles = controler(plan, tableau, emprise_cadastrale, seuil_puissance_mwc)
+    return ImportBE(
+        plan=plan,
+        tableau=tableau,
+        controles=controles,
+        seuil_puissance_mwc=seuil_puissance_mwc,
+    )
