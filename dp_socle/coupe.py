@@ -61,6 +61,26 @@ ECART_ALTIMETRIQUE_MAX_M = 2.0
 #: traversée.
 DISTANCE_TABLE_COUPE_M = 12.0
 
+#: Demi-largeur du couloir dans lequel un nuage de points est retenu, en mètres.
+#:
+#: L'outil topographique interne rend un nuage sur une grille au mètre, pas un
+#: profil. À ±2 m, une coupe de n'importe quelle orientation trouve au moins un
+#: point par mètre d'abscisse — au pire, en diagonale, les points d'une grille
+#: au mètre sont espacés de 1,41 m. Moyenner sur une bande de 4 m lisse le
+#: terrain de quelques centimètres sur une pente de 5 %, invisible au 1/300 de
+#: la coupe DP 3.
+DEMI_COULOIR_M = 2.0
+
+#: Pas de regroupement des altitudes du couloir par abscisse, en mètres. Plus
+#: fin que la grille du relevé : il sert à fusionner les points qui se
+#: projettent au même endroit, pas à rééchantillonner.
+_PAS_REGROUPEMENT_M = 0.25
+
+#: Trou admis dans le couloir sans le signaler, en mètres. Au-delà, le profil
+#: est interpolé en ligne droite sur une distance où le terrain peut faire
+#: n'importe quoi.
+TROU_MAX_M = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Étape D — correction de perpendicularité
@@ -416,17 +436,8 @@ def _profil_depuis_fichier(
         "pas sur l'interrogation du RGE ALTI."
     ]
     if nb_colonnes == {3}:
-        couples = sorted(
-            (float(ligne.project(Point(x, y))), z) for x, y, z in releves
-        )
-        ecart_max = max(
-            Point(x, y).distance(ligne) for x, y, _ in releves
-        )
-        if ecart_max > 5.0:
-            avertissements.append(
-                f"Les points du relevé s'écartent jusqu'à {ecart_max:.0f} m de la "
-                "ligne de coupe ; ils sont projetés dessus."
-            )
+        couples, avertissements_nuage = _couloir_de_coupe(releves, ligne, chemin)
+        avertissements.extend(avertissements_nuage)
     else:
         couples = sorted((s, z) for s, z in releves)
 
@@ -453,6 +464,80 @@ def _profil_depuis_fichier(
         f"Fichier d'altimétrie « {chemin.name} »",
         avertissements,
     )
+
+
+def _couloir_de_coupe(
+    releves: list[tuple[float, ...]],
+    ligne: LineString,
+    chemin: Path,
+    demi_couloir_m: float = DEMI_COULOIR_M,
+) -> tuple[list[tuple[float, float]], list[str]]:
+    """Profil extrait d'un nuage de points 3D, le long de la ligne de coupe.
+
+    L'outil topographique interne ne rend pas un profil mais un **nuage** : le
+    fichier de référence porte 202 399 points sur une grille au mètre couvrant
+    605 × 494 m. Projeter tout le nuage sur la ligne, puis trier par abscisse,
+    donne un profil qui *ressemble* à un profil et qui est faux : à chaque
+    abscisse c'est le dernier point trié qui l'emporte, quelle que soit sa
+    distance à la coupe. Mesuré sur ce fichier le 03/09/2026, l'écart au profil
+    réel atteignait 2,57 m d'amplitude 3,14 m, pour un relief de 3,50 m — le
+    profil était donc du bruit, sans que rien ne le signale.
+
+    Seuls les points d'un couloir centré sur la coupe sont retenus, et les
+    altitudes de même abscisse y sont moyennées.
+    """
+    if len(ligne.coords) < 2:
+        raise ErreurCoupe("Ligne de coupe dégénérée : couloir impossible à définir.")
+
+    minx, miny, maxx, maxy = ligne.bounds
+    retenus: list[tuple[float, float, float]] = []
+    for x, y, z in releves:
+        # Filtre par boîte englobante d'abord : il écarte 201 976 des 202 399
+        # points du fichier de référence sans construire un seul objet shapely,
+        # ce qui fait passer la lecture de 4,1 s à moins d'une seconde.
+        if not (
+            minx - demi_couloir_m <= x <= maxx + demi_couloir_m
+            and miny - demi_couloir_m <= y <= maxy + demi_couloir_m
+        ):
+            continue
+        point = Point(x, y)
+        ecart = float(ligne.distance(point))
+        if ecart <= demi_couloir_m:
+            retenus.append((float(ligne.project(point)), z, ecart))
+
+    if len(retenus) < 2:
+        raise ErreurCoupe(
+            f"{chemin.name} : seuls {len(retenus)} point(s) du relevé tombent à "
+            f"moins de {demi_couloir_m:g} m de la ligne de coupe. Le nuage ne "
+            "couvre pas cette coupe — déplacez la coupe, ou fournissez un relevé "
+            "qui la traverse."
+        )
+
+    # Moyenne des altitudes de même abscisse : sur une grille au mètre et une
+    # coupe nord-sud, les points d'une même rangée se projettent au même endroit.
+    par_abscisse: dict[int, list[float]] = {}
+    for abscisse, z, _ in retenus:
+        par_abscisse.setdefault(round(abscisse / _PAS_REGROUPEMENT_M), []).append(z)
+    couples = sorted(
+        (cle * _PAS_REGROUPEMENT_M, sum(zs) / len(zs))
+        for cle, zs in par_abscisse.items()
+    )
+
+    avertissements = [
+        f"Relevé traité comme un nuage de points : {len(retenus)} points sur "
+        f"{len(releves)} retenus dans un couloir de ±{demi_couloir_m:g} m autour "
+        f"de la coupe, moyennés en {len(couples)} abscisses."
+    ]
+    trou = max(
+        (suivant[0] - courant[0] for courant, suivant in zip(couples, couples[1:])),
+        default=0.0,
+    )
+    if trou > TROU_MAX_M:
+        avertissements.append(
+            f"Le couloir présente un trou de {trou:.0f} m sans aucun point : le "
+            "profil y est interpolé en ligne droite entre les deux bords du trou."
+        )
+    return [(a, z) for a, z in couples], avertissements
 
 
 # ---------------------------------------------------------------------------

@@ -723,14 +723,33 @@ garde au sol de la structure, pas une erreur. Le contrôle compare donc la
 référentiel altimétrique, qui se compte en dizaines de mètres, pas la valeur
 zéro.
 
-Un relevé altimétrique en TXT prend le pas sur l'appel automatique — service
-indisponible, ou relevé drone plus précis. Faute d'un exemple de sortie de
-l'outil interne d'extraction topographique, deux formes sont acceptées :
-trois colonnes `X Y Z` en Lambert 93, projetées sur la coupe, ou deux colonnes
-`abscisse Z`. Le séparateur est **déterminé une fois** sur la première ligne de
-données puis annoncé : la virgule est à la fois séparateur de colonnes en CSV
-anglo-saxon et séparateur décimal en français, et `0,0;0,0;100,00` compte trois
-colonnes, pas six.
+Un relevé altimétrique en TXT prend le pas sur l'appel automatique, quand le
+service est indisponible. Deux formes sont acceptées : trois colonnes `X Y Z` en
+Lambert 93, ou deux colonnes `abscisse Z` déjà exprimées le long de la coupe. Le
+séparateur est **déterminé une fois** sur la première ligne de données puis
+annoncé : la virgule est à la fois séparateur de colonnes en CSV anglo-saxon et
+séparateur décimal en français, et `0,0;0,0;100,00` compte trois colonnes, pas
+six. Une ligne d'en-tête non numérique est sautée.
+
+**Un relevé à trois colonnes est un nuage, pas un profil.** Le fichier de
+référence `exemples/rosnay-lhopital-topo/` porte 202 399 points sur une grille au
+mètre couvrant 605 × 494 m. Seuls ceux d'un couloir de ±2 m autour de la coupe
+sont retenus, et les altitudes de même abscisse y sont moyennées. Une coupe que
+le nuage ne traverse pas est refusée, et un trou de plus de 10 m dans le couloir
+est signalé.
+
+Ce couloir n'est pas un raffinement : la première version projetait tout le
+nuage sur la coupe puis triait par abscisse, si bien qu'à chaque abscisse c'était
+le dernier point trié qui l'emportait, quelle que soit sa distance à la coupe.
+Mesuré le 03/09/2026, le profil s'écartait du profil réel de 2,57 m, d'amplitude
+3,14 m, pour un relief de 3,50 m — c'était du bruit, et rien ne le signalait. Le
+filtre par boîte englobante préalable fait au passage tomber la lecture de 4,1 s
+à 0,4 s.
+
+Ce relevé est un repli, pas une source à préférer. Sur le segment de contrôle, le
+nuage du BE et le RGE ALTI s'accordent à ±0,10 m avec un écart-type de 0,02 m :
+l'outil topographique interne rééchantillonne le RGE ALTI, il n'apporte pas une
+mesure de terrain plus fine.
 
 ### Écran de validation
 

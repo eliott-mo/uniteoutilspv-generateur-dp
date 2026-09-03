@@ -488,3 +488,110 @@ def test_apercu_du_plan_sur_fond_ortho(plan, emprise):
     assert image.size[0] == 450
     categories = {categorie for categorie, _, _ in legende_presente(plan)}
     assert "tables_pv" in categories and "cloture" in categories
+
+
+# ---------------------------------------------------------------------------
+# Nuage de points de l'outil topographique interne
+# ---------------------------------------------------------------------------
+
+NUAGE = Path(
+    "exemples/rosnay-lhopital-topo/"
+    "sco_rosnay-lhopital-flottant-parcelles-topo-sc-30_06_2026_12_43_1m_interpole.txt"
+)
+
+#: Coupe nord-sud entièrement contenue dans le nuage de Rosnay-l'Hôpital.
+COUPE_NUAGE = LineString([(809_500.0, 6_815_600.0), (809_500.0, 6_816_000.0)])
+
+
+def _couloir_de_reference(demi_largeur_m: float = 0.75) -> dict[int, float]:
+    """Profil de contrôle, calculé à la main, hors du code testé."""
+    x0 = COUPE_NUAGE.coords[0][0]
+    y0, y1 = COUPE_NUAGE.coords[0][1], COUPE_NUAGE.coords[-1][1]
+    par_abscisse: dict[int, list[float]] = {}
+    with NUAGE.open(encoding="utf-8") as fichier:
+        next(fichier)  # ligne d'en-tête « _MULTIPLE _POINT »
+        for ligne in fichier:
+            x, y, z = (float(v) for v in ligne.split(","))
+            if abs(x - x0) <= demi_largeur_m and y0 <= y <= y1:
+                par_abscisse.setdefault(round(y - y0), []).append(z)
+    return {s: sum(zs) / len(zs) for s, zs in par_abscisse.items()}
+
+
+def test_nuage_de_points_lu_dans_un_couloir_et_non_projete_en_entier():
+    """Le relevé de l'outil topo est un nuage, pas un profil.
+
+    202 399 points sur une grille au mètre couvrant 605 × 494 m. Les projeter
+    tous sur la coupe puis trier par abscisse donnait un profil *plausible* et
+    faux : jusqu'à 2,57 m d'écart, d'amplitude 3,14 m, pour un relief réel de
+    3,50 m. Rien ne le signalait.
+    """
+    profil = profil_terrain(COUPE_NUAGE, pas_m=5.0, fichier_altimetrie=NUAGE)
+    reference = _couloir_de_reference()
+
+    ecarts = [
+        z - reference[round(s)]
+        for s, z in zip(profil.abscisses_m, profil.altitudes_m)
+        if round(s) in reference
+    ]
+    assert len(ecarts) > 50
+    assert max(abs(e) for e in ecarts) < 0.20
+    assert profil.denivelee_m == pytest.approx(
+        max(reference.values()) - min(reference.values()), abs=0.05
+    )
+    assert any("couloir" in m for m in profil.avertissements)
+
+
+def test_entete_non_numerique_du_nuage_saute():
+    """La première ligne du fichier est « _MULTIPLE _POINT »."""
+    assert NUAGE.read_text(encoding="utf-8").splitlines()[0] == "_MULTIPLE _POINT"
+    profil = profil_terrain(COUPE_NUAGE, pas_m=25.0, fichier_altimetrie=NUAGE)
+    assert all(100.0 < z < 130.0 for z in profil.altitudes_m)
+    assert any("virgule" in m for m in profil.avertissements)
+
+
+def test_coupe_en_diagonale_trouve_des_points_sur_une_grille_au_metre():
+    """Cas le plus défavorable : en diagonale, la grille au mètre espace de 1,41 m."""
+    diagonale = LineString(
+        [(809_400.0, 6_815_700.0), (809_600.0, 6_815_900.0)]
+    )
+    profil = profil_terrain(diagonale, pas_m=5.0, fichier_altimetrie=NUAGE)
+    assert len(profil.altitudes_m) > 50
+    assert all(100.0 < z < 130.0 for z in profil.altitudes_m)
+
+
+def test_coupe_hors_du_nuage_leve_au_lieu_de_rendre_un_profil():
+    hors = LineString([(800_000.0, 6_810_000.0), (800_000.0, 6_810_400.0)])
+    with pytest.raises(ErreurCoupe) as erreur:
+        profil_terrain(hors, pas_m=5.0, fichier_altimetrie=NUAGE)
+    assert "ne couvre pas cette coupe" in str(erreur.value)
+
+
+def test_trou_dans_le_couloir_signale(tmp_path):
+    """Un profil interpolé en ligne droite sur 100 m doit se dire."""
+    fichier = tmp_path / "nuage_troue.txt"
+    lignes = ["_MULTIPLE _POINT"]
+    for y in list(range(0, 40)) + list(range(140, 200)):
+        for x in (-1, 0, 1):
+            lignes.append(f"{x}.00,{y}.00,{100 + y * 0.01:.2f}")
+    fichier.write_text("\n".join(lignes) + "\n", encoding="utf-8")
+
+    profil = profil_terrain(
+        LineString([(0, 0), (0, 199)]), pas_m=10.0, fichier_altimetrie=fichier
+    )
+    assert any("trou de" in m for m in profil.avertissements)
+
+
+@pytest.mark.reseau
+def test_le_nuage_du_be_concorde_avec_le_rge_alti():
+    """Contrôle croisé de deux sources indépendantes sur le même segment.
+
+    Elles s'accordent à ±0,10 m, écart-type 0,02 m : l'outil topographique
+    interne rééchantillonne le RGE ALTI, il n'apporte pas une mesure de terrain
+    plus fine. C'est donc un repli quand le service est indisponible, pas une
+    source à préférer.
+    """
+    nuage = profil_terrain(COUPE_NUAGE, pas_m=5.0, fichier_altimetrie=NUAGE)
+    ign = profil_terrain(COUPE_NUAGE, pas_m=5.0)
+    ecarts = [a - b for a, b in zip(nuage.altitudes_m, ign.altitudes_m)]
+    assert max(abs(e) for e in ecarts) < 0.30
+    assert nuage.denivelee_m == pytest.approx(ign.denivelee_m, abs=0.15)
