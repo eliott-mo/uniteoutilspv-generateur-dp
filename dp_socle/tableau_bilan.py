@@ -29,7 +29,13 @@ import openpyxl
 from .erreurs import ErreurTableauBilan
 from .import_be import normaliser
 
-ONGLET_CARACTERISTIQUES = "2. Caractéristiques du projet"
+#: Noms d'onglet acceptés pour les caractéristiques du projet, dans l'ordre de
+#: préférence. Le tableau a été renommé entre ses versions : « 2.
+#: Caractéristiques du projet » en V6, « Projet » en V10. La comparaison passe
+#: par `normaliser`, donc la casse et les accents ne comptent pas. Un nom
+#: inconnu est refusé en listant les onglets présents, jamais deviné.
+ONGLETS_CARACTERISTIQUES = ("2. Caractéristiques du projet", "Projet")
+ONGLET_CARACTERISTIQUES = ONGLETS_CARACTERISTIQUES[0]
 ONGLET_DIMENSIONS = "Dimensions postes et pieux"
 ONGLET_STANDARDS = "Standards UNITe"
 
@@ -103,8 +109,21 @@ def _date(valeur, libelle: str) -> _dt.date:
     )
 
 
+#: Séparateurs des valeurs composites. Le tableau décrit les projets à deux
+#: formats de table par une paire, écrite « 13 / 26 » en V6 et « 13 & 26 » en
+#: V10. Les deux sont acceptées ; la forme retenue n'est pas devinée ligne à
+#: ligne, elles sont simplement toutes reconnues.
+SEPARATEURS_COMPOSITES = r"[/;&+]"
+
+#: Marques d'une valeur explicitement non renseignée. Le tableau V10 met « / »
+#: dans la case GCR des indices où elle n'a pas été calculée. Ces marques ne
+#: sont acceptées que là où le paramètre le prévoit : ailleurs, une valeur
+#: illisible reste une erreur.
+MARQUEURS_ABSENCE = frozenset({"/", "na", "n/a", "-", "—", "sansobjet"})
+
+
 def _couple(valeur, libelle: str) -> tuple[int, ...]:
-    """Valeur composite « 13 / 26 », rendue en tuple d'entiers.
+    """Valeur composite « 13 / 26 » ou « 13 & 26 », rendue en tuple d'entiers.
 
     Le tableau y met les deux longueurs de table du projet. Une valeur simple
     est acceptée et rendue en tuple d'un élément.
@@ -112,10 +131,31 @@ def _couple(valeur, libelle: str) -> tuple[int, ...]:
     if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
         return (_entier(valeur, libelle),)
     texte = _texte(valeur, libelle)
-    morceaux = [m.strip() for m in re.split(r"[/;]", texte) if m.strip()]
+    morceaux = [m.strip() for m in re.split(SEPARATEURS_COMPOSITES, texte) if m.strip()]
     if not morceaux:
         raise ErreurTableauBilan(f"« {libelle} » vaut {valeur!r} : valeur illisible.")
     return tuple(_entier(m, libelle) for m in morceaux)
+
+
+def _somme(valeur, libelle: str) -> int:
+    """Total d'une valeur composite : « 269 & 27 » vaut 296 tables.
+
+    Un projet à deux formats de table décrit son parc en deux nombres. Les
+    contrôles croisés portent sur le total, et la chaîne d'origine est conservée
+    à côté — voir `nb_tables_brut` — pour que la décomposition reste lisible.
+    """
+    return sum(_couple(valeur, libelle))
+
+
+def _nombre_ou_absent(valeur, libelle: str) -> float | None:
+    """Nombre, ou None quand la case porte une marque d'absence explicite.
+
+    Réservé aux paramètres dont aucun contrôle ne dépend. Ailleurs, rendre None
+    en silence sur une case illisible masquerait le problème.
+    """
+    if valeur is not None and normaliser(valeur) in MARQUEURS_ABSENCE:
+        return None
+    return _nombre(valeur, libelle)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +190,10 @@ PARAMETRES = {
         # « SE » sans rien dire : la chaîne d'origine est donc conservée, et
         # c'est elle qui est montrée à l'écran de contrôle.
         ("azimut_brut", "Azimut (°)", _texte, True),
-        ("nb_tables", "Nombre de tables", _entier, True),
+        # Deux formats de table sur un même projet donnent « 269 & 27 » :
+        # les contrôles portent sur le total, la chaîne reste lisible à côté.
+        ("nb_tables", "Nombre de tables", _somme, True),
+        ("nb_tables_brut", "Nombre de tables", _texte, True),
         ("inter_table_m", "Inter-table (m)", _nombre, True),
         ("pitch_m", "Pitch (m)", _nombre, True),
         ("point_bas_m", "Point bas (m)", _nombre, True),
@@ -166,7 +209,9 @@ PARAMETRES = {
         ("puissance_unitaire_wc", "Puissance unitaire (Wc)", _nombre, True),
         ("surface_unitaire_m2", "Surface unitaire (m²)", _nombre, True),
         ("nb_modules", "Nombre installé", _entier, True),
-        ("gcr", "GCR (%)", _nombre, True),
+        # « / » dans les indices où le GCR n'a pas été calculé. Aucun
+        # contrôle n'en dépend, l'absence est donc admise et rendue None.
+        ("gcr", "GCR (%)", _nombre_ou_absent, True),
         ("surface_modules_m2", "Surface modules (m²)", _nombre, True),
         ("surface_projetee_m2", "Surface module projetée au sol (m²)", _nombre, True),
         ("puissance_mwc", "Puissance projet (MWc)", _nombre, True),
@@ -287,10 +332,24 @@ def _onglet(classeur, nom: str, chemin: Path):
     return classeur[nom]
 
 
+def _onglet_caracteristiques(classeur, chemin: Path):
+    """Onglet des caractéristiques, sous l'un de ses noms connus."""
+    presents = {normaliser(n): n for n in classeur.sheetnames}
+    for candidat in ONGLETS_CARACTERISTIQUES:
+        reel = presents.get(normaliser(candidat))
+        if reel is not None:
+            return classeur[reel], reel
+    raise ErreurTableauBilan(
+        f"Aucun onglet de caractéristiques dans {chemin.name}. Noms acceptés : "
+        f"{', '.join(ONGLETS_CARACTERISTIQUES)}. Onglets présents : "
+        f"{', '.join(classeur.sheetnames)}."
+    )
+
+
 def indices_disponibles(chemin: str | Path) -> list[str]:
     """Indices de révision présents en en-tête de l'onglet caractéristiques."""
     chemin = Path(chemin)
-    feuille = _onglet(_classeur(chemin), ONGLET_CARACTERISTIQUES, chemin)
+    feuille, _ = _onglet_caracteristiques(_classeur(chemin), chemin)
     return _indices_de(feuille)[0]
 
 
@@ -316,13 +375,13 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
     """Lit le tableau bilan pour un indice donné et renvoie ses paramètres."""
     chemin = Path(chemin)
     classeur = _classeur(chemin)
-    feuille = _onglet(classeur, ONGLET_CARACTERISTIQUES, chemin)
+    feuille, nom_onglet = _onglet_caracteristiques(classeur, chemin)
 
     disponibles, colonnes = _indices_de(feuille)
     if not disponibles:
         raise ErreurTableauBilan(
             f"Aucun indice de révision en ligne 1 de l'onglet "
-            f"« {ONGLET_CARACTERISTIQUES} » de {chemin.name}."
+            f"« {nom_onglet} » de {chemin.name}."
         )
     if indice not in colonnes:
         raise ErreurTableauBilan(
@@ -343,7 +402,7 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
                 if obligatoire:
                     raise ErreurTableauBilan(
                         f"Paramètre « {libelle} » introuvable en colonne A de "
-                        f"l'onglet « {ONGLET_CARACTERISTIQUES} » de {chemin.name}. "
+                        f"l'onglet « {nom_onglet} » de {chemin.name}. "
                         "La mise en page du tableau a probablement changé."
                     )
                 continue
@@ -355,7 +414,7 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
     nom_projet = str(feuille.cell(1, 1).value or "").strip()
     if not nom_projet:
         avertissements.append(
-            f"La cellule A1 de l'onglet « {ONGLET_CARACTERISTIQUES} » ne porte pas "
+            f"La cellule A1 de l'onglet « {nom_onglet} » ne porte pas "
             "de nom de projet."
         )
 

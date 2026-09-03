@@ -134,6 +134,15 @@ FLECHE_DISCRETISATION_M = 0.01
 #: plusieurs dizaines de mètres.
 TOLERANCE_REGROUPEMENT_M = 0.05
 
+#: Écart admis entre les deux extrémités d'un contour de clôture avant de
+#: signaler qu'il est ouvert, en mètres.
+#:
+#: Un contour ouvert est refermé pour calculer la surface, ce qui invente un
+#: segment entre ses deux bouts. Sur Saint-Cyr la clôture porte le drapeau
+#: « fermée » du DXF ; sur Sarnois elle est ouverte, et la surface qu'on en tire
+#: dépend d'un segment que le BE n'a pas dessiné. Cela doit se dire.
+ECART_FERMETURE_CLOTURE_M = 0.5
+
 #: Écart admis, en degrés, entre l'inclinaison des rangées mesurée sur la
 #: géométrie et celle déclarée au tableau bilan — comparées en valeur absolue,
 #: voir `_azimut` pour pourquoi.
@@ -590,6 +599,21 @@ def lire_plan_be(
             "des calques n'apparie rien. Calques présents : "
             f"{', '.join(sorted(entites_par_calque))}."
         )
+
+    for entite in entites:
+        if entite.categorie != "cloture" or entite.geometrie.geom_type != "LineString":
+            continue
+        sommets = list(entite.geometrie.coords)
+        ecart = hypot(
+            sommets[0][0] - sommets[-1][0], sommets[0][1] - sommets[-1][1]
+        )
+        if ecart > ECART_FERMETURE_CLOTURE_M:
+            avertissements.append(
+                f"Le contour de clôture du calque « {entite.calque} » est ouvert : "
+                f"{ecart:.1f} m séparent ses deux extrémités. Il est refermé pour "
+                "calculer la surface clôturée, ce qui invente un segment que le BE "
+                "n'a pas dessiné — vérifiez la surface annoncée."
+            )
 
     tables = [
         e.geometrie

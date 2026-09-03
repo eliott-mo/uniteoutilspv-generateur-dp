@@ -465,3 +465,124 @@ def test_blocs_imbriques_developpes(tmp_path):
     plan_imbrique = lire_plan_be(chemin)
     assert plan_imbrique.nb_tables == 1
     assert plan_imbrique.tables[0].area == pytest.approx(69.0, abs=0.1)
+
+
+def test_cloture_ouverte_signalee(tmp_path):
+    """Refermer un contour ouvert invente un segment que le BE n'a pas dessiné.
+
+    Le drapeau `closed` du DXF ne suffit pas à trancher : sur Sarnois la
+    clôture l'a à faux alors que son tracé revient sur son point de départ. Ce
+    qui compte est la distance entre les deux extrémités, pas le drapeau.
+    """
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    espace.add_lwpolyline(
+        [
+            (622_900, 6_750_700),
+            (622_980, 6_750_700),
+            (622_980, 6_750_780),
+            (622_900, 6_750_760),
+        ],
+        close=False,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    _ajouter_table(espace, (622_910, 6_750_710))
+    chemin = tmp_path / "cloture_ouverte.dxf"
+    document.saveas(str(chemin))
+
+    plan_ouvert = lire_plan_be(chemin)
+    messages = " ".join(plan_ouvert.avertissements)
+    assert "contour de clôture" in messages and "ouvert" in messages
+    assert "60.0 m" in messages  # écart entre les deux extrémités
+
+
+def test_cloture_fermee_sans_drapeau_ne_declenche_rien(tmp_path):
+    """Le cas réel de Sarnois : drapeau à faux, tracé refermé à la main."""
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    espace.add_lwpolyline(
+        [
+            (622_900, 6_750_700),
+            (622_980, 6_750_700),
+            (622_980, 6_750_780),
+            (622_900, 6_750_700),
+        ],
+        close=False,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    _ajouter_table(espace, (622_910, 6_750_710))
+    chemin = tmp_path / "cloture_refermee.dxf"
+    document.saveas(str(chemin))
+
+    plan_ferme = lire_plan_be(chemin)
+    assert not any("ouvert" in m for m in plan_ferme.avertissements)
+    assert plan_ferme.surface_cloturee_m2 == pytest.approx(3200.0, abs=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Tableau bilan V10 — révélé par Sarnois
+# ---------------------------------------------------------------------------
+
+TABLEAU_V10 = Path("exemples/sarnois-1-DXF/20260827_Sarnois_Tableau_Bilan_V10.xlsx")
+
+
+def test_onglet_renomme_entre_les_versions_du_tableau():
+    """« 2. Caractéristiques du projet » en V6, « Projet » en V10."""
+    import openpyxl
+
+    from dp_socle.tableau_bilan import ONGLETS_CARACTERISTIQUES
+
+    v10 = openpyxl.load_workbook(TABLEAU_V10, read_only=True).sheetnames
+    assert "2. Caractéristiques du projet" not in v10
+    assert "Projet" in v10
+    assert set(ONGLETS_CARACTERISTIQUES) >= {"2. Caractéristiques du projet", "Projet"}
+
+    assert indices_disponibles(TABLEAU_V10) == ["IND06", "IND07", "IND08", "IND09"]
+    assert indices_disponibles(TABLEAU) == ["IND05", "IND06"]
+
+
+def test_onglet_inconnu_refuse_en_listant_les_onglets(tmp_path):
+    import openpyxl
+
+    classeur = openpyxl.Workbook()
+    classeur.active.title = "Autre chose"
+    chemin = tmp_path / "inconnu.xlsx"
+    classeur.save(chemin)
+
+    with pytest.raises(ErreurTableauBilan) as erreur:
+        indices_disponibles(chemin)
+    assert "Autre chose" in str(erreur.value)
+
+
+def test_valeur_composite_au_perluete_sommee():
+    """Un projet à deux formats de table décrit son parc en deux nombres.
+
+    « 269 & 27 » vaut 296 tables. La chaîne d'origine reste lisible à côté :
+    la décomposition ne doit pas disparaître dans la somme.
+    """
+    tableau_v10 = lire_tableau(TABLEAU_V10, "IND09")
+    assert tableau_v10.structures["nb_tables"] == 296
+    assert tableau_v10.structures["nb_tables_brut"] == "269 & 27"
+    assert tableau_v10.structures["nb_modules_longueur"] == (13, 26)
+
+
+def test_valeur_explicitement_non_renseignee_admise_sur_le_gcr():
+    """Le tableau met « / » là où le GCR n'a pas été calculé.
+
+    Admis parce qu'aucun contrôle n'en dépend. Ailleurs, une case illisible
+    reste une erreur — rendre None en silence masquerait le problème.
+    """
+    from dp_socle.tableau_bilan import _nombre, _nombre_ou_absent
+
+    assert lire_tableau(TABLEAU_V10, "IND09").modules["gcr"] is None
+    assert lire_tableau(TABLEAU_V10, "IND06").modules["gcr"] == pytest.approx(0.4214, abs=1e-4)
+    assert _nombre_ou_absent("/", "GCR (%)") is None
+    with pytest.raises(ErreurTableauBilan):
+        _nombre("/", "GCR (%)")
+
+
+def test_azimut_negatif_du_tableau_v10():
+    """Le projet SE dont le tableau écrit « -24.5 » sans direction."""
+    tableau_v10 = lire_tableau(TABLEAU_V10, "IND09")
+    assert tableau_v10.structures["azimut_deg"] == pytest.approx(-24.5)
+    assert tableau_v10.structures["azimut_brut"] == "-24.5"
