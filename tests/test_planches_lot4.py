@@ -429,3 +429,81 @@ def test_sans_contrat_le_dossier_sarrete_au_cadastre(site, tmp_path):
         "DP 1-1", "DP 1-2", "DP 1-3"
     ]
     assert any("Aucun plan importé" in m for m in rapport.avertissements)
+
+
+# ---------------------------------------------------------------------------
+# Mise en page : blanc tournant et sous-cadres
+# ---------------------------------------------------------------------------
+
+
+def test_le_blanc_tournant_est_le_meme_partout():
+    """Une marge qui change d'un bloc à l'autre se remarque plus qu'elle ne sert."""
+    from dp_socle.planches import dp3_coupes, dp4_ouvrages
+    from dp_socle.planches.primitives import BLANC_TOURNANT_MM
+
+    assert dp3_coupes.BLANC_TOURNANT_MM == BLANC_TOURNANT_MM
+    assert dp4_ouvrages.BLANC_TOURNANT_MM == BLANC_TOURNANT_MM
+
+
+def test_un_sous_cadre_laisse_une_marge_interieure():
+    """Un texte collé au filet ne fait pas propre."""
+    from dp_socle.planches.primitives import (
+        MARGE_SOUS_CADRE_MM,
+        zone_interieure,
+    )
+
+    x, y, largeur, hauteur = zone_interieure(10.0, 20.0, 100.0, 60.0)
+    assert x == 10.0 + MARGE_SOUS_CADRE_MM
+    assert largeur == 100.0 - 2 * MARGE_SOUS_CADRE_MM
+    # Le titre prend sa place en haut ; le bas garde la marge.
+    assert y > 20.0 + MARGE_SOUS_CADRE_MM
+    assert y + hauteur == 20.0 + 60.0 - MARGE_SOUS_CADRE_MM
+
+
+def test_les_ouvrages_etendus_ne_commandent_pas_le_cadrage(site):
+    """Critère du zoom : la clôture ceint le site, elle ne le cadre pas.
+
+    Sans cette règle, la planche des citernes revenait au plan de masse
+    entier — 1:2 000 pour une citerne de 8 m — alors que sa voisine, qui décrit
+    le poste, était au 1:300.
+    """
+    from dp_socle.planches.dp4_ouvrages import _zone_reperee
+    from dp_socle.planches.primitives import union_valide
+
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    emprise = union_valide(contrat.geometries("cloture"))
+
+    # La planche des citernes : clôture, portail et citerne.
+    cadre, resserre = _zone_reperee(
+        contrat, ("cloture", "portail", "bache_incendie"), emprise
+    )
+    assert resserre, "le cadrage aurait dû se resserrer sur la citerne"
+    assert cadre.area < emprise.area
+
+    # Une planche qui ne décrirait que la clôture se cadre sur le site.
+    _, resserre_seul = _zone_reperee(contrat, ("cloture",), emprise)
+    assert not resserre_seul
+
+
+def test_aucune_planche_dp4_ne_revient_au_plan_entier(site):
+    """Chaque planche zoome sur ce qu'elle décrit, y compris celle des citernes.
+
+    C'est le point : une planche dont les ouvrages sont locaux ne doit pas
+    revenir au plan de masse entier sous prétexte qu'elle porte aussi la
+    clôture. Les deux cadrages ne sont pas forcément identiques — ils suivent
+    les ouvrages de chaque planche — mais aucun ne rend le zoom inutile.
+    """
+    from dp_socle.planches.dp4_ouvrages import _zone_reperee
+    from dp_socle.planches.primitives import union_valide
+
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    emprise = union_valide(contrat.geometries("cloture"))
+
+    postes, _ = _zone_reperee(contrat, ("pdl_ptr",), emprise)
+    citernes, _ = _zone_reperee(
+        contrat, ("cloture", "portail", "bache_incendie"), emprise
+    )
+    for cadre in (postes, citernes):
+        assert cadre.area < 0.25 * emprise.area

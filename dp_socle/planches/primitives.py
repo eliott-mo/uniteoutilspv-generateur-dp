@@ -714,3 +714,83 @@ def cote_oblique(dessin: Dessin, depart_m, arrivee_m, texte: str,
         texte, taille=TAILLE_COTE, ancre="middle",
     )
     dessin._noter((milieu[0], milieu[1] + ny * 3.0))
+
+
+
+# ---------------------------------------------------------------------------
+# Sous-cadres
+# ---------------------------------------------------------------------------
+
+#: Blanc tournant : marge laissée libre entre le cadre principal de la planche
+#: et ce qu'elle porte, et entre deux sous-cadres voisins.
+#:
+#: Un texte collé au filet ne fait pas propre, et l'œil ne sépare pas deux
+#: séries de vues qui se touchent. La même valeur partout : c'est ce qui donne
+#: à la planche son rythme, et une marge qui change d'un bloc à l'autre se
+#: remarque plus qu'elle ne sert.
+BLANC_TOURNANT_MM = 4.0
+
+#: Marge intérieure d'un sous-cadre, entre son filet et son contenu.
+MARGE_SOUS_CADRE_MM = 3.5
+
+#: Hauteur du titre en tête d'un sous-cadre.
+HAUTEUR_TITRE_CADRE_MM = 5.6
+
+STYLE_SOUS_CADRE = Style(trait="#9a9a9a", epaisseur_mm=0.25, remplissage="none")
+
+
+def zone_interieure(x_mm: float, y_mm: float, largeur_mm: float,
+                    hauteur_mm: float, avec_titre: bool = True) -> tuple:
+    """Zone utile d'un sous-cadre, connue avant de le tracer.
+
+    Le contenu d'un cadre décide de sa hauteur, et sa hauteur décide de
+    l'échelle du contenu : il faut pouvoir calculer l'un sans avoir tracé
+    l'autre.
+    """
+    interieur_y = y_mm + MARGE_SOUS_CADRE_MM + (
+        HAUTEUR_TITRE_CADRE_MM if avec_titre else 0.0
+    )
+    return (
+        x_mm + MARGE_SOUS_CADRE_MM,
+        interieur_y,
+        largeur_mm - 2 * MARGE_SOUS_CADRE_MM,
+        y_mm + hauteur_mm - MARGE_SOUS_CADRE_MM - interieur_y,
+    )
+
+
+def sous_cadre(planche: Planche, x_mm: float, y_mm: float, largeur_mm: float,
+               hauteur_mm: float, titre: str | None = None,
+               echelle: int | None = None) -> tuple:
+    """Trace un sous-cadre titré et rend la zone utile qu'il laisse dedans.
+
+    Le dossier de référence structure ses planches en cadres : un par ouvrage,
+    un pour le plan de repérage. Chacun porte son titre et, s'il a la sienne,
+    son échelle.
+    """
+    planche.ajouter_rectangle(
+        x_mm, y_mm, largeur_mm, hauteur_mm, STYLE_SOUS_CADRE
+    )
+    interieur_y = y_mm + MARGE_SOUS_CADRE_MM
+    if titre:
+        planche.ajouter_texte(
+            x_mm + MARGE_SOUS_CADRE_MM, interieur_y + 3.0, titre,
+            taille=7.5 * PT, gras=True,
+        )
+        if echelle is not None:
+            planche.ajouter_texte(
+                x_mm + largeur_mm - MARGE_SOUS_CADRE_MM, interieur_y + 3.0,
+                f"Échelle {formater_echelle(echelle)}",
+                taille=TAILLE_MENTION, ancre="end",
+            )
+        interieur_y += HAUTEUR_TITRE_CADRE_MM
+    return (
+        x_mm + MARGE_SOUS_CADRE_MM,
+        interieur_y,
+        largeur_mm - 2 * MARGE_SOUS_CADRE_MM,
+        y_mm + hauteur_mm - MARGE_SOUS_CADRE_MM - interieur_y,
+    )
+
+
+def hauteur_titre_cadre(avec_titre: bool = True) -> float:
+    """Place qu'un sous-cadre prend en plus de son contenu."""
+    return 2 * MARGE_SOUS_CADRE_MM + (HAUTEUR_TITRE_CADRE_MM if avec_titre else 0.0)

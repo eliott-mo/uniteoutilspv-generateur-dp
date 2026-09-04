@@ -32,6 +32,24 @@ ESPACEMENT_POTEAUX_M = 2.50
 PASSAGE_FAUNE_LARGEUR_M = 0.15
 PASSAGE_FAUNE_HAUTEUR_M = 0.15
 
+#: Hauteurs conventionnelles de la végétation, en mètres.
+#:
+#: Ni le tableau bilan ni le DXF ne portent de hauteur pour une haie ou un
+#: arbre. La coupe du terrain doit pourtant les montrer quand elle les
+#: traverse : une haie de deux mètres devant une table en change la perception,
+#: et c'est exactement ce qu'un instructeur regarde. Ces valeurs sont donc
+#: conventionnelles — hauteur à la plantation pour une haie, port moyen d'un
+#: arbre de haut-jet — et leur emploi est écrit au rapport.
+HAUTEUR_HAIE_M = 2.00
+HAUTEUR_ARBRE_M = 8.00
+
+MESSAGE_VEGETATION = (
+    "Coupe du terrain : la végétation traversée est dessinée à des hauteurs "
+    f"conventionnelles ({nombre_fr(HAUTEUR_HAIE_M)} m pour une haie, "
+    f"{nombre_fr(HAUTEUR_ARBRE_M)} m pour un arbre). Ni le tableau bilan ni le "
+    "plan ne portent de hauteur de végétation."
+)
+
 MESSAGE_HAUTEURS = (
     "Hauteur de clôture et de portail non portées au contrat d'entrée : les "
     f"dessins sont établis à la valeur standard UNITe de "

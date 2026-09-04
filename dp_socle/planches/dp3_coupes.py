@@ -40,8 +40,16 @@ from ..planche import nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .palette import STYLES
-from .standards import HAUTEUR_CLOTURE_M, MESSAGE_HAUTEURS
+from .standards import (
+    HAUTEUR_ARBRE_M,
+    HAUTEUR_CLOTURE_M,
+    HAUTEUR_HAIE_M,
+    MESSAGE_HAUTEURS,
+    MESSAGE_VEGETATION,
+)
 from .primitives import (
+    BLANC_TOURNANT_MM,
+    hauteur_titre_cadre,
     TAILLE_COTE,
     TRAIT_COTE,
     TRAIT_FIN,
@@ -59,6 +67,8 @@ from .primitives import (
     silhouette,
     sol_hachure,
     sol_profond,
+    sous_cadre,
+    zone_interieure,
 )
 
 NUMERO = "DP 3"
@@ -77,12 +87,11 @@ ECHELLES_TERRAIN = (200, 250, 300, 500, 750, 1000)
 RANGEES_DESSINEES = 3
 RANGEES_MINIMALES = 2
 
-#: Hauteur des deux blocs de la planche, en millimètres papier.
-HAUTEUR_BLOC_TABLES_MM = 128.0
-INTERVALLE_BLOCS_MM = 4.0
-
-#: Place réservée au titre et à la mention d'échelle en tête de chaque bloc.
-HAUTEUR_TITRE_MM = 11.0
+#: Part de la hauteur utile revenant au bloc de la coupe de principe.
+#:
+#: Un peu moins de la moitié : la coupe de site est plus large que haute, et
+#: son bandeau parcellaire lui prend de la place en bas.
+PART_BLOC_TABLES = 0.47
 
 #: Longueurs de module admises pour le contrôle d'ordre de grandeur du
 #: rampant. `format_module` est une désignation commerciale (« G12R »), pas une
@@ -157,16 +166,54 @@ HAUTEUR_BANDEAU_MM = 5.0
 #: reliés d'une jambe de force, et non un simple trait sur deux piquets. C'est
 #: cette structure qui fait qu'on reconnaît une table.
 EPAISSEUR_MODULE_M = 0.06
-#: Position des deux poteaux sur le rampant, en fraction depuis le point bas.
-APPUIS_RAMPANT = (0.28, 0.78)
-#: Départ de la jambe de force au sol, en fraction de la projection.
-PIED_JAMBE_DE_FORCE = 0.62
-#: Débord de la panne sous le plan des modules, en mètres.
-DEBORD_PANNE_M = 0.12
+
+#: Position des deux pieux sur le rampant, en fraction depuis le point bas.
+APPUIS_RAMPANT = (0.22, 0.76)
+#: Largeur d'un pieu battu, en mètres. Un profilé courant fait 8 à 12 cm
+#: d'aile ; dessiné en trait unique, il ne se lit pas comme une structure.
+LARGEUR_PIEU_M = 0.09
+#: Fiche du pieu sous le terrain naturel, en mètres. Elle est dessinée : c'est
+#: elle qui fait comprendre qu'il s'agit d'un pieu battu et non d'un plot posé.
+FICHE_PIEU_M = 1.10
+#: Hauteur de la platine de tête et du collier de contreventement, en mètres.
+PLATINE_M = 0.16
+COLLIER_M = 0.14
+#: Hauteur du collier sur le pieu, en fraction de sa hauteur hors sol.
+HAUTEUR_COLLIER = 0.42
+#: Hauteur de la panne sous le plan des modules, en mètres.
+HAUTEUR_PANNE_M = 0.14
+#: Position du gousset central du contreventement sur le rampant.
+GOUSSET_RAMPANT = 0.50
+COTE_GOUSSET_M = 0.22
 
 #: Épaisseur d'une piste dessinée sur le profil, en millimètres de papier. Une
 #: piste n'a pas d'épaisseur mesurable à cette échelle : c'est un figuré.
-EPAISSEUR_PISTE_MM = 1.1
+#:
+#: Elle se dessine **sous** la ligne de terrain, pas au-dessus : une piste est
+#: incrustée dans le sol, décaissée puis remblayée de grave. Posée en
+#: surépaisseur, elle se lisait comme un merlon.
+EPAISSEUR_PISTE_MM = 1.3
+
+#: Végétation traversée par la coupe, avec sa hauteur conventionnelle.
+VEGETATION_TRAVERSEE = {
+    "haie": HAUTEUR_HAIE_M,
+    "haie_existante": HAUTEUR_HAIE_M,
+    "arbre_existant": HAUTEUR_ARBRE_M,
+}
+
+#: Ouvrages dont la hauteur vient des cotes normalisées du tableau bilan.
+OUVRAGES_TRAVERSES = (
+    "pdl_ptr",
+    "ptr",
+    "pdl",
+    "local_technique",
+    "bess",
+    "bache_incendie",
+    "bac_retention",
+    "citerne_refroidissement",
+    "zone_remise",
+    "aire_aspiration",
+)
 
 #: Catégories de sol que la coupe montre là où elle les traverse, dans l'ordre
 #: de dessin du contrat.
@@ -457,13 +504,28 @@ def generer(
     planche = nouvelle_planche(projet, NUMERO, numero=numero)
     zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
 
-    bloc_tables = (zone_x, zone_y, zone_l, HAUTEUR_BLOC_TABLES_MM)
-    haut_terrain = zone_y + HAUTEUR_BLOC_TABLES_MM + INTERVALLE_BLOCS_MM
-    bloc_terrain = (zone_x, haut_terrain, zone_l, zone_y + zone_h - haut_terrain)
+    # Blanc tournant : la planche ne colle rien à son cadre, et laisse le même
+    # jeu entre ses deux sous-cadres.
+    utile_x = zone_x + BLANC_TOURNANT_MM
+    utile_y = zone_y + BLANC_TOURNANT_MM
+    utile_l = zone_l - 2 * BLANC_TOURNANT_MM
+    utile_h = zone_h - 2 * BLANC_TOURNANT_MM
 
-    echelle_tables, nb_rangees = _coupe_des_tables(planche, table, bloc_tables)
+    hauteur_tables = (utile_h - BLANC_TOURNANT_MM) * PART_BLOC_TABLES
+    bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables)
+
+    # Le premier cadre est mesuré avant d'être tracé : le second se pose sous
+    # lui, et occupe tout ce qui reste. Sans cela, la planche gardait une
+    # moitié de feuille vide sous ses deux cadres.
+    _, _, hauteur_tables_reelle = _coupe_des_tables(
+        planche, table, bloc_tables, tracer=False
+    )
+    bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables_reelle)
+    echelle_tables, nb_rangees, _ = _coupe_des_tables(planche, table, bloc_tables)
     planche.definir_echelle(echelle_tables)
 
+    haut_terrain = utile_y + hauteur_tables_reelle + BLANC_TOURNANT_MM
+    bloc_terrain = (utile_x, haut_terrain, utile_l, utile_y + utile_h - haut_terrain)
     echelle_terrain, messages = _coupe_du_terrain(planche, contrat, table, bloc_terrain)
     avertissements.extend(messages)
     if nb_rangees < RANGEES_DESSINEES:
@@ -494,14 +556,16 @@ def generer(
 # ---------------------------------------------------------------------------
 
 
-def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
+def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
+                      tracer: bool = True) -> tuple:
     """Dessin de type : trois rangées en profil, sur un sol hachuré.
 
     Aucune géométrie n'est lue du GeoPackage. C'est une coupe de principe, et
     ses cotes sont celles que la notice reprendra.
     """
     bloc_x, bloc_y, bloc_l, bloc_h = bloc
-    dessin_h = bloc_h - HAUTEUR_TITRE_MM
+    interieur = zone_interieure(bloc_x, bloc_y, bloc_l, bloc_h)
+    interieur_x, interieur_y, interieur_l, interieur_h = interieur
 
     # L'échelle est calée sur deux rangées complètes et leurs lignes de cote
     # (D2) : c'est la largeur qu'il faut garantir, pas celle des trois rangées
@@ -511,10 +575,10 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
     largeur_utile_m += table.inter_table_m  # le sol déborde de part et d'autre
     hauteur_utile_m = table.point_haut_m
     zone_contenu = (
-        bloc_x + MARGE_COTE_LATERALE_MM,
-        bloc_y + HAUTEUR_TITRE_MM + MARGE_HAUT_MM,
-        bloc_l - 2 * MARGE_COTE_LATERALE_MM,
-        dessin_h - MARGE_HAUT_MM - MARGE_COTES_BASSES_MM,
+        interieur_x + MARGE_COTE_LATERALE_MM,
+        interieur_y + MARGE_HAUT_MM,
+        interieur_l - 2 * MARGE_COTE_LATERALE_MM,
+        interieur_h - MARGE_HAUT_MM - MARGE_COTES_BASSES_MM,
     )
     denominateur = echelle_du_dessin(
         largeur_utile_m,
@@ -524,25 +588,32 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
         libelle="coupe des tables",
     )
 
-    # Titre et dessin forment un groupe, centré dans le bloc. Posé en bas de
-    # bloc, le dessin laissait au-dessus de lui un vide de plusieurs
-    # centimètres et sa légende flottait loin de lui.
-    hauteur_groupe_mm = (
-        HAUTEUR_TITRE_MM
-        + MARGE_HAUT_MM
+    # Le cadre épouse la hauteur de son contenu : dimensionné sur la part de
+    # planche qu'on lui a réservée, il laissait au-dessus du dessin un vide de
+    # plusieurs centimètres qui se lisait comme un oubli.
+    hauteur_dessin_mm = (
+        MARGE_HAUT_MM
         + hauteur_utile_m * 1000.0 / denominateur
         + MARGE_COTES_BASSES_MM
     )
-    haut_groupe = bloc_y + max(0.0, (bloc_h - hauteur_groupe_mm) / 2.0)
-
-    mention_echelle(
-        planche, bloc_x + 2.0, haut_groupe + 3.0, denominateur,
+    hauteur_cadre = hauteur_dessin_mm + hauteur_titre_cadre()
+    if not tracer:
+        # Mesure seule : la planche a besoin de connaître la hauteur de ce
+        # cadre pour poser le suivant, avant que rien ne soit tracé. Le nombre
+        # de rangées ne se sait qu'au tracé et n'a pas d'intérêt ici.
+        return denominateur, None, hauteur_cadre
+    sous_cadre(
+        planche, bloc_x, bloc_y, bloc_l, hauteur_cadre,
         titre="Coupe de principe des tables photovoltaïques",
+        echelle=denominateur,
     )
+    interieur = zone_interieure(bloc_x, bloc_y, bloc_l, hauteur_cadre)
+    interieur_x, interieur_y, interieur_l, interieur_h = interieur
+    haut_groupe = interieur_y
 
     # Autant de rangées complètes que la largeur en loge, trois au plus.
     largeur_disponible_m = (
-        (bloc_l - 2 * MARGE_COTE_LATERALE_MM) * denominateur / 1000.0
+        (interieur_l - 2 * MARGE_COTE_LATERALE_MM) * denominateur / 1000.0
         - table.inter_table_m
     )
     nb_rangees = int((largeur_disponible_m - table.projection_m) // table.pas_m) + 1
@@ -558,8 +629,8 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
     # Le dessin est centré horizontalement, et posé assez haut pour laisser
     # sous le sol la place des cotes de pas et d'inter-table.
     largeur_totale_mm = (sol_droite - sol_gauche) * 1000.0 / denominateur
-    origine_x_mm = bloc_x + (bloc_l - largeur_totale_mm) / 2.0
-    origine_y_mm = haut_groupe + hauteur_groupe_mm - MARGE_COTES_BASSES_MM
+    origine_x_mm = interieur_x + (interieur_l - largeur_totale_mm) / 2.0
+    origine_y_mm = haut_groupe + hauteur_dessin_mm - MARGE_COTES_BASSES_MM
 
     dessin = Dessin(
         planche=planche,
@@ -570,6 +641,8 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
     )
 
     sol_profond(dessin, sol_gauche, sol_droite)
+    # Les fiches des pieux se dessinent après le sol : elles doivent se lire à
+    # travers les hachures, comme sur le dossier de référence.
 
     style_table = STYLES["tables_pv"].style
     trait_table = type(TRAIT_FORT)(
@@ -597,54 +670,137 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
         )
 
     dessin.verifier_cadre("Coupe des tables")
-    return denominateur, nb_rangees
+    return denominateur, nb_rangees, hauteur_cadre
+
+
+def _point_sur_rampant(table: GeometrieTable, x_bas: float, fraction: float):
+    """Point du plan des modules, repéré en fraction du rampant."""
+    return (
+        x_bas + table.projection_m * fraction,
+        table.point_bas_m + (table.point_haut_m - table.point_bas_m) * fraction,
+    )
+
+
+def _bande(dessin: Dessin, depart, arrivee, epaisseur_m: float, style) -> None:
+    """Bande d'épaisseur constante le long d'un segment quelconque.
+
+    C'est ce qui distingue une structure d'un trait de construction : un pieu,
+    une panne et un plan de modules ont une épaisseur, et le dossier de
+    référence les dessine tous à double trait.
+    """
+    dx = arrivee[0] - depart[0]
+    dy = arrivee[1] - depart[1]
+    norme = math.hypot(dx, dy)
+    if norme == 0:
+        return
+    nx, ny = -dy / norme, dx / norme
+    demi = epaisseur_m / 2.0
+    dessin.polyligne(
+        [
+            (depart[0] + nx * demi, depart[1] + ny * demi),
+            (arrivee[0] + nx * demi, arrivee[1] + ny * demi),
+            (arrivee[0] - nx * demi, arrivee[1] - ny * demi),
+            (depart[0] - nx * demi, depart[1] - ny * demi),
+        ],
+        style,
+        fermer=True,
+    )
 
 
 def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) -> None:
     """Une table en profil : le plan des modules et sa structure porteuse.
 
-    Le plan des modules est une bande, pas un trait : à grande échelle un
-    module a une épaisseur, et c'est elle qui distingue un panneau d'une ligne
-    de construction. La structure reprend celle du dossier de référence — deux
-    poteaux battus sur le rampant, reliés par une jambe de force.
-    """
-    bas = (x_bas, table.point_bas_m)
-    haut = (x_bas + table.projection_m, table.point_haut_m)
+    Reprise de la coupe de principe du dossier de Massay du 17/04/2025, où la
+    structure se lit entièrement : deux pieux battus à double trait, fichés
+    sous le terrain, une platine de tête et un collier sur chacun, la panne
+    continue sous le plan des modules, et un contreventement triangulé partant
+    d'un gousset central.
 
-    # Le plan des modules, en bande : deux parallèles au rampant.
+    Un pieu dessiné d'un trait unique ne se lit pas comme une structure : il se
+    lit comme une ligne de rappel.
+    """
+    acier = type(TRAIT_MOYEN)(trait="#3a3a3a", epaisseur_mm=0.2, remplissage="none")
+    fiche = type(TRAIT_FIN)(trait="#7a7a7a", epaisseur_mm=0.15, remplissage="none")
+
+    bas = _point_sur_rampant(table, x_bas, 0.0)
+    haut = _point_sur_rampant(table, x_bas, 1.0)
+
+    # La panne, continue sous le plan des modules, décalée de sa hauteur.
     pente_x = table.projection_m
     pente_y = table.point_haut_m - table.point_bas_m
     norme = math.hypot(pente_x, pente_y)
-    # Normale au rampant, vers le haut.
     normale = (-pente_y / norme, pente_x / norme)
-    epaisseur = EPAISSEUR_MODULE_M
+
+    def sous_rampant(point, distance):
+        return (
+            point[0] - normale[0] * distance,
+            point[1] - normale[1] * distance,
+        )
+
+    _bande(
+        dessin,
+        sous_rampant(bas, HAUTEUR_PANNE_M / 2.0),
+        sous_rampant(haut, HAUTEUR_PANNE_M / 2.0),
+        HAUTEUR_PANNE_M,
+        acier,
+    )
+
+    # Le plan des modules, en bande, posé sur la panne.
     dessus = [
-        (bas[0] + normale[0] * epaisseur, bas[1] + normale[1] * epaisseur),
-        (haut[0] + normale[0] * epaisseur, haut[1] + normale[1] * epaisseur),
+        (bas[0] + normale[0] * EPAISSEUR_MODULE_M,
+         bas[1] + normale[1] * EPAISSEUR_MODULE_M),
+        (haut[0] + normale[0] * EPAISSEUR_MODULE_M,
+         haut[1] + normale[1] * EPAISSEUR_MODULE_M),
     ]
     dessin.polyligne([bas, haut, dessus[1], dessus[0]], style, fermer=True)
 
-    # Les deux appuis, montés du sol jusqu'au rampant.
-    appuis = []
+    # Les deux pieux, à double trait, fichés sous le terrain.
+    colliers = []
     for fraction in APPUIS_RAMPANT:
-        x = x_bas + table.projection_m * fraction
-        y = table.point_bas_m + pente_y * fraction
-        dessin.ligne((x, 0.0), (x, y), TRAIT_MOYEN)
-        # La panne, sous le plan des modules.
-        dessin.ligne(
-            (x - DEBORD_PANNE_M, y), (x + DEBORD_PANNE_M, y), TRAIT_FORT
+        tete = sous_rampant(
+            _point_sur_rampant(table, x_bas, fraction), HAUTEUR_PANNE_M
         )
-        appuis.append((x, y))
+        x = tete[0]
+        dessin.polyligne(
+            [
+                (x - LARGEUR_PIEU_M / 2.0, 0.0),
+                (x - LARGEUR_PIEU_M / 2.0, tete[1]),
+                (x + LARGEUR_PIEU_M / 2.0, tete[1]),
+                (x + LARGEUR_PIEU_M / 2.0, 0.0),
+            ],
+            acier,
+        )
+        # La fiche, sous le terrain naturel.
+        for cote in (-1, 1):
+            dessin.ligne(
+                (x + cote * LARGEUR_PIEU_M / 2.0, 0.0),
+                (x + cote * LARGEUR_PIEU_M / 2.0, -FICHE_PIEU_M),
+                fiche,
+            )
+        # Platine de tête, entre le pieu et la panne.
+        dessin.rectangle(
+            x - PLATINE_M / 2.0, tete[1] - PLATINE_M / 4.0,
+            PLATINE_M, PLATINE_M * 0.75, acier,
+        )
+        # Collier de contreventement.
+        y_collier = tete[1] * HAUTEUR_COLLIER
+        dessin.rectangle(
+            x - COLLIER_M / 2.0, y_collier - COLLIER_M / 2.0,
+            COLLIER_M, COLLIER_M, acier,
+        )
+        colliers.append((x, y_collier))
 
-    # La jambe de force : du pied du poteau haut vers le milieu du poteau bas.
-    if len(appuis) == 2:
-        pied = (
-            x_bas + table.projection_m * PIED_JAMBE_DE_FORCE,
-            0.0,
-        )
-        milieu_bas = (appuis[0][0], appuis[0][1] * 0.55)
-        dessin.ligne(pied, milieu_bas, TRAIT_FIN)
-        dessin.ligne(pied, (appuis[1][0], appuis[1][1] * 0.45), TRAIT_FIN)
+    # Le contreventement : un gousset sur la panne, deux diagonales vers les
+    # colliers. C'est ce triangle qui tient la table au vent.
+    gousset = sous_rampant(
+        _point_sur_rampant(table, x_bas, GOUSSET_RAMPANT), HAUTEUR_PANNE_M
+    )
+    dessin.rectangle(
+        gousset[0] - COTE_GOUSSET_M / 2.0, gousset[1] - COTE_GOUSSET_M / 2.0,
+        COTE_GOUSSET_M, COTE_GOUSSET_M, acier,
+    )
+    for collier in colliers:
+        _bande(dessin, gousset, collier, 0.05, acier)
 
 
 def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None:
@@ -692,7 +848,7 @@ def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None
 
 def _coter_angle(dessin: Dessin, table: GeometrieTable) -> None:
     """L'inclinaison, en arc entre l'horizontale et le plan des modules."""
-    rayon = min(table.projection_m * 0.45, table.rampant_m * 0.45)
+    rayon = min(table.projection_m * 0.30, table.rampant_m * 0.30)
     origine = (0.0, table.point_bas_m)
     dessin.ligne(origine, (rayon * 1.25, table.point_bas_m), TRAIT_COTE)
 
@@ -706,10 +862,10 @@ def _coter_angle(dessin: Dessin, table: GeometrieTable) -> None:
     ]
     dessin.polyligne(arc, TRAIT_COTE)
     dessin.texte(
-        origine[0] + rayon * 1.15,
-        origine[1] + rayon * math.sin(angle) * 0.35,
+        origine[0] + rayon * 1.25,
+        origine[1] + rayon * math.sin(angle) * 0.30,
         f"{nombre_fr(table.inclinaison_deg, 0)}°",
-        taille=TAILLE_COTE,
+        taille=TAILLE_COTE, decalage_mm=(0.0, 1.4),
     )
 
 
@@ -746,14 +902,25 @@ def _coupe_du_terrain(
     altitudes = [altitude for _, altitude in profil]
     alt_min, alt_max = min(altitudes), max(altitudes)
 
-    dessin_h = bloc_h - HAUTEUR_TITRE_MM
-    # Hauteur utile : le relief, plus la hauteur des tables posées dessus.
-    hauteur_utile_m = (alt_max - alt_min) + table.point_haut_m
+    interieur = zone_interieure(bloc_x, bloc_y, bloc_l, bloc_h)
+    interieur_x, interieur_y, interieur_l, interieur_h = interieur
+    # Hauteur utile : le relief, plus le plus haut de ce qui est posé dessus.
+    # Un arbre traversé par la coupe monte à 8 m, bien au-dessus d'une table :
+    # l'oublier ici le faisait sortir du bloc.
+    hauteur_posee_m = max(
+        [table.point_haut_m]
+        + [
+            hauteur
+            for categorie, hauteur in VEGETATION_TRAVERSEE.items()
+            if contrat.presente(categorie)
+        ]
+    )
+    hauteur_utile_m = (alt_max - alt_min) + hauteur_posee_m
     zone_contenu = (
-        bloc_x + MARGE_AXE_MM,
-        bloc_y + HAUTEUR_TITRE_MM + MARGE_HAUT_MM,
-        bloc_l - MARGE_AXE_MM - MARGE_COTE_LATERALE_MM,
-        dessin_h - MARGE_HAUT_MM - MARGE_REPERES_MM,
+        interieur_x + MARGE_AXE_MM,
+        interieur_y + MARGE_HAUT_MM,
+        interieur_l - MARGE_AXE_MM - MARGE_COTE_LATERALE_MM,
+        interieur_h - MARGE_HAUT_MM - MARGE_REPERES_MM,
     )
     denominateur = echelle_du_dessin(
         longueur_m,
@@ -763,25 +930,25 @@ def _coupe_du_terrain(
         libelle="coupe du terrain",
     )
 
-    hauteur_groupe_mm = (
-        HAUTEUR_TITRE_MM
-        + MARGE_HAUT_MM
+    hauteur_dessin_mm = (
+        MARGE_HAUT_MM
         + hauteur_utile_m * 1000.0 / denominateur
         + MARGE_REPERES_MM
     )
-    haut_groupe = bloc_y + max(0.0, (bloc_h - hauteur_groupe_mm) / 2.0)
-
-    mention_echelle(
-        planche, bloc_x + bloc_l - 2.0, haut_groupe + 3.0, denominateur,
-        titre="Coupe du terrain naturel A-A'", ancre="end",
+    sous_cadre(
+        planche, bloc_x, bloc_y, bloc_l, bloc_h,
+        titre="Coupe du terrain naturel A-A'", echelle=denominateur,
     )
+    # Ce cadre occupe le bas de la planche : son dessin y est centré plutôt
+    # que posé en haut.
+    haut_groupe = interieur_y + max(0.0, (interieur_h - hauteur_dessin_mm) / 2.0)
 
     largeur_mm = longueur_m * 1000.0 / denominateur
     origine_x_mm = (
-        bloc_x + MARGE_AXE_MM
-        + (bloc_l - MARGE_AXE_MM - MARGE_COTE_LATERALE_MM - largeur_mm) / 2.0
+        interieur_x + MARGE_AXE_MM
+        + (interieur_l - MARGE_AXE_MM - MARGE_COTE_LATERALE_MM - largeur_mm) / 2.0
     )
-    origine_y_mm = haut_groupe + hauteur_groupe_mm - MARGE_REPERES_MM
+    origine_y_mm = haut_groupe + hauteur_dessin_mm - MARGE_REPERES_MM
 
     dessin = Dessin(
         planche=planche,
@@ -984,11 +1151,14 @@ def _sols_sur_le_profil(dessin, contrat: Contrat, profil) -> None:
                 abscisses.append(courante)
                 courante += pas
             abscisses.append(fin)
-            # La piste suit le terrain : elle est dessinée comme une bande
-            # d'épaisseur constante posée sur le profil, et non comme un
-            # rectangle qui s'enfoncerait dans les creux.
-            haut = [(x, _altitude_a(profil, x) + epaisseur) for x in abscisses]
-            bas = [(x, _altitude_a(profil, x)) for x in reversed(abscisses)]
+            # La piste est **incrustée** dans le terrain : décaissée puis
+            # remblayée, sa surface est celle du sol. Sa bande se dessine donc
+            # sous le profil, et non par-dessus.
+            haut = [(x, _altitude_a(profil, x)) for x in abscisses]
+            bas = [
+                (x, _altitude_a(profil, x) - epaisseur)
+                for x in reversed(abscisses)
+            ]
             dessin.polyligne(haut + bas, style, fermer=True)
 
 
@@ -1055,8 +1225,8 @@ def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
 
     ligne = _ligne_de_coupe(contrat)
     avertissements = []
-    for categorie in ("pdl_ptr", "ptr", "pdl", "local_technique", "bess",
-                      "bache_incendie", "bac_retention", "citerne_refroidissement"):
+    avertissements.extend(_vegetation_sur_le_profil(dessin, contrat, profil, ligne))
+    for categorie in OUVRAGES_TRAVERSES:
         for entite in contrat.entites(categorie):
             traversee = entite.geometrie.intersection(ligne)
             if traversee.is_empty:
@@ -1083,6 +1253,54 @@ def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
                 debut, sol, fin - debut, hauteur, STYLES[categorie].style
             )
     return avertissements
+
+
+def _vegetation_sur_le_profil(dessin, contrat: Contrat, profil, ligne) -> list:
+    """Haies et arbres traversés par la coupe, à hauteur conventionnelle.
+
+    Ni le tableau bilan ni le plan ne portent de hauteur de végétation. Une
+    haie de deux mètres devant une rangée change pourtant la perception du
+    projet, et c'est ce qu'un instructeur regarde : elle doit apparaître, et sa
+    hauteur doit être annoncée pour ce qu'elle est.
+    """
+    messages = []
+    employees = False
+    for categorie, hauteur in VEGETATION_TRAVERSEE.items():
+        geometries = contrat.geometries(categorie)
+        if not geometries:
+            continue
+        style = STYLES[categorie].style
+        for debut, fin in _portions_traversees(ligne, geometries):
+            sol = _altitude_a(profil, (debut + fin) / 2.0)
+            largeur = max(fin - debut, dessin.metres(1.2))
+            centre = (debut + fin) / 2.0
+            # Un houppier sur son tronc, et non un rectangle, qui se lirait
+            # comme un bâtiment.
+            tronc = max(largeur * 0.12, dessin.metres(0.4))
+            dessin.rectangle(
+                centre - tronc / 2.0, sol, tronc, hauteur * 0.35,
+                type(TRAIT_FIN)(trait="#5a4020", epaisseur_mm=0.2,
+                                remplissage="#8a6a3a"),
+            )
+            demi = largeur / 2.0
+            bas = sol + hauteur * 0.3
+            sommet = sol + hauteur
+            dessin.polyligne(
+                [
+                    (centre - demi, bas),
+                    (centre - demi * 0.85, sommet - hauteur * 0.22),
+                    (centre - demi * 0.35, sommet),
+                    (centre + demi * 0.35, sommet),
+                    (centre + demi * 0.85, sommet - hauteur * 0.22),
+                    (centre + demi, bas),
+                ],
+                style,
+                fermer=True,
+            )
+            employees = True
+    if employees:
+        messages.append(MESSAGE_VEGETATION)
+    return messages
 
 
 def _bandeau_parcellaire(dessin, contrat: Contrat, profil, alt_min) -> list:
