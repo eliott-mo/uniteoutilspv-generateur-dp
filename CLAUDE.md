@@ -12,7 +12,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 2 | Import DXF HelioScope et calage géographique | livré, en réserve |
 | 2bis | Import du plan du BE interne, contrôles croisés, coupe A-A' | livré |
 | 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
-| 4 | DP 2, DP 3, DP 4 | à venir |
+| 4 | DP 2, DP 3, DP 4 | livré |
 | 5 | Notice DP 11 | à venir |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne

@@ -199,6 +199,45 @@ DERNIER_RECOURS = {
 }
 
 
+def _piste_des_standards(contrat: Contrat, inclinaison, inter_table, pas) -> str:
+    """Dit si les hauteurs standard, elles, referment la géométrie.
+
+    Mesuré sur Saint-Cyr le 04/09/2026. Le tableau bilan y déclare un point
+    bas à 2,50 m et un point haut à 4,00 m : un rampant de 5,80 m à 15°, soit
+    2,90 m par module pour deux modules, et un pas qui manque d'un mètre. Les
+    hauteurs du bloc `standards_unite` du même tableau — 1,10 m et 2,34 m —
+    donnent 4,79 m de rampant, 2,39 m par module (un G12R en mesure 2,384) et
+    un pas qui referme à 3 cm.
+
+    Les deux valeurs ne décrivent donc pas la même chose : les hauteurs
+    déclarées sont des **bornes d'enveloppe sur tout le site**, comme le dit
+    le PDF de profil du bureau d'études avec ses « 2.5m min » et « 4m max »,
+    et non les deux extrémités d'une table. Le dessin suit la décision prise
+    et reste aux valeurs déclarées, que la notice reprendra ; ce message
+    existe pour qu'on sache d'où vient l'écart au lieu de le chercher.
+    """
+    standards = contrat.donnees.get("standards_unite") or {}
+    try:
+        bas = float(standards["Hauteur point bas"])
+        haut = float(standards["Hauteur point haut"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if haut <= bas:
+        return ""
+    rampant = (haut - bas) / math.sin(math.radians(inclinaison))
+    projection = rampant * math.cos(math.radians(inclinaison))
+    ecart = abs(pas - (inter_table + projection))
+    if ecart > TOLERANCE_PAS_M:
+        return ""
+    return (
+        f"Les hauteurs standard du même tableau ({nombre_fr(bas)} m et "
+        f"{nombre_fr(haut)} m), elles, referment la géométrie à "
+        f"{nombre_fr(ecart)} m près : les deux hauteurs déclarées sont "
+        "vraisemblablement des bornes d'enveloppe sur tout le site, et non "
+        "les extrémités d'une table."
+    )
+
+
 def _blocs_de_lecture(contrat: Contrat) -> dict:
     return {
         "structures": contrat.structures,
@@ -318,13 +357,18 @@ def geometrie_table(contrat: Contrat) -> tuple:
 
     ecart_pas = abs(pas - (inter_table + projection))
     if ecart_pas > TOLERANCE_PAS_M:
-        avertissements.append(
+        message = (
             f"Pas déclaré de {nombre_fr(pas)} m, contre "
             f"{nombre_fr(inter_table + projection)} m attendus (inter-table "
             f"{nombre_fr(inter_table)} m + projection du rampant "
             f"{nombre_fr(projection)} m), soit {nombre_fr(ecart_pas)} m "
-            "d'écart. La coupe est dessinée au pas déclaré."
+            "d'écart. La coupe est dessinée au pas déclaré et aux hauteurs "
+            "déclarées, comme la notice les annoncera."
         )
+        piste = _piste_des_standards(contrat, inclinaison, inter_table, pas)
+        if piste:
+            message += " " + piste
+        avertissements.append(message)
 
     return (
         GeometrieTable(

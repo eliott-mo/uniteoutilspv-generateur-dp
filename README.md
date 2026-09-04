@@ -123,11 +123,17 @@ Lambert 93, d'où la mention « NORD (L93) », et n'affirme rien sur le nord
 géographique (la convergence des méridiens atteint 3° en métropole).
 
 **Sommaire.** Tableau à trois colonnes — code, intitulé, page — reprenant la
-forme du sommaire des dossiers HOCH. Il liste les onze pièces du dossier, la
-page de garde ne s'y listant pas elle-même, y compris celles des lots suivants
-et les insertions paysagères fournies : le dossier s'annonce complet dès
-maintenant. Les pièces produites portent leur numéro de page réel, les autres un
-tiret. Une pièce tenant sur plusieurs planches s'affiche en plage, « 9-10 ».
+forme du sommaire des dossiers HOCH. Il liste les douze pièces du dossier, la
+page de garde ne s'y listant pas elle-même, y compris les insertions paysagères
+fournies et la notice du lot 5 : le dossier s'annonce complet dès maintenant. Les
+pièces produites portent leur numéro de page réel, les autres un tiret. Une pièce
+tenant sur plusieurs planches s'affiche en plage, « 9-10 ».
+
+Depuis le lot 4, les pièces produites ne sont plus toujours les mêmes : un projet
+sans poste n'a pas de DP 4-1, un projet sans BESS ni local technique n'a pas de
+DP 4-3, et un dossier dont le plan n'a pas été importé s'arrête au plan de
+cadastre. Le rang de chaque planche se calcule donc sur les pièces **réellement
+produites**, et `assemblage.py` continue de le vérifier sur le PDF assemblé.
 
 **Photomontage.** Il occupe la moitié gauche de la page de garde, surmonté d'un
 bandeau « VUE EN PERSPECTIVE DU PROJET » calé sur la largeur réelle de l'image.
@@ -231,6 +237,32 @@ python -m pytest -q
   tableau.
 - `tests/test_coupe.py` — contrôles croisés, correction de perpendicularité de
   la coupe A-A', profil altimétrique et contrat de sortie GeoPackage.
+- `tests/test_contrat_lot4.py` — lecture du contrat d'entrée du lot 4 : ce
+  qu'il refuse, surtout. Un test **inverse volontairement** `ordre_cotes` pour
+  que le jour où quelqu'un câblerait la position des dimensions au lieu de les
+  lire, quelque chose casse : un poste de 12 x 3 m dessiné 3 x 12 se dessine
+  parfaitement et ne se remarque pas.
+- `tests/test_palette_dp.py` — les deux règles de la légende, mesurées : ce qui
+  n'est pas dessiné n'y figure pas, et deux teintes qui peuvent se côtoyer
+  restent séparées d'au moins 12 ΔE.
+- `tests/test_primitives_lot4.py` — le repère local des coupes : isotropie,
+  conversion passant par `dp_socle.echelle`, refus d'un dessin qui déborde de
+  son cadre.
+- `tests/test_planches_lot4.py` — **critères de validation n°1 et n°2**, mesurés
+  dans le PDF produit : six échelles locales vérifiées à moins de 0,5 %, et
+  l'isotropie contrôlée deux fois — sur deux segments perpendiculaires de même
+  longueur, et sur un profil à 2 % qui doit se retrouver à 2 % dans le fichier.
+  Ces deux-là ne demandent aucun service en ligne : ce sont ceux qui comptent le
+  plus, et un `-m "not reseau"` ne doit pas les sauter.
+
+Les tests du lot 4 s'appuient sur un contrat **synthétique**
+(`tests/contrat_synthetique.py`), dimensionné en nombres ronds — clôture de
+200 x 120 m, poste de 12 x 3 m, coupe de 220 m sur une pente de 2 %. Les jeux
+réels valent pour ce qu'ils montrent d'imprévu, mais on ne peut pas mesurer une
+planche contre eux : leurs cotes ne sont connues que par ce que l'import en a lu.
+Son GeoPackage est écrit par le producteur réel, `import_be.ecrire_geopackage` :
+un fixture qui écrirait son propre schéma cesserait de tester le contrat le jour
+où le contrat changerait.
 
 Les tests du lot 2 s'appuient sur les deux exports réels de `exemples/` et se
 mettent en `skip` si ces fichiers sont absents. Ceux des lots 2bis s'appuient
@@ -257,18 +289,28 @@ dp_socle/
 ├── tableau_bilan.py  lecture du tableau bilan Excel du BE
 ├── coupe.py          ligne de coupe A-A' et profil du terrain naturel
 ├── apercu_be.py      aperçu du plan importé, palette de la légende DP
+├── contrat.py        lecture du contrat d'entrée du lot 4, cotes normalisées
 ├── ign.py            WMS-R et WFS Géoplateforme, EPSG:2154 natif
 ├── polices.py        installation et vérification d'Aptos
 ├── projet.py         modèle projet.json
 ├── assemblage.py     génération complète, sommaire paginé, PDF assemblé
 ├── environnement.py  chemin des DLL cairo sous Windows
 ├── erreurs.py        exceptions nommées
-└── planches/         page de garde, DP 1-1, DP 1-2, DP 1-3
+└── planches/
+    ├── commun.py         cartouche et numérotation partagés
+    ├── primitives.py     repère local des coupes, cotes, hachures, silhouette
+    ├── palette.py        teintes et légende du dossier imprimé
+    ├── page_garde.py     page de garde et sommaire paginé
+    ├── dp1_1_situation.py, dp1_2_aerienne.py, dp1_3_cadastre.py
+    ├── dp2_plan_masse.py plan de masse
+    ├── dp3_coupes.py     coupe de type des tables et coupe du terrain
+    └── dp4_ouvrages.py   postes, clôture, portail, citerne, équipements
 ```
 
-L'API `Planche` est conçue pour les lots suivants (coupes, plans techniques) :
-elle sépare le repère papier (millimètres) du repère terrain (Lambert 93) et ne
-suppose rien de cartographique.
+L'API `Planche` sépare le repère papier (millimètres) du repère terrain
+(Lambert 93) et ne suppose rien de cartographique. Le lot 4 s'en sert dans les
+deux repères et **ne l'a pas modifiée** : les primitives qui lui manquaient se
+construisent par-dessus.
 
 ## Services IGN
 
@@ -1215,8 +1257,240 @@ lève ni contrôle bloquant ni avertissement.
 | Puissance | 2,93878 MWc | — |
 | Emprise cadastrale | — | 4,5259 ha, clôture débordant de 0,53 m² |
 
+## Planches du projet (lot 4)
+
+DP 2, DP 3 et les DP 4 se dessinent depuis le **contrat d'entrée** —
+`sortie/{projet}/geometries.gpkg` et `sortie/{projet}/projet.json` — sans savoir
+lequel des deux lots l'a écrit. Le champ `origine` ne sert qu'à deux choses : le
+dire au rapport, et savoir que le Z d'un dossier HelioScope ne décrit pas le
+terrain.
+
+Un contrat absent est un cas normal : le dossier s'arrête alors au plan de
+cadastre et le rapport le dit. Un contrat présent mais refusé — version plus
+récente que ce que l'outil lit, couche `voirie` dont personne n'a tranché le
+type — fait échouer la génération : produire un dossier amputé de ses quatre
+planches principales sans que rien ne l'explique serait pire.
+
+### Deux repères, et un troisième qui n'existe pas
+
+Le plan de masse et les plans de repérage sont **cartographiques** : ils passent
+par la transformation Lambert 93 du lot 1. Les coupes et les dessins d'ouvrages
+ne le sont pas : ils se composent en millimètres de papier, dans un repère local
+(`dp_socle/planches/primitives.py`) qui a sa propre échelle.
+
+Ce repère ne porte **qu'un facteur d'échelle pour ses deux axes**. Ce n'est pas
+une consigne, c'est la structure : il n'y a pas moyen d'écrire une exagération
+verticale. L'aperçu de contrôle du lot 2bis en applique une, avec raison — 0,96 m
+de dénivelée sur 355 m y serait invisible — mais une planche qui déclare une
+échelle à son cartouche ne le peut pas. Si le terrain est plat, la coupe est
+plate, et c'est ce qu'elle doit dire.
+
+Le moteur `Planche` n'a pas été modifié. Il ne trace, en millimètres, que des
+lignes et des rectangles ; la silhouette humaine et les triangles des repères de
+coupe sont **remplis par balayage**, en traits jointifs. La voie évidente —
+déclarer la forme en `<pattern>` et la peindre par un rectangle, comme le fait la
+hachure des bâtiments de DP 1-3 — a été essayée et écartée le 04/09/2026 : cairo
+pixellise les motifs, et une silhouette de 35 mm en ressortait floue sur un
+aperçu à 600 dpi. Un aplat de 20 mm passait, un de 3 mm était illisible : c'est
+la taille du carreau qui décidait.
+
+### Échelles adaptatives
+
+Aucune échelle n'est figée. Le pas inter-rangées de Saint-Cyr est de 9,5 m contre
+3 m aux Islettes, et la coupe de Saint-Cyr fait 355 m : au 1/300 elle mesurerait
+1,18 m. Chaque dessin retient la **plus grande échelle** d'une liste normalisée
+qui fasse tenir son contenu utile, et l'inscrit — au cartouche pour le dessin
+principal, en clair à côté de lui pour les autres.
+
+| Dessin | Liste | Contenu à faire tenir |
+|---|---|---|
+| Plan de masse | 1/500 à 1/5 000 | l'emprise cadastrale + 10 % |
+| Coupe des tables | 1/50 à 1/200 | deux rangées complètes et leurs cotes |
+| Coupe du terrain | 1/200 à 1/1 000 | la longueur de la coupe |
+| Ouvrages DP 4 | 1/50, 1/100, 1/200 | le plus grand ouvrage de la planche |
+| Plan de repérage DP 4 | 1/200 à 1/1 000, **prolongée** | l'emprise clôturée |
+
+La dernière ligne est un écart au cadrage retenu, et il est mesuré. L'emprise
+clôturée de Sarnois fait 327 x 264 m, soit 327 x 264 mm au 1/1 000, quand la zone
+de dessin d'un A3 entier en mesure 410 x 268 : le plan de repérage remplirait la
+planche à lui seul, et il ne resterait rien pour les dessins d'ouvrages que la
+même planche doit porter. Aucune des quatre échelles prévues ne tient dans un
+demi-A3 pour un site de 5 ha, qui est la taille courante de nos projets. La liste
+est donc prolongée jusqu'au 1/5 000, et **tout dépassement est écrit au rapport**.
+
+Les marges de mise en page sont serrées à dessein. Les échelles vont du simple au
+double : trois millimètres de trop sur une planche DP 4 faisaient passer tous ses
+ouvrages du 1/100 au 1/200, où le passage à petite faune de la clôture mesurait
+moins d'un millimètre.
+
+### DP 2 — Plan de masse
+
+Cadré sur l'**emprise cadastrale plus 10 %**, et non sur la clôture : le plan
+doit montrer le contexte parcellaire alentour, comme celui du dossier de
+référence. Une planche cadrée sur la seule clôture donnerait un projet posé dans
+le vide.
+
+Parcellaire et bâtiments viennent du WFS IGN, jamais du DXF ; les numéros de
+parcelle reprennent la mécanique de DP 1-3, seuil de lisibilité compris. Pas de
+fond raster : le plan de masse de référence est sur fond blanc, et une ortho
+écraserait la lecture des ouvrages — c'est DP 1-2 qui porte la photo aérienne.
+
+Un objet du plan qui tombe hors du cadre est **signalé**. Le contenu
+cartographique est découpé sur la zone de dessin : il disparaîtrait sans rien
+dire, et c'est le genre d'absence que personne ne rattrape à la relecture.
+
+### DP 3 — Deux coupes, deux échelles, deux sources de hauteur
+
+Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
+échelle : il porte celle de la coupe des tables, et la coupe du terrain porte la
+sienne en clair.
+
+Les deux ne lisent pas les mêmes hauteurs, et c'est délibéré :
+
+- la **coupe des tables** est un dessin de type. Elle prend `point_bas_m` et
+  `point_haut_m` du tableau bilan, qui sont ce qu'annoncera la notice DP 11 —
+  une planche qui contredit sa propre notice est une faiblesse à l'instruction ;
+- la **coupe du terrain** est une coupe de site. Elle prend le Z du GeoPackage,
+  qui décrit chaque table là où elle est posée. L'écart entre les deux sources
+  n'est pas constant — 2,50 m déclarés contre 1,70 m mesurés à Saint-Cyr, 1,50
+  contre 1,29 à Sarnois — mais à cette échelle 0,80 m fait moins de 3 mm.
+
+Le rampant n'est pas lu mais **déduit** des deux hauteurs et de l'inclinaison :
+`format_module` est une désignation commerciale (« G12R »), pas une dimension. Il
+est ensuite recoupé deux fois, par la longueur de module qu'il implique et par le
+pas déclaré, qui doit valoir l'inter-table plus la projection du rampant.
+
+#### Ce que ce recoupement a montré sur Saint-Cyr
+
+| Source des hauteurs | rampant | par module | pas attendu / déclaré |
+|---|---|---|---|
+| `structures` : 2,50 et 4,00 m | 5,80 m | **2,90 m** | 10,50 / 9,50 m |
+| `standards_unite` : 1,10 et 2,34 m | 4,79 m | 2,39 m | 9,53 / 9,50 m |
+
+Un module G12R mesure 2,384 m. La seconde ligne referme la géométrie à 3 cm
+près ; la première donne un module de 2,90 m et manque le pas d'un mètre.
+
+Les deux hauteurs déclarées ne décrivent donc **pas une table** : ce sont des
+bornes d'enveloppe sur tout le site, comme le dit le PDF de profil du bureau
+d'études avec ses « 2.5m min » et « 4m max ». Le dessin reste aux valeurs
+déclarées, que la notice reprendra, et le rapport dit d'où vient l'écart au lieu
+de laisser le chercher. C'est une chose à reprendre avec le bureau d'études, pas
+un défaut du dessin.
+
+#### Ce qu'un dossier HelioScope ne porte pas
+
+Un export HelioScope ne décrit **aucune garde au sol** : son DXF est plat et le
+tableau bilan n'existe pas. Chaque paramètre est donc cherché là où il peut se
+trouver — l'inclinaison et le pas se mesurent sur le calepinage — et les deux
+hauteurs retombent sur le standard UNITe. Tout recours à autre chose que la
+source principale est écrit au rapport : ce n'est pas la même chose de lire une
+inclinaison au tableau bilan du projet et de la mesurer sur un calepinage.
+
+De même, quand le Z des tables ne porte pas d'altitude de terrain, les tables de
+la coupe du terrain sont posées sur le profil RGE ALTI en leur appliquant les
+hauteurs déclarées. C'est le seul comportement possible, mais il se voit.
+
+### DP 4 — Ouvrages techniques
+
+Chaque planche est partagée en deux : le plan de repérage à gauche, les dessins
+d'ouvrages à droite. Un ouvrage absent du projet n'a pas de bloc, et la planche
+se recompose sur ce qui reste ; une planche dont aucun ouvrage n'est au contrat
+n'est pas produite, et le rang des suivantes suit.
+
+| Planche | Ouvrages |
+|---|---|
+| DP 4-1 | `pdl_ptr`, `ptr`, `pdl` — plan de toiture, quatre élévations, coupe |
+| DP 4-2 | `cloture`, `portail`, `bache_incendie` |
+| DP 4-3 | `bess`, `local_technique`, `bac_retention`, `citerne_refroidissement`, `aire_aspiration` |
+
+Seuls les postes reçoivent le traitement complet du dossier de référence : ce
+sont les seuls ouvrages bâtis du site. Les autres sont des équipements posés, que
+deux vues et un bloc de caractéristiques décrivent entièrement. Mesuré sur
+Sarnois le 04/09/2026 : à sept vues par ouvrage, les cinq équipements de sa
+DP 4-3 faisaient 21 vues qui ne tenaient pas sur la planche, même au 1/200.
+
+Un ouvrage sans hauteur se dessine en plan et rien de plus : l'aire d'aspiration
+du SDIS est une aire de stationnement, le tableau bilan ne lui donne que
+« 8 x 4 m », et la dessiner en élévation demanderait une cote qu'elle n'a pas.
+
+**Les lignes de rappel du dossier de référence ne sont pas reprises.** Placer
+automatiquement des libellés sans chevauchement est un problème de mise en page
+non résolu, et un libellé mal posé sur une planche déposée coûte plus cher que le
+confort qu'il apporte. Le bloc de légende standard porte la même information.
+
+#### Ce que le contrat ne porte pas
+
+La **hauteur de clôture et de portail** n'est nulle part : le tableau bilan donne
+le linéaire, le nombre de portails et leur largeur, jamais une hauteur. Les
+élévations sont dessinées à la valeur standard UNITe de 2,00 m, et chaque planche
+qui l'emploie le dit au rapport. C'est un manque du contrat, à combler des deux
+côtés à la fois — donc une décision, pas un correctif de ce lot.
+
+### La légende se construit depuis ce qui a été dessiné
+
+Le contrat porte 35 catégories, la légende de la planche de référence en compte
+10. L'écart ne se tranche pas une fois pour toutes : il se résout à chaque projet.
+
+Une catégorie sans objet dessiné n'y figure pas. Deux catégories partageant le
+même intitulé n'y font qu'une entrée — le dédoublonnage se fait sur l'intitulé,
+pas sur la catégorie : `piste_lourde` et `aire_grutage` sont toutes deux « Voie
+lourde », `tables_pv` et `modules_pv` sont le même ouvrage à deux niveaux de
+détail. L'ordre est celui du rang de dessin du contrat, pour que la légende se
+relise dans l'ordre du plan.
+
+Quatre catégories sont exclues d'office, même présentes : la base vie et le
+stockage de chantier, qui sont temporaires et que le dossier de référence ne
+montre pas ; la zone d'implantation et le recul, qui sont des contours d'étude —
+seule la clôture délimite le projet à l'instruction. Deux entrées viennent
+d'ailleurs que du contrat et y figurent comme chez HOCH : « Limite de parcelle »
+et « Bâtiment », tirées du WFS IGN. La seconde n'apparaît que s'il tombe un
+bâtiment dans le cadre : la requête déborde d'un tampon pour tracer les limites
+jusqu'au bord, et en tirer une entrée ferait annoncer un objet que la planche ne
+montre pas.
+
+Mesuré sur les deux indices de Sarnois, qui sont deux variantes d'un même
+projet : l'indice A porte un poste de livraison/transformation, l'indice B un
+poste de transformation, une citerne incendie et une zone de contention. Leurs
+légendes comptent 18 et 20 entrées, et diffèrent exactement de ces ouvrages.
+
+### La palette : les relevées font foi, les dérivées se mesurent
+
+`dp_socle/planches/palette.py`, à ne pas confondre avec `apercu_be.STYLES` qui est
+la palette de l'image de contrôle à l'écran. Les deux n'ont pas les mêmes
+contraintes : à l'écran on zoome, sur une épreuve A3 un poste de 12 x 3 m au
+1/1 000 fait 12 x 3 mm.
+
+Les douze teintes relevées au pixel sur la planche DP 2 du dossier HOCH sont
+reprises telles quelles : c'est le document que l'instructeur a l'habitude de
+voir. Deux d'entre elles se confondent — la plateforme et la piste légère
+partagent le gris 215 — et c'est un fait du document de référence, pas une
+décision de ce lot ; le filet les distingue, et la légende porte deux entrées.
+
+Les dérivées, elles, sont refaites sur un critère mesuré :
+`tests/test_palette_dp.py` vérifie que deux catégories pouvant se retrouver sur la
+même planche restent séparées d'au moins 12 unités ΔE (CIE76). Trois d'entre
+elles se confondaient avec une teinte relevée et ont été déplacées : la zone
+évitée, l'aire d'aspiration et le local technique, à qui le contrat donnait le
+vert du poste de livraison alors que les deux se côtoient sur le même plan.
+
+**Réserve.** La convention UNITe des annexes de demande d'examen au cas par cas —
+BESS, bac de rétention, local technique — n'a pas pu être consultée : ces annexes
+ne sont pas dans le dépôt. L'orangé du BESS, seul indice disponible, vient du
+contrat et est conservé ; les deux autres sont construites sur le seul critère
+mesurable ici. À reprendre sur pièce.
+
+### `voirie` bloque, elle ne se devine pas
+
+La catégorie `voirie` existe parce qu'un calque du bureau d'études ne disait pas
+si la piste était lourde ou légère, alors que le tableau bilan sépare les deux et
+que la légende du dossier les distingue. Une couche `voirie` peuplée **refuse** de
+dessiner tant que le chef de projet n'a pas tranché, par un bouton radio sans
+valeur par défaut. La décision se conserve dans le `projet.json` du lot 1, le
+format pivot, pour qu'une régénération ne la redemande pas.
+
 ## Hors périmètre de ces lots
 
-DP 2 / DP 3 / DP 4 (lot 4), notice DP 11 (lot 5). L'import HelioScope et le
-calage géographique (lot 2) restent en réserve pour les projets sans plan BE ;
-la saisie manuelle des éléments techniques (lot 3) est remplacée par le lot 2bis.
+La notice DP 11 (lot 5). Les insertions paysagères DP 6, DP 7 et DP 8 sont
+fournies en PDF et simplement assemblées. L'import HelioScope et le calage
+géographique (lot 2) restent en réserve pour les projets sans plan BE ; la saisie
+manuelle des éléments techniques (lot 3) est remplacée par le lot 2bis.

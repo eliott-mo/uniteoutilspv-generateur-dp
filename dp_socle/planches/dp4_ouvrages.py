@@ -49,6 +49,11 @@ from .primitives import (
     union_valide,
 )
 
+#: Ouvrages qui reçoivent le traitement complet du dossier de référence :
+#: plan de toiture, quatre élévations et une coupe. Ce sont les seuls bâtis
+#: du site, et les seuls dont le volume compte à l'instruction.
+POSTES = ("pdl_ptr", "ptr", "pdl")
+
 #: Répartition des ouvrages sur les planches, décidée au brief. La troisième
 #: n'existe que si le projet porte les ouvrages qu'elle loge.
 REPARTITION = {
@@ -126,6 +131,15 @@ MESSAGE_HAUTEURS_STANDARD = (
 )
 
 LARGEUR_LEGENDE_MM = 62.0
+
+#: Largeur qu'il faut laisser libre à droite de la dernière ligne de vues pour
+#: y écrire les caractéristiques d'un ouvrage plutôt que sous le dessin.
+#:
+#: C'est la disposition du dossier de référence, et elle rend la planche
+#: possible : mesuré sur Sarnois le 04/09/2026, les cinq blocs de sa DP 4-3
+#: prenaient 87 mm rien qu'en caractéristiques posées sous les vues, et la
+#: planche débordait de 40 mm.
+LARGEUR_CARACTERISTIQUES_MM = 52.0
 
 
 # ---------------------------------------------------------------------------
@@ -296,15 +310,42 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
             x, curseur_y + 3.0, bloc.titre, taille=7.5 * PT, gras=True
         )
         curseur_y += HAUTEUR_TITRE_BLOC_MM
+        haut_vues = curseur_y
         curseur_y = _disposer_vues(
             planche, bloc, denominateur, x, curseur_y, largeur
         )
         if bloc.caracteristiques:
-            curseur_y = _bloc_caracteristiques(
-                planche, bloc.caracteristiques, x, curseur_y
-            )
+            lignes = _lignes_de_vues(bloc, denominateur, largeur)
+            if _place_pour_caracteristiques(bloc, lignes, denominateur, largeur):
+                prise = sum(
+                    v.largeur_m * 1000.0 / denominateur
+                    + MARGE_VUE_MM
+                    + ESPACEMENT_VUES_MM
+                    for v in lignes[-1]
+                )
+                _bloc_caracteristiques(
+                    planche,
+                    bloc.caracteristiques,
+                    x + prise,
+                    curseur_y - _hauteur_derniere_ligne(lignes, denominateur) - 2.0,
+                )
+            else:
+                curseur_y = _bloc_caracteristiques(
+                    planche, bloc.caracteristiques, x, curseur_y
+                )
         curseur_y += ESPACEMENT_VUES_MM
     return denominateur
+
+
+def _place_pour_caracteristiques(bloc, lignes, denominateur, largeur_mm) -> bool:
+    """Reste-t-il de quoi écrire les caractéristiques à droite des vues ?"""
+    if not bloc.caracteristiques or not lignes:
+        return False
+    prise = sum(
+        vue.largeur_m * 1000.0 / denominateur + MARGE_VUE_MM + ESPACEMENT_VUES_MM
+        for vue in lignes[-1]
+    )
+    return largeur_mm - prise >= LARGEUR_CARACTERISTIQUES_MM
 
 
 def _lignes_de_vues(bloc: BlocOuvrage, denominateur: int, largeur_mm: float) -> list:
@@ -327,12 +368,15 @@ def _hauteur_disposition(blocs, denominateur: int, largeur_mm: float) -> float:
     total = 0.0
     for bloc in blocs:
         total += HAUTEUR_TITRE_BLOC_MM
-        for ligne in _lignes_de_vues(bloc, denominateur, largeur_mm):
+        lignes = _lignes_de_vues(bloc, denominateur, largeur_mm)
+        for ligne in lignes:
             hauteur_ligne = max(
                 v.hauteur_m * 1000.0 / denominateur for v in ligne
             )
             total += hauteur_ligne + MARGE_VUE_MM + HAUTEUR_TITRE_VUE_MM
-        if bloc.caracteristiques:
+        if bloc.caracteristiques and not _place_pour_caracteristiques(
+            bloc, lignes, denominateur, largeur_mm
+        ):
             total += 3.0 + 3.6 * len(bloc.caracteristiques)
         total += ESPACEMENT_VUES_MM
     return total
@@ -364,6 +408,10 @@ def _disposer_vues(planche, bloc, denominateur, x, y, largeur_mm) -> float:
             curseur_x += largeur_vue + MARGE_VUE_MM + ESPACEMENT_VUES_MM
         curseur_y += hauteur_ligne + MARGE_VUE_MM + HAUTEUR_TITRE_VUE_MM
     return curseur_y
+
+
+def _hauteur_derniere_ligne(lignes, denominateur: int) -> float:
+    return max(v.hauteur_m * 1000.0 / denominateur for v in lignes[-1])
 
 
 def _bloc_caracteristiques(planche, lignes, x, y) -> float:
@@ -499,9 +547,24 @@ def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> Blo
 
     surface = _surface_au_sol(contrat, categorie)
     cote = contrat.cote_de_categorie(categorie, surface_m2=surface)
-    if categorie in ("bache_incendie", "citerne_refroidissement"):
-        return _bloc_citerne(cote, STYLES[categorie].libelle)
-    return _bloc_volume(cote, STYLES[categorie].libelle, categorie)
+    if not cote.a_hauteur:
+        # Une aire d'aspiration est une surface, pas un volume : le tableau
+        # bilan lui donne « 8 x 4 m », en longueur x largeur, et rien d'autre.
+        # La dessiner en élévation demanderait une hauteur qu'elle n'a pas ;
+        # elle se dessine en plan, ce qui la décrit entièrement.
+        return _bloc_surface(cote, STYLES[categorie].libelle, categorie)
+    if categorie in POSTES:
+        return _bloc_volume(cote, STYLES[categorie].libelle, categorie)
+    # Tout le reste — citernes, conteneurs BESS, bacs, local technique — est
+    # un équipement posé, pas un bâtiment : deux vues et ses caractéristiques
+    # le décrivent entièrement.
+    #
+    # Le traitement complet du poste, sept vues, n'y est ni utile ni tenable :
+    # mesuré sur Sarnois le 04/09/2026, les six équipements de sa DP 4-3
+    # faisaient 21 vues qui ne tenaient pas sur la planche, même au 1:200. Le
+    # dossier de référence lui-même ne détaille que le poste, qui est le seul
+    # ouvrage bâti visible du site.
+    return _bloc_equipement(cote, STYLES[categorie].libelle, categorie)
 
 
 def _surface_au_sol(contrat: Contrat, categorie: str) -> float | None:
@@ -583,12 +646,43 @@ def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
     )
 
 
-def _bloc_citerne(cote, libelle: str) -> BlocOuvrage:
-    """Citerne : vue de dessus, vue de face, et ses caractéristiques en clair."""
+def _bloc_surface(cote, libelle: str, categorie: str) -> BlocOuvrage:
+    """Un ouvrage plan : une vue de dessus cotée, et rien de plus.
+
+    L'aire d'aspiration du SDIS est une aire de stationnement pour l'engin
+    pompe : elle n'a pas d'élévation, et le tableau bilan ne lui donne que
+    deux dimensions.
+    """
+    longueur = cote.longueur_m
+    largeur = cote.largeur_m
+    style = _style_ouvrage(categorie)
+
+    def dessus(dessin: Dessin) -> None:
+        dessin.rectangle(0.0, 0.0, longueur, largeur, style)
+        _coter_rectangle(dessin, longueur, largeur)
+
+    return BlocOuvrage(
+        titre=f"{libelle} — {cote.dimensions}",
+        vues=[Vue("Vue en plan", longueur, largeur, dessus)],
+        caracteristiques=[
+            f"Aire de {nombre_fr(longueur)} x {nombre_fr(largeur)} m, "
+            "sans ouvrage en élévation.",
+        ],
+    )
+
+
+def _bloc_equipement(cote, libelle: str, categorie: str) -> BlocOuvrage:
+    """Équipement posé : vue de dessus, vue de face, caractéristiques en clair.
+
+    C'est la présentation de la citerne du dossier de référence, étendue à
+    tous les équipements : un conteneur BESS, un bac de rétention ou un local
+    technique se décrivent par leur emprise, leur hauteur hors sol et leurs
+    deux vues.
+    """
     longueur = cote.longueur_m
     largeur = cote.largeur_m
     hauteur = cote.hauteur_m
-    style = _style_ouvrage("bache_incendie")
+    style = _style_ouvrage(categorie)
 
     def dessus(dessin: Dessin) -> None:
         dessin.rectangle(0.0, 0.0, longueur, largeur, style)
@@ -600,19 +694,25 @@ def _bloc_citerne(cote, libelle: str) -> BlocOuvrage:
         dessin.rectangle(0.0, 0.0, longueur, hauteur, style)
         _coter_rectangle(dessin, longueur, hauteur)
 
-    volume = cote.ouvrage.rsplit("—", 1)[-1].strip()
+    # Le volume d'une citerne incendie est écrit à la fin de son libellé de
+    # catalogue (« Citerne incendie — 120 ») ; les autres équipements n'en ont
+    # pas, et c'est leur désignation qui les identifie.
+    fin_du_libelle = cote.ouvrage.rsplit("—", 1)[-1].strip()
+    caracteristiques = [
+        f"Volume : {fin_du_libelle} m³"
+        if fin_du_libelle.isdigit()
+        else f"Type : {cote.ouvrage}",
+        f"Hauteur hors sol : {nombre_fr(hauteur)} m",
+        f"Longueur : {nombre_fr(longueur)} m",
+        f"Largeur : {nombre_fr(largeur)} m",
+    ]
     return BlocOuvrage(
         titre=f"{libelle} — {cote.dimensions}",
         vues=[
             Vue("Vue de dessus", longueur, largeur, dessus),
             Vue("Vue de face", longueur, max(hauteur, 1.0), face),
         ],
-        caracteristiques=[
-            f"Volume : {volume} m³" if volume.isdigit() else f"Type : {cote.ouvrage}",
-            f"Hauteur hors sol : {nombre_fr(hauteur)} m",
-            f"Longueur : {nombre_fr(longueur)} m",
-            f"Largeur : {nombre_fr(largeur)} m",
-        ],
+        caracteristiques=caracteristiques,
     )
 
 
