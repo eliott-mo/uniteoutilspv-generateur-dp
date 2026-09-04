@@ -35,6 +35,7 @@ from ..planche import GRIS, PT, Planche, Style, nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .legende import dessiner_legende, hauteur_bloc
+from .modules import tracer_trame, trame_du_projet
 from .palette import STYLES, construire_legende, objets_a_dessiner
 from .standards import (
     ESPACEMENT_POTEAUX_M,
@@ -479,6 +480,67 @@ def _zone_reperee(contrat: Contrat, categories, emprise):
     return box(minx - marge, miny - marge, maxx + marge, maxy + marge), True
 
 
+def _tracer_tables(planche, contrat, tables, fenetre, avertissements) -> None:
+    """Trame des modules sur les tables du plan de repérage.
+
+    Même reconstruction que sur le plan de masse : le plan du bureau d'études
+    ne descend pas au module, la trame vient du tableau bilan.
+    """
+    from ..erreurs import ErreurDP
+    from .dp3_coupes import geometrie_table
+
+    try:
+        table, _ = geometrie_table(contrat)
+        rampant = table.rampant_m
+    except ErreurDP:
+        rampant = None
+    visibles = [g for g in tables if fenetre.intersects(g)]
+    trame, _raison = trame_du_projet(contrat, contrat.geometries("tables_pv"), rampant)
+    if trame is None:
+        return
+    tracer_trame(
+        planche, visibles, trame, STYLES["tables_pv"].style,
+        planche.transformation.mm_par_metre, fenetre=fenetre,
+    )
+
+
+def _tracer_decoupe(planche, geometrie, style, fenetre) -> bool:
+    """Trace une géométrie recoupée sur la fenêtre, sans refermer son contour.
+
+    Découper un polygone sur la fenêtre le **referme le long du bord** : la
+    clôture d'un site plus grand que le zoom y gagnait un trait rouge droit au
+    ras du cadre, qui se lisait comme une limite de projet alors que ce n'est
+    que le bord du dessin.
+
+    Le remplissage et le filet sont donc tracés séparément : la surface est
+    bien coupée à la fenêtre — il faut bien qu'elle s'arrête — mais le filet ne
+    suit que le contour réel de l'objet, recoupé lui aussi. Ce qui longe le
+    bord du cadre n'est plus dessiné du tout.
+    """
+    tracee = False
+    remplissage = style.remplissage
+    if remplissage and remplissage != "none":
+        surface = geometrie.intersection(fenetre)
+        if not surface.is_empty:
+            planche.ajouter_geometrie(
+                surface,
+                Style(trait=None, epaisseur_mm=0.0, remplissage=remplissage,
+                      opacite_remplissage=style.opacite_remplissage),
+            )
+            tracee = True
+
+    contour = geometrie.boundary if geometrie.geom_type != "LineString" else geometrie
+    visible = contour.intersection(fenetre)
+    if not visible.is_empty:
+        planche.ajouter_geometrie(
+            visible,
+            Style(trait=style.trait, epaisseur_mm=style.epaisseur_mm,
+                  remplissage="none", tirets=style.tirets),
+        )
+        tracee = True
+    return tracee
+
+
 def _categories_visibles(contrat: Contrat, cadre, avertissements) -> list:
     """Catégories qui tombent dans le cadre du plan de repérage.
 
@@ -514,32 +576,53 @@ def _plan_de_reperage(
         ]
 
     cadre, resserre = _zone_reperee(contrat, categories, emprise)
-    # La légende est construite sur le cadre demandé ; elle sera reprise sur la
-    # fenêtre réellement affichée une fois l'échelle connue.
-    entrees = construire_legende(
-        [c for c, _ in _categories_visibles(contrat, cadre, avertissements)]
-    )
-    hauteur_legende = hauteur_bloc(len(entrees))
-
     minx, miny, maxx, maxy = cadre.bounds
     largeur_m = max(maxx - minx, 1.0)
     hauteur_m = max(maxy - miny, 1.0)
+    centre_cadre = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
 
-    hauteur_plan = panneau_h - HAUTEUR_ENTETE_MM - hauteur_legende - 3.0
-    if hauteur_plan <= 20.0:
-        raise ErreurComposition(
-            f"Plan de repérage DP 4 : la légende occupe {hauteur_legende:.0f} mm "
-            f"du panneau de {panneau_h:.0f} mm et il ne reste plus de place "
-            "pour le plan."
+    # La place de la légende et l'échelle du plan se commandent l'une l'autre :
+    # une légende plus haute laisse moins de place au plan, donc une échelle
+    # plus petite, donc une fenêtre plus large, donc peut-être plus de
+    # catégories à porter en légende. Deux passes suffisent à converger, et on
+    # retient la hauteur la plus grande rencontrée : elle ne peut alors plus
+    # être dépassée au tracé.
+    #
+    # Sans cette reprise, la légende était calée sur le cadre du zoom mais
+    # dessinée sur la fenêtre du panneau, plus large : elle gagnait des entrées
+    # et débordait sur le cartouche.
+    hauteur_legende = hauteur_bloc(1)
+    denominateur = None
+    fenetre = None
+    visibles = []
+    for _ in range(3):
+        hauteur_plan = panneau_h - HAUTEUR_ENTETE_MM - hauteur_legende - 3.0
+        if hauteur_plan <= 20.0:
+            raise ErreurComposition(
+                f"Plan de repérage DP 4 : la légende occupe "
+                f"{hauteur_legende:.0f} mm du panneau de {panneau_h:.0f} mm et "
+                "il ne reste plus de place pour le plan."
+            )
+        denominateur = echelle_du_dessin(
+            largeur_m,
+            hauteur_m,
+            (panneau_x, panneau_y + HAUTEUR_ENTETE_MM, panneau_l, hauteur_plan),
+            ECHELLES_REPERAGE,
+            marge=0.02,
+            libelle="plan de repérage DP 4",
         )
-    denominateur = echelle_du_dessin(
-        largeur_m,
-        hauteur_m,
-        (panneau_x, panneau_y + HAUTEUR_ENTETE_MM, panneau_l, hauteur_plan),
-        ECHELLES_REPERAGE,
-        marge=0.02,
-        libelle="plan de repérage DP 4",
-    )
+        facteur = denominateur / 1000.0
+        fenetre = box(
+            centre_cadre[0] - panneau_l * facteur / 2.0,
+            centre_cadre[1] - hauteur_plan * facteur / 2.0,
+            centre_cadre[0] + panneau_l * facteur / 2.0,
+            centre_cadre[1] + hauteur_plan * facteur / 2.0,
+        )
+        visibles = _categories_visibles(contrat, fenetre, avertissements)
+        besoin = hauteur_bloc(len(construire_legende([c for c, _ in visibles])))
+        if besoin <= hauteur_legende:
+            break
+        hauteur_legende = besoin
     if denominateur not in ECHELLES_REPERAGE_BRIEF:
         avertissements.append(
             f"Plan de repérage DP 4 dessiné au 1:{denominateur}, hors de la "
@@ -555,9 +638,6 @@ def _plan_de_reperage(
         panneau_x + panneau_l / 2.0,
         panneau_y + HAUTEUR_ENTETE_MM + hauteur_plan / 2.0,
     )
-    facteur = denominateur / 1000.0
-    centre_cadre = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
-
     planche.centrer_sur(
         (
             centre_cadre[0] + (centre_zone_mm[0] - centre_plan_mm[0]) * facteur,
@@ -572,36 +652,26 @@ def _plan_de_reperage(
 
     # Le contenu cartographique n'est découpé que sur la zone de dessin
     # entière : sans découpe, la clôture d'un site de 5 ha traversait le
-    # panneau des ouvrages et passait par-dessus la légende. La fenêtre du
-    # panneau est donc calculée en Lambert 93, et chaque géométrie y est
-    # recoupée avant d'être tracée.
-    fenetre = box(
-        centre_cadre[0] - panneau_l * facteur / 2.0,
-        centre_cadre[1] - hauteur_plan * facteur / 2.0,
-        centre_cadre[0] + panneau_l * facteur / 2.0,
-        centre_cadre[1] + hauteur_plan * facteur / 2.0,
-    )
-    tracees = []
-    for categorie, geometries in _categories_visibles(
-        contrat, fenetre, avertissements
-    ):
+    # panneau des ouvrages et passait par-dessus la légende.
+    for categorie, geometries in visibles:
         style = STYLES[categorie].style
-        dessine = False
         for geometrie in geometries:
-            visible = geometrie.intersection(fenetre)
-            if visible.is_empty:
-                continue
-            planche.ajouter_geometrie(visible, style)
-            dessine = True
-        if dessine:
-            tracees.append(categorie)
+            # Le remplissage d'abord, la trame ensuite : dessinée avant, elle
+            # disparaissait sous l'aplat de la table.
+            _tracer_decoupe(planche, geometrie, style, fenetre)
+        if categorie == "tables_pv":
+            _tracer_tables(planche, contrat, geometries, fenetre, avertissements)
 
     # Le bloc de légende, et non des lignes de rappel : voir l'en-tête du
     # module. Il ne porte que ce que la fenêtre montre.
+    entrees = construire_legende([c for c, _ in visibles])
     dessiner_legende(
         planche,
-        construire_legende(tracees),
-        position=(panneau_x, panneau_y + panneau_h - hauteur_legende - 1.0),
+        entrees,
+        position=(
+            panneau_x,
+            panneau_y + panneau_h - hauteur_bloc(len(entrees)) - 1.0,
+        ),
         largeur_mm=panneau_l,
     )
     return denominateur, avertissements

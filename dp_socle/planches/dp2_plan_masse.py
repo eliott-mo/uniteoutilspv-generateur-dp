@@ -19,7 +19,7 @@ from shapely.geometry import box
 from ..contrat import Contrat
 from ..dossier import piece
 from ..echelle import echelle_adaptative
-from ..erreurs import ErreurComposition, ErreurService
+from ..erreurs import ErreurComposition, ErreurDP, ErreurService
 from ..geometrie import Emprise
 from ..ign import telecharger_batiments, telecharger_parcelles
 from ..planche import (
@@ -29,11 +29,13 @@ from ..planche import (
     STYLE_PARCELLE,
     TAILLE_ETIQUETTE,
     Planche,
+    nombre_fr,
 )
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
-from .legende import dessiner_legende, hauteur_bloc
+from .legende import dessiner_legende
+from .modules import tracer_trame, trame_du_projet
 from .palette import STYLES, construire_legende, objets_a_dessiner
 from .primitives import TRAIT_AXE, repere_coupe
 
@@ -111,6 +113,7 @@ def generer(
             "serait vide. Vérifiez l'appariement des calques à l'import."
         )
     hors_cadre = []
+    tables_visibles = []
     for categorie, geometries in objets:
         style = STYLES[categorie].style
         for geometrie in geometries:
@@ -118,6 +121,15 @@ def generer(
                 hors_cadre.append(categorie)
                 continue
             planche.ajouter_geometrie(geometrie, style)
+            if categorie == "tables_pv":
+                tables_visibles.append(geometrie)
+
+    # La trame des modules, par-dessus le contour des rangées : c'est elle qui
+    # fait lire une table comme un panneau plutôt que comme une dalle, et c'est
+    # ce que porte le plan de masse du dossier de référence.
+    avertissements.extend(
+        _tramer_les_tables(planche, contrat, tables_visibles)
+    )
     if hors_cadre:
         # Le contenu cartographique est découpé sur la zone de dessin : un objet
         # hors cadre disparaîtrait sans rien dire, et c'est exactement le genre
@@ -176,6 +188,45 @@ def generer(
             "avertissements": avertissements,
         },
     )
+
+
+def _tramer_les_tables(planche: Planche, contrat: Contrat, tables) -> list:
+    """Divise chaque table en modules, ou dit pourquoi elle ne l'est pas."""
+    if not tables:
+        return []
+    from .dp3_coupes import geometrie_table
+    from .modules import controler_trame
+
+    try:
+        table, _ = geometrie_table(contrat)
+        rampant = table.rampant_m
+    except ErreurDP:
+        rampant = None
+
+    trame, raison = trame_du_projet(contrat, tables, rampant)
+    if trame is None:
+        return [raison]
+
+    tramees, comptes = tracer_trame(
+        planche, tables, trame, STYLES["tables_pv"].style,
+        planche.transformation.mm_par_metre,
+    )
+    messages = []
+    ecart = controler_trame(contrat.structures, comptes)
+    if ecart:
+        messages.append(ecart)
+    if tramees == 0:
+        messages.append(
+            f"Trame des modules non dessinée : au 1:{planche.echelle}, un "
+            "module ne mesurerait pas un millimètre sur la planche."
+        )
+    elif tramees < len(tables):
+        messages.append(
+            f"Trame des modules dessinée sur {tramees} rangées sur "
+            f"{len(tables)} : les autres ne se divisent pas en un nombre "
+            f"entier de modules de {nombre_fr(trame.largeur_module_m)} m."
+        )
+    return messages
 
 
 def _etiqueter_parcelles(planche: Planche, parcelles, cadre) -> None:

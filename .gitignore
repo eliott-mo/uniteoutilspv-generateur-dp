@@ -25,3 +25,7 @@ exemples/**/*.dwl2
 # référence versionné reste Saint-Cyr, à 1,4 Mo ; les mécanismes qu'ils ont
 # révélés sont couverts par des DXF synthétiques dans les tests.
 exemples/sarnois-*/*.dxf
+
+# Classeur des dimensions standard UNITe : petit, lisible, et cest la
+# reference des cotes des ouvrages. Il reste versionne.
+!exemples/Standards UNITe*.xlsx
