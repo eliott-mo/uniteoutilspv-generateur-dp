@@ -419,13 +419,26 @@ CONTOUR_SILHOUETTE = _contour_silhouette()
 
 def silhouette(dessin: Dessin, x_m: float, y_sol_m: float,
                hauteur_m: float = HAUTEUR_SILHOUETTE_M,
-               couleur: str = "#4a4a4a") -> None:
-    """Silhouette humaine à l'échelle du dessin, posée sur le sol."""
+               couleur: str = "#4a4a4a", pleine: bool = True) -> None:
+    """Silhouette humaine à l'échelle du dessin, posée sur le sol.
+
+    `pleine` à faux ne trace que son contour, comme le fait le dossier de
+    référence sur ses coupes de principe : une silhouette pleine y masquerait
+    la structure de la table derrière elle.
+    """
     points_mm = [
         dessin.point(x_m + x * hauteur_m, y_sol_m + y * hauteur_m)
         for x, y in CONTOUR_SILHOUETTE
     ]
-    forme_pleine(dessin.planche, points_mm, couleur)
+    if pleine:
+        forme_pleine(dessin.planche, points_mm, couleur)
+    else:
+        trait = Style(trait=couleur, epaisseur_mm=0.25, remplissage="none")
+        boucle = points_mm + [points_mm[0]]
+        for depart, arrivee in zip(boucle, boucle[1:]):
+            dessin.planche.ajouter_ligne(
+                depart[0], depart[1], arrivee[0], arrivee[1], trait
+            )
     # La silhouette passe par un motif, invisible au contrôle d'étendue :
     # ses extrémités sont notées pour que le débordement se voie quand même.
     dessin._noter(*points_mm)
@@ -595,3 +608,109 @@ def union_valide(geometries):
     if not valides:
         return None
     return unary_union(valides)
+
+
+# ---------------------------------------------------------------------------
+# Figurés du dessin de coupe
+# ---------------------------------------------------------------------------
+
+#: Profondeur du sol hachuré d'une coupe de principe, en millimètres.
+#:
+#: Le dossier de référence ne pose pas une bande fine sous le terrain : il
+#: hachure une épaisseur franche, qui fait lire le sol comme de la matière et
+#: non comme un trait. Relevé sur la coupe de principe de Massay du 17/04/2025.
+PROFONDEUR_SOL_MM = 16.0
+#: Pas des hachures de ce sol : plus lâche que celui d'une bande fine, sans
+#: quoi l'épaisseur devient un aplat gris.
+PAS_SOL_PROFOND_MM = 2.6
+
+#: Touffe d'herbe : largeur et hauteur en mètres, et espacement.
+#:
+#: L'herbe n'est pas un ornement. Une coupe de principe sans elle se lit comme
+#: une coupe de terrassement ; avec elle, on voit que la centrale est posée sur
+#: une prairie qui reste pâturée, ce qui est l'objet même d'un projet ovin.
+HERBE_HAUTEUR_M = 0.45
+HERBE_LARGEUR_M = 0.55
+HERBE_PAS_M = 1.4
+COULEUR_HERBE = "#8aa04a"
+
+
+def sol_profond(dessin: Dessin, depart_m: float, arrivee_m: float,
+                altitude_m: float = 0.0,
+                profondeur_mm: float = PROFONDEUR_SOL_MM) -> None:
+    """Ligne de terrain sur une épaisseur de sol hachurée.
+
+    À distinguer de `sol_hachure`, qui pose une bande fine sous un profil de
+    terrain réel : ici le sol est un figuré de coupe de principe, et son
+    épaisseur est celle du dessin, pas celle d'une couche.
+    """
+    profondeur = dessin.metres(profondeur_mm)
+    contour = [
+        (depart_m, altitude_m),
+        (arrivee_m, altitude_m),
+        (arrivee_m, altitude_m - profondeur),
+        (depart_m, altitude_m - profondeur),
+    ]
+    hachurer(dessin, contour, pas_mm=PAS_SOL_PROFOND_MM, style=TRAIT_FIN)
+    dessin.ligne((depart_m, altitude_m), (arrivee_m, altitude_m), TRAIT_FORT)
+
+
+def herbe(dessin: Dessin, depart_m: float, arrivee_m: float,
+          altitude_m: float = 0.0, eviter=()) -> None:
+    """Touffes d'herbe le long du sol, sautant les abscisses occupées.
+
+    `eviter` liste des intervalles (début, fin) où ne pas en poser : le pied
+    d'un poteau ou d'un ouvrage ne porte pas d'herbe.
+    """
+    style = Style(trait=COULEUR_HERBE, epaisseur_mm=0.18, remplissage="none")
+    abscisse = depart_m + HERBE_PAS_M / 2.0
+    while abscisse < arrivee_m:
+        if any(debut <= abscisse <= fin for debut, fin in eviter):
+            abscisse += HERBE_PAS_M
+            continue
+        demi = HERBE_LARGEUR_M / 2.0
+        for fraction, hauteur in ((-1.0, 0.62), (-0.45, 0.9), (0.2, 1.0), (0.75, 0.7)):
+            dessin.ligne(
+                (abscisse + fraction * demi, altitude_m),
+                (
+                    abscisse + fraction * demi * 1.9,
+                    altitude_m + HERBE_HAUTEUR_M * hauteur,
+                ),
+                style,
+            )
+        abscisse += HERBE_PAS_M
+
+
+def cote_oblique(dessin: Dessin, depart_m, arrivee_m, texte: str,
+                 decalage_mm: float = 4.0) -> None:
+    """Ligne de cote parallèle à un segment quelconque, texte posé dessus.
+
+    C'est ainsi que le dossier de référence cote la longueur du rampant : le
+    long de la pente, et non par sa projection, qui ne dit pas la même chose.
+    """
+    p1 = dessin.point(*depart_m)
+    p2 = dessin.point(*arrivee_m)
+    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+    norme = math.hypot(dx, dy)
+    if norme == 0:
+        return
+    # Normale, du côté où l'on décale la cote. Le repère papier a son ordonnée
+    # vers le bas : pour poser la cote **au-dessus** d'un rampant qui monte, il
+    # faut la normale (dy, -dx) et non (-dy, dx), qui la mettait sous le plan
+    # des modules, en travers de l'arc d'inclinaison.
+    nx, ny = dy / norme, -dx / norme
+    a = (p1[0] + nx * decalage_mm, p1[1] + ny * decalage_mm)
+    b = (p2[0] + nx * decalage_mm, p2[1] + ny * decalage_mm)
+
+    dessin.planche.ajouter_ligne(a[0], a[1], b[0], b[1], TRAIT_COTE)
+    dessin._noter(a, b)
+    for extremite, origine in ((a, p1), (b, p2)):
+        dessin.planche.ajouter_ligne(
+            origine[0], origine[1], extremite[0], extremite[1], TRAIT_COTE
+        )
+    milieu = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+    dessin.planche.ajouter_texte(
+        milieu[0] + nx * 1.6, milieu[1] + ny * 1.6 + TAILLE_COTE * 0.35,
+        texte, taille=TAILLE_COTE, ancre="middle",
+    )
+    dessin._noter((milieu[0], milieu[1] + ny * 3.0))

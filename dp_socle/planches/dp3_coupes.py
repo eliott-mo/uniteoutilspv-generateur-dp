@@ -50,12 +50,15 @@ from .primitives import (
     Dessin,
     attache,
     cote_horizontale,
+    cote_oblique,
     cote_verticale,
     echelle_du_dessin,
+    herbe,
     mention_echelle,
     repere_coupe,
     silhouette,
     sol_hachure,
+    sol_profond,
 )
 
 NUMERO = "DP 3"
@@ -117,14 +120,19 @@ TOLERANCE_PAS_M = 0.5
 #: Exprimées en mètres, ces marges enflaient avec l'échelle et la coupe des
 #: tables au 1/80 sortait de son cadre de 16 mm.
 MARGE_COTE_LATERALE_MM = 15.0
-MARGE_COTES_BASSES_MM = 18.0
-MARGE_HAUT_MM = 4.0
+#: Sous la ligne de sol il n'y a plus que le sol hachuré, dont l'épaisseur est
+#: un figuré ; au-dessus des tables, les deux lignes de cote horizontales.
+MARGE_COTES_BASSES_MM = 19.0
+MARGE_HAUT_MM = 17.0
 
-#: Retrait des lignes de cote sous la ligne de sol, en millimètres de papier.
-#: La première dégage la bande hachurée de 3 mm, dans laquelle la cote
-#: d'inter-table venait sinon s'écrire.
-RETRAIT_INTER_TABLE_MM = 7.5
-RETRAIT_PAS_MM = 13.5
+#: Hauteur des lignes de cote **au-dessus** du point haut des tables, en
+#: millimètres de papier.
+#:
+#: Le dossier de référence cote le pas et l'inter-table au-dessus du dessin.
+#: Posées sous la ligne de sol, elles traversaient l'épaisseur hachurée du
+#: terrain et devenaient illisibles.
+HAUTEUR_INTER_TABLE_MM = 6.0
+HAUTEUR_PAS_MM = 12.0
 #: Écart d'une cote verticale au bord du dessin qu'elle cote.
 ECART_COTE_VERTICALE_MM = 3.0
 
@@ -141,6 +149,20 @@ MARGE_REPERES_MM = 24.0
 #: est réservée, ils se lisent tous.
 RETRAIT_BANDEAU_MM = 7.0
 HAUTEUR_BANDEAU_MM = 5.0
+
+#: Figuré d'une table en coupe de principe, en mètres.
+#:
+#: Relevé sur la coupe de principe de Massay du 17/04/2025 : le plan des
+#: modules y est une **bande** — verre et cadre — portée par deux poteaux
+#: reliés d'une jambe de force, et non un simple trait sur deux piquets. C'est
+#: cette structure qui fait qu'on reconnaît une table.
+EPAISSEUR_MODULE_M = 0.06
+#: Position des deux poteaux sur le rampant, en fraction depuis le point bas.
+APPUIS_RAMPANT = (0.28, 0.78)
+#: Départ de la jambe de force au sol, en fraction de la projection.
+PIED_JAMBE_DE_FORCE = 0.62
+#: Débord de la panne sous le plan des modules, en mètres.
+DEBORD_PANNE_M = 0.12
 
 #: Épaisseur d'une piste dessinée sur le profil, en millimètres de papier. Une
 #: piste n'a pas d'épaisseur mesurable à cette échelle : c'est un figuré.
@@ -547,40 +569,82 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc) -> tuple:
         cadre_mm=(bloc_x, bloc_y, bloc_l, bloc_h),
     )
 
-    sol_hachure(dessin, [(sol_gauche, 0.0), (sol_droite, 0.0)])
+    sol_profond(dessin, sol_gauche, sol_droite)
 
     style_table = STYLES["tables_pv"].style
     trait_table = type(TRAIT_FORT)(
-        trait=style_table.trait, epaisseur_mm=0.8, remplissage="none"
+        trait=style_table.trait, epaisseur_mm=0.3,
+        remplissage=style_table.remplissage,
     )
+    pieds = []
     for index in range(nb_rangees):
         x_bas = index * table.pas_m
         _tracer_table(dessin, table, x_bas, trait_table)
+        pieds.append((x_bas - 0.3, x_bas + table.projection_m + 0.3))
+
+    # L'herbe court sous les tables : c'est une prairie qui reste pâturée, et
+    # une coupe sans elle se lit comme un terrassement.
+    herbe(dessin, sol_gauche, sol_droite, eviter=[])
 
     _coter_table(dessin, table, nb_rangees)
 
     # La silhouette donne l'échelle d'un coup d'œil, ce qu'aucune cote ne fait
     # aussi vite. Elle est posée dans l'inter-rangée, où elle ne masque rien.
     if nb_rangees >= 2:
-        silhouette(dessin, table.projection_m + table.inter_table_m / 2.0, 0.0)
+        silhouette(
+            dessin, table.projection_m + table.inter_table_m / 2.0, 0.0,
+            pleine=False,
+        )
 
     dessin.verifier_cadre("Coupe des tables")
     return denominateur, nb_rangees
 
 
 def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) -> None:
-    """Une table en profil : le plan des modules et ses deux pieux."""
+    """Une table en profil : le plan des modules et sa structure porteuse.
+
+    Le plan des modules est une bande, pas un trait : à grande échelle un
+    module a une épaisseur, et c'est elle qui distingue un panneau d'une ligne
+    de construction. La structure reprend celle du dossier de référence — deux
+    poteaux battus sur le rampant, reliés par une jambe de force.
+    """
     bas = (x_bas, table.point_bas_m)
     haut = (x_bas + table.projection_m, table.point_haut_m)
-    dessin.ligne(bas, haut, style)
 
-    # Deux pieux battus, au quart et aux trois quarts du rampant : c'est la
-    # fondation portée au tableau bilan, et deux appuis suffisent à faire lire
-    # la structure sans l'encombrer.
-    for fraction in (0.25, 0.75):
+    # Le plan des modules, en bande : deux parallèles au rampant.
+    pente_x = table.projection_m
+    pente_y = table.point_haut_m - table.point_bas_m
+    norme = math.hypot(pente_x, pente_y)
+    # Normale au rampant, vers le haut.
+    normale = (-pente_y / norme, pente_x / norme)
+    epaisseur = EPAISSEUR_MODULE_M
+    dessus = [
+        (bas[0] + normale[0] * epaisseur, bas[1] + normale[1] * epaisseur),
+        (haut[0] + normale[0] * epaisseur, haut[1] + normale[1] * epaisseur),
+    ]
+    dessin.polyligne([bas, haut, dessus[1], dessus[0]], style, fermer=True)
+
+    # Les deux appuis, montés du sol jusqu'au rampant.
+    appuis = []
+    for fraction in APPUIS_RAMPANT:
         x = x_bas + table.projection_m * fraction
-        y = table.point_bas_m + (table.point_haut_m - table.point_bas_m) * fraction
+        y = table.point_bas_m + pente_y * fraction
         dessin.ligne((x, 0.0), (x, y), TRAIT_MOYEN)
+        # La panne, sous le plan des modules.
+        dessin.ligne(
+            (x - DEBORD_PANNE_M, y), (x + DEBORD_PANNE_M, y), TRAIT_FORT
+        )
+        appuis.append((x, y))
+
+    # La jambe de force : du pied du poteau haut vers le milieu du poteau bas.
+    if len(appuis) == 2:
+        pied = (
+            x_bas + table.projection_m * PIED_JAMBE_DE_FORCE,
+            0.0,
+        )
+        milieu_bas = (appuis[0][0], appuis[0][1] * 0.55)
+        dessin.ligne(pied, milieu_bas, TRAIT_FIN)
+        dessin.ligne(pied, (appuis[1][0], appuis[1][1] * 0.45), TRAIT_FIN)
 
 
 def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None:
@@ -597,8 +661,9 @@ def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None
     )
 
     if nb_rangees >= 2:
-        # Inter-table : du haut d'une rangée au bas de la suivante.
-        y_cote = -dessin.metres(RETRAIT_INTER_TABLE_MM)
+        # Inter-table : du haut d'une rangée au bas de la suivante, cotée
+        # au-dessus du dessin comme sur le dossier de référence.
+        y_cote = table.point_haut_m + dessin.metres(HAUTEUR_INTER_TABLE_MM)
         attache(dessin, table.projection_m, table.point_haut_m, y_cote)
         attache(dessin, table.pas_m, table.point_bas_m, y_cote)
         cote_horizontale(
@@ -606,13 +671,22 @@ def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None
             f"inter-table {nombre_fr(table.inter_table_m)} m",
         )
         # Pas : du bas d'une rangée au bas de la suivante.
-        y_pas = -dessin.metres(RETRAIT_PAS_MM)
+        y_pas = table.point_haut_m + dessin.metres(HAUTEUR_PAS_MM)
         attache(dessin, 0.0, table.point_bas_m, y_pas)
         attache(dessin, table.pas_m, table.point_bas_m, y_pas)
         cote_horizontale(
             dessin, 0.0, table.pas_m, y_pas, f"pas {nombre_fr(table.pas_m)} m"
         )
 
+    # Le rampant, coté le long de la pente : sa projection ne dit pas la même
+    # chose, et c'est la longueur du rampant qui donne le nombre de modules.
+    cote_oblique(
+        dessin,
+        (0.0, table.point_bas_m),
+        (table.projection_m, table.point_haut_m),
+        f"rampant {nombre_fr(table.rampant_m)} m",
+        decalage_mm=7.0,
+    )
     _coter_angle(dessin, table)
 
 
@@ -632,8 +706,8 @@ def _coter_angle(dessin: Dessin, table: GeometrieTable) -> None:
     ]
     dessin.polyligne(arc, TRAIT_COTE)
     dessin.texte(
-        origine[0] + rayon * 1.35,
-        origine[1] + rayon * math.sin(angle) * 0.55,
+        origine[0] + rayon * 1.15,
+        origine[1] + rayon * math.sin(angle) * 0.35,
         f"{nombre_fr(table.inclinaison_deg, 0)}°",
         taille=TAILLE_COTE,
     )
