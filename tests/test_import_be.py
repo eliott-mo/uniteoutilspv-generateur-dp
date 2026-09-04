@@ -944,3 +944,107 @@ def test_maillage_3d_rendu_par_son_emprise_en_plan(tmp_path):
     assert len(arbres) == 1
     assert arbres[0].geometrie.geom_type == "Polygon"
     assert arbres[0].geometrie.area == pytest.approx(16.0, abs=0.1)
+
+
+def _dxf_grutage(chemin: Path, diagonales: bool, largeur=12.0, longueur=15.0) -> Path:
+    """DXF portant une aire de grutage, en croix de diagonales ou en polygone."""
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_800))
+    x, y = 622_900.0, 6_750_700.0
+    coins = [(x, y), (x + longueur, y), (x + longueur, y + largeur), (x, y + largeur)]
+    if diagonales:
+        espace.add_lwpolyline(
+            [coins[0], coins[2]], dxfattribs={"layer": "UNI_VRD_Aire de grutage"}
+        )
+        espace.add_lwpolyline(
+            [coins[1], coins[3]], dxfattribs={"layer": "UNI_VRD_Aire de grutage"}
+        )
+    else:
+        espace.add_lwpolyline(
+            coins, close=True, dxfattribs={"layer": "UNI_VRD_Aire de grutage"}
+        )
+    document.saveas(str(chemin))
+    return chemin
+
+
+def test_aire_de_grutage_reconstruite_depuis_ses_diagonales(tmp_path):
+    """Le BE ne dessine parfois qu'une croix : les deux diagonales du rectangle.
+
+    Un rectangle est le seul quadrilatère dont les diagonales se coupent en leur
+    milieu et ont même longueur. Mesuré sur Sarnois : 12,0 x 19,0 m et
+    12,0 x 15,0 m, la seconde étant l'aire « 12x15m » de la légende du plan, et
+    la part débordant de la voie lourde donne 263 m² pour 255 déclarés.
+    """
+    plan_croix = lire_plan_be(_dxf_grutage(tmp_path / "croix.dxf", diagonales=True))
+    aires = plan_croix.par_categorie("aire_grutage")
+    assert len(aires) == 1
+    assert aires[0].geometrie.geom_type == "Polygon"
+    assert aires[0].geometrie.area == pytest.approx(180.0, abs=0.1)
+    assert any("reconstruite" in m for m in plan_croix.avertissements)
+
+
+def test_un_contour_dessine_fait_toujours_foi(tmp_path):
+    """La reconstruction ne s'applique qu'à défaut de polygone."""
+    plan_ferme = lire_plan_be(_dxf_grutage(tmp_path / "ferme.dxf", diagonales=False))
+    aires = plan_ferme.par_categorie("aire_grutage")
+    assert len(aires) == 1
+    assert aires[0].geometrie.area == pytest.approx(180.0, abs=0.1)
+    assert not any("reconstruite" in m for m in plan_ferme.avertissements)
+
+
+def test_deux_traits_de_longueurs_differentes_ne_font_pas_un_rectangle(tmp_path):
+    """Sans le contrôle des longueurs, deux traits quelconques se croisant en
+    leur milieu passeraient pour une aire de grutage."""
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_800))
+    # Même milieu, longueurs très différentes : ce n'est pas un rectangle.
+    espace.add_lwpolyline(
+        [(622_900, 6_750_700), (622_920, 6_750_700)],
+        dxfattribs={"layer": "UNI_VRD_Aire de grutage"},
+    )
+    espace.add_lwpolyline(
+        [(622_910, 6_750_695), (622_910, 6_750_705)],
+        dxfattribs={"layer": "UNI_VRD_Aire de grutage"},
+    )
+    chemin = tmp_path / "faux_rectangle.dxf"
+    document.saveas(str(chemin))
+
+    plan_faux = lire_plan_be(chemin)
+    aires = plan_faux.par_categorie("aire_grutage")
+    assert all(e.geometrie.geom_type == "LineString" for e in aires)
+    assert not any("reconstruite" in m for m in plan_faux.avertissements)
+
+
+def test_l_aire_de_grutage_se_dessine_en_voie_lourde(tmp_path):
+    """Un élargissement de voie, que la légende du dossier ne distingue pas.
+
+    Le tableau bilan la compte en « supplément piste lourde » et la planche de
+    référence n'a pas cette entrée : deux catégories dessinées à l'identique
+    n'apparaissent qu'une fois en légende, leurs objets comptés ensemble.
+    """
+    from dp_socle.apercu_be import STYLES, legende_presente
+
+    assert STYLES["aire_grutage"].libelle == STYLES["piste_lourde"].libelle
+    assert STYLES["aire_grutage"].remplissage == STYLES["piste_lourde"].remplissage
+
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_800))
+    espace.add_lwpolyline(
+        [(622_900, 6_750_700), (622_915, 6_750_700), (622_915, 6_750_712)],
+        close=True,
+        dxfattribs={"layer": "UNI_VRD_Pistes lourdes"},
+    )
+    espace.add_lwpolyline(
+        [(622_940, 6_750_700), (622_955, 6_750_700), (622_955, 6_750_712)],
+        close=True,
+        dxfattribs={"layer": "UNI_VRD_Aire de grutage"},
+    )
+    chemin = tmp_path / "legende.dxf"
+    document.saveas(str(chemin))
+
+    entrees = legende_presente(lire_plan_be(chemin))
+    voies = [(s.libelle, nb) for _, s, nb in entrees if s.libelle == "Voie lourde"]
+    assert voies == [("Voie lourde", 2)]

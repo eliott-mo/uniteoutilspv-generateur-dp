@@ -70,7 +70,12 @@ STYLES = {
     # BE : « voie lourde » et « piste légère ».
     "piste_lourde": StyleCategorie("Voie lourde", (162, 162, 162), (110, 110, 110)),
     "piste_legere": StyleCategorie("Piste légère", (215, 215, 215), (140, 140, 140)),
-    "aire_grutage": StyleCategorie("Aire de grutage", (198, 198, 198), (60, 60, 60)),
+    # Même style et même intitulé que la voie lourde : une aire de grutage est
+    # un élargissement ponctuel de la voie, que le tableau bilan compte en
+    # « supplément piste lourde » et que la légende du dossier de référence ne
+    # distingue pas. Deux catégories dessinées à l'identique n'apparaissent
+    # qu'une fois en légende.
+    "aire_grutage": StyleCategorie("Voie lourde", (162, 162, 162), (110, 110, 110)),
     "plateforme": StyleCategorie("Plateforme", (215, 215, 215), (110, 110, 110)),
     "aire_aspiration": StyleCategorie(
         "Aire d'aspiration", (215, 215, 215), (63, 191, 191), epaisseur=2
@@ -327,12 +332,25 @@ def _parties(geometrie: BaseGeometry):
 
 
 def legende_presente(plan) -> list[tuple[str, StyleCategorie, int]]:
-    """Entrées de légende des seules catégories réellement importées."""
-    entrees = []
+    """Entrées de légende des seules catégories réellement importées.
+
+    Deux catégories dessinées à l'identique ne font qu'une entrée, leurs objets
+    comptés ensemble : l'aire de grutage est une voie lourde élargie, et la
+    faire apparaître à part dirait au lecteur du dossier une distinction que le
+    plan ne montre pas.
+    """
+    entrees: list[tuple[str, StyleCategorie, int]] = []
+    par_libelle: dict[str, int] = {}
     for categorie, style in STYLES.items():
         nombre = len(plan.par_categorie(categorie))
-        if nombre:
-            entrees.append((categorie, style, nombre))
+        if not nombre:
+            continue
+        if style.libelle in par_libelle:
+            rang = par_libelle[style.libelle]
+            entrees[rang] = (entrees[rang][0], entrees[rang][1], entrees[rang][2] + nombre)
+            continue
+        par_libelle[style.libelle] = len(entrees)
+        entrees.append((categorie, style, nombre))
     return entrees
 
 

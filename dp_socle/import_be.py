@@ -920,6 +920,8 @@ def lire_plan_be(
             f"{', '.join(sorted(entites_par_calque))}."
         )
 
+    entites = _reconstruire_aires_grutage(entites, avertissements)
+
     for entite in entites:
         if entite.categorie != "cloture" or entite.geometrie.geom_type != "LineString":
             continue
@@ -972,6 +974,100 @@ def lire_plan_be(
         avertissements=avertissements,
     )
 
+
+#: Écart admis entre les milieux de deux segments pour les tenir pour les
+#: diagonales d'un même rectangle, en mètres.
+TOLERANCE_DIAGONALES_M = 0.05
+
+
+def _reconstruire_aires_grutage(
+    entites: list[EntiteBE], avertissements: list[str]
+) -> list[EntiteBE]:
+    """Reconstruit les aires de grutage dessinées par leurs seules diagonales.
+
+    Le BE ne dessine pas toujours ces aires : sur l'indice B de Sarnois, le
+    calque ne porte que **deux croix**, quatre segments dont chaque paire
+    partage exactement le même milieu. Ce sont les diagonales de deux
+    rectangles — un rectangle est le seul quadrilatère dont les diagonales se
+    coupent en leur milieu et ont même longueur — et l'enveloppe convexe de
+    leurs quatre extrémités le restitue.
+
+    Mesuré le 04/09/2026 : 12,0 × 19,0 m et 12,0 × 15,0 m, la seconde étant
+    exactement l'aire « 12x15m » de la légende du plan. La part qui déborde de
+    la voie lourde vaut 263 m² pour 255 déclarés au tableau bilan, soit 3 %.
+
+    Cette reconstruction ne s'applique **qu'à défaut de polygone** : un contour
+    dessiné fait toujours foi. Et elle reste une convention de dessin déduite
+    d'un seul fichier — d'où l'avertissement, pour qu'elle se voie.
+    """
+    aires = [e for e in entites if e.categorie == "aire_grutage"]
+    if not aires or any(e.geometrie.geom_type == "Polygon" for e in aires):
+        return entites
+
+    segments = [
+        e
+        for e in aires
+        if e.geometrie.geom_type == "LineString" and len(e.geometrie.coords) == 2
+    ]
+    if len(segments) < 2:
+        return entites
+
+    def _milieu(entite):
+        (x1, y1), (x2, y2) = (c[:2] for c in entite.geometrie.coords)
+        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+    rectangles: list[EntiteBE] = []
+    apparies: set[int] = set()
+    for i, premier in enumerate(segments):
+        if i in apparies:
+            continue
+        for j in range(i + 1, len(segments)):
+            if j in apparies:
+                continue
+            second = segments[j]
+            mi, mj = _milieu(premier), _milieu(second)
+            if hypot(mi[0] - mj[0], mi[1] - mj[1]) > TOLERANCE_DIAGONALES_M:
+                continue
+            # Les diagonales d'un rectangle ont même longueur. Sans ce contrôle,
+            # deux traits quelconques se croisant en leur milieu passeraient
+            # pour une aire de grutage.
+            if abs(premier.geometrie.length - second.geometrie.length) > 0.1:
+                continue
+            sommets = [
+                (x, y)
+                for x, y, *_ in list(premier.geometrie.coords)
+                + list(second.geometrie.coords)
+            ]
+            enveloppe = MultiPoint(sommets).convex_hull
+            if enveloppe.geom_type != "Polygon":
+                continue
+            rectangles.append(
+                EntiteBE(
+                    categorie="aire_grutage",
+                    calque=premier.calque,
+                    geometrie=enveloppe,
+                    z_reel=False,
+                )
+            )
+            apparies |= {i, j}
+            break
+
+    if not rectangles:
+        return entites
+
+    restants = len(segments) - len(apparies)
+    surface = sum(r.geometrie.area for r in rectangles)
+    avertissements.append(
+        f"{len(rectangles)} aire(s) de grutage reconstruite(s) depuis leurs "
+        f"diagonales, faute de contour dessiné : {surface:.0f} m² au total. "
+        "Deux segments de même milieu et de même longueur sont les diagonales "
+        "d'un rectangle — convention relevée sur les plans du BE, pas une règle "
+        "générale. Demandez-lui un contour fermé pour ne plus dépendre de cette "
+        "lecture."
+        + (f" {restants} segment(s) non apparié(s) et non importé(s)." if restants else "")
+    )
+    gardes = {id(e) for e in aires}
+    return [e for e in entites if id(e) not in gardes] + rectangles
 
 def _detecter_unite(entites_par_calque: dict[str, list], nom: str) -> tuple[str, float]:
     """Unité du dessin, déduite de l'ordre de grandeur des coordonnées.

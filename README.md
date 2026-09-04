@@ -1068,6 +1068,30 @@ couches tombent juste — 1 280 m² relevés pour 1 280 déclarés en voie lourd
 interne sur l'indice A, 3 424 pour 3 424 en piste légère, 2 446 pour 2 447 sur
 l'indice B.
 
+#### L'aire de grutage se dessine en voie lourde
+
+Ce n'est pas un ouvrage distinct mais un **élargissement ponctuel de la voie
+lourde** : le tableau bilan ne lui donne pas de ligne de surface propre, il la
+compte en « supplément piste lourde », et la légende du dossier de référence n'a
+pas cette entrée. Sa catégorie existe donc, mais elle porte le style et
+l'intitulé de la voie lourde — deux catégories dessinées à l'identique
+n'apparaissent qu'une fois en légende, leurs objets comptés ensemble.
+
+Le BE ne dessine pas toujours son contour. Sur l'indice B de Sarnois, le calque
+ne porte que **deux croix** : quatre segments dont chaque paire partage
+exactement le même milieu et la même longueur. Ce sont les diagonales de deux
+rectangles — un rectangle est le seul quadrilatère dont les diagonales se
+coupent en leur milieu et ont même longueur — et l'enveloppe convexe de leurs
+extrémités les restitue : 12,0 × 19,0 m et 12,0 × 15,0 m, la seconde étant
+exactement l'aire « 12x15m » de la légende du plan. La part qui déborde de la
+voie lourde vaut **263 m² pour 255 déclarés** au tableau, soit 3 %.
+
+Cette reconstruction ne s'applique **qu'à défaut de polygone** : un contour
+dessiné fait toujours foi. Elle reste une convention de dessin déduite d'un seul
+fichier, et elle est signalée à chaque import pour que ça se voie. Le contrôle
+des longueurs de diagonales est ce qui empêche deux traits quelconques se
+croisant en leur milieu de passer pour une aire de grutage.
+
 Les intitulés du contrat suivent désormais **la légende du plan du BE** plutôt
 que les miens : « voie lourde », « piste légère », « aire de grutage »,
 « arbres existants ». Le PDF du plan porte cette légende, et s'en servir évite
