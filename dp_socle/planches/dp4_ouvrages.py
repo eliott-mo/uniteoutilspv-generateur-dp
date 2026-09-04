@@ -46,6 +46,7 @@ from .standards import (
     PASSAGE_FAUNE_LARGEUR_M,
 )
 from .primitives import (
+    TRAIT_COTE,
     TAILLE_COTE,
     TRAIT_FIN,
     TRAIT_FORT,
@@ -140,6 +141,27 @@ HAUTEUR_ENTETE_MM = 11.0
 #: Hauteurs standard UNITe, absentes du contrat : voir `standards.py`, qui
 #: porte leur justification et le message qui les accompagne au rapport.
 MESSAGE_HAUTEURS_STANDARD = MESSAGE_HAUTEURS
+
+#: Figuré d'un poste préfabriqué, relevé sur les élévations du dossier de
+#: Massay du 17/04/2025 et sur la planche type UNITe.
+#:
+#: Un poste n'est pas un parallélépipède nu : sa toiture déborde des murs, il
+#: repose sur un socle de 0,3 à 0,5 m, et sa teinte est un RAL, pas une couleur
+#: de légende. La couleur de la légende sert au plan de masse, où elle repère
+#: l'ouvrage parmi d'autres ; l'élévation, elle, montre l'ouvrage tel qu'il
+#: sera, et le dossier de référence l'écrit sur le dessin : « RAL 6003 ».
+COULEUR_POSTE = "#4b573e"
+COULEUR_TOITURE = "#585d51"
+COULEUR_SOCLE = "#cfcbc2"
+REFERENCE_RAL = "RAL 6003"
+
+DEBORD_TOITURE_M = 0.16
+EPAISSEUR_TOITURE_M = 0.14
+#: Le dossier de référence cote le socle « 0,3 à 0,5 m » : c'est une
+#: fourchette de pose, pas une cote. On dessine la valeur basse et on écrit la
+#: fourchette, comme lui.
+HAUTEUR_SOCLE_M = 0.30
+HAUTEUR_SOCLE_MAX_M = 0.50
 
 LARGEUR_LEGENDE_MM = 62.0
 
@@ -734,66 +756,149 @@ def _style_ouvrage(categorie: str) -> Style:
     )
 
 
-def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
-    """Un ouvrage parallélépipédique : plan de toiture, élévations, coupe.
+def _style_poste() -> Style:
+    return Style(trait="#2f3529", epaisseur_mm=0.25, remplissage=COULEUR_POSTE)
 
-    C'est la présentation du dossier de référence pour un poste : la toiture
-    vue de dessus, les quatre faces, et une coupe où une silhouette donne
-    l'échelle.
+
+def _toiture(dessin: Dessin, largeur_m: float, hauteur_m: float) -> None:
+    """Dalle de toiture, débordant des murs de part et d'autre."""
+    dessin.rectangle(
+        -DEBORD_TOITURE_M,
+        hauteur_m,
+        largeur_m + 2 * DEBORD_TOITURE_M,
+        EPAISSEUR_TOITURE_M,
+        Style(trait="#2f3529", epaisseur_mm=0.25, remplissage=COULEUR_TOITURE),
+    )
+
+
+def _socle(dessin: Dessin, largeur_m: float) -> None:
+    """Socle de pose, entre le sol et le bas des parois."""
+    dessin.rectangle(
+        -0.10, 0.0, largeur_m + 0.20, HAUTEUR_SOCLE_M,
+        Style(trait="#8a8578", epaisseur_mm=0.2, remplissage=COULEUR_SOCLE),
+    )
+
+
+def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
+                     coter_socle: bool = False):
+    """Une face de poste : socle, parois, toiture débordante et ouvertures.
+
+    `ouvertures` est une suite de (type, fraction de la largeur), le type
+    valant « porte » ou « grille ».
+    """
+
+    def tracer(dessin: Dessin) -> None:
+        sol_hachure(
+            dessin, [(-0.9, 0.0), (largeur_m + 0.9, 0.0)], epaisseur_mm=1.8
+        )
+        _socle(dessin, largeur_m)
+        dessin.rectangle(
+            0.0, HAUTEUR_SOCLE_M, largeur_m, hauteur_m, _style_poste()
+        )
+        for nature, fraction in ouvertures:
+            abscisse = largeur_m * fraction
+            if nature == "porte":
+                _porte(dessin, abscisse, hauteur_m)
+            else:
+                _grille(dessin, abscisse, hauteur_m)
+        _toiture(dessin, largeur_m, hauteur_m + HAUTEUR_SOCLE_M)
+
+        cote_horizontale(
+            dessin, 0.0, largeur_m, -dessin.metres(6.5),
+            f"{nombre_fr(largeur_m)} m",
+        )
+        cote_verticale(
+            dessin, HAUTEUR_SOCLE_M, HAUTEUR_SOCLE_M + hauteur_m,
+            -dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m",
+        )
+        # La fourchette du socle, écrite comme sur le dossier de référence.
+        # Portée par une seule vue : répétée sur les quatre, elle débordait sur
+        # la vue voisine et n'apprenait rien de plus.
+        if coter_socle:
+            dessin.texte(
+                largeur_m / 2.0, 0.0,
+                f"socle {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
+                f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m",
+                taille=5.5 * PT, ancre="middle", decalage_mm=(0.0, 5.0),
+            )
+
+    return tracer
+
+
+def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
+    """Un poste préfabriqué : plan de toiture, quatre élévations, coupe.
+
+    C'est la présentation du dossier de référence pour le seul ouvrage bâti du
+    site : la toiture vue de dessus, les quatre faces, et une coupe où une
+    silhouette donne l'échelle.
     """
     longueur = cote.longueur_m
     largeur = cote.largeur_m
     hauteur = cote.hauteur_m
-    style = _style_ouvrage(categorie)
 
     def plan(dessin: Dessin) -> None:
-        dessin.rectangle(0.0, 0.0, longueur, largeur, style)
-        # Sens de pente de la toiture, marqué par une flèche simple.
-        dessin.ligne((longueur * 0.25, largeur / 2.0), (longueur * 0.75, largeur / 2.0), TRAIT_FIN)
+        # La toiture vue de dessus déborde des murs : c'est elle qu'on voit.
+        dessin.rectangle(
+            -DEBORD_TOITURE_M, -DEBORD_TOITURE_M,
+            longueur + 2 * DEBORD_TOITURE_M, largeur + 2 * DEBORD_TOITURE_M,
+            Style(trait="#2f3529", epaisseur_mm=0.25, remplissage=COULEUR_TOITURE),
+        )
+        dessin.rectangle(0.0, 0.0, longueur, largeur, TRAIT_FIN)
+        # Sens de pente de la toiture.
+        dessin.ligne(
+            (longueur * 0.3, largeur / 2.0), (longueur * 0.7, largeur / 2.0),
+            TRAIT_FIN,
+        )
         _coter_rectangle(dessin, longueur, largeur)
 
-    def elevation_long(porte: bool):
-        def tracer(dessin: Dessin) -> None:
-            sol_hachure(dessin, [(-0.6, 0.0), (longueur + 0.6, 0.0)], epaisseur_mm=1.6)
-            dessin.rectangle(0.0, 0.0, longueur, hauteur, style)
-            if porte:
-                _porte(dessin, longueur * 0.5, hauteur)
-            else:
-                _grille(dessin, longueur * 0.25, hauteur)
-                _grille(dessin, longueur * 0.75, hauteur)
-            _coter_rectangle(dessin, longueur, hauteur)
-
-        return tracer
-
-    def pignon(avec_grille: bool):
-        def tracer(dessin: Dessin) -> None:
-            sol_hachure(dessin, [(-0.6, 0.0), (largeur + 0.6, 0.0)], epaisseur_mm=1.6)
-            dessin.rectangle(0.0, 0.0, largeur, hauteur, style)
-            if avec_grille:
-                _grille(dessin, largeur / 2.0, hauteur)
-            _coter_rectangle(dessin, largeur, hauteur)
-
-        return tracer
-
     def coupe(dessin: Dessin) -> None:
-        sol_hachure(dessin, [(-0.6, 0.0), (largeur + 2.6, 0.0)], epaisseur_mm=1.6)
-        dessin.rectangle(0.0, 0.0, largeur, hauteur, TRAIT_FORT)
-        # Épaisseur d'enveloppe et niveau de plancher, pour que la coupe se
-        # lise comme une coupe et non comme une cinquième élévation.
-        dessin.rectangle(0.12, 0.12, largeur - 0.24, hauteur - 0.24, TRAIT_FIN)
-        dessin.ligne((0.0, 0.35), (largeur, 0.35), TRAIT_MOYEN)
-        silhouette(dessin, largeur + 1.4, 0.0)
-        _coter_rectangle(dessin, largeur, hauteur)
+        sol_hachure(dessin, [(-0.9, 0.0), (largeur + 3.2, 0.0)], epaisseur_mm=1.8)
+        _socle(dessin, largeur)
+        # Une coupe montre l'enveloppe et le vide intérieur, pas un aplat.
+        dessin.rectangle(0.0, HAUTEUR_SOCLE_M, largeur, hauteur, TRAIT_FORT)
+        dessin.rectangle(
+            0.14, HAUTEUR_SOCLE_M + 0.14, largeur - 0.28, hauteur - 0.28,
+            TRAIT_FIN,
+        )
+        _toiture(dessin, largeur, hauteur + HAUTEUR_SOCLE_M)
+        silhouette(dessin, largeur + 1.7, 0.0, pleine=False)
+        cote_verticale(
+            dessin, HAUTEUR_SOCLE_M, HAUTEUR_SOCLE_M + hauteur,
+            -dessin.metres(3.0), f"{nombre_fr(hauteur)} m",
+        )
 
+    hauteur_vue = hauteur + HAUTEUR_SOCLE_M + EPAISSEUR_TOITURE_M
     return BlocOuvrage(
         titre=f"{libelle} — {cote.dimensions}",
         vues=[
             Vue("Plan de toiture", longueur, largeur, plan),
-            Vue("Élévation long pan (façade)", longueur, hauteur, elevation_long(True)),
-            Vue("Élévation long pan (arrière)", longueur, hauteur, elevation_long(False)),
-            Vue("Élévation pignon", largeur, hauteur, pignon(True)),
-            Vue("Élévation pignon opposé", largeur, hauteur, pignon(False)),
-            Vue("Coupe transversale", largeur + 3.0, max(hauteur, 1.9), coupe),
+            Vue(
+                "Élévation long pan (façade)", longueur, hauteur_vue,
+                _elevation_poste(
+                    longueur, hauteur, [("porte", 0.5)], coter_socle=True
+                ),
+            ),
+            Vue(
+                "Élévation long pan (arrière)", longueur, hauteur_vue,
+                _elevation_poste(
+                    longueur, hauteur, [("grille", 0.25), ("grille", 0.75)]
+                ),
+            ),
+            Vue(
+                "Élévation pignon", largeur, hauteur_vue,
+                _elevation_poste(largeur, hauteur, [("grille", 0.5)]),
+            ),
+            Vue(
+                "Élévation pignon opposé", largeur, hauteur_vue,
+                _elevation_poste(largeur, hauteur, []),
+            ),
+            Vue("Coupe transversale", largeur + 3.4, max(hauteur_vue, 2.1), coupe),
+        ],
+        caracteristiques=[
+            f"Poste préfabriqué, teinte {REFERENCE_RAL}.",
+            f"Dimensions hors tout : {cote.dimensions}.",
+            f"Socle de {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
+            f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m.",
         ],
     )
 
@@ -869,30 +974,33 @@ def _bloc_equipement(cote, libelle: str, categorie: str) -> BlocOuvrage:
 
 
 def _bloc_cloture() -> BlocOuvrage:
-    """Élévation de clôture : grillage, poteaux, passage à petite faune."""
+    """Élévation de clôture : grillage, poteaux, passage à petite faune.
+
+    Comme pour le poste, l'élévation montre l'ouvrage tel qu'il sera — grillage
+    rigide teinte RAL 6003 — et non la couleur rouge qui le repère au plan.
+    """
     largeur = ESPACEMENT_POTEAUX_M * 3
     hauteur = HAUTEUR_CLOTURE_M
-    style = STYLES["cloture"].style
+    style = Style(trait=COULEUR_POSTE, epaisseur_mm=0.3, remplissage="none")
 
     def tracer(dessin: Dessin) -> None:
         sol_hachure(dessin, [(-0.4, 0.0), (largeur + 0.4, 0.0)], epaisseur_mm=1.6)
         # Le grillage, figuré par sa trame : c'est ce qui le distingue d'un mur.
-        hachurer(
-            dessin,
-            [(0.0, 0.0), (largeur, 0.0), (largeur, hauteur), (0.0, hauteur)],
-            pas_mm=1.1, angle_deg=45.0,
-        )
-        hachurer(
-            dessin,
-            [(0.0, 0.0), (largeur, 0.0), (largeur, hauteur), (0.0, hauteur)],
-            pas_mm=1.1, angle_deg=-45.0,
-        )
+        # Grillage rigide : une trame croisée serrée, qui se lit comme un
+        # treillis et non comme une hachure de coupe.
+        maille = Style(trait=COULEUR_POSTE, epaisseur_mm=0.08, remplissage="none")
+        contour = [(0.0, 0.0), (largeur, 0.0), (largeur, hauteur), (0.0, hauteur)]
+        hachurer(dessin, contour, pas_mm=0.8, angle_deg=90.0, style=maille)
+        hachurer(dessin, contour, pas_mm=0.8, angle_deg=0.0, style=maille)
         dessin.rectangle(0.0, 0.0, largeur, hauteur, style)
         # Poteaux, tous les 2,50 m.
         nombre = int(round(largeur / ESPACEMENT_POTEAUX_M))
+        montant = Style(
+            trait=COULEUR_POSTE, epaisseur_mm=0.25, remplissage=COULEUR_POSTE
+        )
         for index in range(nombre + 1):
             x = index * ESPACEMENT_POTEAUX_M
-            dessin.rectangle(x - 0.04, 0.0, 0.08, hauteur, TRAIT_FORT)
+            dessin.rectangle(x - 0.05, 0.0, 0.10, hauteur + 0.06, montant)
 
         # Passage à petite faune, au pied de la clôture.
         x_passage = ESPACEMENT_POTEAUX_M * 1.5 - PASSAGE_FAUNE_LARGEUR_M / 2.0
@@ -919,9 +1027,10 @@ def _bloc_cloture() -> BlocOuvrage:
         titre="Clôture du projet solaire",
         vues=[Vue("Élévation", largeur, hauteur + 1.2, tracer)],
         caracteristiques=[
-            f"Grillage soudé, hauteur {nombre_fr(HAUTEUR_CLOTURE_M)} m, "
-            f"poteaux tous les {nombre_fr(ESPACEMENT_POTEAUX_M)} m.",
-            "Passages à petite faune ménagés au pied de la clôture.",
+            f"Grillage métal rigide, teinte {REFERENCE_RAL}.",
+            f"Hauteur {nombre_fr(HAUTEUR_CLOTURE_M)} m, montants tous les "
+            f"{nombre_fr(ESPACEMENT_POTEAUX_M)} m.",
+            "Passages adaptés à la petite faune au pied de la clôture.",
         ],
     )
 
@@ -929,7 +1038,7 @@ def _bloc_cloture() -> BlocOuvrage:
 def _bloc_portail(largeur_m: float) -> BlocOuvrage:
     """Portail : une élévation et une coupe, largeur depuis le tableau bilan."""
     hauteur = HAUTEUR_PORTAIL_M
-    style = STYLES["portail"].style
+    style = Style(trait=COULEUR_POSTE, epaisseur_mm=0.3, remplissage="none")
 
     def elevation(dessin: Dessin) -> None:
         sol_hachure(dessin, [(-0.5, 0.0), (largeur_m + 0.5, 0.0)], epaisseur_mm=1.6)
@@ -943,11 +1052,16 @@ def _bloc_portail(largeur_m: float) -> BlocOuvrage:
                     (x + largeur_m / 2.0 - 0.06, hauteur - 0.06), (x + 0.06, hauteur - 0.06),
                 ],
                 pas_mm=1.4, angle_deg=90.0,
+                style=Style(trait=COULEUR_POSTE, epaisseur_mm=0.12,
+                            remplissage="none"),
             )
         # Poteaux d'ancrage de part et d'autre.
-        for x in (-0.12, largeur_m + 0.04):
-            dessin.rectangle(x, 0.0, 0.08, hauteur + 0.1, TRAIT_FORT)
-        silhouette(dessin, largeur_m + 0.9, 0.0)
+        montant = Style(
+            trait=COULEUR_POSTE, epaisseur_mm=0.25, remplissage=COULEUR_POSTE
+        )
+        for x in (-0.14, largeur_m + 0.04):
+            dessin.rectangle(x, 0.0, 0.10, hauteur + 0.12, montant)
+        silhouette(dessin, largeur_m + 0.9, 0.0, pleine=False)
         cote_horizontale(
             dessin, 0.0, largeur_m, -dessin.metres(6.5), f"{nombre_fr(largeur_m)} m"
         )
@@ -957,7 +1071,11 @@ def _bloc_portail(largeur_m: float) -> BlocOuvrage:
 
     def coupe(dessin: Dessin) -> None:
         sol_hachure(dessin, [(-0.5, 0.0), (1.1, 0.0)], epaisseur_mm=1.6)
-        dessin.rectangle(0.0, 0.0, 0.08, hauteur + 0.1, TRAIT_FORT)
+        dessin.rectangle(
+            0.0, 0.0, 0.10, hauteur + 0.12,
+            Style(trait=COULEUR_POSTE, epaisseur_mm=0.25,
+                  remplissage=COULEUR_POSTE),
+        )
         # Massif d'ancrage, sous le sol.
         dessin.rectangle(-0.18, -0.6, 0.44, 0.6, TRAIT_FIN)
         dessin.ligne((0.08, hauteur * 0.5), (0.6, hauteur * 0.5), style)
@@ -970,6 +1088,11 @@ def _bloc_portail(largeur_m: float) -> BlocOuvrage:
         vues=[
             Vue("Élévation", largeur_m + 2.4, hauteur + 1.4, elevation),
             Vue("Coupe sur poteau", 1.8, hauteur + 1.4, coupe),
+        ],
+        caracteristiques=[
+            f"Portail double battant, teinte {REFERENCE_RAL}.",
+            f"Largeur {nombre_fr(largeur_m)} m, hauteur "
+            f"{nombre_fr(hauteur)} m.",
         ],
     )
 
@@ -992,22 +1115,33 @@ def _coter_rectangle(dessin: Dessin, largeur_m: float, hauteur_m: float) -> None
 
 
 def _porte(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
-    """Double porte d'un poste, en élévation."""
+    """Double porte d'un poste, en élévation, posée sur le socle."""
     largeur_porte = min(1.9, hauteur_m * 0.75)
     hauteur_porte = min(2.1, hauteur_m * 0.82)
+    gauche = x_centre - largeur_porte / 2.0
     dessin.rectangle(
-        x_centre - largeur_porte / 2.0, 0.0, largeur_porte, hauteur_porte, TRAIT_MOYEN
+        gauche, HAUTEUR_SOCLE_M, largeur_porte, hauteur_porte, TRAIT_MOYEN
     )
     dessin.ligne(
-        (x_centre, 0.0), (x_centre, hauteur_porte), TRAIT_FIN
+        (x_centre, HAUTEUR_SOCLE_M),
+        (x_centre, HAUTEUR_SOCLE_M + hauteur_porte),
+        TRAIT_FIN,
     )
+    # Les deux poignées, au tiers de la hauteur.
+    for cote in (-1, 1):
+        abscisse = x_centre + cote * 0.09
+        dessin.ligne(
+            (abscisse, HAUTEUR_SOCLE_M + hauteur_porte * 0.45),
+            (abscisse, HAUTEUR_SOCLE_M + hauteur_porte * 0.55),
+            TRAIT_MOYEN,
+        )
 
 
 def _grille(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
-    """Grille de ventilation, en élévation."""
+    """Grille de ventilation, en élévation, posée sur le socle."""
     largeur = 0.7
     hauteur = 0.55
-    bas = hauteur_m * 0.45
+    bas = HAUTEUR_SOCLE_M + hauteur_m * 0.45
     dessin.rectangle(x_centre - largeur / 2.0, bas, largeur, hauteur, TRAIT_FIN)
     hachurer(
         dessin,
