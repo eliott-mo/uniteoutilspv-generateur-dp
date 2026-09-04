@@ -68,3 +68,19 @@ class ErreurCoupe(ErreurImportBE):
 
 class ErreurAltimetrie(ErreurService):
     """Le service altimétrique de la Géoplateforme n'a pas répondu comme attendu."""
+
+
+class ErreurContrat(ErreurDP):
+    """Le contrat d'entrée du lot 4 est absent, illisible ou d'une version non lue."""
+
+
+class ErreurVoirieIndecise(ErreurContrat):
+    """La couche `voirie` est peuplée sans que son type ait été tranché."""
+
+
+class ErreurCoteOuvrage(ErreurContrat):
+    """Un ouvrage à dessiner n'a pas de cote normalisée exploitable."""
+
+
+class ErreurComposition(ErreurDP):
+    """Un dessin ne tient pas dans la place que la planche lui laisse."""
