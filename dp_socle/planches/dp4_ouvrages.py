@@ -1,0 +1,769 @@
+"""DP 4 — Ouvrages techniques : postes, clôture, portail, citerne.
+
+Chaque planche est partagée en deux : le **plan de repérage** à gauche, les
+**dessins d'ouvrages** à droite. Le plan de repérage montre l'emprise clôturée
+et ses ouvrages, à sa propre échelle, portée en clair ; les dessins d'ouvrages
+partagent l'échelle du cartouche, calée sur le plus grand d'entre eux.
+
+⚠️ Le dossier de référence annote les objets du plan de repérage par des
+**lignes de rappel** vers des libellés placés autour du dessin. Ce procédé
+n'est **pas** repris : placer automatiquement des libellés sans chevauchement
+est un problème de mise en page non résolu, et un libellé mal posé sur une
+planche déposée coûte plus cher que le confort qu'il apporte. Le bloc de
+légende standard porte exactement la même information, sans ce risque.
+
+**Un ouvrage absent du projet n'a pas de bloc**, et la planche se recompose sur
+ce qui reste : si DP 4-2 n'a que la clôture et le portail, les deux blocs
+occupent la place.
+
+Les cotes viennent de `cotes_normalisees`, jamais de la géométrie du plan : le
+GeoPackage donne une emprise au sol, pas une hauteur. Un ouvrage sans cote
+n'est pas dessiné, et son absence est portée au rapport.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from ..contrat import Contrat
+from ..dossier import piece
+from ..erreurs import ErreurComposition, ErreurCoteOuvrage
+from ..planche import GRIS, PT, Planche, Style, nombre_fr
+from ..projet import Projet
+from .commun import Sortie, nouvelle_planche
+from .palette import STYLES, construire_legende, objets_a_dessiner
+from .primitives import (
+    TAILLE_COTE,
+    TRAIT_FIN,
+    TRAIT_FORT,
+    TRAIT_MOYEN,
+    Dessin,
+    cote_horizontale,
+    cote_verticale,
+    echelle_du_dessin,
+    hachurer,
+    mention_echelle,
+    silhouette,
+    sol_hachure,
+    union_valide,
+)
+
+#: Répartition des ouvrages sur les planches, décidée au brief. La troisième
+#: n'existe que si le projet porte les ouvrages qu'elle loge.
+REPARTITION = {
+    "DP 4-1": ("pdl_ptr", "ptr", "pdl"),
+    "DP 4-2": ("cloture", "portail", "bache_incendie"),
+    "DP 4-3": (
+        "bess",
+        "local_technique",
+        "bac_retention",
+        "citerne_refroidissement",
+        "aire_aspiration",
+    ),
+}
+
+#: Échelles autorisées (décision D2).
+ECHELLES_OUVRAGES = (50, 100, 200)
+
+#: Échelles du plan de repérage. Les quatre premières sont celles du brief ;
+#: les suivantes sont une extension, et leur emploi est signalé au rapport.
+#:
+#: Mesuré le 04/09/2026 sur la sortie réelle de Sarnois : l'emprise clôturée y
+#: fait 327 x 264 m, soit 327 x 264 mm au 1/1 000 — la zone de dessin d'un A3
+#: entier mesure 410 x 268 mm. Le plan de repérage y remplirait donc la
+#: planche à lui seul, et il n'y aurait plus de place pour les dessins
+#: d'ouvrages que la même planche doit porter. Aucune des quatre échelles du
+#: brief ne tient dans un demi-A3 pour un site de 5 ha, et c'est la taille
+#: courante de nos projets.
+#:
+#: Plutôt que de refuser de produire DP 4 sur un site réel, ou de rogner le
+#: plan en silence, la liste est prolongée et le dépassement est écrit au
+#: rapport. L'échelle retenue est de toute façon portée en clair à côté du
+#: dessin : le lecteur sait toujours à quelle échelle il lit.
+ECHELLES_REPERAGE_BRIEF = (200, 300, 500, 1000)
+ECHELLES_REPERAGE = ECHELLES_REPERAGE_BRIEF + (1500, 2000, 2500, 5000)
+
+#: Partage de la planche : le plan de repérage à gauche, les ouvrages à droite.
+LARGEUR_REPERAGE_MM = 140.0
+INTERVALLE_PANNEAUX_MM = 6.0
+
+#: Place d'un titre de vue et de ses cotes autour du dessin, en millimètres.
+#:
+#: Ces valeurs sont serrées à dessein. Les échelles autorisées vont du simple
+#: au double : trois millimètres de marge de trop sur une planche font passer
+#: tous ses ouvrages du 1/100 au 1/200, et une clôture de 7,50 m y tombe à
+#: 37 mm avec un passage à petite faune de moins d'un millimètre. Mesuré le
+#: 04/09/2026 sur DP 4-2 du site d'essai.
+HAUTEUR_TITRE_VUE_MM = 4.0
+MARGE_VUE_MM = 10.0
+ESPACEMENT_VUES_MM = 3.5
+HAUTEUR_TITRE_BLOC_MM = 5.0
+
+#: Hauteur réservée au titre et à l'échelle en tête du panneau de droite.
+HAUTEUR_ENTETE_MM = 11.0
+
+#: Hauteurs standard UNITe, **absentes du contrat**.
+#:
+#: Le tableau bilan porte le linéaire de clôture, le nombre de portails et la
+#: largeur des portails, mais aucune hauteur. Ces valeurs sont celles des
+#: clôtures et portails posés sur les centrales UNITe. Toute planche qui les
+#: emploie le dit au rapport de génération : ce n'est pas un repli silencieux,
+#: c'est une valeur qui ne vient pas du dossier et qui doit se voir.
+HAUTEUR_CLOTURE_M = 2.00
+HAUTEUR_PORTAIL_M = 2.00
+ESPACEMENT_POTEAUX_M = 2.50
+#: Passage à petite faune : ouverture ménagée au pied de la clôture, élément
+#: standard et attendu à l'instruction.
+PASSAGE_FAUNE_LARGEUR_M = 0.15
+PASSAGE_FAUNE_HAUTEUR_M = 0.15
+
+MESSAGE_HAUTEURS_STANDARD = (
+    "Hauteur de clôture et de portail non portées au contrat d'entrée : les "
+    f"élévations de DP 4 sont dessinées aux valeurs standard UNITe "
+    f"({nombre_fr(HAUTEUR_CLOTURE_M)} m). Le tableau bilan ne donne que le "
+    "linéaire, le nombre de portails et leur largeur."
+)
+
+LARGEUR_LEGENDE_MM = 62.0
+
+
+# ---------------------------------------------------------------------------
+# Vues et blocs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Vue:
+    """Un dessin d'ouvrage, avec l'encombrement qu'il réclame en mètres."""
+
+    titre: str
+    largeur_m: float
+    hauteur_m: float
+    tracer: object
+
+
+@dataclass
+class BlocOuvrage:
+    """Les vues d'un même ouvrage, présentées ensemble."""
+
+    titre: str
+    vues: list = field(default_factory=list)
+    #: Lignes de caractéristiques affichées à côté des vues.
+    caracteristiques: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Planche
+# ---------------------------------------------------------------------------
+
+
+def ouvrages_de(contrat: Contrat, code: str) -> list:
+    """Catégories de la planche que le projet porte réellement."""
+    return [c for c in REPARTITION[code] if contrat.presente(c)]
+
+
+def planches_necessaires(contrat: Contrat) -> list:
+    """Codes des planches DP 4 à produire pour ce dossier.
+
+    Un projet sans poste n'a pas de DP 4-1 ; un projet sans BESS ni local
+    technique n'a pas de DP 4-3. La planche n'est pas produite vide, et le
+    rang des suivantes suit.
+    """
+    return [code for code in REPARTITION if ouvrages_de(contrat, code)]
+
+
+def generer(
+    projet: Projet,
+    contrat: Contrat,
+    dossier: str | Path,
+    code: str,
+    numero: str | None = None,
+) -> Sortie:
+    categories = ouvrages_de(contrat, code)
+    if not categories:
+        raise ErreurComposition(
+            f"{code} : aucun des ouvrages qu'elle porte "
+            f"({', '.join(REPARTITION[code])}) n'est au contrat. La planche ne "
+            "se produit pas vide."
+        )
+
+    avertissements = []
+    blocs = []
+    for categorie in categories:
+        try:
+            bloc = _bloc_ouvrage(contrat, categorie, avertissements)
+        except ErreurCoteOuvrage as exc:
+            avertissements.append(
+                f"{code} : « {categorie} » n'est pas dessiné — {exc}"
+            )
+            continue
+        blocs.append(bloc)
+    if not blocs:
+        raise ErreurComposition(
+            f"{code} : aucun ouvrage dessinable. "
+            + " ".join(avertissements)
+        )
+
+    planche = nouvelle_planche(projet, code, numero=numero)
+    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+
+    panneau_gauche = (zone_x, zone_y, LARGEUR_REPERAGE_MM, zone_h)
+    x_droite = zone_x + LARGEUR_REPERAGE_MM + INTERVALLE_PANNEAUX_MM
+    panneau_droit = (x_droite, zone_y, zone_x + zone_l - x_droite, zone_h)
+
+    echelle_ouvrages = _dessiner_ouvrages(planche, blocs, panneau_droit)
+    echelle_reperage, messages = _plan_de_reperage(
+        planche, contrat, panneau_gauche, zone_x, zone_y, zone_l, zone_h
+    )
+    avertissements.extend(messages)
+
+    # Le cartouche annonce l'échelle des ouvrages, celle du dessin principal ;
+    # le plan de repérage porte la sienne en clair à côté de lui.
+    #
+    # L'ordre compte : le plan de repérage est cartographique, il a fallu
+    # donner son échelle à la planche pour le tracer, et c'est elle qui
+    # tomberait au cartouche. Le contenu géographique étant posé, seule reste
+    # à corriger la valeur que le cartouche lira.
+    planche.echelle = echelle_ouvrages
+
+    chemin = planche.rendre_pdf(
+        Path(dossier) / f"DP_{code.split()[1]}_{_nom_fichier(code)}.pdf"
+    )
+    return Sortie(
+        numero=code,
+        titre=piece(code).titre,
+        chemin=chemin,
+        echelle=echelle_ouvrages,
+        details={
+            "ouvrages": [b.titre for b in blocs],
+            "categories": categories,
+            "echelle_ouvrages": echelle_ouvrages,
+            "echelle_reperage": echelle_reperage,
+            "avertissements": avertissements,
+        },
+    )
+
+
+def _nom_fichier(code: str) -> str:
+    return {
+        "DP 4-1": "postes",
+        "DP 4-2": "cloture_portail_citerne",
+        "DP 4-3": "autres_ouvrages",
+    }[code]
+
+
+# ---------------------------------------------------------------------------
+# Panneau de droite : les ouvrages
+# ---------------------------------------------------------------------------
+
+
+def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
+    """Dispose les blocs d'ouvrages, tous à la même échelle.
+
+    Une planche, une échelle pour ses ouvrages : elle est calée sur le plus
+    grand d'entre eux (D2) et inscrite au cartouche. Les vues s'écoulent de
+    gauche à droite et reviennent à la ligne quand la largeur est prise ;
+    c'est ce qui permet de loger sept vues d'un poste sans les rétrécir.
+    """
+    x, y, largeur, hauteur = panneau
+    hauteur_utile = hauteur - HAUTEUR_ENTETE_MM
+
+    denominateur = None
+    for candidat in sorted(ECHELLES_OUVRAGES):
+        if _hauteur_disposition(blocs, candidat, largeur) <= hauteur_utile:
+            denominateur = candidat
+            break
+    if denominateur is None:
+        plus_grand = max(
+            (v.largeur_m for bloc in blocs for v in bloc.vues), default=0.0
+        )
+        raise ErreurComposition(
+            f"Les {sum(len(b.vues) for b in blocs)} vues d'ouvrages ne tiennent "
+            f"pas dans {largeur:.0f} x {hauteur_utile:.0f} mm, même au "
+            f"1:{max(ECHELLES_OUVRAGES)} — le plus grand ouvrage mesure "
+            f"{plus_grand:.1f} m. Répartissez les ouvrages sur une planche de "
+            "plus."
+        )
+
+    mention_echelle(
+        planche, x, y + 3.5, denominateur, titre="Ouvrages techniques"
+    )
+
+    curseur_y = y + HAUTEUR_ENTETE_MM
+    for bloc in blocs:
+        planche.ajouter_texte(
+            x, curseur_y + 3.0, bloc.titre, taille=7.5 * PT, gras=True
+        )
+        curseur_y += HAUTEUR_TITRE_BLOC_MM
+        curseur_y = _disposer_vues(
+            planche, bloc, denominateur, x, curseur_y, largeur
+        )
+        if bloc.caracteristiques:
+            curseur_y = _bloc_caracteristiques(
+                planche, bloc.caracteristiques, x, curseur_y
+            )
+        curseur_y += ESPACEMENT_VUES_MM
+    return denominateur
+
+
+def _lignes_de_vues(bloc: BlocOuvrage, denominateur: int, largeur_mm: float) -> list:
+    """Répartit les vues d'un bloc en lignes tenant dans la largeur."""
+    lignes, courante, prise = [], [], 0.0
+    for vue in bloc.vues:
+        largeur_vue = vue.largeur_m * 1000.0 / denominateur + MARGE_VUE_MM
+        if courante and prise + largeur_vue > largeur_mm:
+            lignes.append(courante)
+            courante, prise = [], 0.0
+        courante.append(vue)
+        prise += largeur_vue + ESPACEMENT_VUES_MM
+    if courante:
+        lignes.append(courante)
+    return lignes
+
+
+def _hauteur_disposition(blocs, denominateur: int, largeur_mm: float) -> float:
+    """Hauteur qu'occuperaient tous les blocs à cette échelle."""
+    total = 0.0
+    for bloc in blocs:
+        total += HAUTEUR_TITRE_BLOC_MM
+        for ligne in _lignes_de_vues(bloc, denominateur, largeur_mm):
+            hauteur_ligne = max(
+                v.hauteur_m * 1000.0 / denominateur for v in ligne
+            )
+            total += hauteur_ligne + MARGE_VUE_MM + HAUTEUR_TITRE_VUE_MM
+        if bloc.caracteristiques:
+            total += 3.0 + 3.6 * len(bloc.caracteristiques)
+        total += ESPACEMENT_VUES_MM
+    return total
+
+
+def _disposer_vues(planche, bloc, denominateur, x, y, largeur_mm) -> float:
+    curseur_y = y
+    for ligne in _lignes_de_vues(bloc, denominateur, largeur_mm):
+        hauteur_ligne = max(v.hauteur_m * 1000.0 / denominateur for v in ligne)
+        curseur_x = x
+        for vue in ligne:
+            largeur_vue = vue.largeur_m * 1000.0 / denominateur
+            planche.ajouter_texte(
+                curseur_x, curseur_y + 2.6, vue.titre,
+                taille=6 * PT, couleur=GRIS,
+            )
+            dessin = Dessin(
+                planche=planche,
+                denominateur=denominateur,
+                # Le repère de la vue a son origine au pied du dessin. La
+                # marge est prise à gauche : c'est là que se posent la cote
+                # verticale et son texte.
+                origine_mm=(
+                    curseur_x + MARGE_VUE_MM,
+                    curseur_y + HAUTEUR_TITRE_VUE_MM + hauteur_ligne,
+                ),
+            )
+            vue.tracer(dessin)
+            curseur_x += largeur_vue + MARGE_VUE_MM + ESPACEMENT_VUES_MM
+        curseur_y += hauteur_ligne + MARGE_VUE_MM + HAUTEUR_TITRE_VUE_MM
+    return curseur_y
+
+
+def _bloc_caracteristiques(planche, lignes, x, y) -> float:
+    """Caractéristiques en clair, comme sur la planche de citerne de référence."""
+    curseur = y + 3.0
+    for ligne in lignes:
+        planche.ajouter_texte(x + 1.0, curseur, ligne, taille=6.5 * PT)
+        curseur += 3.6
+    return curseur
+
+
+# ---------------------------------------------------------------------------
+# Panneau de gauche : le plan de repérage
+# ---------------------------------------------------------------------------
+
+
+def _hauteur_legende(contrat: Contrat) -> float:
+    """Hauteur du bloc de légende, telle que le moteur la composera.
+
+    Elle est calculée avant de choisir l'échelle du plan : la légende n'est
+    pas un ajout de dernière minute qu'on pose par-dessus le dessin, c'est
+    elle qui décide de la place qui lui reste.
+    """
+    entrees = construire_legende([c for c, _ in objets_a_dessiner(contrat)])
+    return 2 * 2.2 + 5.0 + 5.0 * len(entrees)
+
+
+def _plan_de_reperage(planche, contrat, panneau, zone_x, zone_y, zone_l, zone_h):
+    """L'emprise clôturée et ses ouvrages, dans le panneau de gauche.
+
+    Le moteur centre la carte sur la zone de dessin entière. Pour qu'elle
+    tombe dans le panneau de gauche, c'est le centre terrain qu'on décale, du
+    même écart converti à l'échelle : la transformation n'est pas détournée,
+    on lui donne un autre centre.
+    """
+    panneau_x, panneau_y, panneau_l, panneau_h = panneau
+    avertissements = []
+
+    emprise = union_valide(contrat.geometries("cloture"))
+    if emprise is None or emprise.is_empty:
+        return None, [
+            "Aucune clôture au contrat : le plan de repérage de DP 4 n'a pas "
+            "d'emprise à montrer."
+        ]
+
+    minx, miny, maxx, maxy = emprise.bounds
+    largeur_m = max(maxx - minx, 1.0)
+    hauteur_m = max(maxy - miny, 1.0)
+
+    # Le plan occupe le haut du panneau ; la légende prend le bas.
+    hauteur_legende = _hauteur_legende(contrat)
+    hauteur_plan = panneau_h - HAUTEUR_ENTETE_MM - hauteur_legende - 3.0
+    if hauteur_plan <= 20.0:
+        raise ErreurComposition(
+            f"Plan de repérage DP 4 : la légende occupe {hauteur_legende:.0f} mm "
+            f"du panneau de {panneau_h:.0f} mm et il ne reste plus de place "
+            "pour le plan."
+        )
+    denominateur = echelle_du_dessin(
+        largeur_m,
+        hauteur_m,
+        (panneau_x, panneau_y + HAUTEUR_ENTETE_MM, panneau_l, hauteur_plan),
+        ECHELLES_REPERAGE,
+        marge=0.08,
+        libelle="plan de repérage DP 4",
+    )
+    if denominateur not in ECHELLES_REPERAGE_BRIEF:
+        avertissements.append(
+            f"Plan de repérage DP 4 dessiné au 1:{denominateur}, hors de la "
+            f"liste retenue ({', '.join('1:' + str(e) for e in ECHELLES_REPERAGE_BRIEF)}) : "
+            f"l'emprise clôturée mesure {largeur_m:.0f} x {hauteur_m:.0f} m et "
+            "ne tient dans le panneau à aucune d'entre elles. L'échelle est "
+            "portée en clair sur la planche."
+        )
+    planche.definir_echelle(denominateur)
+
+    centre_emprise = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+    centre_zone_mm = (zone_x + zone_l / 2.0, zone_y + zone_h / 2.0)
+    centre_plan_mm = (
+        panneau_x + panneau_l / 2.0,
+        panneau_y + HAUTEUR_ENTETE_MM + hauteur_plan / 2.0,
+    )
+    facteur = denominateur / 1000.0
+    planche.centrer_sur(
+        (
+            centre_emprise[0] + (centre_zone_mm[0] - centre_plan_mm[0]) * facteur,
+            centre_emprise[1] + (centre_plan_mm[1] - centre_zone_mm[1]) * facteur,
+        )
+    )
+
+    mention_echelle(
+        planche, panneau_x, panneau_y + 3.5, denominateur,
+        titre="Plan de repérage des ouvrages",
+    )
+
+    objets = objets_a_dessiner(contrat)
+    for categorie, geometries in objets:
+        style = STYLES[categorie].style
+        for geometrie in geometries:
+            planche.ajouter_geometrie(geometrie, style)
+
+    # Le bloc de légende standard, et non des lignes de rappel : voir
+    # l'en-tête du module.
+    entrees = construire_legende([c for c, _ in objets])
+    y_legende = panneau_y + panneau_h - hauteur_legende - 1.0
+    planche.ajouter_legende(
+        entrees,
+        position=(panneau_x, y_legende),
+        largeur_mm=min(LARGEUR_LEGENDE_MM, panneau_l),
+    )
+    return denominateur, avertissements
+
+
+# ---------------------------------------------------------------------------
+# Dessins d'ouvrages
+# ---------------------------------------------------------------------------
+
+
+def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> BlocOuvrage:
+    if categorie == "cloture":
+        avertissements.append(MESSAGE_HAUTEURS_STANDARD)
+        return _bloc_cloture()
+    if categorie == "portail":
+        largeur = contrat.generalites.get("largeur_portails_m")
+        if not largeur:
+            raise ErreurCoteOuvrage(
+                "Largeur de portail absente de `parametres.generalites` : "
+                "l'élévation du portail n'est pas dessinée."
+            )
+        if MESSAGE_HAUTEURS_STANDARD not in avertissements:
+            avertissements.append(MESSAGE_HAUTEURS_STANDARD)
+        return _bloc_portail(float(largeur))
+
+    surface = _surface_au_sol(contrat, categorie)
+    cote = contrat.cote_de_categorie(categorie, surface_m2=surface)
+    if categorie in ("bache_incendie", "citerne_refroidissement"):
+        return _bloc_citerne(cote, STYLES[categorie].libelle)
+    return _bloc_volume(cote, STYLES[categorie].libelle, categorie)
+
+
+def _surface_au_sol(contrat: Contrat, categorie: str) -> float | None:
+    """Surface au sol du plus grand objet d'une catégorie, pour choisir sa cote."""
+    aires = [e.geometrie.area for e in contrat.entites(categorie) if e.geometrie.area > 0]
+    return max(aires) if aires else None
+
+
+def _style_ouvrage(categorie: str) -> Style:
+    fond = STYLES[categorie].style
+    return Style(
+        trait=fond.trait or "#000000",
+        epaisseur_mm=0.3,
+        remplissage=fond.remplissage,
+    )
+
+
+def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
+    """Un ouvrage parallélépipédique : plan de toiture, élévations, coupe.
+
+    C'est la présentation du dossier de référence pour un poste : la toiture
+    vue de dessus, les quatre faces, et une coupe où une silhouette donne
+    l'échelle.
+    """
+    longueur = cote.longueur_m
+    largeur = cote.largeur_m
+    hauteur = cote.hauteur_m
+    style = _style_ouvrage(categorie)
+
+    def plan(dessin: Dessin) -> None:
+        dessin.rectangle(0.0, 0.0, longueur, largeur, style)
+        # Sens de pente de la toiture, marqué par une flèche simple.
+        dessin.ligne((longueur * 0.25, largeur / 2.0), (longueur * 0.75, largeur / 2.0), TRAIT_FIN)
+        _coter_rectangle(dessin, longueur, largeur)
+
+    def elevation_long(porte: bool):
+        def tracer(dessin: Dessin) -> None:
+            sol_hachure(dessin, [(-0.6, 0.0), (longueur + 0.6, 0.0)], epaisseur_mm=1.6)
+            dessin.rectangle(0.0, 0.0, longueur, hauteur, style)
+            if porte:
+                _porte(dessin, longueur * 0.5, hauteur)
+            else:
+                _grille(dessin, longueur * 0.25, hauteur)
+                _grille(dessin, longueur * 0.75, hauteur)
+            _coter_rectangle(dessin, longueur, hauteur)
+
+        return tracer
+
+    def pignon(avec_grille: bool):
+        def tracer(dessin: Dessin) -> None:
+            sol_hachure(dessin, [(-0.6, 0.0), (largeur + 0.6, 0.0)], epaisseur_mm=1.6)
+            dessin.rectangle(0.0, 0.0, largeur, hauteur, style)
+            if avec_grille:
+                _grille(dessin, largeur / 2.0, hauteur)
+            _coter_rectangle(dessin, largeur, hauteur)
+
+        return tracer
+
+    def coupe(dessin: Dessin) -> None:
+        sol_hachure(dessin, [(-0.6, 0.0), (largeur + 2.6, 0.0)], epaisseur_mm=1.6)
+        dessin.rectangle(0.0, 0.0, largeur, hauteur, TRAIT_FORT)
+        # Épaisseur d'enveloppe et niveau de plancher, pour que la coupe se
+        # lise comme une coupe et non comme une cinquième élévation.
+        dessin.rectangle(0.12, 0.12, largeur - 0.24, hauteur - 0.24, TRAIT_FIN)
+        dessin.ligne((0.0, 0.35), (largeur, 0.35), TRAIT_MOYEN)
+        silhouette(dessin, largeur + 1.4, 0.0)
+        _coter_rectangle(dessin, largeur, hauteur)
+
+    return BlocOuvrage(
+        titre=f"{libelle} — {cote.dimensions}",
+        vues=[
+            Vue("Plan de toiture", longueur, largeur, plan),
+            Vue("Élévation long pan (façade)", longueur, hauteur, elevation_long(True)),
+            Vue("Élévation long pan (arrière)", longueur, hauteur, elevation_long(False)),
+            Vue("Élévation pignon", largeur, hauteur, pignon(True)),
+            Vue("Élévation pignon opposé", largeur, hauteur, pignon(False)),
+            Vue("Coupe transversale", largeur + 3.0, max(hauteur, 1.9), coupe),
+        ],
+    )
+
+
+def _bloc_citerne(cote, libelle: str) -> BlocOuvrage:
+    """Citerne : vue de dessus, vue de face, et ses caractéristiques en clair."""
+    longueur = cote.longueur_m
+    largeur = cote.largeur_m
+    hauteur = cote.hauteur_m
+    style = _style_ouvrage("bache_incendie")
+
+    def dessus(dessin: Dessin) -> None:
+        dessin.rectangle(0.0, 0.0, longueur, largeur, style)
+        dessin.rectangle(0.35, 0.35, longueur - 0.7, largeur - 0.7, TRAIT_FIN)
+        _coter_rectangle(dessin, longueur, largeur)
+
+    def face(dessin: Dessin) -> None:
+        sol_hachure(dessin, [(-0.6, 0.0), (longueur + 0.6, 0.0)], epaisseur_mm=1.6)
+        dessin.rectangle(0.0, 0.0, longueur, hauteur, style)
+        _coter_rectangle(dessin, longueur, hauteur)
+
+    volume = cote.ouvrage.rsplit("—", 1)[-1].strip()
+    return BlocOuvrage(
+        titre=f"{libelle} — {cote.dimensions}",
+        vues=[
+            Vue("Vue de dessus", longueur, largeur, dessus),
+            Vue("Vue de face", longueur, max(hauteur, 1.0), face),
+        ],
+        caracteristiques=[
+            f"Volume : {volume} m³" if volume.isdigit() else f"Type : {cote.ouvrage}",
+            f"Hauteur hors sol : {nombre_fr(hauteur)} m",
+            f"Longueur : {nombre_fr(longueur)} m",
+            f"Largeur : {nombre_fr(largeur)} m",
+        ],
+    )
+
+
+def _bloc_cloture() -> BlocOuvrage:
+    """Élévation de clôture : grillage, poteaux, passage à petite faune."""
+    largeur = ESPACEMENT_POTEAUX_M * 3
+    hauteur = HAUTEUR_CLOTURE_M
+    style = STYLES["cloture"].style
+
+    def tracer(dessin: Dessin) -> None:
+        sol_hachure(dessin, [(-0.4, 0.0), (largeur + 0.4, 0.0)], epaisseur_mm=1.6)
+        # Le grillage, figuré par sa trame : c'est ce qui le distingue d'un mur.
+        hachurer(
+            dessin,
+            [(0.0, 0.0), (largeur, 0.0), (largeur, hauteur), (0.0, hauteur)],
+            pas_mm=1.1, angle_deg=45.0,
+        )
+        hachurer(
+            dessin,
+            [(0.0, 0.0), (largeur, 0.0), (largeur, hauteur), (0.0, hauteur)],
+            pas_mm=1.1, angle_deg=-45.0,
+        )
+        dessin.rectangle(0.0, 0.0, largeur, hauteur, style)
+        # Poteaux, tous les 2,50 m.
+        nombre = int(round(largeur / ESPACEMENT_POTEAUX_M))
+        for index in range(nombre + 1):
+            x = index * ESPACEMENT_POTEAUX_M
+            dessin.rectangle(x - 0.04, 0.0, 0.08, hauteur, TRAIT_FORT)
+
+        # Passage à petite faune, au pied de la clôture.
+        x_passage = ESPACEMENT_POTEAUX_M * 1.5 - PASSAGE_FAUNE_LARGEUR_M / 2.0
+        dessin.rectangle(
+            x_passage, 0.0, PASSAGE_FAUNE_LARGEUR_M, PASSAGE_FAUNE_HAUTEUR_M,
+            Style(trait="#000000", epaisseur_mm=0.3, remplissage="#ffffff"),
+        )
+        dessin.texte(
+            x_passage + PASSAGE_FAUNE_LARGEUR_M / 2.0, 0.0,
+            f"Passage petite faune {nombre_fr(PASSAGE_FAUNE_LARGEUR_M * 100, 0)} x "
+            f"{nombre_fr(PASSAGE_FAUNE_HAUTEUR_M * 100, 0)} cm",
+            taille=5.5 * PT, ancre="middle", decalage_mm=(0.0, 4.6),
+        )
+
+        cote_verticale(
+            dessin, 0.0, hauteur, -dessin.metres(3.0), f"{nombre_fr(hauteur)} m"
+        )
+        cote_horizontale(
+            dessin, 0.0, ESPACEMENT_POTEAUX_M, hauteur + dessin.metres(4.0),
+            f"{nombre_fr(ESPACEMENT_POTEAUX_M)} m",
+        )
+
+    return BlocOuvrage(
+        titre="Clôture du projet solaire",
+        vues=[Vue("Élévation", largeur, hauteur + 1.2, tracer)],
+        caracteristiques=[
+            f"Grillage soudé, hauteur {nombre_fr(HAUTEUR_CLOTURE_M)} m, "
+            f"poteaux tous les {nombre_fr(ESPACEMENT_POTEAUX_M)} m.",
+            "Passages à petite faune ménagés au pied de la clôture.",
+        ],
+    )
+
+
+def _bloc_portail(largeur_m: float) -> BlocOuvrage:
+    """Portail : une élévation et une coupe, largeur depuis le tableau bilan."""
+    hauteur = HAUTEUR_PORTAIL_M
+    style = STYLES["portail"].style
+
+    def elevation(dessin: Dessin) -> None:
+        sol_hachure(dessin, [(-0.5, 0.0), (largeur_m + 0.5, 0.0)], epaisseur_mm=1.6)
+        for vantail in range(2):
+            x = vantail * largeur_m / 2.0
+            dessin.rectangle(x, 0.0, largeur_m / 2.0, hauteur, style)
+            hachurer(
+                dessin,
+                [
+                    (x + 0.06, 0.06), (x + largeur_m / 2.0 - 0.06, 0.06),
+                    (x + largeur_m / 2.0 - 0.06, hauteur - 0.06), (x + 0.06, hauteur - 0.06),
+                ],
+                pas_mm=1.4, angle_deg=90.0,
+            )
+        # Poteaux d'ancrage de part et d'autre.
+        for x in (-0.12, largeur_m + 0.04):
+            dessin.rectangle(x, 0.0, 0.08, hauteur + 0.1, TRAIT_FORT)
+        silhouette(dessin, largeur_m + 0.9, 0.0)
+        cote_horizontale(
+            dessin, 0.0, largeur_m, -dessin.metres(6.5), f"{nombre_fr(largeur_m)} m"
+        )
+        cote_verticale(
+            dessin, 0.0, hauteur, -dessin.metres(3.5), f"{nombre_fr(hauteur)} m"
+        )
+
+    def coupe(dessin: Dessin) -> None:
+        sol_hachure(dessin, [(-0.5, 0.0), (1.1, 0.0)], epaisseur_mm=1.6)
+        dessin.rectangle(0.0, 0.0, 0.08, hauteur + 0.1, TRAIT_FORT)
+        # Massif d'ancrage, sous le sol.
+        dessin.rectangle(-0.18, -0.6, 0.44, 0.6, TRAIT_FIN)
+        dessin.ligne((0.08, hauteur * 0.5), (0.6, hauteur * 0.5), style)
+        cote_verticale(
+            dessin, 0.0, hauteur, -dessin.metres(3.5), f"{nombre_fr(hauteur)} m"
+        )
+
+    return BlocOuvrage(
+        titre=f"Portail d'accès — {nombre_fr(largeur_m)} m",
+        vues=[
+            Vue("Élévation", largeur_m + 2.4, hauteur + 1.4, elevation),
+            Vue("Coupe sur poteau", 1.8, hauteur + 1.4, coupe),
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Détails de dessin
+# ---------------------------------------------------------------------------
+
+
+def _coter_rectangle(dessin: Dessin, largeur_m: float, hauteur_m: float) -> None:
+    """Les deux cotes d'une vue rectangulaire, hors du dessin."""
+    # La cote horizontale passe sous la bande de sol hachurée des élévations,
+    # dans laquelle elle venait sinon s'écrire.
+    cote_horizontale(
+        dessin, 0.0, largeur_m, -dessin.metres(6.5), f"{nombre_fr(largeur_m)} m"
+    )
+    cote_verticale(
+        dessin, 0.0, hauteur_m, -dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m"
+    )
+
+
+def _porte(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
+    """Double porte d'un poste, en élévation."""
+    largeur_porte = min(1.9, hauteur_m * 0.75)
+    hauteur_porte = min(2.1, hauteur_m * 0.82)
+    dessin.rectangle(
+        x_centre - largeur_porte / 2.0, 0.0, largeur_porte, hauteur_porte, TRAIT_MOYEN
+    )
+    dessin.ligne(
+        (x_centre, 0.0), (x_centre, hauteur_porte), TRAIT_FIN
+    )
+
+
+def _grille(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
+    """Grille de ventilation, en élévation."""
+    largeur = 0.7
+    hauteur = 0.55
+    bas = hauteur_m * 0.45
+    dessin.rectangle(x_centre - largeur / 2.0, bas, largeur, hauteur, TRAIT_FIN)
+    hachurer(
+        dessin,
+        [
+            (x_centre - largeur / 2.0, bas),
+            (x_centre + largeur / 2.0, bas),
+            (x_centre + largeur / 2.0, bas + hauteur),
+            (x_centre - largeur / 2.0, bas + hauteur),
+        ],
+        pas_mm=0.6, angle_deg=0.0,
+    )
