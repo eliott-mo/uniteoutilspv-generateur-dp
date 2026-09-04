@@ -1285,6 +1285,26 @@ TOLERANCE_SURFACE_CLOTURE = 0.02
 TOLERANCE_LINEAIRE_CLOTURE = 0.02
 TOLERANCE_SURFACE_MODULES = 0.05
 
+#: Tolérance sur les surfaces de piste, en fraction de la valeur du tableau.
+#:
+#: Plus lâche que celle de la clôture : le tableau calcule ces surfaces en
+#: longueur × largeur là où le plan les dessine en polygones, et l'écart de
+#: méthode se voit dans les élargissements et les raccordements. Mesuré sur les
+#: exports triés du 04/09/2026, l'écart tombe à 0 % sur l'indice A de Sarnois et
+#: monte à 9 % sur l'indice B — c'est ce second cas qu'on veut voir.
+TOLERANCE_SURFACE_PISTE = 0.05
+
+#: Catégories dessinées comme de la voie lourde, dont les surfaces s'additionnent
+#: face au total du tableau. L'aire de grutage en fait partie : le tableau la
+#: compte en « supplément piste lourde », pas comme un ouvrage distinct.
+CATEGORIES_VOIE_LOURDE = (
+    "piste_lourde",
+    "piste_lourde_existante",
+    "piste_lourde_a_creer",
+    "aire_grutage",
+)
+CATEGORIES_PISTE_LEGERE = ("piste_legere",)
+
 #: Débordement de la clôture hors de l'emprise cadastrale en deçà duquel on ne
 #: dit rien, en m². Absorbe l'imprécision de numérisation du parcellaire ; un
 #: vrai débordement se compte en dizaines de m².
@@ -1438,6 +1458,7 @@ def controler(
         )
     )
 
+    controles.extend(_surfaces_de_piste(plan, tableau.pistes))
     controles.append(
         _azimut(
             plan.azimut_tables_deg,
@@ -1447,6 +1468,63 @@ def controler(
     )
     controles.append(_emprise(plan, emprise_cadastrale))
     controles.append(_puissance(modules["puissance_mwc"], seuil_puissance_mwc))
+    return controles
+
+
+def _surface_dessinee(plan: PlanBE, categories) -> float:
+    """Surface des polygones d'un ensemble de catégories, recouvrements ôtés."""
+    polygones = [
+        e.geometrie.buffer(0)
+        for categorie in categories
+        for e in plan.par_categorie(categorie)
+        if e.geometrie.geom_type in ("Polygon", "MultiPolygon")
+    ]
+    if not polygones:
+        return 0.0
+    return float(unary_union(polygones).area)
+
+
+def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
+    """Recoupe les surfaces de piste dessinées avec celles du tableau.
+
+    Le lot 4 annonce ces surfaces au dossier : elles doivent correspondre à ce
+    que la planche montre. La comparaison porte sur l'**union** des polygones et
+    non sur leur somme, pour qu'un recouvrement ne compte pas deux fois.
+
+    Une piste absente du plan **et** du tableau n'appelle pas de contrôle : sur
+    le jeu de Saint-Cyr, aucune piste légère n'est dessinée et le tableau n'en
+    déclare pas davantage.
+    """
+    controles: list[Controle] = []
+    for libelle, categories, declaree in (
+        (
+            "Surface de voie lourde",
+            CATEGORIES_VOIE_LOURDE,
+            pistes.get("surface_piste_lourde_m2") or 0.0,
+        ),
+        (
+            "Surface de piste légère",
+            CATEGORIES_PISTE_LEGERE,
+            (pistes.get("surface_piste_legere_interne_m2") or 0.0)
+            + (pistes.get("surface_piste_legere_externe_m2") or 0.0),
+        ),
+    ):
+        dessinee = _surface_dessinee(plan, categories)
+        if not dessinee and not declaree:
+            continue
+        controles.append(
+            _ecart_relatif(
+                libelle,
+                dessinee,
+                declaree,
+                "m²",
+                TOLERANCE_SURFACE_PISTE,
+                AVERTISSEMENT,
+                "Le tableau calcule ces surfaces en longueur × largeur là où le "
+                "plan les dessine en polygones ; au-delà de la tolérance, c'est "
+                "le tracé et le décompte qui divergent.",
+            )
+        )
     return controles
 
 

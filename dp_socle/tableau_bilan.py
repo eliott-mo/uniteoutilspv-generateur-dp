@@ -266,6 +266,29 @@ PARAMETRES = {
             True,
         ),
     ),
+    "pistes": (
+        # Le total, supplément d'aire de grutage compris. Ce libellé-ci n'est
+        # présent qu'une fois, contrairement à son équivalent enherbé.
+        ("surface_piste_lourde_m2", "Surface piste lourde (m²)", _nombre, True),
+        # « Surface piste enherbée (m²) » apparaît **deux fois** au tableau, une
+        # fois en cours de section et une fois au total : le lecteur refuse par
+        # principe un libellé ambigu, et le total se recompose donc depuis les
+        # deux lignes qui ne le sont pas. Une troisième ligne, celle qui porte
+        # le libellé ambigu, n'est pas lue — si un projet y met sa piste
+        # légère, le contrôle de surface le montrera plutôt que de le taire.
+        (
+            "surface_piste_legere_interne_m2",
+            "Surface piste enherbée interne (m²)",
+            _nombre,
+            True,
+        ),
+        (
+            "surface_piste_legere_externe_m2",
+            "Surface piste enherbée externe (m²)",
+            _nombre,
+            True,
+        ),
+    ),
 }
 
 
@@ -300,6 +323,7 @@ class TableauBilan:
     structures: dict
     modules: dict
     postes: dict
+    pistes: dict
     cotes: list[CoteNormalisee]
     standards: dict
     source: str
@@ -311,6 +335,7 @@ class TableauBilan:
             **self.structures,
             **self.modules,
             **self.postes,
+            **self.pistes,
         }
 
 
@@ -450,6 +475,7 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
         structures=valeurs["structures"],
         modules=valeurs["modules"],
         postes=valeurs["postes"],
+        pistes=valeurs["pistes"],
         cotes=cotes,
         standards=standards,
         source=chemin.name,

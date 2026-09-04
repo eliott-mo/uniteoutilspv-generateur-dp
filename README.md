@@ -823,6 +823,8 @@ ne remarque avant l'instruction du dossier.
 | Surface clôturée, polygone DXF vs tableau | 2 % | bloquant |
 | Linéaire de clôture, DXF vs tableau | 2 % | avertissement |
 | Surface projetée des modules vs aires de tables | 5 % | avertissement |
+| Surface de voie lourde, dessinée vs déclarée | 5 % | avertissement |
+| Surface de piste légère, dessinée vs déclarée | 5 % | avertissement |
 | Inclinaison des rangées, mesurée vs déclarée | 2°, en valeur absolue | avertissement |
 | Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
@@ -837,6 +839,34 @@ polygone**, géométriquement identiques, 4,5259 ha chacun. `charger_emprise` en
 fait l'union et rend un seul polygone, ce qui évite d'en compter la surface deux
 fois — mais si un jour un export contient deux parcelles *distinctes*, elles
 seront unies de la même façon.
+
+#### Les surfaces de piste
+
+Le lot 4 annonce ces surfaces au dossier : elles doivent correspondre à ce que
+la planche montre. La comparaison porte sur l'**union** des polygones et non sur
+leur somme, pour qu'une aire de grutage posée sur la voie qu'elle élargit ne
+compte pas deux fois sa partie commune. Une piste absente du plan *et* du
+tableau n'appelle pas de contrôle.
+
+La tolérance est de 5 %, plus lâche que celle de la clôture : le tableau calcule
+ces surfaces en longueur × largeur là où le plan les dessine en polygones.
+
+Sur les trois jeux de référence, le contrôle attrape deux choses différentes :
+
+| | dessiné | déclaré | |
+|---|---|---|---|
+| Saint-Cyr | 3 362 m² | 3 365 m² | ✅ 0,1 % |
+| Sarnois A | 1 280 m² | 1 538 m² | ⚠️ −16,8 % — aire de grutage **non dessinée** |
+| Sarnois B | 1 551 m² | 1 423 m² | ⚠️ +9,0 % — voie lourde **plus large** que déclarée |
+| pistes légères A et B | 3 424 / 2 446 m² | 3 424 / 2 447 m² | ✅ 0,0 % |
+
+**Lire le tableau bilan a demandé un détour** : « Surface piste enherbée (m²) »
+y apparaît **deux fois**, une fois en cours de section et une fois au total. Le
+lecteur refusant par principe un libellé ambigu, le total se recompose depuis
+les lignes « interne » et « externe », qui ne le sont pas. Une troisième ligne,
+celle qui porte le libellé ambigu, n'est pas lue — si un projet y range sa piste
+légère, ce contrôle le montrera plutôt que de le taire. « Surface piste lourde
+(m²) », elle, n'apparaît qu'une fois et se lit directement.
 
 #### Le champ « Azimut (°) » n'a pas de convention
 

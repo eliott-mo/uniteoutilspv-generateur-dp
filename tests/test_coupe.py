@@ -1108,3 +1108,81 @@ def test_le_nuage_reel_reste_lu(tmp_path):
     profil = profil_terrain(COUPE_NUAGE, pas_m=25.0, fichier_altimetrie=NUAGE)
     assert len(profil.altitudes_m) > 10
     assert all(100.0 < z < 130.0 for z in profil.altitudes_m)
+
+
+# ---------------------------------------------------------------------------
+# Surfaces de piste
+# ---------------------------------------------------------------------------
+
+
+def test_surfaces_de_piste_du_jeu_de_reference(plan, tableau):
+    """Saint-Cyr : 3 362 m² dessinés pour 3 365 déclarés, soit 0,1 %."""
+    controle = next(
+        c
+        for c in controler(plan, tableau)
+        if c.libelle == "Surface de voie lourde"
+    )
+    assert controle.statut == OK
+    assert controle.valeur_dxf == pytest.approx(3362.0, abs=5.0)
+    assert controle.valeur_tableau == pytest.approx(3365.0)
+
+
+def test_aucune_piste_legere_ni_au_plan_ni_au_tableau(plan, tableau):
+    """Un contrôle sans objet ne vaut pas mieux qu'un contrôle absent.
+
+    Saint-Cyr ne dessine aucune piste légère et le tableau n'en déclare pas.
+    """
+    assert not [
+        c for c in controler(plan, tableau) if c.libelle == "Surface de piste légère"
+    ]
+
+
+def test_piste_dessinee_hors_tolerance_avertit(plan, tableau):
+    tableau_modifie = lire_tableau(TABLEAU, "IND06")
+    tableau_modifie.pistes["surface_piste_lourde_m2"] = 5000.0  # +49 %
+    controle = next(
+        c
+        for c in controler(plan, tableau_modifie)
+        if c.libelle == "Surface de voie lourde"
+    )
+    assert controle.statut == AVERTISSEMENT
+    assert not controle.bloquant
+
+
+def test_recouvrement_de_pistes_compte_une_seule_fois(tmp_path):
+    """La comparaison porte sur l'union des polygones, pas sur leur somme.
+
+    Deux polygones qui se chevauchent — une aire de grutage posée sur la voie
+    qu'elle élargit, par exemple — ne doivent pas compter deux fois leur partie
+    commune.
+    """
+    import ezdxf
+
+    from dp_socle.import_be import CATEGORIES_VOIE_LOURDE, _surface_dessinee
+
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    espace.add_lwpolyline(
+        [(622_900, 6_750_800), (622_915, 6_750_800), (622_915, 6_750_804.6)],
+        close=True,
+        dxfattribs={"layer": "PVcase PV Modules (optimised)"},
+    )
+    for calque in ("UNI_VRD_Pistes lourdes", "UNI_VRD_Aire de grutage"):
+        espace.add_lwpolyline(
+            [
+                (622_900, 6_750_700),
+                (622_910, 6_750_700),
+                (622_910, 6_750_710),
+                (622_900, 6_750_710),
+            ],
+            close=True,
+            dxfattribs={"layer": calque},
+        )
+    chemin = tmp_path / "recouvrement.dxf"
+    document.saveas(str(chemin))
+
+    plan_recouvert = lire_plan_be(chemin)
+    # Deux carrés de 100 m² exactement superposés : 100 m², pas 200.
+    assert _surface_dessinee(plan_recouvert, CATEGORIES_VOIE_LOURDE) == pytest.approx(
+        100.0
+    )
