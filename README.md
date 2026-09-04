@@ -678,6 +678,18 @@ agrivoltaïques (`limite_paddock`, `bac_equarrissage`, `espace_vert`) et
 compléments d'aire de charge BESS (`citerne_refroidissement`, `zone_remise`),
 tous comptés au tableau bilan.
 
+**Trois types de poste, trois légendes.** Le tableau bilan compte séparément le
+poste de livraison seul (9 × 3 m), le poste de transformation seul (10 × 3 m) et
+le poste de livraison **et** de transformation (12 × 3 m). Les catégories `pdl`,
+`ptr` et `pdl_ptr` les distinguent ; les confondre interdisait au lot 4 de les
+dessiner différemment. Le poste de transformation d'une aire de charge BESS est
+un PTR et hérite de sa légende.
+
+Attention au nom du calque : `UNI_PDL` porte en fait un **PDL/PTR** sur les deux
+projets de référence — le tableau y compte 1 PDL/PTR, 0 PDL et 0 PTR. C'est le
+tableau qui tranche, pas le nom, et un projet portant un PDL seul demandera de
+corriger l'appariement à l'écran.
+
 Deux distinctions valent d'être notées, parce que les manquer produit des
 mesures fausses : la **haie existante** n'est pas la haie plantée — l'une est un
 état des lieux, l'autre un aménagement — et le **portail d'exploitation** n'est

@@ -53,6 +53,12 @@ STYLES = {
     "pdl_ptr": StyleCategorie(
         "Poste de livraison / transformation", (127, 255, 191), (0, 0, 0)
     ),
+    # Le poste de transformation et le poste de livraison ne figurent pas
+    # séparément sur la planche de référence, qui n'a qu'une entrée « Poste de
+    # livraison/transformation » : leurs teintes en sont dérivées, assez
+    # distinctes pour se lire l'une de l'autre en légende.
+    "ptr": StyleCategorie("Poste de transformation", (90, 214, 160), (0, 0, 0)),
+    "pdl": StyleCategorie("Poste de livraison", (176, 255, 224), (0, 0, 0)),
     "bache_incendie": StyleCategorie("Citerne incendie", (63, 191, 191), (0, 0, 0)),
     "piste_lourde_existante": StyleCategorie(
         "Piste lourde existante", (162, 162, 162), (110, 110, 110)
@@ -81,6 +87,9 @@ STYLES = {
     ),
     # Éléments agrivoltaïques.
     "limite_paddock": StyleCategorie("Limite de paddock", None, (150, 110, 20), epaisseur=2),
+    "zone_contention": StyleCategorie(
+        "Zone de contention", (222, 205, 160), (150, 110, 20), epaisseur=2
+    ),
     "bac_equarrissage": StyleCategorie("Bac d'équarrissage", (200, 170, 120), (0, 0, 0)),
     "espace_vert": StyleCategorie("Espace vert", (176, 208, 140), (111, 170, 11)),
     # Compléments de l'aire de charge BESS.
@@ -130,6 +139,8 @@ ORDRE_DESSIN = (
     # rend le plan lisible, le contour groupé ne sert qu'à les cerner.
     "modules_pv",
     "pdl_ptr",
+    "ptr",
+    "pdl",
     "local_technique",
     "bess",
     "bac_retention",
@@ -138,6 +149,7 @@ ORDRE_DESSIN = (
     "bac_equarrissage",
     "bache_incendie",
     "limite_paddock",
+    "zone_contention",
     "recul_implantation",
     "zone_implantation_pv",
     "cloture",

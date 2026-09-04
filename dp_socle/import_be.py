@@ -76,7 +76,14 @@ CATEGORIES = (
     "zone_evitee",
     "cloture",
     "portail",
+    # Trois postes distincts au tableau bilan, avec leurs propres cotes et
+    # leur propre décompte : le poste de livraison et de transformation
+    # (12 x 3 m), le poste de transformation seul (10 x 3 m) et le poste de
+    # livraison seul (9 x 3 m). Ils portent des légendes différentes au dossier,
+    # donc trois catégories et non une.
     "pdl_ptr",
+    "ptr",
+    "pdl",
     "plateforme",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
@@ -101,6 +108,7 @@ CATEGORIES = (
     "stockage_chantier",
     # Éléments agrivoltaïques, propres aux projets d'élevage.
     "limite_paddock",
+    "zone_contention",
     "bac_equarrissage",
     "espace_vert",
     # Compléments d'une aire de charge BESS, comptés au tableau bilan.
@@ -117,6 +125,11 @@ CORRESPONDANCE_DEFAUT = {
     "PVcase PV Modules (optimised)": "tables_pv",
     "UNI_Clôture": "cloture",
     "UNI_portail": "portail",
+    # Le calque s'appelle « PDL » mais porte un poste de livraison **et** de
+    # transformation : sur Saint-Cyr comme sur Sarnois, le tableau bilan compte
+    # 1 PDL/PTR, 0 PDL et 0 PTR. C'est le tableau qui tranche, pas le nom du
+    # calque — un projet avec un PDL seul demandera de corriger l'appariement à
+    # l'écran.
     "UNI_PDL": "pdl_ptr",
     "UNI_VRD_Plateforme": "plateforme",
     "UNI_VRD_Piste_lourde_existante": "piste_lourde_existante",
@@ -133,10 +146,13 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_Haies": "haie",
     "UNI_Haies existantes": "haie_existante",
     "UNI_VRD_Voirie": "voirie",
-    # Poste de transformation. La légende du dossier de référence n'a qu'une
-    # entrée « Poste de livraison/transformation » : les deux y sont dessinés
-    # de la même façon, et le tableau bilan les compte séparément.
-    "UNI_PDT": "pdl_ptr",
+    # Poste de transformation seul, à distinguer du poste de livraison et de
+    # transformation : ils ont des légendes différentes au dossier.
+    "UNI_PDT": "ptr",
+    # Le poste de transformation de l'aire de charge BESS est un PTR, et hérite
+    # de la même légende.
+    "UNI_BESS_PTR": "ptr",
+    "UNI_Zone de contention": "zone_contention",
     # Ces trois-là ne se voient qu'une fois les blocs développés : elles sont
     # portées par le contenu des blocs, pas par leur insertion.
     "UNI_Portail exploitant": "portail_exploitant",

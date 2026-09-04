@@ -728,7 +728,7 @@ def test_noms_de_calque_de_sarnois_apparies():
         "UNI_Haies existantes": "haie_existante",
         "UNI_Local_Stockage": "local_technique",
         "UNI_VRD_Voirie": "voirie",
-        "UNI_PDT": "pdl_ptr",
+        "UNI_PDT": "ptr",
         "UNI_BESS_Batterie": "bess",
         "UNI_BESS_Rétention": "bac_retention",
     }
@@ -834,3 +834,42 @@ def test_calque_par_defaut_signale_a_part(tmp_path):
     message = next(m for m in plan_zero.avertissements if "calque par défaut" in m)
     assert "cacher des ouvrages" in message
     assert "calques nommés" in message
+
+
+def test_les_trois_types_de_poste_sont_distincts():
+    """PDL seul, PTR seul, PDL/PTR combiné : trois légendes au dossier.
+
+    Le tableau bilan les compte séparément et leur donne des cotes distinctes —
+    9 x 3 m pour le PDL, 10 x 3 m pour le PTR, 12 x 3 m pour le combiné. Les
+    confondre dans une seule catégorie interdisait au lot 4 de les dessiner
+    différemment.
+    """
+    from dp_socle.import_be import CATEGORIES, categorie_proposee
+
+    assert {"pdl", "ptr", "pdl_ptr"} <= set(CATEGORIES)
+    assert categorie_proposee("UNI_PDT") == "ptr"
+    # Le poste de transformation de l'aire de charge BESS est un PTR.
+    assert categorie_proposee("UNI_BESS_PTR") == "ptr"
+
+
+def test_le_calque_pdl_porte_en_fait_un_poste_combine():
+    """Le nom du calque dit « PDL », le tableau dit « PDL/PTR ».
+
+    Sur Saint-Cyr comme sur Sarnois : 1 PDL/PTR, 0 PDL, 0 PTR. C'est le tableau
+    qui tranche, pas le nom du calque — et un projet portant un PDL seul
+    demandera de corriger l'appariement à l'écran.
+    """
+    from dp_socle.import_be import categorie_proposee
+
+    assert categorie_proposee("UNI_PDL") == "pdl_ptr"
+    tableau_scv = lire_tableau(TABLEAU, "IND06")
+    assert tableau_scv.postes["nb_pdl_ptr"] == 1
+    assert tableau_scv.postes["nb_pdl"] == 0
+    assert tableau_scv.postes["nb_ptr"] == 0
+
+
+def test_zone_de_contention_avec_les_elements_agrivoltaiques():
+    from dp_socle.import_be import categorie_proposee
+
+    assert categorie_proposee("UNI_Zone de contention") == "zone_contention"
+    assert categorie_proposee("UNI_Limite paddock") == "limite_paddock"
