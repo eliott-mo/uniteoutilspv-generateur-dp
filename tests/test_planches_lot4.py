@@ -507,3 +507,67 @@ def test_aucune_planche_dp4_ne_revient_au_plan_entier(site):
     )
     for cadre in (postes, citernes):
         assert cadre.area < 0.25 * emprise.area
+
+
+def test_le_vide_se_partage_a_parts_egales_entre_les_cadres():
+    """Caler le premier cadre sur son contenu laissait le second à moitié vide.
+
+    Deux cadres qui demandent 40 et 10 mm dans une colonne de 100 mm doivent
+    ressortir à 63 et 33 : les 46 mm qui restent une fois retirés leurs besoins
+    et le blanc tournant qui les sépare vont pour moitié à chacun.
+    """
+    from dp_socle.planches.primitives import (
+        BLANC_TOURNANT_MM,
+        repartir_hauteurs,
+    )
+
+    hauteurs = repartir_hauteurs([40.0, 10.0], 100.0)
+    assert hauteurs == pytest.approx([63.0, 33.0])
+    vides = [hauteur - besoin for hauteur, besoin in zip(hauteurs, [40.0, 10.0])]
+    assert vides[0] == pytest.approx(vides[1])
+    # La colonne remplit sa page : rien ne reste en bas.
+    assert sum(hauteurs) + BLANC_TOURNANT_MM == pytest.approx(100.0)
+
+
+def test_le_vide_ne_se_partage_pas_quand_il_n_y_en_a_pas():
+    """Faire tenir la colonne est le travail de l'échelle, pas de la marge.
+
+    Rogner ici les cadres pour les faire entrer serait un repli silencieux :
+    les besoins sont rendus tels quels, et le débordement se voit.
+    """
+    from dp_socle.planches.primitives import repartir_hauteurs
+
+    assert repartir_hauteurs([80.0, 60.0], 100.0) == [80.0, 60.0]
+
+
+def test_le_plan_de_reperage_ne_descend_pas_sous_le_1_300(site, tmp_path):
+    """Retour de relecture : au 1:200 le zoom colle aux ouvrages.
+
+    À cette échelle le cadre serre les ouvrages de si près qu'on ne les situe
+    plus dans le site, et le plan de repérage ne repère plus rien.
+    """
+    from dp_socle.planches.dp4_ouvrages import ECHELLES_REPERAGE
+
+    assert min(ECHELLES_REPERAGE) == 300
+
+    projet, dossier = site()
+    contrat = charger_contrat(dossier)
+    for code in dp4_ouvrages.planches_necessaires(contrat):
+        sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, code)
+        assert sortie.details["echelle_reperage"] >= 300, code
+
+
+def test_seuls_les_ouvrages_a_facade_ont_une_planche():
+    """La liste arrêtée à la relecture du 04/09/2026.
+
+    L'aire d'aspiration est un revêtement de sol, le bac de rétention une
+    cuvette : ni l'un ni l'autre n'a de façade à montrer. Ils restent tracés
+    sur le plan de masse et sur le plan de repérage.
+    """
+    portes = {c for ouvrages in dp4_ouvrages.REPARTITION.values() for c in ouvrages}
+    assert portes == {
+        "pdl_ptr", "ptr", "pdl",
+        "cloture", "portail",
+        "bache_incendie", "citerne_refroidissement",
+        "local_technique", "bess",
+    }

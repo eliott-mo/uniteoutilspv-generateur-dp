@@ -1308,20 +1308,42 @@ principal, en clair à côté de lui pour les autres.
 | Coupe des tables | 1/50 à 1/200 | deux rangées complètes et leurs cotes |
 | Coupe du terrain | 1/200 à 1/1 000 | la longueur de la coupe |
 | Ouvrages DP 4 | 1/50, 1/100, 1/200 | le plus grand ouvrage de la planche |
-| Plan de repérage DP 4 | 1/200 à 1/1 000, **prolongée** | l'emprise clôturée |
+| Plan de repérage DP 4 | 1/300 à 1/1 000, **prolongée** | la zone concernée |
 
 La dernière ligne est un écart au cadrage retenu, et il est mesuré. L'emprise
 clôturée de Sarnois fait 327 x 264 m, soit 327 x 264 mm au 1/1 000, quand la zone
 de dessin d'un A3 entier en mesure 410 x 268 : le plan de repérage remplirait la
 planche à lui seul, et il ne resterait rien pour les dessins d'ouvrages que la
-même planche doit porter. Aucune des quatre échelles prévues ne tient dans un
-demi-A3 pour un site de 5 ha, qui est la taille courante de nos projets. La liste
-est donc prolongée jusqu'au 1/5 000, et **tout dépassement est écrit au rapport**.
+même planche doit porter. Aucune des échelles prévues ne tient dans un demi-A3
+pour un site de 5 ha, qui est la taille courante de nos projets. La liste est donc
+prolongée jusqu'au 1/5 000, et **tout dépassement est écrit au rapport**.
+
+L'écart joue aussi dans l'autre sens : le 1/200 du brief est écarté. À cette
+échelle le cadre serre les ouvrages de si près qu'on ne les situe plus dans le
+site, et le zoom cesse d'être un plan de repérage — c'est un retour de relecture
+du 04/09/2026. La plus grande échelle admise est le 1/300.
 
 Les marges de mise en page sont serrées à dessein. Les échelles vont du simple au
 double : trois millimètres de trop sur une planche DP 4 faisaient passer tous ses
 ouvrages du 1/100 au 1/200, où le passage à petite faune de la clôture mesurait
 moins d'un millimètre.
+
+### Un blanc tournant, et le vide partagé entre les cadres
+
+Les planches DP 3 et DP 4 sont structurées en sous-cadres, comme celles du
+dossier de référence : un par coupe, un par ouvrage, un pour le plan de repérage,
+chacun portant son titre et son échelle. Une seule valeur de marge les sépare —
+le **blanc tournant** de `primitives.BLANC_TOURNANT_MM` — entre le cadre de la
+planche et son contenu comme entre deux cadres voisins. Une marge qui change d'un
+bloc à l'autre se remarque plus qu'elle ne sert.
+
+Reste à décider ce que chaque cadre mesure. Le dimensionner sur son contenu et
+donner le reste au suivant produit des cadres disproportionnés : celui du haut
+plein à ras bord, celui du bas gardant une demi-feuille blanche. Les cadres sont
+donc d'abord mesurés à vide, puis `primitives.repartir_hauteurs` partage le blanc
+restant **à parts égales** entre eux, et chaque dessin est centré dans le cadre
+qu'il reçoit. Les cadres n'ont pas la même taille — leurs contenus non plus —
+mais ils respirent de la même façon.
 
 ### DP 2 — Plan de masse
 
@@ -1401,7 +1423,17 @@ n'est pas produite, et le rang des suivantes suit.
 |---|---|
 | DP 4-1 | `pdl_ptr`, `ptr`, `pdl` — plan de toiture, quatre élévations, coupe |
 | DP 4-2 | `cloture`, `portail`, `bache_incendie` |
-| DP 4-3 | `bess`, `local_technique`, `bac_retention`, `citerne_refroidissement`, `aire_aspiration` |
+| DP 4-3 | `bess`, `local_technique`, `citerne_refroidissement` |
+
+La liste est celle arrêtée à la relecture du 04/09/2026 : postes de livraison, de
+transformation et combiné, clôture et portail, citernes, local de stockage,
+conteneur BESS. Ce sont les seuls ouvrages dont une façade apprenne quelque chose
+à l'instruction. L'aire d'aspiration et le bac de rétention en sont sortis — le
+premier est un revêtement de sol sans élévation, le second une cuvette au sol ;
+tous deux restent tracés sur le plan de masse et sur le plan de repérage, ils
+disparaissent des façades et pas du dossier. Le transformateur de la batterie
+n'aura son bloc que le jour où le contrat le distinguera de celui du parc : aucune
+catégorie ne les sépare aujourd'hui.
 
 Seuls les postes reçoivent le traitement complet du dossier de référence : ce
 sont les seuls ouvrages bâtis du site. Les autres sont des équipements posés, que
@@ -1409,9 +1441,10 @@ deux vues et un bloc de caractéristiques décrivent entièrement. Mesuré sur
 Sarnois le 04/09/2026 : à sept vues par ouvrage, les cinq équipements de sa
 DP 4-3 faisaient 21 vues qui ne tenaient pas sur la planche, même au 1/200.
 
-Un ouvrage sans hauteur se dessine en plan et rien de plus : l'aire d'aspiration
-du SDIS est une aire de stationnement, le tableau bilan ne lui donne que
-« 8 x 4 m », et la dessiner en élévation demanderait une cote qu'elle n'a pas.
+Un ouvrage dont le tableau bilan ne porte pas de hauteur se dessine en plan et
+rien de plus : plutôt que d'inventer une cote, la vue en plan le décrit avec les
+deux dimensions dont on dispose, et sa ligne de caractéristiques annonce qu'il
+n'a pas d'élévation.
 
 **Les lignes de rappel du dossier de référence ne sont pas reprises.** Placer
 automatiquement des libellés sans chevauchement est un problème de mise en page

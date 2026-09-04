@@ -62,7 +62,7 @@ from .primitives import (
     cote_verticale,
     echelle_du_dessin,
     herbe,
-    mention_echelle,
+    repartir_hauteurs,
     repere_coupe,
     silhouette,
     sol_hachure,
@@ -86,12 +86,6 @@ ECHELLES_TERRAIN = (200, 250, 300, 500, 750, 1000)
 #: fait comprendre le pas.
 RANGEES_DESSINEES = 3
 RANGEES_MINIMALES = 2
-
-#: Part de la hauteur utile revenant au bloc de la coupe de principe.
-#:
-#: Un peu moins de la moitié : la coupe de site est plus large que haute, et
-#: son bandeau parcellaire lui prend de la place en bas.
-PART_BLOC_TABLES = 0.47
 
 #: Longueurs de module admises pour le contrôle d'ordre de grandeur du
 #: rampant. `format_module` est une désignation commerciale (« G12R »), pas une
@@ -511,22 +505,31 @@ def generer(
     utile_l = zone_l - 2 * BLANC_TOURNANT_MM
     utile_h = zone_h - 2 * BLANC_TOURNANT_MM
 
-    hauteur_tables = (utile_h - BLANC_TOURNANT_MM) * PART_BLOC_TABLES
-    bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables)
-
-    # Le premier cadre est mesuré avant d'être tracé : le second se pose sous
-    # lui, et occupe tout ce qui reste. Sans cela, la planche gardait une
-    # moitié de feuille vide sous ses deux cadres.
-    _, _, hauteur_tables_reelle = _coupe_des_tables(
-        planche, table, bloc_tables, tracer=False
+    # Les deux cadres sont d'abord mesurés à vide sur un partage provisoire de
+    # la hauteur, puis le blanc qui reste se partage à parts égales entre eux.
+    # Caler le premier sur son contenu et donner tout le reste au second
+    # donnait un cadre plein et un cadre presque vide.
+    provisoire = (utile_h - BLANC_TOURNANT_MM) / 2.0
+    _, _, besoin_tables = _coupe_des_tables(
+        planche, table, (utile_x, utile_y, utile_l, provisoire), tracer=False
     )
-    bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables_reelle)
+    _, _, besoin_terrain = _coupe_du_terrain(
+        planche, contrat, table, (utile_x, utile_y, utile_l, provisoire),
+        tracer=False,
+    )
+    hauteur_tables, hauteur_terrain = repartir_hauteurs(
+        [besoin_tables, besoin_terrain], utile_h
+    )
+
+    bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables)
     echelle_tables, nb_rangees, _ = _coupe_des_tables(planche, table, bloc_tables)
     planche.definir_echelle(echelle_tables)
 
-    haut_terrain = utile_y + hauteur_tables_reelle + BLANC_TOURNANT_MM
-    bloc_terrain = (utile_x, haut_terrain, utile_l, utile_y + utile_h - haut_terrain)
-    echelle_terrain, messages = _coupe_du_terrain(planche, contrat, table, bloc_terrain)
+    haut_terrain = utile_y + hauteur_tables + BLANC_TOURNANT_MM
+    bloc_terrain = (utile_x, haut_terrain, utile_l, hauteur_terrain)
+    echelle_terrain, messages, _ = _coupe_du_terrain(
+        planche, contrat, table, bloc_terrain
+    )
     avertissements.extend(messages)
     if nb_rangees < RANGEES_DESSINEES:
         avertissements.append(
@@ -588,28 +591,24 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
         libelle="coupe des tables",
     )
 
-    # Le cadre épouse la hauteur de son contenu : dimensionné sur la part de
-    # planche qu'on lui a réservée, il laissait au-dessus du dessin un vide de
-    # plusieurs centimètres qui se lisait comme un oubli.
     hauteur_dessin_mm = (
         MARGE_HAUT_MM
         + hauteur_utile_m * 1000.0 / denominateur
         + MARGE_COTES_BASSES_MM
     )
-    hauteur_cadre = hauteur_dessin_mm + hauteur_titre_cadre()
     if not tracer:
-        # Mesure seule : la planche a besoin de connaître la hauteur de ce
-        # cadre pour poser le suivant, avant que rien ne soit tracé. Le nombre
-        # de rangées ne se sait qu'au tracé et n'a pas d'intérêt ici.
-        return denominateur, None, hauteur_cadre
+        # Mesure seule : la planche a besoin de savoir ce que ce cadre demande
+        # pour partager le blanc entre ses deux cadres, avant que rien ne soit
+        # tracé. Le nombre de rangées ne se sait qu'au tracé.
+        return denominateur, None, hauteur_dessin_mm + hauteur_titre_cadre()
     sous_cadre(
-        planche, bloc_x, bloc_y, bloc_l, hauteur_cadre,
+        planche, bloc_x, bloc_y, bloc_l, bloc_h,
         titre="Coupe de principe des tables photovoltaïques",
         echelle=denominateur,
     )
-    interieur = zone_interieure(bloc_x, bloc_y, bloc_l, hauteur_cadre)
-    interieur_x, interieur_y, interieur_l, interieur_h = interieur
-    haut_groupe = interieur_y
+    # Le dessin est centré dans le cadre qu'on lui a donné : posé en haut, il
+    # laissait tout son blanc en bas, ce qui se lit comme un oubli.
+    haut_groupe = interieur_y + max(0.0, (interieur_h - hauteur_dessin_mm) / 2.0)
 
     # Autant de rangées complètes que la largeur en loge, trois au plus.
     largeur_disponible_m = (
@@ -670,7 +669,7 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
         )
 
     dessin.verifier_cadre("Coupe des tables")
-    return denominateur, nb_rangees, hauteur_cadre
+    return denominateur, nb_rangees, hauteur_dessin_mm + hauteur_titre_cadre()
 
 
 def _point_sur_rampant(table: GeometrieTable, x_bas: float, fraction: float):
@@ -875,7 +874,8 @@ def _coter_angle(dessin: Dessin, table: GeometrieTable) -> None:
 
 
 def _coupe_du_terrain(
-    planche: Planche, contrat: Contrat, table: GeometrieTable, bloc
+    planche: Planche, contrat: Contrat, table: GeometrieTable, bloc,
+    tracer: bool = True,
 ) -> tuple:
     """Coupe de site : le terrain naturel, les tables posées dessus.
 
@@ -935,6 +935,8 @@ def _coupe_du_terrain(
         + hauteur_utile_m * 1000.0 / denominateur
         + MARGE_REPERES_MM
     )
+    if not tracer:
+        return denominateur, [], hauteur_dessin_mm + hauteur_titre_cadre()
     sous_cadre(
         planche, bloc_x, bloc_y, bloc_l, bloc_h,
         titre="Coupe du terrain naturel A-A'", echelle=denominateur,
@@ -991,7 +993,7 @@ def _coupe_du_terrain(
     _reperes_de_coupe(dessin, profil, alt_min)
 
     dessin.verifier_cadre("Coupe du terrain")
-    return denominateur, avertissements
+    return denominateur, avertissements, hauteur_dessin_mm + hauteur_titre_cadre()
 
 
 def _altitude_a(profil, abscisse: float) -> float:

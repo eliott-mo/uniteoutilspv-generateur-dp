@@ -794,3 +794,32 @@ def sous_cadre(planche: Planche, x_mm: float, y_mm: float, largeur_mm: float,
 def hauteur_titre_cadre(avec_titre: bool = True) -> float:
     """Place qu'un sous-cadre prend en plus de son contenu."""
     return 2 * MARGE_SOUS_CADRE_MM + (HAUTEUR_TITRE_CADRE_MM if avec_titre else 0.0)
+
+
+def repartir_hauteurs(besoins, hauteur_disponible: float) -> list:
+    """Hauteurs d'une colonne de sous-cadres, à vide égal dans chacun.
+
+    Dimensionner le premier cadre sur son contenu puis donner tout le reste au
+    suivant produit des cadres disproportionnés : celui du haut est plein à ras
+    bord, celui du bas garde une demi-feuille blanche, et la planche se lit
+    comme un oubli de mise en page. Le surplus se partage donc à parts égales —
+    chaque cadre respire de la même façon.
+
+    `besoins` est ce que chaque bloc demande, filet et titre compris ;
+    `hauteur_disponible` est la colonne entière, blancs tournants entre cadres
+    compris. La somme des hauteurs rendues plus ces blancs vaut exactement la
+    hauteur disponible : la colonne remplit sa page.
+
+    Quand les contenus débordent déjà, il n'y a rien à partager et les besoins
+    sont rendus tels quels : c'est au choix d'échelle de l'appelant de faire
+    tenir la colonne, pas à la répartition de rogner en silence.
+    """
+    besoins = list(besoins)
+    if not besoins:
+        return []
+    blancs = BLANC_TOURNANT_MM * (len(besoins) - 1)
+    surplus = hauteur_disponible - blancs - sum(besoins)
+    if surplus <= 0.0:
+        return besoins
+    part = surplus / len(besoins)
+    return [besoin + part for besoin in besoins]

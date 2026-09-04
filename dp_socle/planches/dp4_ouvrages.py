@@ -59,6 +59,7 @@ from .primitives import (
     echelle_du_dessin,
     hachurer,
     mention_echelle,
+    repartir_hauteurs,
     silhouette,
     sol_hachure,
     sous_cadre,
@@ -73,38 +74,47 @@ POSTES = ("pdl_ptr", "ptr", "pdl")
 
 #: Répartition des ouvrages sur les planches, décidée au brief. La troisième
 #: n'existe que si le projet porte les ouvrages qu'elle loge.
+#:
+#: La liste est celle arrêtée à la relecture du 04/09/2026 : postes de
+#: livraison, de transformation et combiné, clôture et portail, citernes, local
+#: de stockage, conteneur BESS. Ce sont les seuls ouvrages dont une façade
+#: apprenne quelque chose à l'instruction.
+#:
+#: En sont sortis l'aire d'aspiration et le bac de rétention : le premier est
+#: un revêtement de sol sans élévation, le second une cuvette au sol. Tous deux
+#: restent tracés sur le plan de masse et sur le plan de repérage — ils
+#: disparaissent des façades, pas du dossier.
 REPARTITION = {
     "DP 4-1": ("pdl_ptr", "ptr", "pdl"),
     "DP 4-2": ("cloture", "portail", "bache_incendie"),
-    "DP 4-3": (
-        "bess",
-        "local_technique",
-        "bac_retention",
-        "citerne_refroidissement",
-        "aire_aspiration",
-    ),
+    "DP 4-3": ("bess", "local_technique", "citerne_refroidissement"),
 }
 
 #: Échelles autorisées (décision D2).
 ECHELLES_OUVRAGES = (50, 100, 200)
 
-#: Échelles du plan de repérage. Les quatre premières sont celles du brief ;
-#: les suivantes sont une extension, et leur emploi est signalé au rapport.
+#: Échelles du plan de repérage, en deux listes.
 #:
-#: Mesuré le 04/09/2026 sur la sortie réelle de Sarnois : l'emprise clôturée y
-#: fait 327 x 264 m, soit 327 x 264 mm au 1/1 000 — la zone de dessin d'un A3
-#: entier mesure 410 x 268 mm. Le plan de repérage y remplirait donc la
-#: planche à lui seul, et il n'y aurait plus de place pour les dessins
-#: d'ouvrages que la même planche doit porter. Aucune des quatre échelles du
-#: brief ne tient dans un demi-A3 pour un site de 5 ha, et c'est la taille
-#: courante de nos projets.
+#: Le brief demandait 1:200, 1:300, 1:500 et 1:1 000. Le 1:200 en est écarté à
+#: la relecture du 04/09/2026 : à cette échelle le cadre serre les ouvrages de
+#: si près qu'on ne les situe plus dans le site, et le zoom cesse d'être un
+#: plan de repérage. `ECHELLES_REPERAGE_ADMISES` est donc ce qui reste du
+#: brief, et c'est elle qui fait référence : en sortir se signale au rapport.
+#:
+#: `ECHELLES_REPERAGE` la prolonge pour les grands sites. Mesuré le 04/09/2026
+#: sur la sortie réelle de Sarnois : l'emprise clôturée y fait 327 x 264 m,
+#: soit 327 x 264 mm au 1/1 000 — la zone de dessin d'un A3 entier mesure
+#: 410 x 268 mm. Le plan de repérage y remplirait la planche à lui seul, et il
+#: n'y aurait plus de place pour les dessins d'ouvrages que la même planche
+#: doit porter. Aucune échelle du brief ne tient dans un demi-A3 pour un site
+#: de 5 ha, et c'est la taille courante de nos projets.
 #:
 #: Plutôt que de refuser de produire DP 4 sur un site réel, ou de rogner le
 #: plan en silence, la liste est prolongée et le dépassement est écrit au
 #: rapport. L'échelle retenue est de toute façon portée en clair à côté du
 #: dessin : le lecteur sait toujours à quelle échelle il lit.
-ECHELLES_REPERAGE_BRIEF = (200, 300, 500, 1000)
-ECHELLES_REPERAGE = ECHELLES_REPERAGE_BRIEF + (1500, 2000, 2500, 5000)
+ECHELLES_REPERAGE_ADMISES = (300, 500, 1000)
+ECHELLES_REPERAGE = ECHELLES_REPERAGE_ADMISES + (1500, 2000, 2500, 5000)
 
 #: Marge autour des ouvrages repérés, en fraction de leur emprise. Le plan de
 #: repérage cadre sur **la zone concernée** et non sur tout le site : c'est ce
@@ -397,11 +407,20 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
             "plus."
         )
 
+    # Le blanc qui reste se partage à parts égales entre les cadres, au lieu
+    # de s'accumuler en bas de la colonne : deux cadres serrés sur leur contenu
+    # sous une demi-planche vide se lisent comme une mise en page inachevée.
+    utile = zone_interieure(x, y, largeur, 0.0)[2]
+    hauteurs = repartir_hauteurs(
+        [
+            _hauteur_contenu(bloc, denominateur, utile) + hauteur_titre_cadre()
+            for bloc in blocs
+        ],
+        hauteur,
+    )
+
     curseur_y = y
-    for bloc in blocs:
-        utile = zone_interieure(x, curseur_y, largeur, 0.0)
-        contenu = _hauteur_contenu(bloc, denominateur, utile[2])
-        hauteur_cadre = contenu + hauteur_titre_cadre()
+    for bloc, hauteur_cadre in zip(blocs, hauteurs):
         interieur = sous_cadre(
             planche, x, curseur_y, largeur, hauteur_cadre,
             titre=bloc.titre, echelle=denominateur,
@@ -412,15 +431,17 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
 
 
 def _disposer_vues(planche, bloc, denominateur, interieur) -> None:
-    """Pose les vues d'un bloc dans son cadre, chaque ligne centrée.
+    """Pose les vues d'un bloc dans son cadre, centrées dans les deux sens.
 
-    Tassées à gauche, les vues laissaient un vide à droite du cadre qui se
-    lisait comme un oubli.
+    Tassées en haut à gauche, les vues laissaient tout leur blanc en bas et à
+    droite du cadre, ce qui se lisait comme un oubli.
     """
-    x, y, largeur, _ = interieur
-    curseur_y = y
+    x, y, largeur, hauteur = interieur
     lignes = _lignes_de_vues(bloc, denominateur, largeur)
     a_cote = _place_pour_caracteristiques(bloc, lignes, denominateur, largeur)
+    curseur_y = y + max(
+        0.0, (hauteur - _hauteur_contenu(bloc, denominateur, largeur)) / 2.0
+    )
 
     for index, ligne in enumerate(lignes):
         hauteur_ligne = max(v.hauteur_m * 1000.0 / denominateur for v in ligne)
@@ -657,16 +678,22 @@ def _plan_de_reperage(planche, contrat, panneau, categories):
             centre_cadre[0] + interieur_l * facteur / 2.0,
             centre_cadre[1] + hauteur_plan * facteur / 2.0,
         )
-        visibles = _categories_visibles(contrat, fenetre, avertissements)
+        # Les messages de chaque passe sont recueillis à part : la boucle est
+        # une recherche, et une passe abandonnée n'a rien à dire au rapport.
+        # Sans cela le même avertissement y figurait autant de fois qu'il avait
+        # fallu de passes.
+        messages_du_plan = []
+        visibles = _categories_visibles(contrat, fenetre, messages_du_plan)
         besoin = hauteur_bloc(len(construire_legende([c for c, _ in visibles])))
         if besoin <= hauteur_legende:
             break
         hauteur_legende = besoin
+    avertissements.extend(messages_du_plan)
 
-    if denominateur not in ECHELLES_REPERAGE_BRIEF:
+    if denominateur not in ECHELLES_REPERAGE_ADMISES:
         avertissements.append(
             f"Plan de repérage DP 4 dessiné au 1:{denominateur}, hors de la "
-            f"liste retenue ({', '.join('1:' + str(e) for e in ECHELLES_REPERAGE_BRIEF)}) : "
+            f"liste retenue ({', '.join('1:' + str(e) for e in ECHELLES_REPERAGE_ADMISES)}) : "
             f"la zone repérée mesure {largeur_m:.0f} x {hauteur_m:.0f} m et ne "
             "tient dans le panneau à aucune d'entre elles. L'échelle est portée "
             "en clair sur la planche."
@@ -744,10 +771,9 @@ def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> Blo
     surface = _surface_au_sol(contrat, categorie)
     cote = contrat.cote_de_categorie(categorie, surface_m2=surface)
     if not cote.a_hauteur:
-        # Une aire d'aspiration est une surface, pas un volume : le tableau
-        # bilan lui donne « 8 x 4 m », en longueur x largeur, et rien d'autre.
-        # La dessiner en élévation demanderait une hauteur qu'elle n'a pas ;
-        # elle se dessine en plan, ce qui la décrit entièrement.
+        # Le tableau bilan ne donne à cet ouvrage que deux dimensions. Le
+        # dessiner en élévation demanderait une hauteur qu'il n'a pas : il se
+        # dessine en plan, et son cadre le dit.
         return _bloc_surface(cote, STYLES[categorie].libelle, categorie)
     if categorie in POSTES:
         return _bloc_volume(cote, STYLES[categorie].libelle, categorie)
@@ -836,12 +862,16 @@ def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
         # La fourchette du socle, écrite comme sur le dossier de référence.
         # Portée par une seule vue : répétée sur les quatre, elle débordait sur
         # la vue voisine et n'apprenait rien de plus.
+        #
+        # Calée à gauche, et non centrée : centrée, elle tombait exactement sur
+        # la cote de largeur, qui l'est aussi, et les deux textes s'écrivaient
+        # l'un sur l'autre.
         if coter_socle:
             dessin.texte(
-                largeur_m / 2.0, 0.0,
+                0.0, 0.0,
                 f"socle {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
                 f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m",
-                taille=5.5 * PT, ancre="middle", decalage_mm=(0.0, 5.0),
+                taille=5.5 * PT, ancre="start", decalage_mm=(0.0, 5.0),
             )
 
     return tracer
@@ -928,9 +958,10 @@ def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
 def _bloc_surface(cote, libelle: str, categorie: str) -> BlocOuvrage:
     """Un ouvrage plan : une vue de dessus cotée, et rien de plus.
 
-    L'aire d'aspiration du SDIS est une aire de stationnement pour l'engin
-    pompe : elle n'a pas d'élévation, et le tableau bilan ne lui donne que
-    deux dimensions.
+    Recours pour un ouvrage dont le tableau bilan ne porte pas de hauteur.
+    Plutôt que d'en inventer une, la vue en plan le décrit avec les deux
+    dimensions dont on dispose, et la ligne de caractéristiques annonce qu'il
+    n'a pas d'élévation.
     """
     longueur = cote.longueur_m
     largeur = cote.largeur_m
