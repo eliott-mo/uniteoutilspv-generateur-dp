@@ -13,11 +13,20 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
-from .erreurs import ErreurRendu
-from .dossier import numero_planche
+from .contrat import Contrat, charger_contrat
+from .erreurs import ErreurContrat, ErreurDP, ErreurRendu
+from .dossier import codes_produits, numero_planche
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
-from .planches import dp1_1_situation, dp1_2_aerienne, dp1_3_cadastre, page_garde
+from .planches import (
+    dp1_1_situation,
+    dp1_2_aerienne,
+    dp1_3_cadastre,
+    dp2_plan_masse,
+    dp3_coupes,
+    dp4_ouvrages,
+    page_garde,
+)
 from .polices import EtatPolices, avertir_si_indisponible
 from .projet import Projet
 
@@ -43,6 +52,9 @@ class Rapport:
     taille_mo: float = 0.0
     etat_polices: EtatPolices | None = None
     avertissements: list = field(default_factory=list)
+    #: Origine du contrat d'entrée employé, ou None si le dossier s'arrête au
+    #: socle faute d'import.
+    origine_contrat: str | None = None
 
 
 def generer_dossier(
@@ -74,6 +86,14 @@ def generer_dossier(
     # Les reprises du WMS-R sont émises en RuntimeWarning au plus près de la
     # requête ; on les remonte au rapport pour qu'elles atteignent l'interface
     # au lieu de finir dans la console.
+    # Le contrat d'entrée du lot 4 vit dans le même dossier que les planches
+    # produites : `sortie/{projet}/`. Son absence est un cas normal — c'est un
+    # dossier dont le plan n'a pas encore été importé — et le dossier s'arrête
+    # alors au socle, en le disant.
+    contrat, message = _charger_contrat_eventuel(dossier, projet)
+    if message:
+        avertissements.append(message)
+
     with warnings.catch_warnings(record=True) as captees:
         warnings.simplefilter("always", RuntimeWarning)
         sorties = [
@@ -81,6 +101,10 @@ def generer_dossier(
             dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi),
             dp1_3_cadastre.generer(projet, emprise, dossier),
         ]
+        if contrat is not None:
+            sorties.extend(
+                _planches_lot4(projet, contrat, emprise, dossier, avertissements)
+            )
     avertissements.extend(
         str(c.message) for c in captees if issubclass(c.category, RuntimeWarning)
     )
@@ -89,12 +113,17 @@ def generer_dossier(
     pages = {"": 1}
     sommaire = [{"numero": "—", "titre": "Page de garde", "page": 1}]
     page_courante = 2
+    produites = codes_produits([s.numero for s in sorties])
     for sortie in sorties:
         # La case NUMÉRO du cartouche a été composée à partir de
         # dossier.numero_planche(), qui suppose une page par pièce. On le
         # vérifie sur les PDF produits : un cartouche qui annonce une planche 3
         # sur une page 4 est le genre d'erreur que personne ne rattrape.
-        attendu = numero_planche(sortie.numero)
+        #
+        # Le rang est calculé sur les pièces réellement produites : depuis le
+        # lot 4 elles ne sont plus toujours les mêmes, un projet sans poste
+        # n'ayant pas de DP 4-1.
+        attendu = numero_planche(sortie.numero, produites)
         if attendu != page_courante:
             raise ErreurRendu(
                 f"{sortie.numero} : le cartouche annonce la planche {attendu} "
@@ -128,7 +157,70 @@ def generer_dossier(
         taille_mo=taille_mo,
         etat_polices=etat,
         avertissements=avertissements,
+        origine_contrat=contrat.origine if contrat is not None else None,
     )
+
+
+def _charger_contrat_eventuel(dossier: Path, projet: Projet):
+    """Contrat d'entrée du lot 4, s'il y en a un, et ce qu'il faut en dire.
+
+    Un contrat absent est normal : le dossier s'arrête alors au socle. Un
+    contrat présent mais refusé — version trop récente, voirie non tranchée —
+    ne l'est pas, et l'erreur remonte : produire un dossier amputé de ses
+    quatre planches principales sans que rien ne l'explique serait pire.
+    """
+    try:
+        return charger_contrat(dossier, voirie=projet.voirie), None
+    except ErreurContrat as exc:
+        if "Aucun contrat" in str(exc):
+            return None, (
+                "Aucun plan importé pour ce projet : le dossier s'arrête au "
+                "plan de cadastre. Importez le plan du bureau d'études ou "
+                "l'export HelioScope pour produire DP 2, DP 3 et DP 4."
+            )
+        raise
+
+
+def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements):
+    """DP 2, DP 3 et les DP 4, dans l'ordre du dossier.
+
+    Chaque planche non produite l'est pour une raison écrite au rapport. Le
+    rang des planches suivantes se calcule ensuite sur ce qui a réellement été
+    produit : c'est `codes_produits` qui s'en charge, une fois la liste connue.
+    """
+    sorties = []
+    rang = 5  # page de garde, DP 1-1, DP 1-2, DP 1-3, puis DP 2.
+
+    sorties.append(
+        dp2_plan_masse.generer(projet, contrat, emprise, dossier, numero=str(rang))
+    )
+    avertissements.extend(sorties[-1].details.get("avertissements", []))
+    rang += 1
+
+    if contrat.profil and (contrat.profil.get("points") or []):
+        sorties.append(
+            dp3_coupes.generer(projet, contrat, dossier, numero=str(rang))
+        )
+        avertissements.extend(sorties[-1].details.get("avertissements", []))
+        rang += 1
+    else:
+        avertissements.append(
+            "Aucun profil de terrain au contrat : DP 3 n'est pas produite. "
+            "Tracez la ligne de coupe A-A' et relevez le profil à l'import."
+        )
+
+    for code in dp4_ouvrages.planches_necessaires(contrat):
+        try:
+            sortie = dp4_ouvrages.generer(
+                projet, contrat, dossier, code, numero=str(rang)
+            )
+        except ErreurDP as exc:
+            avertissements.append(f"{code} n'est pas produite : {exc}")
+            continue
+        sorties.append(sortie)
+        avertissements.extend(sortie.details.get("avertissements", []))
+        rang += 1
+    return sorties
 
 
 def _nb_pages(chemin: Path) -> int:

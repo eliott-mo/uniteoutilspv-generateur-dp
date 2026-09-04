@@ -42,6 +42,7 @@ from dp_socle.coupe import (
     profil_terrain,
     reprendre_coupe,
 )
+from dp_socle.contrat import VOIRIES_ADMISES, voiries_a_trancher
 from dp_socle.erreurs import ErreurCoupe, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
@@ -181,6 +182,34 @@ libelle = st.text_input(
     "page de garde.",
 )
 
+#: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
+#: une voirie était lourde ou légère, le chef de projet tranche. Le bouton n'a
+#: **aucune valeur par défaut** — le tableau bilan sépare les deux, la légende
+#: du dossier les distingue, et aucune des deux n'est plus probable que
+#: l'autre. Sans réponse, les planches ne sont pas dessinées.
+_voiries = voiries_a_trancher(DOSSIER_SORTIE / nom.strip()) if nom.strip() else 0
+voirie = None
+if _voiries:
+    st.warning(
+        f"Le plan importé porte {_voiries} objet(s) sur le calque « voirie » "
+        "dont le type n'était pas précisé. Le tableau bilan sépare la voie "
+        "lourde de la piste légère, et la légende du dossier les distingue : "
+        "tranchez avant de dessiner.",
+        icon="⚠️",
+    )
+    voirie = st.radio(
+        "Type de ces voiries",
+        options=VOIRIES_ADMISES,
+        format_func=lambda v: {
+            "piste_lourde": "Voie lourde",
+            "piste_legere": "Piste légère",
+        }[v],
+        index=None,
+        horizontal=True,
+        help="Aucune valeur par défaut : c'est une décision de projet, pas un "
+        "réglage.",
+    )
+
 st.subheader("2. Fichiers")
 fichiers_emprise = st.file_uploader(
     "Emprise (ZIP du shapefile, ou .shp + .shx + .dbf + .prj)",
@@ -226,6 +255,7 @@ def _construire_projet() -> Projet | None:
         emprise=str(chemin_emprise),
         image_garde=str(chemin_image) if chemin_image else None,
         libelle=libelle.strip() or None,
+        voirie=voirie,
     )
 
 
@@ -265,6 +295,12 @@ if lancer:
             )
             with st.spinner("Téléchargement des fonds IGN et composition des planches…"):
                 rapport = generer_dossier(projet, DOSSIER_SORTIE, dpi=int(dpi))
+
+            if rapport.origine_contrat:
+                st.caption(
+                    f"Planches DP 2 à DP 4 dessinées depuis le contrat d'entrée "
+                    f"« {rapport.origine_contrat} » de {rapport.dossier}."
+                )
 
             for message in rapport.avertissements:
                 st.warning(message, icon="⚠️")

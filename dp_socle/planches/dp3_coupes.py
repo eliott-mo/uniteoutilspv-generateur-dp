@@ -88,6 +88,22 @@ HAUTEUR_TITRE_MM = 11.0
 LONGUEUR_MODULE_MIN_M = 1.6
 LONGUEUR_MODULE_MAX_M = 2.5
 
+#: Hauteurs standard UNITe des tables, **quand le contrat n'en porte pas**.
+#:
+#: Relevées dans le bloc `standards_unite` d'un tableau bilan réel
+#: (Bray-Saint-Aignan, 04/09/2026), où elles sont écrites « Hauteur point bas »
+#: et « Hauteur point haut ». Elles ne servent qu'en dernier recours.
+#:
+#: Un dossier d'origine HelioScope n'a **aucune** de ces deux valeurs : l'export
+#: ne décrit pas la garde au sol de la structure, et son DXF est plat. La
+#: décision D1 suppose des hauteurs déclarées ; il n'y en a pas. Plutôt que de
+#: ne pas produire DP 3 sur ces dossiers, la coupe est dessinée au standard, et
+#: le rapport de génération dit d'où viennent les deux cotes. C'est ce que la
+#: règle demande : la substitution est le seul comportement possible, mais elle
+#: doit se voir.
+POINT_BAS_STANDARD_M = 1.50
+POINT_HAUT_STANDARD_M = 3.12
+
 #: Écart admis entre le pas déclaré et l'inter-table augmenté de la projection
 #: du rampant, en mètres. Les trois valeurs viennent du même tableau bilan et
 #: doivent se recouper ; 0,5 m laisse passer les arrondis de saisie.
@@ -145,6 +161,96 @@ class GeometrieTable:
     nb_modules_rampant: int | None
 
 
+#: Où lire chaque paramètre de la coupe de type, dans l'ordre d'essai.
+#:
+#: Les deux producteurs du contrat remplissent des clés différentes, et c'est
+#: légitime : le lot 2bis lit un tableau bilan, le lot 2 mesure un DXF. Le
+#: lot 4 lit une seule structure, mais il doit savoir où chaque valeur peut se
+#: trouver. Tout recours à autre chose que la source principale est écrit au
+#: rapport : ce n'est pas la même chose de lire une inclinaison au tableau
+#: bilan et de la mesurer sur un calepinage.
+SOURCES_PARAMETRES = {
+    "inclinaison_deg": (
+        ("structures", "inclinaison_deg", None),
+        ("modules", "inclinaison_deg", "mesurée sur le calepinage HelioScope"),
+    ),
+    "pas_m": (
+        ("structures", "pitch_m", None),
+        ("generalites", "pas_rangees_m", "mesuré sur le calepinage HelioScope"),
+    ),
+    "point_bas_m": (
+        ("structures", "point_bas_m", None),
+        ("standards_unite", "Hauteur point bas", "standard UNITe du tableau bilan"),
+    ),
+    "point_haut_m": (
+        ("structures", "point_haut_m", None),
+        ("standards_unite", "Hauteur point haut", "standard UNITe du tableau bilan"),
+    ),
+    "inter_table_m": (
+        ("structures", "inter_table_m", None),
+        ("standards_unite", "Distance inter-table", "standard UNITe du tableau bilan"),
+    ),
+}
+
+#: Valeurs de dernier recours, et ce qu'il faut en dire.
+DERNIER_RECOURS = {
+    "point_bas_m": (POINT_BAS_STANDARD_M, "hauteur standard UNITe"),
+    "point_haut_m": (POINT_HAUT_STANDARD_M, "hauteur standard UNITe"),
+}
+
+
+def _blocs_de_lecture(contrat: Contrat) -> dict:
+    return {
+        "structures": contrat.structures,
+        "modules": contrat.modules,
+        "generalites": contrat.generalites,
+        "standards_unite": contrat.donnees.get("standards_unite") or {},
+    }
+
+
+def resoudre_parametre(contrat: Contrat, nom: str, avertissements: list) -> float:
+    """Valeur d'un paramètre de la coupe de type, et d'où elle vient.
+
+    L'ordre d'essai est celui de `SOURCES_PARAMETRES`. Dès qu'on quitte la
+    source principale, le rapport le dit : une coupe dessinée sur des valeurs
+    standard n'est pas la même chose qu'une coupe dessinée sur le tableau
+    bilan du projet, et rien sur la planche ne les distingue.
+    """
+    blocs = _blocs_de_lecture(contrat)
+    for bloc, cle, origine in SOURCES_PARAMETRES[nom]:
+        brut = blocs.get(bloc, {}).get(cle)
+        if brut is None or brut == "":
+            continue
+        try:
+            valeur = float(brut)
+        except (TypeError, ValueError):
+            continue
+        if origine is not None:
+            avertissements.append(
+                f"Coupe des tables : « {nom} » = {nombre_fr(valeur)} lu comme "
+                f"{origine}, faute de valeur au tableau bilan du projet."
+            )
+        return valeur
+
+    if nom in DERNIER_RECOURS:
+        valeur, origine = DERNIER_RECOURS[nom]
+        avertissements.append(
+            f"Coupe des tables : « {nom} » absent du contrat d'entrée — "
+            f"{origine} de {nombre_fr(valeur)} m appliquée. Un export "
+            "HelioScope ne décrit pas la garde au sol de la structure, et son "
+            "DXF est plat : cette cote ne vient pas du projet."
+        )
+        return valeur
+
+    raise ErreurContrat(
+        f"« {nom} » introuvable dans le contrat d'entrée (cherché dans "
+        + ", ".join(
+            f"{bloc}.{cle}" for bloc, cle, _ in SOURCES_PARAMETRES[nom]
+        )
+        + "). La coupe des tables ne peut pas être dessinée."
+    )
+
+
 def geometrie_table(contrat: Contrat) -> tuple:
     """Profil de type d'une table, et ce que les recoupements ont montré.
 
@@ -156,24 +262,12 @@ def geometrie_table(contrat: Contrat) -> tuple:
     recoupent pas, c'est le tableau qu'il faut reprendre, et le dire vaut
     mieux que dessiner une table qui ne ferme pas.
     """
-    structures = contrat.structures
     avertissements = []
 
-    def _valeur(cle: str) -> float:
-        brut = structures.get(cle)
-        if brut is None:
-            raise ErreurContrat(
-                f"« {cle} » absent des paramètres de structures du contrat : la "
-                "coupe des tables ne peut pas être dessinée. Cette valeur vient "
-                "du tableau bilan du bureau d'études."
-            )
-        return float(brut)
-
-    point_bas = _valeur("point_bas_m")
-    point_haut = _valeur("point_haut_m")
-    inclinaison = _valeur("inclinaison_deg")
-    inter_table = _valeur("inter_table_m")
-    pas = _valeur("pitch_m")
+    point_bas = resoudre_parametre(contrat, "point_bas_m", avertissements)
+    point_haut = resoudre_parametre(contrat, "point_haut_m", avertissements)
+    inclinaison = resoudre_parametre(contrat, "inclinaison_deg", avertissements)
+    pas = resoudre_parametre(contrat, "pas_m", avertissements)
 
     if not 0.0 < inclinaison < 90.0:
         raise ErreurContrat(
@@ -190,6 +284,25 @@ def geometrie_table(contrat: Contrat) -> tuple:
     rampant = (point_haut - point_bas) / math.sin(math.radians(inclinaison))
     projection = rampant * math.cos(math.radians(inclinaison))
 
+    # L'inter-table se déduit du pas quand elle n'est pas portée : les deux
+    # décrivent la même géométrie, et c'est le pas qui commande le dessin.
+    try:
+        inter_table = resoudre_parametre(contrat, "inter_table_m", avertissements)
+    except ErreurContrat:
+        inter_table = pas - projection
+        avertissements.append(
+            f"Coupe des tables : inter-table absente du contrat, déduite du pas "
+            f"({nombre_fr(pas)} m) moins la projection du rampant "
+            f"({nombre_fr(projection)} m), soit {nombre_fr(inter_table)} m."
+        )
+    if inter_table <= 0:
+        raise ErreurContrat(
+            f"Inter-table de {nombre_fr(inter_table)} m : les rangées se "
+            f"chevaucheraient. Pas de {nombre_fr(pas)} m pour une projection "
+            f"de rampant de {nombre_fr(projection)} m."
+        )
+
+    structures = contrat.structures
     nb_modules = structures.get("nb_modules_rampant")
     if nb_modules:
         longueur_module = rampant / float(nb_modules)

@@ -41,6 +41,15 @@ class Projet:
     #: n'a pas à être stockée. Une fois cette valeur écrite, une régénération ne
     #: redemande jamais le calage.
     longitude_calage: float | None = None
+    #: Type retenu pour les voiries dont le calque du bureau d'études ne disait
+    #: pas si elles étaient lourdes ou légères (décision D5 du lot 4).
+    #:
+    #: Sans valeur, une couche `voirie` peuplée bloque la génération des
+    #: planches : le tableau bilan sépare les deux et la légende du dossier les
+    #: distingue, aucune des deux n'est plus probable que l'autre. La décision
+    #: est celle du chef de projet, et elle se conserve ici pour qu'une
+    #: régénération ne la redemande pas.
+    voirie: str | None = None
     #: Correction nord-sud saisie à la main, en mètres vers le nord, à partir de
     #: la latitude déduite du fichier. Stockée en écart plutôt qu'en latitude
     #: corrigée : la valeur du fichier reste lisible et la retouche se voit.
@@ -108,6 +117,14 @@ class Projet:
                 raise ErreurDP(
                     f"longitude_calage = {self.longitude_calage} hors de la France "
                     "métropolitaine (-5,5° à 10,0°). Refaites le calage."
+                )
+        if self.voirie is not None:
+            from .contrat import VOIRIES_ADMISES
+
+            if self.voirie not in VOIRIES_ADMISES:
+                raise ErreurDP(
+                    f"voirie = « {self.voirie} » inconnu dans projet.json ; "
+                    f"attendu parmi {', '.join(VOIRIES_ADMISES)}."
                 )
         if self.correction_nord_sud_m is not None:
             if self.longitude_calage is None:

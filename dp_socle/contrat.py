@@ -502,3 +502,25 @@ def _lire_couches(chemin: Path) -> dict:
 def version_lue() -> int:
     """Version maximale du contrat que le lot 4 sait lire."""
     return VERSION_CONTRAT
+
+
+def voiries_a_trancher(dossier: str | Path) -> int:
+    """Nombre d'objets sur la couche `voirie` d'un dossier de sortie.
+
+    Sert à l'interface : elle ne pose la question du type de voirie que si le
+    plan importé en porte. Un dossier sans sortie, ou dont le GeoPackage est
+    illisible, rend zéro — la question ne se pose pas encore, et c'est le
+    chargement du contrat qui refusera plus tard, avec son message à lui.
+    """
+    import fiona
+
+    chemin = Path(dossier) / NOM_GEOPACKAGE
+    if not chemin.exists():
+        return 0
+    try:
+        if "voirie" not in fiona.listlayers(str(chemin)):
+            return 0
+        with fiona.open(str(chemin), layer="voirie") as source:
+            return len(source)
+    except Exception:
+        return 0
