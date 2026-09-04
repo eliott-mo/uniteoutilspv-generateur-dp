@@ -1,0 +1,238 @@
+"""DP 2 — Plan de masse, à échelle adaptative.
+
+Le cadrage se fait sur l'**emprise cadastrale plus 10 % de marge**, et non sur
+la clôture : le plan doit montrer le contexte parcellaire alentour, comme celui
+du dossier de référence. Une planche cadrée sur la seule clôture donnerait un
+projet posé dans le vide.
+
+Pas de fond raster. Le plan de masse de référence est sur fond blanc, et une
+ortho écraserait la lecture des ouvrages — c'est DP 1-2 qui porte la photo
+aérienne.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from shapely.geometry import box
+
+from ..contrat import Contrat
+from ..dossier import piece
+from ..echelle import echelle_adaptative
+from ..erreurs import ErreurComposition, ErreurService
+from ..geometrie import Emprise
+from ..ign import telecharger_batiments, telecharger_parcelles
+from ..planche import (
+    GRIS,
+    MOTIF_BATIMENT,
+    STYLE_BATIMENT,
+    STYLE_PARCELLE,
+    TAILLE_ETIQUETTE,
+    Planche,
+)
+from ..projet import Projet
+from .commun import Sortie, nouvelle_planche
+from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
+from .palette import STYLES, construire_legende, objets_a_dessiner
+from .primitives import TRAIT_AXE, repere_coupe
+
+NUMERO = "DP 2"
+TITRE = piece("DP 2").titre
+
+#: Échelles autorisées pour le plan de masse (décision D2).
+ECHELLES_PLAN_MASSE = (500, 1000, 2000, 2500, 5000)
+
+#: Marge autour de l'emprise cadastrale, en fraction de ses dimensions.
+MARGE = 0.10
+
+#: Distance des repères A et A' au-delà de l'extrémité de la ligne de coupe,
+#: en millimètres papier : ils doivent se lire hors du dessin qu'ils repèrent.
+RECUL_REPERE_MM = 4.0
+
+LARGEUR_LEGENDE_MM = 68.0
+
+
+def generer(
+    projet: Projet,
+    contrat: Contrat,
+    emprise: Emprise,
+    dossier: str | Path,
+    numero: str | None = None,
+) -> Sortie:
+    planche = nouvelle_planche(projet, NUMERO, numero=numero)
+    zone = planche.zone_dessin()
+
+    largeur_m, hauteur_m = emprise.dimensions_m
+    denominateur = echelle_adaptative(
+        largeur_m, hauteur_m, zone, marge=MARGE, valeurs=ECHELLES_PLAN_MASSE
+    )
+    planche.definir_echelle(denominateur)
+    planche.centrer_sur(emprise.centre)
+
+    minx, miny, maxx, maxy = planche.emprise_terrain()
+    avertissements = []
+
+    # 1. Parcellaire du WFS IGN, en filet fin, avec les numéros de parcelle.
+    #    Le cadastre embarqué par le bureau d'études est écarté d'office : le
+    #    dossier prend le sien de l'IGN, que l'instructeur peut vérifier.
+    tampon = max(50.0, 0.05 * max(maxx - minx, maxy - miny))
+    cadre_requete = (minx - tampon, miny - tampon, maxx + tampon, maxy + tampon)
+    parcelles = telecharger_parcelles(cadre_requete)
+    if not parcelles:
+        raise ErreurService(
+            "Aucune parcelle cadastrale sur l'emprise du plan de masse. "
+            "Le plan de masse porte le parcellaire : il n'est pas produit sans."
+        )
+    for parcelle in parcelles:
+        planche.ajouter_geometrie(parcelle.geometrie, STYLE_PARCELLE)
+
+    # 2. Bâtiments, hachurés à 45° comme sur DP 1-3.
+    #
+    #    Seuls ceux qui tombent dans le cadre comptent pour la légende. La
+    #    requête WFS déborde du cadre d'un tampon, pour que les limites soient
+    #    tracées jusqu'au bord ; en tirer une entrée « Bâtiment » ferait
+    #    annoncer à la légende un objet que la planche ne montre pas.
+    cadre_planche = box(minx, miny, maxx, maxy)
+    batiments = telecharger_batiments(cadre_requete)
+    batiments_visibles = [
+        b for b in batiments if cadre_planche.intersects(b.geometrie)
+    ]
+    if batiments_visibles:
+        planche.ajouter_definition(MOTIF_BATIMENT)
+        for batiment in batiments_visibles:
+            planche.ajouter_geometrie(batiment.geometrie, STYLE_BATIMENT)
+
+    # 3. Les catégories du GeoPackage, dans l'ordre de dessin du contrat.
+    objets = objets_a_dessiner(contrat)
+    if not objets:
+        raise ErreurComposition(
+            "Le contrat ne porte aucun objet à dessiner : le plan de masse "
+            "serait vide. Vérifiez l'appariement des calques à l'import."
+        )
+    hors_cadre = []
+    for categorie, geometries in objets:
+        style = STYLES[categorie].style
+        for geometrie in geometries:
+            if not cadre_planche.intersects(geometrie):
+                hors_cadre.append(categorie)
+                continue
+            planche.ajouter_geometrie(geometrie, style)
+    if hors_cadre:
+        # Le contenu cartographique est découpé sur la zone de dessin : un objet
+        # hors cadre disparaîtrait sans rien dire, et c'est exactement le genre
+        # d'absence que personne ne remarque à la relecture.
+        avertissements.append(
+            f"{len(hors_cadre)} objet(s) du plan tombent hors du cadre de DP 2 "
+            f"({', '.join(sorted(set(hors_cadre)))}) : ils ne sont pas dessinés. "
+            "L'emprise cadastrale ne couvre pas tout le projet."
+        )
+
+    # 4. Étiquettes de parcelle, là où la parcelle est assez grande sur le
+    #    papier pour en porter une — même mécanique que DP 1-3.
+    _etiqueter_parcelles(planche, parcelles, cadre_planche)
+
+    # 5. La ligne de coupe, en trait d'axe, et ses repères A / A'.
+    trace = _tracer_ligne_coupe(planche, contrat)
+    if trace is None:
+        avertissements.append(
+            "Aucune ligne de coupe au contrat : le plan de masse ne porte pas "
+            "les repères A et A', et DP 3 n'est pas produite."
+        )
+
+    # 6. La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
+    categories_tracees = [c for c, _ in objets]
+    planche.ajouter_legende(
+        construire_legende(
+            categories_tracees,
+            avec_parcelles=True,
+            avec_batiments=bool(batiments_visibles),
+        ),
+        largeur_mm=LARGEUR_LEGENDE_MM,
+    )
+    planche.ajouter_texte(
+        zone[0] + 3.0,
+        zone[1] + zone[3] - 2.5,
+        "Parcellaire et bâtiments : IGN — Parcellaire Express (PCI), WFS "
+        "Géoplateforme. Ouvrages : plan du bureau d'études.",
+        taille=1.9,
+        couleur=GRIS,
+        halo=True,
+    )
+
+    chemin = planche.rendre_pdf(Path(dossier) / "DP_2_plan_de_masse.pdf")
+    return Sortie(
+        numero=NUMERO,
+        titre=TITRE,
+        chemin=chemin,
+        echelle=denominateur,
+        details={
+            "categories_dessinees": categories_tracees,
+            "nb_parcelles": len(parcelles),
+            "nb_batiments": len(batiments_visibles),
+            "coupe_tracee": trace is not None,
+            "avertissements": avertissements,
+        },
+    )
+
+
+def _etiqueter_parcelles(planche: Planche, parcelles, cadre) -> None:
+    """Numéros de parcelle, sous le seuil de lisibilité près.
+
+    Reprise de la mécanique de DP 1-3 : en dessous de quelques millimètres
+    carrés sur le papier, l'étiquette déborde de sa parcelle et se lit comme
+    celle de la voisine.
+    """
+    facteur = planche.transformation.mm_par_metre ** 2
+    points, textes = [], []
+    for parcelle in parcelles:
+        visible = parcelle.geometrie.intersection(cadre)
+        if visible.is_empty or visible.area * facteur < SURFACE_MIN_ETIQUETTE_MM2:
+            continue
+        points.append(visible.representative_point())
+        textes.append(parcelle.numero)
+    planche.ajouter_etiquettes(
+        points, textes, {"taille_mm": TAILLE_ETIQUETTE, "couleur": "#5a3800"}
+    )
+
+
+def _tracer_ligne_coupe(planche: Planche, contrat: Contrat):
+    """Ligne de coupe en trait d'axe, repères A et A' aux extrémités.
+
+    Les triangles pointent l'un vers l'autre, dans le sens de lecture de la
+    coupe : c'est ce que porte le plan de masse du dossier de référence, et ce
+    que l'instructeur cherche pour savoir de quel côté la coupe regarde.
+    """
+    couche = contrat.couches.get("ligne_coupe")
+    if couche is None or couche.empty:
+        return None
+    ligne = couche.geometry.iloc[0]
+    if ligne is None or ligne.is_empty:
+        return None
+
+    planche.ajouter_geometrie(ligne, TRAIT_AXE)
+
+    coords = list(ligne.coords)
+    depart_mm = planche.transformation.point(coords[0][0], coords[0][1])
+    arrivee_mm = planche.transformation.point(coords[-1][0], coords[-1][1])
+    dx = arrivee_mm[0] - depart_mm[0]
+    dy = arrivee_mm[1] - depart_mm[1]
+    norme = (dx * dx + dy * dy) ** 0.5
+    if norme == 0:
+        return None
+    ux, uy = dx / norme, dy / norme
+
+    repere_coupe(
+        planche,
+        depart_mm[0] - ux * RECUL_REPERE_MM,
+        depart_mm[1] - uy * RECUL_REPERE_MM,
+        "A",
+        (ux, uy),
+    )
+    repere_coupe(
+        planche,
+        arrivee_mm[0] + ux * RECUL_REPERE_MM,
+        arrivee_mm[1] + uy * RECUL_REPERE_MM,
+        "A'",
+        (-ux, -uy),
+    )
+    return ligne

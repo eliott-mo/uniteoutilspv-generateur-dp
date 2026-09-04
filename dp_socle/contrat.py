@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import geopandas as gpd
-from shapely import make_valid
+from shapely import force_2d, make_valid
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -190,6 +190,29 @@ TOLERANCE_VARIANTE = 0.15
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class EntiteContrat:
+    """Une géométrie du contrat, à plat, avec les bornes de son Z."""
+
+    geometrie: BaseGeometry
+    categorie: str
+    calque: str
+    z_min: float | None
+    z_max: float | None
+    z_reel: bool
+
+
+def _reel_ou_rien(valeur):
+    """Un réel, ou None : les colonnes du GeoPackage rendent des NaN."""
+    if valeur is None:
+        return None
+    try:
+        reel = float(valeur)
+    except (TypeError, ValueError):
+        return None
+    return None if reel != reel else reel
+
+
 @dataclass
 class Contrat:
     """Contenu de `sortie/{projet}/`, prêt à dessiner."""
@@ -259,21 +282,46 @@ class Contrat:
         return categorie in self.couches and len(self.couches[categorie]) > 0
 
     def geometries(self, categorie: str) -> list:
-        """Géométries d'une catégorie, chacune passée par `make_valid` (D6).
+        """Géométries d'une catégorie, à plat et valides, prêtes à dessiner.
 
-        `make_valid` systématiquement, pas seulement là où ça a déjà planté :
-        le calque « ESPACE VERT » de Sarnois portait un polygone
-        auto-intersectant qui faisait échouer `unary_union` au lot 2bis, et
-        rien ne dit que c'est le seul fichier du parc dans ce cas.
+        **À plat** : le contrat porte des `Polygon Z`, et le moteur de planche
+        ne trace que des coordonnées à deux dimensions — il lève sur les
+        troisièmes. C'est cohérent avec ce qu'est un plan de masse, une
+        projection au sol ; l'altitude ne s'y dessine pas, elle se lit sur la
+        coupe. Le Z reste accessible par `z_bornes` et `entites`, où il porte
+        un sens, plutôt que traîné dans une géométrie qui n'en a pas l'usage.
+
+        **Valides** : `make_valid` systématiquement, pas seulement là où ça a
+        déjà planté (D6). Le calque « ESPACE VERT » de Sarnois portait un
+        polygone auto-intersectant qui faisait échouer `unary_union` au lot
+        2bis, et rien ne dit que c'est le seul fichier du parc dans ce cas.
+        """
+        return [entite.geometrie for entite in self.entites(categorie)]
+
+    def entites(self, categorie: str) -> list:
+        """Géométries d'une catégorie avec les bornes de leur Z, une par une.
+
+        La coupe du terrain a besoin de l'altitude table par table, pas de
+        celle de la couche : `z_bornes` donne la seconde, celle-ci la première.
         """
         couche = self.couches.get(categorie)
         if couche is None:
             return []
         resultat = []
-        for geometrie in couche.geometry:
+        for ligne in couche.itertuples():
+            geometrie = ligne.geometry
             if geometrie is None or geometrie.is_empty:
                 continue
-            resultat.append(make_valid(geometrie))
+            resultat.append(
+                EntiteContrat(
+                    geometrie=make_valid(force_2d(geometrie)),
+                    categorie=categorie,
+                    calque=str(getattr(ligne, "calque", "") or ""),
+                    z_min=_reel_ou_rien(getattr(ligne, "z_min", None)),
+                    z_max=_reel_ou_rien(getattr(ligne, "z_max", None)),
+                    z_reel=bool(getattr(ligne, "z_reel", False)),
+                )
+            )
         return resultat
 
     def union(self, categorie: str) -> BaseGeometry | None:

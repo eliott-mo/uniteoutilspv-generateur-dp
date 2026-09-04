@@ -23,18 +23,26 @@ class Sortie:
 
 
 def nouvelle_planche(
-    projet: Projet, code: str, echelle: int | None = None
+    projet: Projet,
+    code: str,
+    echelle: int | None = None,
+    numero: str | None = None,
 ) -> Planche:
     """Planche d'une pièce du dossier, titrée et repérée depuis `dp_socle.dossier`.
 
     Le titre du cartouche porte le code de la pièce (« DP 1-3 : PLAN DE
     CADASTRE ») ; la case NUMÉRO porte le rang de la planche dans le dossier
     assemblé, page de garde comprise (« 4 »).
+
+    `numero` permet de passer un rang calculé sur les pièces réellement
+    produites : depuis le lot 4, les planches d'ouvrages n'existent que si le
+    projet porte les ouvrages correspondants, et le rang ne se déduit plus de
+    la seule liste des pièces.
     """
     piece = _piece(code)
     return Planche(
         titre=piece.intitule_cartouche,
-        numero=str(_numero(code)),
+        numero=str(numero if numero is not None else _numero(code)),
         projet=projet.libelle_affiche,
         date=projet.date_francaise(),
         echelle=echelle,

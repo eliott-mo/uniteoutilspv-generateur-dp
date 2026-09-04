@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from dp_socle.dossier import PIECES, PIECES_PRODUITES, numero_planche, piece
+from dp_socle.dossier import (
+    PIECES,
+    PIECES_PRODUITES,
+    codes_produits,
+    numero_planche,
+    piece,
+)
 
 
 def test_codes_uniques():
@@ -37,9 +43,54 @@ def test_intitules():
     assert piece("DP 1-3").intitule_cartouche == "DP 1-3 : PLAN DE CADASTRE"
 
 
-def test_pieces_des_lots_suivants_declarees_non_produites():
-    for code in ("DP 2", "DP 3", "DP 4-1", "DP 4-2", "DP 6", "DP 11"):
+def test_les_planches_du_lot_4_sont_produites():
+    for code in ("DP 2", "DP 3", "DP 4-1", "DP 4-2", "DP 4-3"):
+        assert piece(code).produite
+
+
+def test_les_pieces_fournies_et_le_lot_5_restent_non_produites():
+    """Les insertions paysagères sont fournies en PDF, la notice vient au lot 5."""
+    for code in ("DP 6", "DP 7", "DP 8", "DP 11"):
         assert not piece(code).produite
+
+
+# ---------------------------------------------------------------------------
+# Numérotation d'un dossier où toutes les pièces ne sont pas produites
+# ---------------------------------------------------------------------------
+
+
+def test_le_rang_se_calcule_sur_les_pieces_reellement_produites():
+    """Un projet sans poste n'a pas de DP 4-1, et la suivante remonte d'un rang.
+
+    Sans ce calcul, le cartouche de DP 4-2 annoncerait la planche 8 sur la
+    page 7 du dossier assemblé — ce que `assemblage` refuserait, mais après
+    avoir produit toutes les planches.
+    """
+    sans_poste = codes_produits(
+        ["DP 1-1", "DP 1-2", "DP 1-3", "DP 2", "DP 3", "DP 4-2"]
+    )
+    assert numero_planche("DP 2", sans_poste) == 5
+    assert numero_planche("DP 4-2", sans_poste) == 7
+
+
+def test_un_dossier_sans_lot_4_garde_la_numerotation_du_socle():
+    """Un projet sans contrat d'entrée s'arrête au plan de cadastre."""
+    socle = codes_produits(["DP 1-1", "DP 1-2", "DP 1-3"])
+    assert numero_planche("DP 1-3", socle) == 4
+    with pytest.raises(KeyError, match="DP 2"):
+        numero_planche("DP 2", socle)
+
+
+def test_codes_produits_ordonne_selon_le_dossier():
+    """L'ordre du dossier fait foi, pas celui dans lequel on cite les pièces."""
+    assert codes_produits(["DP 3", "DP 1-1", "DP 2"]) == [
+        "", "DP 1-1", "DP 2", "DP 3"
+    ]
+
+
+def test_codes_produits_refuse_une_piece_inconnue():
+    with pytest.raises(KeyError, match="DP 99"):
+        codes_produits(["DP 99"])
 
 
 def test_piece_inconnue():

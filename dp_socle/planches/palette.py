@@ -210,9 +210,14 @@ STYLES = {
         Style(trait="#ff0000", epaisseur_mm=0.5, remplissage="none"),
         relevee=True,
     ),
+    # Le portail porte le rouge de la clôture, relevé, dont il est
+    # l'interruption : ce qui l'en distingue au plan est son épaisseur, et
+    # c'est aussi tout ce qui les sépare en légende — le pavé de légende du
+    # moteur est un rectangle, et la clôture comme le portail sont rouges au
+    # dossier de référence. Deux entrées, deux libellés, un même rouge.
     "portail": StyleDP(
         "Portail", 33,
-        Style(trait="#ff0000", epaisseur_mm=0.7, remplissage="none"),
+        Style(trait="#ff0000", epaisseur_mm=0.9, remplissage="none"),
         relevee=True,
     ),
     # Dérivée : rouge sombre et tireté, pour ne pas se lire comme le portail
@@ -353,3 +358,26 @@ def couleur_significative(fiche: StyleDP) -> str:
     if remplissage and remplissage != "none":
         return remplissage
     return fiche.style.trait or "#000000"
+
+
+def objets_a_dessiner(contrat) -> list:
+    """Géométries à tracer, par catégorie, dans l'ordre de dessin du contrat.
+
+    Un seul endroit applique les trois règles qui décident de ce qui figure au
+    dossier, pour que le plan de masse et les plans de repérage des DP 4 ne
+    puissent pas en appliquer des versions différentes :
+
+    - les catégories exclues ne sont pas dessinées (D3) ;
+    - une catégorie sans objet ne produit rien, et n'aura donc pas d'entrée de
+      légende (D3) ;
+    - les voiries dont le calque ne disait pas le type rejoignent celle que le
+      chef de projet a tranchée, et n'existent pas sous leur propre nom (D5).
+    """
+    resultat = []
+    for categorie in categories_dessinables():
+        geometries = list(contrat.geometries(categorie))
+        if contrat.voirie == categorie:
+            geometries.extend(contrat.geometries("voirie"))
+        if geometries:
+            resultat.append((categorie, geometries))
+    return resultat
