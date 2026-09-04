@@ -66,6 +66,11 @@ STYLES = {
     "piste_lourde_a_creer": StyleCategorie(
         "Piste lourde à créer", (162, 162, 162), (0, 0, 0)
     ),
+    # Les deux gris de la légende de référence, repris sous les intitulés du
+    # BE : « voie lourde » et « piste légère ».
+    "piste_lourde": StyleCategorie("Voie lourde", (162, 162, 162), (110, 110, 110)),
+    "piste_legere": StyleCategorie("Piste légère", (215, 215, 215), (140, 140, 140)),
+    "aire_grutage": StyleCategorie("Aire de grutage", (198, 198, 198), (60, 60, 60)),
     "plateforme": StyleCategorie("Plateforme", (215, 215, 215), (110, 110, 110)),
     "aire_aspiration": StyleCategorie(
         "Aire d'aspiration", (215, 215, 215), (63, 191, 191), epaisseur=2
@@ -92,6 +97,11 @@ STYLES = {
     ),
     "bac_equarrissage": StyleCategorie("Bac d'équarrissage", (200, 170, 120), (0, 0, 0)),
     "espace_vert": StyleCategorie("Espace vert", (176, 208, 140), (111, 170, 11)),
+    # Végétation en place, dessinée en vert sombre pour se distinguer de la haie
+    # plantée sans lui disputer la lisibilité.
+    "arbre_existant": StyleCategorie(
+        "Arbres existants", (96, 148, 74), (55, 95, 40)
+    ),
     # Compléments de l'aire de charge BESS.
     "citerne_refroidissement": StyleCategorie(
         "Citerne de refroidissement", (63, 191, 191), (0, 0, 0)
@@ -127,8 +137,12 @@ ORDRE_DESSIN = (
     "plateforme",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
+    "piste_legere",
+    "piste_lourde",
+    "aire_grutage",
     "aire_aspiration",
     "espace_vert",
+    "arbre_existant",
     "base_vie",
     "stockage_chantier",
     "haie",

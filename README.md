@@ -714,6 +714,7 @@ chacune** :
 | `UNI_Legende`, `UNI_Echelle`, `UNI_Traits de cosntruction` | mobilier de dessin |
 | couches de travail PVcase, maillage topographique, habillage décoratif | ni ouvrage ni mesure |
 | `UNI_ZIP` | contour d'étude ; **seule la clôture délimite le projet au dossier** |
+| `0` | calque de travail du BE, censé être vide à l'export |
 | `UNI_PDL-PDT_Zone_Ombre` | étude d'ombrage |
 | `VAL-PDL` | doublon du remplissage des plateformes |
 
@@ -1046,6 +1047,45 @@ exactement ce que cette image sert à contrôler.
 L'échelle verticale du profil est exagérée, l'exagération étant **mesurée sur
 les axes réellement composés** et écrite sur la figure. Sans cela, 0,96 m de
 dénivelée sur 355 m de coupe donnerait une ligne parfaitement plate.
+
+### L'export trié, et ce qu'il a changé
+
+Le BE a livré le 04/09/2026 des exports ne contenant que les éléments utiles.
+L'effet est net :
+
+| | export complet | export trié |
+|---|---|---|
+| Calques peuplés | 55 | 27 / 29 |
+| Appariés | 20-21 | **23 / 25** |
+| Écartés | 30-31 | **3** |
+| À décider | 3-5 | **0** |
+| Poids du fichier | 47-50 Mo | 15-16 Mo |
+
+Il apporte surtout **la distinction des pistes**, qui manquait au lot 4 : la
+légende du dossier de référence sépare piste lourde et piste légère, et le DXF
+n'avait qu'un axe indifférencié. Mesurées contre le tableau bilan, les nouvelles
+couches tombent juste — 1 280 m² relevés pour 1 280 déclarés en voie lourde
+interne sur l'indice A, 3 424 pour 3 424 en piste légère, 2 446 pour 2 447 sur
+l'indice B.
+
+Les intitulés du contrat suivent désormais **la légende du plan du BE** plutôt
+que les miens : « voie lourde », « piste légère », « aire de grutage »,
+« arbres existants ». Le PDF du plan porte cette légende, et s'en servir évite
+d'inventer un vocabulaire parallèle.
+
+Deux conséquences sur la lecture du DXF :
+
+- **les arbres existants sont des maillages 3D**, que `ezdxf.path` refuse — « Unsupported DXF type PolyMesh or PolyFaceMesh » — et sur lesquels l'import
+  échouait. Ce qui se dessine d'un arbre sur un plan de masse étant son houppier
+  vu du dessus, c'est l'enveloppe convexe des sommets qui est retenue : 292
+  arbres sur l'indice A, de 0 à 70,7 m² chacun, 6,4 m² en médiane. Attention aux
+  **enregistrements de face** du maillage, qui n'encodent que des indices : les
+  compter comme des points donnait des houppiers de plusieurs millions de m² ;
+- **le calque `0` est écarté d'office.** Le BE le confirme : c'est son calque de
+  travail, censé être vide à l'export. Ce qui s'y trouve y est par oubli — sur
+  l'indice A une zone de contention de 70 m², sur l'indice B des traits de
+  construction. Il reste appariable à la main, ce qui a permis de récupérer la
+  zone de contention sans faire rééditer le fichier.
 
 ### Ce que le pilotage de l'application sur Sarnois a corrigé
 

@@ -811,29 +811,40 @@ def test_toutes_les_categories_ont_un_style_et_un_rang_de_dessin():
     assert set(CATEGORIES) - {"ligne_coupe"} == set(ORDRE_DESSIN)
 
 
-def test_calque_par_defaut_signale_a_part(tmp_path):
-    """Le calque 0 est celui où l'on dessine par oubli.
+def test_calque_par_defaut_ecarte_mais_appariable(tmp_path):
+    """Le calque 0 est le calque de travail du BE, censé être vide à l'export.
 
-    Sur Sarnois il porte la citerne incendie (103,9 m² pour 104 déclarés) et
-    l'aire d'aspiration (32,0 m² pour 32 déclarés), deux ouvrages du dossier —
-    plus douze polygones à 2 km du site. L'apparier en bloc mélangerait les
-    trois, et ne rien dire les perdrait.
+    Ce qui s'y trouve y est par oubli : sur l'indice A de Sarnois une zone de
+    contention de 70 m², sur l'indice B des traits de construction. Il est donc
+    écarté d'office — mais reste appariable à la main, ce qui permet de
+    récupérer l'ouvrage égaré sans faire rééditer le fichier au BE.
     """
+    from dp_socle.import_be import motif_ecart
+
     document = ezdxf.new(setup=True)
     espace = document.modelspace()
     _ajouter_table(espace, (622_900, 6_750_700))
     espace.add_lwpolyline(
-        [(622_940, 6_750_700), (622_948, 6_750_700), (622_948, 6_750_704)],
+        [(622_940, 6_750_700), (622_948, 6_750_700), (622_948, 6_750_710)],
         close=True,
         dxfattribs={"layer": "0"},
     )
     chemin = tmp_path / "calque_zero.dxf"
     document.saveas(str(chemin))
 
-    plan_zero = lire_plan_be(chemin)
-    message = next(m for m in plan_zero.avertissements if "calque par défaut" in m)
-    assert "cacher des ouvrages" in message
-    assert "calques nommés" in message
+    assert "calque de travail" in motif_ecart("0")
+    plan_ecarte = lire_plan_be(chemin)
+    assert not plan_ecarte.par_categorie("zone_contention")
+    assert any("0" in m and "écarté" in m for m in plan_ecarte.avertissements)
+
+    # Rattrapage manuel, sans que le BE ait à rééditer son export.
+    plan_rattrape = lire_plan_be(
+        chemin,
+        correspondance={CALQUE_TABLES: "tables_pv", "0": "zone_contention"},
+    )
+    recuperees = plan_rattrape.par_categorie("zone_contention")
+    assert len(recuperees) == 1
+    assert recuperees[0].geometrie.area == pytest.approx(40.0)
 
 
 def test_les_trois_types_de_poste_sont_distincts():
@@ -873,3 +884,63 @@ def test_zone_de_contention_avec_les_elements_agrivoltaiques():
 
     assert categorie_proposee("UNI_Zone de contention") == "zone_contention"
     assert categorie_proposee("UNI_Limite paddock") == "limite_paddock"
+
+
+# ---------------------------------------------------------------------------
+# Exports triés du BE — livrés le 04/09/2026
+# ---------------------------------------------------------------------------
+
+
+def test_pistes_lourdes_et_legeres_distinguees():
+    """Le BE sépare désormais ce que la légende du dossier sépare.
+
+    Sans cette distinction, le lot 4 ne pouvait pas donner aux deux les deux
+    gris de la légende de référence. Les intitulés retenus sont ceux du plan du
+    BE : « voie lourde » et « piste légère ».
+    """
+    from dp_socle.import_be import CATEGORIES, categorie_proposee
+
+    assert categorie_proposee("UNI_VRD_Pistes lourdes") == "piste_lourde"
+    assert categorie_proposee("UNI_VRD_Pistes légères") == "piste_legere"
+    assert categorie_proposee("UNI_VRD_Aire de grutage") == "aire_grutage"
+    assert {"piste_lourde", "piste_legere", "aire_grutage"} <= set(CATEGORIES)
+
+
+def test_arbres_existants_importes_et_non_ecartes():
+    """« Arbres existant » figure à la légende du BE : c'est de la végétation
+    en place, qui a sa place au dossier au même titre que les haies."""
+    from dp_socle.import_be import categorie_proposee, motif_ecart
+
+    assert categorie_proposee("PVcase Trees") == "arbre_existant"
+    assert motif_ecart("PVcase Trees") is None
+
+
+def test_maillage_3d_rendu_par_son_emprise_en_plan(tmp_path):
+    """`ezdxf.path` refuse les maillages, et l'import échouait dessus.
+
+    Les arbres du BE en sont. Ce qui se dessine d'un arbre sur un plan de masse
+    est son houppier vu du dessus : l'enveloppe convexe des sommets le donne.
+    Attention aux enregistrements de face, qui n'encodent que des indices —
+    les compter comme des points donnait des houppiers de plusieurs millions
+    de mètres carrés.
+    """
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    maillage = espace.add_polyface(dxfattribs={"layer": "PVcase Trees"})
+    maillage.append_face(
+        [
+            (622_950, 6_750_700, 0),
+            (622_954, 6_750_700, 0),
+            (622_954, 6_750_704, 3),
+            (622_950, 6_750_704, 3),
+        ]
+    )
+    chemin = tmp_path / "arbre.dxf"
+    document.saveas(str(chemin))
+
+    plan_arbre = lire_plan_be(chemin)
+    arbres = plan_arbre.par_categorie("arbre_existant")
+    assert len(arbres) == 1
+    assert arbres[0].geometrie.geom_type == "Polygon"
+    assert arbres[0].geometrie.area == pytest.approx(16.0, abs=0.1)

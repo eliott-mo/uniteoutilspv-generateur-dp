@@ -29,7 +29,7 @@ from typing import Sequence
 
 import ezdxf
 from ezdxf import path as ezpath
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, MultiPoint, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -87,6 +87,12 @@ CATEGORIES = (
     "plateforme",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
+    # Le BE de Sarnois ne sépare pas l'existant du créé mais le lourd du léger,
+    # comme la légende de son plan : « voie lourde » et « piste légère ». Les
+    # deux découpages coexistent, chaque projet employant le sien.
+    "piste_lourde",
+    "piste_legere",
+    "aire_grutage",
     "bache_incendie",
     "aire_aspiration",
     "local_technique",
@@ -111,6 +117,9 @@ CATEGORIES = (
     "zone_contention",
     "bac_equarrissage",
     "espace_vert",
+    # « Arbres existant » à la légende du BE : de la végétation en place, qui a
+    # sa place au dossier au même titre que les haies.
+    "arbre_existant",
     # Compléments d'une aire de charge BESS, comptés au tableau bilan.
     "citerne_refroidissement",
     "zone_remise",
@@ -153,6 +162,14 @@ CORRESPONDANCE_DEFAUT = {
     # de la même légende.
     "UNI_BESS_PTR": "ptr",
     "UNI_Zone de contention": "zone_contention",
+    # Livrés dans les exports triés du 04/09/2026, et mesurés contre le tableau
+    # bilan : 1 283 m² relevés pour 1 280 déclarés en voie lourde interne,
+    # 3 427 pour 3 424 en piste légère. Ce sont les intitulés de la légende du
+    # plan du BE qui font foi ici, pas les miens.
+    "UNI_VRD_Pistes lourdes": "piste_lourde",
+    "UNI_VRD_Pistes légères": "piste_legere",
+    "UNI_VRD_Aire de grutage": "aire_grutage",
+    "PVcase Trees": "arbre_existant",
     # Ces trois-là ne se voient qu'une fois les blocs développés : elles sont
     # portées par le contenu des blocs, pas par leur insertion.
     "UNI_Portail exploitant": "portail_exploitant",
@@ -293,6 +310,12 @@ CALQUES_ECARTES = {
     "UNI_Traits de construction": "mobilier de dessin",
     "UNI_Traits de cosntruction": "mobilier de dessin",
     "Defpoints": "calque technique AutoCAD",
+    # Le calque par défaut d'AutoCAD. Le BE le confirme le 04/09/2026 : c'est
+    # son calque de référence et de travail, censé être vide à l'export. Ce qui
+    # s'y trouve y est par oubli — sur l'indice A de Sarnois, une zone de
+    # contention ; sur l'indice B, des traits de construction. Écarté d'office,
+    # mais appariable à la main quand il porte un ouvrage égaré.
+    "0": "calque de travail du BE, censé être vide à l'export",
     # Couches de travail de PVcase. Les modules détaillés et les cadres pleins
     # doublent le contour déjà repris sur « (optimised) » ; le reste décrit la
     # construction de l'implantation, pas des ouvrages à dessiner.
@@ -303,7 +326,6 @@ CALQUES_ECARTES = {
     "PVcase AlignmentLine": "couche de travail PVcase",
     "PVcase Effective Area Hatch": "couche de travail PVcase",
     "PVcase PV Area": "couche de travail PVcase",
-    "PVcase Trees": "couche de travail PVcase",
     # Le terrain est bien là — 1 898 points cotés et un maillage — mais le
     # profil de la coupe vient du RGE ALTI ou d'un relevé fourni. Le reprendre
     # d'ici demanderait de vérifier son référentiel altimétrique, ce qui n'est
@@ -838,22 +860,6 @@ def lire_plan_be(
         if motif is not None:
             ecartes.setdefault(motif, []).append(calque)
             continue
-        if normaliser(calque) == "0":
-            # Le calque 0 est celui par défaut d'AutoCAD : ce qui s'y trouve y
-            # est presque toujours par oubli. Sur Sarnois il porte la citerne
-            # incendie (103,9 m² pour 104 déclarés) et l'aire d'aspiration
-            # (32,0 m² pour 32 déclarés), deux ouvrages du dossier qui seraient
-            # perdus — plus douze polygones à 2 km du site, qui n'ont rien à y
-            # faire. L'apparier en bloc mélangerait les trois.
-            avertissements.append(
-                f"Le calque par défaut « {calque} » porte "
-                f"{len(entites_par_calque[calque])} entités non appariées. C'est "
-                "le calque où l'on dessine par oubli : son contenu est souvent "
-                "un mélange, et il peut cacher des ouvrages du dossier. "
-                "Demandez au BE de les répartir sur des calques nommés plutôt "
-                "que d'apparier celui-ci en bloc."
-            )
-            continue
         avertissements.append(
             f"Calque « {calque} » non apparié ({len(entites_par_calque[calque])} "
             "entités) : son contenu n'est pas importé. Appariez-le à une "
@@ -1027,6 +1033,11 @@ def _geometrie_de(
     bulges à la main était le piège à éviter (les plateformes du fichier de
     référence en portent quatre, invisibles dans la liste des sommets).
     """
+    if entite.dxftype() == "POLYLINE" and (
+        entite.is_poly_face_mesh or entite.is_polygon_mesh
+    ):
+        return _emprise_du_maillage(entite, facteur), 0
+
     try:
         trace = ezpath.make_path(entite)
     except Exception as exc:  # noqa: BLE001 - remonté en erreur nommée
@@ -1063,6 +1074,34 @@ def _geometrie_de(
     if len(uniques) < 2:
         return None, perdus
     return LineString(uniques), perdus
+
+
+def _emprise_du_maillage(entite, facteur: float) -> BaseGeometry | None:
+    """Emprise en plan d'un maillage 3D : son enveloppe convexe.
+
+    `ezdxf.path.make_path` refuse les maillages — « Unsupported DXF type
+    PolyMesh or PolyFaceMesh » — et l'import échouait dessus. Or les arbres
+    existants du BE en sont : 292 maillages sur les plans de Sarnois, que la
+    légende de son plan porte sous « Arbres existant ».
+
+    Ce qui se dessine d'un arbre sur un plan de masse, c'est son houppier vu du
+    dessus : l'enveloppe convexe des sommets le donne. Mesurée sur Sarnois, elle
+    va de 0 à 70,7 m² par arbre, 6,4 m² en médiane.
+
+    Un maillage porte deux sortes de sommets : les vrais, avec leurs
+    coordonnées, et des enregistrements de face qui n'encodent que des indices.
+    Les mélanger donnait des houppiers de plusieurs millions de mètres carrés,
+    les indices étant lus comme des points près de l'origine.
+    """
+    sommets = [
+        (v.dxf.location.x * facteur, v.dxf.location.y * facteur)
+        for v in entite.vertices
+        if not v.is_face_record and v.dxf.hasattr("location")
+    ]
+    if len(set(sommets)) < 3:
+        return None
+    enveloppe = MultiPoint(sommets).convex_hull
+    return enveloppe if enveloppe.geom_type == "Polygon" else None
 
 
 def _z_varie(geometrie: BaseGeometry) -> bool:
