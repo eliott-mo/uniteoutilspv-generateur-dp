@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
-from ..echelle import formater_echelle, metres_vers_mm
+from ..echelle import formater_echelle, metres_vers_mm, mm_vers_metres
 from ..erreurs import ErreurComposition
 from ..planche import PT, Planche, Style
 
@@ -87,6 +87,17 @@ class Dessin:
     def longueur(self, valeur_m: float) -> float:
         """Longueur papier, en millimètres, d'une longueur du dessin."""
         return metres_vers_mm(valeur_m, self.denominateur)
+
+    def metres(self, longueur_mm: float) -> float:
+        """Longueur du dessin correspondant à une longueur de papier.
+
+        Les écarts de mise en page — le retrait d'une ligne de cote sous le
+        dessin, le décalage d'un texte — se pensent en millimètres de papier
+        et non en mètres de terrain : ils doivent rester les mêmes quelle que
+        soit l'échelle. Exprimés en mètres, ils enflaient avec elle, et la
+        coupe des tables au 1/50 sortait de son cadre.
+        """
+        return mm_vers_metres(longueur_mm, self.denominateur)
 
     def point(self, x_m: float, y_m: float) -> tuple:
         """Un point du dessin vers le repère papier."""
