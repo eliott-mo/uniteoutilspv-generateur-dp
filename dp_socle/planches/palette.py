@@ -31,7 +31,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, EntreeLegende, Style
+from dataclasses import dataclass as _dataclass
+
+from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, Style
+from .primitives import union_valide
 
 #: Écart perceptuel minimal entre deux teintes susceptibles de se retrouver sur
 #: la même planche, en ΔE CIE76.
@@ -42,6 +45,15 @@ from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, EntreeLegende, Style
 #: est dérivée : une collision entre deux relevées est héritée du dossier de
 #: référence et ne se corrige pas ici.
 ECART_MINIMAL = 12.0
+
+
+@_dataclass(frozen=True)
+class EntreeDP:
+    """Une entrée de légende : son intitulé, son style, et son symbole."""
+
+    libelle: str
+    style: Style
+    symbole: str = "surface"
 
 
 @dataclass(frozen=True)
@@ -57,6 +69,10 @@ class StyleDP:
     relevee: bool = False
     #: Catégorie dessinée sur le plan de masse (DP 2).
     dessinee: bool = True
+    #: Symbole de légende, parmi ceux de `dp_socle.planches.legende`. Une
+    #: surface se lit comme un aplat, un linéaire comme un trait, un portail
+    #: comme un portail : le rectangle du moteur les confondait tous.
+    symbole: str = "surface"
 
 
 def _remplie(couleur: str, filet: str, epaisseur: float = 0.2) -> Style:
@@ -78,12 +94,18 @@ STYLES = {
         "Zone évitée", 1,
         Style(trait="#6a7a52", epaisseur_mm=0.35, remplissage="none",
               tirets="2.2 1.2"),
+        symbole="tirete",
     ),
     "plateforme": StyleDP(
         "Plateforme", 2, _remplie("#d7d7d7", "#6e6e6e"), relevee=True
     ),
+    # L'intitulé est celui de la légende du plan du bureau d'études, relevé sur
+    # le PDF de Saint-Cyr le 04/09/2026 : « Piste lourde existante (à renforcer
+    # si nécessaire) ». Le renforcement d'une piste existante n'est pas la
+    # création d'une piste, et c'est la distinction qui compte à l'instruction.
     "piste_lourde_existante": StyleDP(
-        "Piste lourde existante", 3, _remplie("#a2a2a2", "#6e6e6e"), relevee=True
+        "Piste lourde existante (à renforcer si nécessaire)", 3,
+        _remplie("#a2a2a2", "#6e6e6e"), relevee=True,
     ),
     "piste_lourde_a_creer": StyleDP(
         "Piste lourde à créer", 4, _remplie("#a2a2a2", "#000000"), relevee=True
@@ -111,7 +133,8 @@ STYLES = {
     ),
     "espace_vert": StyleDP("Espace vert", 9, _remplie("#c9dfa8", "#7d9b55")),
     "arbre_existant": StyleDP(
-        "Arbres existants", 10, _remplie("#5a8f4a", "#37592c")
+        "Arbres existants", 10, _remplie("#5a8f4a", "#37592c"),
+        symbole="vegetation",
     ),
     # Installations de chantier : temporaires. Elles ne sont ni dessinées ni
     # portées en légende (décision D3), et gardent un style pour le seul cas où
@@ -126,13 +149,14 @@ STYLES = {
     "haie": StyleDP(
         "Haie plantée", 13,
         Style(trait="#50780a", epaisseur_mm=0.4, remplissage="#6faa0b"),
-        relevee=True,
+        relevee=True, symbole="vegetation",
     ),
     # Dérivée : vert sombre, pour se lire contre la haie plantée sans lui
     # disputer sa teinte relevée.
     "haie_existante": StyleDP(
         "Haie existante", 14,
         Style(trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18"),
+        symbole="vegetation",
     ),
     # -- structures ---------------------------------------------------------
     # Tables et modules décrivent le même ouvrage à deux niveaux de détail :
@@ -187,6 +211,7 @@ STYLES = {
         "Limite de paddock", 28,
         Style(trait="#966e14", epaisseur_mm=0.3, remplissage="none",
               tirets="2.0 1.2"),
+        symbole="ligne",
     ),
     # Dérivée : ocre franc. Le beige pâle du contrat se confondait avec la
     # zone de remise, dont elle ne partage ni la fonction ni la planche.
@@ -198,17 +223,17 @@ STYLES = {
     "recul_implantation": StyleDP(
         "Recul d'implantation (étude)", 30,
         Style(trait="#c87828", epaisseur_mm=0.2, remplissage="none"),
-        dessinee=False,
+        dessinee=False, symbole="tirete",
     ),
     "zone_implantation_pv": StyleDP(
         "Zone d'implantation (étude)", 31,
         Style(trait="#ff2d2d", epaisseur_mm=0.3, remplissage="none"),
-        dessinee=False,
+        dessinee=False, symbole="tirete",
     ),
     "cloture": StyleDP(
         "Clôture du projet solaire", 32,
         Style(trait="#ff0000", epaisseur_mm=0.5, remplissage="none"),
-        relevee=True,
+        relevee=True, symbole="cloture",
     ),
     # Le portail porte le rouge de la clôture, relevé, dont il est
     # l'interruption : ce qui l'en distingue au plan est son épaisseur, et
@@ -218,7 +243,7 @@ STYLES = {
     "portail": StyleDP(
         "Portail", 33,
         Style(trait="#ff0000", epaisseur_mm=0.9, remplissage="none"),
-        relevee=True,
+        relevee=True, symbole="portail",
     ),
     # Dérivée : rouge sombre et tireté, pour ne pas se lire comme le portail
     # d'accès, que seul le tableau bilan compte.
@@ -226,6 +251,7 @@ STYLES = {
         "Portail d'exploitation", 34,
         Style(trait="#8a0000", epaisseur_mm=0.45, remplissage="none",
               tirets="1.4 0.8"),
+        symbole="portail",
     ),
 }
 
@@ -249,6 +275,8 @@ SANS_STYLE = ("voirie", "ligne_coupe")
 #: Elles précèdent les catégories du projet : c'est l'ordre du dessin.
 LIBELLE_PARCELLE = "Limite de parcelle"
 LIBELLE_BATIMENT = "Bâtiment"
+SYMBOLE_PARCELLE = "ligne"
+SYMBOLE_BATIMENT = "surface"
 RANG_PARCELLE = -2
 RANG_BATIMENT = -1
 
@@ -286,24 +314,28 @@ def construire_legende(
     """
     entrees = []
     if avec_parcelles:
-        entrees.append((RANG_PARCELLE, LIBELLE_PARCELLE, STYLE_PARCELLE))
+        entrees.append(
+            (RANG_PARCELLE, LIBELLE_PARCELLE, STYLE_PARCELLE, SYMBOLE_PARCELLE)
+        )
     if avec_batiments:
-        entrees.append((RANG_BATIMENT, LIBELLE_BATIMENT, STYLE_BATIMENT))
+        entrees.append(
+            (RANG_BATIMENT, LIBELLE_BATIMENT, STYLE_BATIMENT, SYMBOLE_BATIMENT)
+        )
 
     for categorie in categories:
         if categorie in EXCLUES or categorie in SANS_STYLE:
             continue
         fiche = style(categorie)
-        entrees.append((fiche.rang, fiche.libelle, fiche.style))
+        entrees.append((fiche.rang, fiche.libelle, fiche.style, fiche.symbole))
 
     entrees.sort(key=lambda e: e[0])
     vues = set()
     legende = []
-    for _, libelle, trace in entrees:
+    for _, libelle, trace, symbole in entrees:
         if libelle in vues:
             continue
         vues.add(libelle)
-        legende.append(EntreeLegende(libelle, trace))
+        legende.append(EntreeDP(libelle, trace, symbole))
     return legende
 
 
@@ -360,7 +392,80 @@ def couleur_significative(fiche: StyleDP) -> str:
     return fiche.style.trait or "#000000"
 
 
-def objets_a_dessiner(contrat) -> list:
+#: Catégories dont le tableau bilan donne le nombre et la surface au sol, et
+#: dont l'emprise dessinée se recoupe donc avec lui.
+COMPTEES_AU_TABLEAU = {
+    "pdl_ptr": ("nb_pdl_ptr", "surface_pdl_ptr_m2"),
+    "ptr": ("nb_ptr", "surface_ptr_m2"),
+    "pdl": ("nb_pdl", "surface_pdl_m2"),
+}
+
+#: Part de son rectangle minimal qu'une emprise doit remplir pour être tenue
+#: pour rectangulaire. 0,97 : un poste est un bâtiment rectangulaire, et ce qui
+#: manque à ce point-là n'est plus un défaut de tracé.
+REMPLISSAGE_RECTANGULAIRE = 0.97
+
+#: Écart admis entre l'emprise dessinée d'un poste et sa surface déclarée.
+TOLERANCE_EMPRISE_POSTE = 0.08
+
+
+def emprise_de_poste(contrat, categorie: str, avertissements: list) -> list:
+    """Emprise au sol d'un poste, redressée et recoupée avec le tableau bilan.
+
+    Un calque de poste n'est pas toujours dessiné d'un seul trait. Mesuré sur
+    Saint-Cyr le 04/09/2026 : `UNI_PDL` y porte **trois** rectangles de 12 m de
+    long accolés — 3,00, 1,50 et 1,00 m de large — dont les bouts sont
+    légèrement décalés parce qu'ils n'ont pas exactement la même orientation.
+    Dessinés tels quels, ils donnent au poste une emprise en escalier.
+
+    Ce n'est pas un objet de trop : le tableau bilan y déclare bien un PDL/PTR
+    de 66 m², et les trois bandes en totalisent 66,0. C'est le **tracé** qui est
+    approximatif, pas le contenu. Le rectangle minimal de leur union mesure
+    12,0 x 5,5 m, soit exactement les 66 m² déclarés : c'est l'emprise du poste,
+    et c'est elle qui se dessine.
+
+    Le redressement n'a lieu que si l'emprise est déjà rectangulaire à 3 % près
+    — un poste est un bâtiment rectangulaire, et redresser autre chose
+    inventerait une forme. La surface dessinée est comparée à celle du tableau
+    dans tous les cas, et l'écart est dit.
+    """
+    parties = contrat.geometries(categorie)
+    if not parties:
+        return parties
+
+    union = union_valide(parties)
+    if union is None or union.is_empty or union.area <= 0:
+        return parties
+
+    dessinee = parties
+    rectangle = union.minimum_rotated_rectangle
+    if (
+        rectangle.area > 0
+        and union.area / rectangle.area >= REMPLISSAGE_RECTANGULAIRE
+    ):
+        dessinee = [rectangle]
+        if len(parties) > 1:
+            avertissements.append(
+                f"« {categorie} » : les {len(parties)} objets du calque sont "
+                f"dessinés comme une seule emprise de {rectangle.area:.1f} m². "
+                "Leurs bouts ne s'alignaient pas et donnaient au poste une "
+                "silhouette en escalier."
+            )
+
+    cles = COMPTEES_AU_TABLEAU.get(categorie)
+    if cles:
+        declaree = (contrat.postes or {}).get(cles[1])
+        aire = sum(g.area for g in dessinee)
+        if declaree and abs(aire - declaree) > TOLERANCE_EMPRISE_POSTE * declaree:
+            avertissements.append(
+                f"« {categorie} » : {aire:.1f} m² dessinés au plan pour "
+                f"{declaree:.1f} m² déclarés au tableau bilan. La planche "
+                "montre ce que le plan porte."
+            )
+    return dessinee
+
+
+def objets_a_dessiner(contrat, avertissements=None) -> list:
     """Géométries à tracer, par catégorie, dans l'ordre de dessin du contrat.
 
     Un seul endroit applique les trois règles qui décident de ce qui figure au
@@ -373,9 +478,13 @@ def objets_a_dessiner(contrat) -> list:
     - les voiries dont le calque ne disait pas le type rejoignent celle que le
       chef de projet a tranchée, et n'existent pas sous leur propre nom (D5).
     """
+    messages = [] if avertissements is None else avertissements
     resultat = []
     for categorie in categories_dessinables():
-        geometries = list(contrat.geometries(categorie))
+        if categorie in COMPTEES_AU_TABLEAU:
+            geometries = list(emprise_de_poste(contrat, categorie, messages))
+        else:
+            geometries = list(contrat.geometries(categorie))
         if contrat.voirie == categorie:
             geometries.extend(contrat.geometries("voirie"))
         if geometries:

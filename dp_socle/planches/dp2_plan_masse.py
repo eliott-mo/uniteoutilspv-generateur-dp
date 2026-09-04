@@ -33,6 +33,7 @@ from ..planche import (
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
+from .legende import dessiner_legende, hauteur_bloc
 from .palette import STYLES, construire_legende, objets_a_dessiner
 from .primitives import TRAIT_AXE, repere_coupe
 
@@ -49,7 +50,7 @@ MARGE = 0.10
 #: en millimètres papier : ils doivent se lire hors du dessin qu'ils repèrent.
 RECUL_REPERE_MM = 4.0
 
-LARGEUR_LEGENDE_MM = 68.0
+LARGEUR_LEGENDE_MM = 82.0
 
 
 def generer(
@@ -103,7 +104,7 @@ def generer(
             planche.ajouter_geometrie(batiment.geometrie, STYLE_BATIMENT)
 
     # 3. Les catégories du GeoPackage, dans l'ordre de dessin du contrat.
-    objets = objets_a_dessiner(contrat)
+    objets = objets_a_dessiner(contrat, avertissements)
     if not objets:
         raise ErreurComposition(
             "Le contrat ne porte aucun objet à dessiner : le plan de masse "
@@ -141,12 +142,14 @@ def generer(
 
     # 6. La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
     categories_tracees = [c for c, _ in objets]
-    planche.ajouter_legende(
+    dessiner_legende(
+        planche,
         construire_legende(
             categories_tracees,
             avec_parcelles=True,
             avec_batiments=bool(batiments_visibles),
         ),
+        position=(zone[0] + 3.0, zone[1] + 3.0),
         largeur_mm=LARGEUR_LEGENDE_MM,
     )
     planche.ajouter_texte(

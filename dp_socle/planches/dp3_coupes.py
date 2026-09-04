@@ -40,6 +40,7 @@ from ..planche import nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .palette import STYLES
+from .standards import HAUTEUR_CLOTURE_M, MESSAGE_HAUTEURS
 from .primitives import (
     TAILLE_COTE,
     TRAIT_COTE,
@@ -127,10 +128,34 @@ RETRAIT_PAS_MM = 13.5
 #: Écart d'une cote verticale au bord du dessin qu'elle cote.
 ECART_COTE_VERTICALE_MM = 3.0
 
-#: Marges de la coupe du terrain : l'axe altimétrique à gauche, les repères
-#: A et A' en dessous.
+#: Marges de la coupe du terrain : l'axe altimétrique à gauche, le bandeau
+#: parcellaire et les repères A et A' en dessous.
 MARGE_AXE_MM = 18.0
-MARGE_REPERES_MM = 12.0
+MARGE_REPERES_MM = 24.0
+
+#: Bandeau parcellaire sous la coupe : retrait sous la ligne de sol, et hauteur.
+#:
+#: Les numéros de parcelle étaient portés en haut du dessin, où ils tombaient
+#: au milieu des tables — celui de la parcelle centrale de Saint-Cyr était
+#: illisible, recouvert par une rangée. Sous la coupe, dans une bande qui leur
+#: est réservée, ils se lisent tous.
+RETRAIT_BANDEAU_MM = 7.0
+HAUTEUR_BANDEAU_MM = 5.0
+
+#: Épaisseur d'une piste dessinée sur le profil, en millimètres de papier. Une
+#: piste n'a pas d'épaisseur mesurable à cette échelle : c'est un figuré.
+EPAISSEUR_PISTE_MM = 1.1
+
+#: Catégories de sol que la coupe montre là où elle les traverse, dans l'ordre
+#: de dessin du contrat.
+SOLS_TRAVERSES = (
+    "plateforme",
+    "piste_lourde_existante",
+    "piste_lourde_a_creer",
+    "piste_legere",
+    "piste_lourde",
+    "aire_grutage",
+)
 
 #: Pas admis pour les graduations de l'axe altimétrique, en mètres, et écart
 #: minimal entre deux d'entre elles sur le papier.
@@ -692,13 +717,13 @@ def _coupe_du_terrain(
         cadre_mm=(bloc_x, bloc_y, bloc_l, bloc_h),
     )
 
-    # 1. Les limites de parcelle traversées, sous le reste : ce sont des
-    #    repères de fond, pas des ouvrages.
-    messages = _limites_de_parcelle(dessin, contrat, profil, alt_min, alt_max, table)
-    avertissements.extend(messages)
-
-    # 2. Le terrain naturel.
+    # 1. Le terrain naturel.
     sol_hachure(dessin, profil)
+
+    # 2. Les sols traversés — pistes, plateformes — posés sur le profil. Sans
+    #    eux la coupe montre des tables flottant sur un terrain nu, alors que
+    #    la coupe traverse presque toujours une piste.
+    _sols_sur_le_profil(dessin, contrat, profil)
 
     # 3. Les tables, à leur abscisse réelle le long de la coupe.
     posees, messages = _tables_sur_le_profil(dessin, contrat, table, profil)
@@ -712,8 +737,16 @@ def _coupe_du_terrain(
     # 4. Les ouvrages traversés par la coupe.
     avertissements.extend(_ouvrages_sur_le_profil(dessin, contrat, profil))
 
-    # 5. L'axe altimétrique, qui donne les cotes NGF, et les repères A / A'.
+    # 5. La clôture, là où la coupe la franchit : c'est elle qui délimite le
+    #    projet, et une coupe de site qui ne la montre pas ne dit pas où il
+    #    commence.
+    avertissements.extend(_cloture_sur_le_profil(dessin, contrat, profil))
+
+    # 6. L'axe altimétrique, le bandeau parcellaire et les repères A / A'.
     _axe_altimetrique(dessin, profil, alt_min, alt_max, table)
+    avertissements.extend(
+        _bandeau_parcellaire(dessin, contrat, profil, alt_min)
+    )
     _reperes_de_coupe(dessin, profil, alt_min)
 
     dessin.verifier_cadre("Coupe du terrain")
@@ -828,6 +861,115 @@ def _extremite_sud(ligne: LineString, abscisse: float) -> float:
     return ligne.interpolate(abscisse).y
 
 
+def _portions_traversees(ligne, geometries) -> list:
+    """Abscisses de début et de fin des portions de coupe dans ces géométries."""
+    portions = []
+    for geometrie in geometries:
+        traversee = geometrie.intersection(ligne)
+        if traversee.is_empty:
+            continue
+        parties = (
+            traversee.geoms
+            if traversee.geom_type.startswith("Multi")
+            or traversee.geom_type == "GeometryCollection"
+            else [traversee]
+        )
+        for partie in parties:
+            abscisses = [
+                ligne.project(Point(coord)) for coord in _extremites(partie)
+            ]
+            if len(abscisses) < 2:
+                continue
+            debut, fin = min(abscisses), max(abscisses)
+            if fin - debut > 0:
+                portions.append((debut, fin))
+    return portions
+
+
+def _sols_sur_le_profil(dessin, contrat: Contrat, profil) -> None:
+    """Pistes et plateformes, posées sur le terrain là où la coupe les croise.
+
+    Elles se dessinent en léger relief sur le profil, à l'épaisseur d'un
+    figuré : une piste lourde fait 25 cm de structure, soit un quart de
+    millimètre au 1/1 000, et personne ne la verrait.
+    """
+    ligne = _ligne_de_coupe(contrat)
+    epaisseur = dessin.metres(EPAISSEUR_PISTE_MM)
+    for categorie in SOLS_TRAVERSES:
+        geometries = list(contrat.geometries(categorie))
+        if contrat.voirie == categorie:
+            geometries.extend(contrat.geometries("voirie"))
+        if not geometries:
+            continue
+        style = STYLES[categorie].style
+        for debut, fin in _portions_traversees(ligne, geometries):
+            pas = max((fin - debut) / 24.0, 0.5)
+            abscisses = []
+            courante = debut
+            while courante < fin:
+                abscisses.append(courante)
+                courante += pas
+            abscisses.append(fin)
+            # La piste suit le terrain : elle est dessinée comme une bande
+            # d'épaisseur constante posée sur le profil, et non comme un
+            # rectangle qui s'enfoncerait dans les creux.
+            haut = [(x, _altitude_a(profil, x) + epaisseur) for x in abscisses]
+            bas = [(x, _altitude_a(profil, x)) for x in reversed(abscisses)]
+            dessin.polyligne(haut + bas, style, fermer=True)
+
+
+def _cloture_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
+    """La clôture, en élévation, là où la coupe franchit son contour."""
+    geometries = contrat.geometries("cloture")
+    if not geometries:
+        return []
+    ligne = _ligne_de_coupe(contrat)
+    style = STYLES["cloture"].style
+    fin = type(TRAIT_FIN)(trait=style.trait, epaisseur_mm=0.2, remplissage="none")
+
+    passages = []
+    for geometrie in geometries:
+        contour = geometrie.boundary
+        croisement = contour.intersection(ligne)
+        if croisement.is_empty:
+            continue
+        parties = (
+            croisement.geoms
+            if hasattr(croisement, "geoms")
+            else [croisement]
+        )
+        for partie in parties:
+            for coord in _extremites(partie):
+                passages.append(ligne.project(Point(coord)))
+    if not passages:
+        return [
+            "La ligne de coupe ne franchit pas la clôture : elle ne montre pas "
+            "les limites du projet. Vérifiez le tracé A-A'."
+        ]
+
+    debut_coupe, fin_coupe = profil[0][0], profil[-1][0]
+    for abscisse in sorted(set(round(a, 2) for a in passages)):
+        if not debut_coupe <= abscisse <= fin_coupe:
+            continue
+        sol = _altitude_a(profil, abscisse)
+        haut = sol + HAUTEUR_CLOTURE_M
+        dessin.ligne((abscisse, sol), (abscisse, haut), style)
+        # Trois fils, pour que le poteau se lise comme une clôture.
+        largeur = dessin.metres(1.2)
+        for fraction in (0.35, 0.7, 1.0):
+            hauteur = sol + HAUTEUR_CLOTURE_M * fraction
+            dessin.ligne(
+                (abscisse - largeur / 2.0, hauteur),
+                (abscisse + largeur / 2.0, hauteur),
+                fin,
+            )
+        dessin.texte(
+            abscisse, haut, "Clôture", taille=5.5 * PT, ancre="middle",
+            decalage_mm=(0.0, -1.4), couleur=style.trait,
+        )
+    return [MESSAGE_HAUTEURS]
+
+
 def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
     """Les ouvrages que la coupe traverse, en élévation sur le terrain.
 
@@ -869,12 +1011,16 @@ def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
     return avertissements
 
 
-def _limites_de_parcelle(dessin, contrat: Contrat, profil, alt_min, alt_max, table):
-    """Limites de parcelle traversées, en trait vertical, et leurs numéros.
+def _bandeau_parcellaire(dessin, contrat: Contrat, profil, alt_min) -> list:
+    """Limites de parcelle traversées et numéros, dans un bandeau sous la coupe.
 
     C'est ce que porte la coupe du dossier de référence, avec ses AD 211 /
     AD 212 / AD 213 : sans cela, rien ne dit sur quelles parcelles la coupe
     passe. Le parcellaire vient du WFS IGN, comme partout ailleurs.
+
+    Le bandeau est **sous** le terrain. Portés en haut du dessin, les numéros
+    tombaient au milieu des tables : celui de la parcelle centrale de Saint-Cyr
+    était illisible, recouvert par une rangée.
     """
     ligne = _ligne_de_coupe(contrat)
     minx, miny, maxx, maxy = ligne.bounds
@@ -885,47 +1031,60 @@ def _limites_de_parcelle(dessin, contrat: Contrat, profil, alt_min, alt_max, tab
     if not parcelles:
         return [
             "Coupe du terrain : aucune parcelle cadastrale le long de la "
-            "coupe, les limites de parcelle ne sont pas portées."
+            "coupe, le bandeau parcellaire n'est pas porté."
         ]
-
-    haut = alt_max + table.point_haut_m + 1.0
-    ruptures = set()
-    traversees = []
-    for parcelle in parcelles:
-        portion = parcelle.geometrie.intersection(ligne)
-        if portion.is_empty:
-            continue
-        abscisses = [
-            ligne.project(Point(coord)) for coord in _extremites(portion)
-        ]
-        if not abscisses:
-            continue
-        debut, fin = min(abscisses), max(abscisses)
-        if fin - debut <= 0:
-            continue
-        traversees.append((debut, fin, parcelle.numero))
-        ruptures.update((round(debut, 2), round(fin, 2)))
 
     debut_coupe, fin_coupe = profil[0][0], profil[-1][0]
-    for abscisse in sorted(ruptures):
-        if not debut_coupe < abscisse < fin_coupe:
+    traversees = []
+    for parcelle in parcelles:
+        portions = _portions_traversees(ligne, [parcelle.geometrie])
+        for debut, fin in portions:
+            traversees.append((debut, fin, parcelle.numero))
+    if not traversees:
+        return [
+            "Coupe du terrain : la coupe ne traverse aucune parcelle du "
+            "Parcellaire Express."
+        ]
+    traversees.sort()
+
+    haut = alt_min - dessin.metres(RETRAIT_BANDEAU_MM)
+    bas = haut - dessin.metres(HAUTEUR_BANDEAU_MM)
+    trait = type(TRAIT_FIN)(trait="#7a4b00", epaisseur_mm=0.2, remplissage="none")
+    dessin.ligne((debut_coupe, haut), (fin_coupe, haut), trait)
+    dessin.ligne((debut_coupe, bas), (fin_coupe, bas), trait)
+
+    ruptures = sorted({round(a, 2) for debut, fin, _ in traversees for a in (debut, fin)})
+    for abscisse in ruptures:
+        if not debut_coupe <= abscisse <= fin_coupe:
             continue
+        dessin.ligne((abscisse, bas), (abscisse, haut), trait)
+        # Le trait de rappel remonte jusqu'au terrain, pour qu'on sache où la
+        # limite tombe sur la coupe.
         dessin.ligne(
-            (abscisse, alt_min - 1.5), (abscisse, haut),
-            type(TRAIT_FIN)(trait="#7a4b00", epaisseur_mm=0.2, tirets="1.6 1.0"),
+            (abscisse, haut),
+            (abscisse, _altitude_a(profil, abscisse)),
+            type(TRAIT_FIN)(trait="#7a4b00", epaisseur_mm=0.15,
+                            remplissage="none", tirets="1.4 1.0"),
         )
-        dessin.texte(
-            abscisse, haut, "Limite de parcelle", taille=5.5 * PT,
-            couleur="#5a3800", ancre="start", decalage_mm=(0.6, -0.8),
-        )
-    for debut, fin, numero in sorted(traversees):
-        milieu = (debut + fin) / 2.0
-        if not debut_coupe <= milieu <= fin_coupe:
+
+    milieu = (haut + bas) / 2.0
+    for debut, fin, numero in traversees:
+        centre = (max(debut, debut_coupe) + min(fin, fin_coupe)) / 2.0
+        if not debut_coupe <= centre <= fin_coupe:
+            continue
+        largeur_mm = dessin.longueur(min(fin, fin_coupe) - max(debut, debut_coupe))
+        if largeur_mm < dessin.planche.mesurer_texte(numero, 6.0 * PT) + 1.0:
+            # Une parcelle trop étroite sur le papier porterait un numéro
+            # débordant sur ses voisines : elle n'en porte pas.
             continue
         dessin.texte(
-            milieu, haut, numero, taille=6.5 * PT, couleur="#5a3800",
-            ancre="middle", decalage_mm=(0.0, 3.2), gras=True,
+            centre, milieu, numero, taille=6.0 * PT, ancre="middle",
+            couleur="#5a3800", gras=True, decalage_mm=(0.0, 1.0),
         )
+    dessin.texte(
+        debut_coupe, bas, "Limites de parcelle", taille=5.5 * PT,
+        ancre="start", couleur="#5a3800", decalage_mm=(0.0, 3.2),
+    )
     return []
 
 

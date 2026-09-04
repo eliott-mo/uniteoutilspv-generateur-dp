@@ -195,3 +195,49 @@ def test_toutes_les_categories_du_contrat_ont_un_style():
     assert not manquantes, (
         "catégories du contrat sans style de dossier : " + ", ".join(manquantes)
     )
+
+
+# ---------------------------------------------------------------------------
+# Symboles de légende
+# ---------------------------------------------------------------------------
+
+
+def test_chaque_categorie_a_un_symbole_connu():
+    """Un symbole inconnu retomberait en silence sur l'aplat rectangulaire."""
+    from dp_socle.planches.legende import SYMBOLES_CONNUS
+
+    inconnus = [c for c, s in STYLES.items() if s.symbole not in SYMBOLES_CONNUS]
+    assert not inconnus, "symboles de légende inconnus : " + ", ".join(inconnus)
+
+
+def test_la_cloture_et_le_portail_ne_partagent_pas_leur_symbole():
+    """Deux linéaires rouges que le rectangle du moteur rendait identiques."""
+    assert style("cloture").symbole == "cloture"
+    assert style("portail").symbole == "portail"
+    assert style("cloture").symbole != style("portail").symbole
+
+
+def test_lintitule_de_la_piste_existante_est_celui_du_bureau_detudes():
+    """« à renforcer » n'est pas « à créer », et c'est ce qui compte au dossier.
+
+    Relevé le 04/09/2026 dans la légende du plan PDF de Saint-Cyr.
+    """
+    assert style("piste_lourde_existante").libelle == (
+        "Piste lourde existante (à renforcer si nécessaire)"
+    )
+    assert "à créer" in style("piste_lourde_a_creer").libelle
+
+
+def test_la_legende_dessinee_a_la_hauteur_quelle_annonce():
+    """Les planches DP 4 calent le plan sur cette hauteur avant de la dessiner."""
+    from dp_socle.planche import Planche
+    from dp_socle.planches.legende import dessiner_legende, hauteur_bloc
+
+    planche = Planche(
+        titre="T", numero="T", projet="T", date="04/09/2026", avec_cartouche=False
+    )
+    entrees = construire_legende(("cloture", "portail", "tables_pv"))
+    _, _, _, hauteur = dessiner_legende(
+        planche, entrees, position=(10.0, 10.0), largeur_mm=70.0
+    )
+    assert hauteur == pytest.approx(hauteur_bloc(len(entrees)))

@@ -307,3 +307,97 @@ def test_cote_est_immuable():
     cote = Cote("essai", "12 x 3 m", "longueur x largeur", None, None, {})
     with pytest.raises(Exception):
         cote.ouvrage = "autre"
+
+
+# ---------------------------------------------------------------------------
+# Emprise au sol des postes
+# ---------------------------------------------------------------------------
+
+
+def test_un_poste_dessine_en_plusieurs_bandes_devient_une_emprise(tmp_path):
+    """Le calque `UNI_PDL` de Saint-Cyr porte trois bandes mal alignées en bout.
+
+    Elles totalisent bien la surface déclarée au tableau bilan : ce n'est pas
+    un objet de trop, c'est un tracé approximatif. Le rectangle minimal de leur
+    union est l'emprise du poste, et il vaut la surface déclarée.
+    """
+    import math
+
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
+    from dp_socle.planches.palette import emprise_de_poste
+
+    x0, y0 = synthese.ORIGINE_L93
+    angle = math.radians(20.0)
+
+    def bande(decalage, largeur, biais):
+        """Bande de 12 m de long, posée à `decalage`, légèrement désalignée."""
+        coins = []
+        for long, trav in ((0, 0), (12.0 + biais, 0), (12.0 + biais, largeur), (0, largeur)):
+            coins.append(
+                (
+                    x0 + long * math.cos(angle) - (trav + decalage) * math.sin(angle),
+                    y0 + long * math.sin(angle) + (trav + decalage) * math.cos(angle),
+                )
+            )
+        return Polygon(coins)
+
+    bandes = [bande(0.0, 3.0, 0.0), bande(3.0, 1.5, -0.1), bande(4.5, 1.0, -0.15)]
+    ecrire_geopackage(
+        [
+            EntiteBE(categorie="pdl_ptr", calque="UNI_PDL", geometrie=g, z_reel=False)
+            for g in bandes
+        ],
+        tmp_path,
+        synthese.ligne_coupe(),
+    )
+    donnees = synthese.parametres()
+    donnees["parametres"]["postes"]["surface_pdl_ptr_m2"] = sum(g.area for g in bandes)
+    ecrire_parametres(donnees, tmp_path)
+
+    contrat = charger_contrat(tmp_path)
+    assert len(contrat.geometries("pdl_ptr")) == 3
+
+    avertissements = []
+    emprise = emprise_de_poste(contrat, "pdl_ptr", avertissements)
+    assert len(emprise) == 1
+    assert emprise[0].geom_type == "Polygon"
+    # Un rectangle : quatre côtés, et pas d'escalier en bout.
+    assert len(emprise[0].exterior.coords) == 5
+    assert any("escalier" in m for m in avertissements)
+
+
+def test_une_emprise_de_poste_non_rectangulaire_reste_telle_quelle(tmp_path):
+    """Redresser autre chose qu'un rectangle inventerait une forme."""
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
+    from dp_socle.planches.palette import emprise_de_poste
+
+    x0, y0 = synthese.ORIGINE_L93
+    triangle = Polygon([(x0, y0), (x0 + 12, y0), (x0, y0 + 6)])
+    ecrire_geopackage(
+        [EntiteBE(categorie="pdl_ptr", calque="UNI_PDL", geometrie=triangle,
+                  z_reel=False)],
+        tmp_path,
+        synthese.ligne_coupe(),
+    )
+    ecrire_parametres(synthese.parametres(), tmp_path)
+
+    contrat = charger_contrat(tmp_path)
+    emprise = emprise_de_poste(contrat, "pdl_ptr", [])
+    assert len(emprise) == 1
+    assert emprise[0].area == pytest.approx(triangle.area)
+
+
+def test_un_ecart_de_surface_avec_le_tableau_est_signale(tmp_path):
+    """30 m² dessinés pour 36 déclarés : la planche montre le plan, et le dit."""
+    from dp_socle.planches.palette import emprise_de_poste
+
+    synthese.ecrire(tmp_path)
+    contrat = charger_contrat(tmp_path)
+    contrat.donnees["parametres"]["postes"]["surface_pdl_ptr_m2"] = 90.0
+    avertissements = []
+    emprise_de_poste(contrat, "pdl_ptr", avertissements)
+    assert any("déclarés au tableau bilan" in m for m in avertissements)

@@ -1,0 +1,42 @@
+"""Valeurs standard UNITe que le contrat d'entrée ne porte pas.
+
+Le tableau bilan donne le linéaire de clôture, le nombre de portails et leur
+largeur. Il ne donne **aucune hauteur** — ni pour la clôture, ni pour le
+portail — alors que les élévations de DP 4 et la coupe du terrain de DP 3 en
+ont besoin.
+
+Ces valeurs sont donc celles des clôtures et portails posés sur les centrales
+UNITe. Elles ne viennent pas du dossier, et toute planche qui les emploie le
+dit au rapport de génération : c'est une substitution, elle doit se voir.
+
+**Corroboration.** Relevée le 04/09/2026 dans la légende du plan PDF du bureau
+d'études pour Saint-Cyr : « Clôture à créer (2m) ». La hauteur est donc bien
+celle-ci, et elle est même écrite sur le plan — mais en texte libre, que
+l'import ne lit pas. C'est la bonne façon de combler ce manque le jour où on
+s'y mettra : lire la légende du DXF plutôt que de garder une constante ici.
+"""
+
+from __future__ import annotations
+
+from ..planche import nombre_fr
+
+#: Hauteur d'une clôture de centrale, en mètres.
+HAUTEUR_CLOTURE_M = 2.00
+#: Hauteur d'un portail d'accès, alignée sur celle de la clôture.
+HAUTEUR_PORTAIL_M = 2.00
+#: Espacement des poteaux de clôture, en mètres.
+ESPACEMENT_POTEAUX_M = 2.50
+
+#: Passage à petite faune : ouverture ménagée au pied de la clôture. Élément
+#: standard et attendu à l'instruction.
+PASSAGE_FAUNE_LARGEUR_M = 0.15
+PASSAGE_FAUNE_HAUTEUR_M = 0.15
+
+MESSAGE_HAUTEURS = (
+    "Hauteur de clôture et de portail non portées au contrat d'entrée : les "
+    f"dessins sont établis à la valeur standard UNITe de "
+    f"{nombre_fr(HAUTEUR_CLOTURE_M)} m. Le tableau bilan ne donne que le "
+    "linéaire, le nombre de portails et leur largeur ; la légende du plan du "
+    "bureau d'études, elle, porte bien « clôture à créer (2m) », mais en texte "
+    "libre que l'import ne lit pas."
+)

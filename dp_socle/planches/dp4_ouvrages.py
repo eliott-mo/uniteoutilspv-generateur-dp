@@ -29,10 +29,21 @@ from pathlib import Path
 from ..contrat import Contrat
 from ..dossier import piece
 from ..erreurs import ErreurComposition, ErreurCoteOuvrage
+from shapely.geometry import box
+
 from ..planche import GRIS, PT, Planche, Style, nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
+from .legende import dessiner_legende, hauteur_bloc
 from .palette import STYLES, construire_legende, objets_a_dessiner
+from .standards import (
+    ESPACEMENT_POTEAUX_M,
+    HAUTEUR_CLOTURE_M,
+    HAUTEUR_PORTAIL_M,
+    MESSAGE_HAUTEURS,
+    PASSAGE_FAUNE_HAUTEUR_M,
+    PASSAGE_FAUNE_LARGEUR_M,
+)
 from .primitives import (
     TAILLE_COTE,
     TRAIT_FIN,
@@ -89,9 +100,26 @@ ECHELLES_OUVRAGES = (50, 100, 200)
 ECHELLES_REPERAGE_BRIEF = (200, 300, 500, 1000)
 ECHELLES_REPERAGE = ECHELLES_REPERAGE_BRIEF + (1500, 2000, 2500, 5000)
 
+#: Marge autour des ouvrages repérés, en fraction de leur emprise. Le plan de
+#: repérage cadre sur **la zone concernée** et non sur tout le site : c'est ce
+#: que fait le dossier de référence, et c'est ce qui rend un poste de 12 x 3 m
+#: visible sur un site de 5 ha. La marge donne le contexte qui permet de situer
+#: la zone dans la clôture.
+MARGE_REPERAGE = 0.55
+
+#: Part de l'emprise clôturée en deçà de laquelle le cadrage se resserre. Au
+#: delà, la zone concernée couvre déjà presque tout le site et le resserrement
+#: n'apporte rien.
+PART_MAXIMALE_ZOOM = 0.45
+
 #: Partage de la planche : le plan de repérage à gauche, les ouvrages à droite.
 LARGEUR_REPERAGE_MM = 140.0
 INTERVALLE_PANNEAUX_MM = 6.0
+
+#: Épaisseur du filet encadrant chaque bloc d'ouvrage, et jeu intérieur.
+#: Le dossier de référence structure sa planche en cadres : chaque ouvrage a le
+#: sien, et l'œil ne confond pas deux séries de vues voisines.
+JEU_CADRE_MM = 2.0
 
 #: Place d'un titre de vue et de ses cotes autour du dessin, en millimètres.
 #:
@@ -108,27 +136,9 @@ HAUTEUR_TITRE_BLOC_MM = 5.0
 #: Hauteur réservée au titre et à l'échelle en tête du panneau de droite.
 HAUTEUR_ENTETE_MM = 11.0
 
-#: Hauteurs standard UNITe, **absentes du contrat**.
-#:
-#: Le tableau bilan porte le linéaire de clôture, le nombre de portails et la
-#: largeur des portails, mais aucune hauteur. Ces valeurs sont celles des
-#: clôtures et portails posés sur les centrales UNITe. Toute planche qui les
-#: emploie le dit au rapport de génération : ce n'est pas un repli silencieux,
-#: c'est une valeur qui ne vient pas du dossier et qui doit se voir.
-HAUTEUR_CLOTURE_M = 2.00
-HAUTEUR_PORTAIL_M = 2.00
-ESPACEMENT_POTEAUX_M = 2.50
-#: Passage à petite faune : ouverture ménagée au pied de la clôture, élément
-#: standard et attendu à l'instruction.
-PASSAGE_FAUNE_LARGEUR_M = 0.15
-PASSAGE_FAUNE_HAUTEUR_M = 0.15
-
-MESSAGE_HAUTEURS_STANDARD = (
-    "Hauteur de clôture et de portail non portées au contrat d'entrée : les "
-    f"élévations de DP 4 sont dessinées aux valeurs standard UNITe "
-    f"({nombre_fr(HAUTEUR_CLOTURE_M)} m). Le tableau bilan ne donne que le "
-    "linéaire, le nombre de portails et leur largeur."
-)
+#: Hauteurs standard UNITe, absentes du contrat : voir `standards.py`, qui
+#: porte leur justification et le message qui les accompagne au rapport.
+MESSAGE_HAUTEURS_STANDARD = MESSAGE_HAUTEURS
 
 LARGEUR_LEGENDE_MM = 62.0
 
@@ -228,7 +238,8 @@ def generer(
 
     echelle_ouvrages = _dessiner_ouvrages(planche, blocs, panneau_droit)
     echelle_reperage, messages = _plan_de_reperage(
-        planche, contrat, panneau_gauche, zone_x, zone_y, zone_l, zone_h
+        planche, contrat, panneau_gauche, zone_x, zone_y, zone_l, zone_h,
+        categories,
     )
     avertissements.extend(messages)
 
@@ -306,17 +317,20 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
 
     curseur_y = y + HAUTEUR_ENTETE_MM
     for bloc in blocs:
+        haut_cadre = curseur_y
         planche.ajouter_texte(
-            x, curseur_y + 3.0, bloc.titre, taille=7.5 * PT, gras=True
+            x + JEU_CADRE_MM, curseur_y + 3.4, bloc.titre,
+            taille=7.5 * PT, gras=True,
         )
         curseur_y += HAUTEUR_TITRE_BLOC_MM
-        haut_vues = curseur_y
         curseur_y = _disposer_vues(
-            planche, bloc, denominateur, x, curseur_y, largeur
+            planche, bloc, denominateur, x + JEU_CADRE_MM, curseur_y,
+            largeur - 2 * JEU_CADRE_MM,
         )
         if bloc.caracteristiques:
-            lignes = _lignes_de_vues(bloc, denominateur, largeur)
-            if _place_pour_caracteristiques(bloc, lignes, denominateur, largeur):
+            utile = largeur - 2 * JEU_CADRE_MM
+            lignes = _lignes_de_vues(bloc, denominateur, utile)
+            if _place_pour_caracteristiques(bloc, lignes, denominateur, utile):
                 prise = sum(
                     v.largeur_m * 1000.0 / denominateur
                     + MARGE_VUE_MM
@@ -326,14 +340,19 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
                 _bloc_caracteristiques(
                     planche,
                     bloc.caracteristiques,
-                    x + prise,
+                    x + JEU_CADRE_MM + prise,
                     curseur_y - _hauteur_derniere_ligne(lignes, denominateur) - 2.0,
                 )
             else:
                 curseur_y = _bloc_caracteristiques(
-                    planche, bloc.caracteristiques, x, curseur_y
+                    planche, bloc.caracteristiques, x + JEU_CADRE_MM, curseur_y
                 )
-        curseur_y += ESPACEMENT_VUES_MM
+        # Le cadre est tracé une fois la hauteur du bloc connue.
+        planche.ajouter_rectangle(
+            x, haut_cadre, largeur, curseur_y - haut_cadre + JEU_CADRE_MM,
+            Style(trait="#8a8a8a", epaisseur_mm=0.25, remplissage="none"),
+        )
+        curseur_y += ESPACEMENT_VUES_MM + JEU_CADRE_MM
     return denominateur
 
 
@@ -367,15 +386,15 @@ def _hauteur_disposition(blocs, denominateur: int, largeur_mm: float) -> float:
     """Hauteur qu'occuperaient tous les blocs à cette échelle."""
     total = 0.0
     for bloc in blocs:
-        total += HAUTEUR_TITRE_BLOC_MM
-        lignes = _lignes_de_vues(bloc, denominateur, largeur_mm)
+        total += HAUTEUR_TITRE_BLOC_MM + 2 * JEU_CADRE_MM
+        lignes = _lignes_de_vues(bloc, denominateur, largeur_mm - 2 * JEU_CADRE_MM)
         for ligne in lignes:
             hauteur_ligne = max(
                 v.hauteur_m * 1000.0 / denominateur for v in ligne
             )
             total += hauteur_ligne + MARGE_VUE_MM + HAUTEUR_TITRE_VUE_MM
         if bloc.caracteristiques and not _place_pour_caracteristiques(
-            bloc, lignes, denominateur, largeur_mm
+            bloc, lignes, denominateur, largeur_mm - 2 * JEU_CADRE_MM
         ):
             total += 3.0 + 3.6 * len(bloc.caracteristiques)
         total += ESPACEMENT_VUES_MM
@@ -428,24 +447,61 @@ def _bloc_caracteristiques(planche, lignes, x, y) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _hauteur_legende(contrat: Contrat) -> float:
-    """Hauteur du bloc de légende, telle que le moteur la composera.
+def _zone_reperee(contrat: Contrat, categories, emprise):
+    """Emprise à cadrer : les ouvrages de la planche, élargis, dans la clôture.
 
-    Elle est calculée avant de choisir l'échelle du plan : la légende n'est
-    pas un ajout de dernière minute qu'on pose par-dessus le dessin, c'est
-    elle qui décide de la place qui lui reste.
+    Le dossier de référence ne remet pas tout le plan de masse sur ses planches
+    d'ouvrages : il zoome sur la zone concernée. Sur un site de 5 ha, un poste
+    de 12 x 3 m au 1/5 000 mesure 2,4 mm et ne se repère pas.
+
+    Le cadrage se resserre seulement si la zone reste petite devant le site :
+    la clôture ou les portails courent sur toute l'emprise, et il n'y a alors
+    rien à resserrer.
     """
-    entrees = construire_legende([c for c, _ in objets_a_dessiner(contrat)])
-    return 2 * 2.2 + 5.0 + 5.0 * len(entrees)
+    ouvrages = []
+    for categorie in categories:
+        ouvrages.extend(contrat.geometries(categorie))
+    zone = union_valide(ouvrages)
+    if zone is None or zone.is_empty:
+        return emprise, False
+
+    minx, miny, maxx, maxy = zone.bounds
+    largeur = max(maxx - minx, 1.0)
+    hauteur = max(maxy - miny, 1.0)
+    e_minx, e_miny, e_maxx, e_maxy = emprise.bounds
+    part = max(
+        largeur / max(e_maxx - e_minx, 1.0), hauteur / max(e_maxy - e_miny, 1.0)
+    )
+    if part > PART_MAXIMALE_ZOOM:
+        return emprise, False
+
+    marge = MARGE_REPERAGE * max(largeur, hauteur)
+    return box(minx - marge, miny - marge, maxx + marge, maxy + marge), True
 
 
-def _plan_de_reperage(planche, contrat, panneau, zone_x, zone_y, zone_l, zone_h):
-    """L'emprise clôturée et ses ouvrages, dans le panneau de gauche.
+def _categories_visibles(contrat: Contrat, cadre, avertissements) -> list:
+    """Catégories qui tombent dans le cadre du plan de repérage.
 
-    Le moteur centre la carte sur la zone de dessin entière. Pour qu'elle
-    tombe dans le panneau de gauche, c'est le centre terrain qu'on décale, du
-    même écart converti à l'échelle : la transformation n'est pas détournée,
-    on lui donne un autre centre.
+    La légende ne porte que ce que le zoom montre : sur une planche cadrée sur
+    le poste, une entrée « bac d'équarrissage » situé à 200 m ferait chercher
+    sur le dessin un objet qui n'y est pas.
+    """
+    visibles = []
+    for categorie, geometries in objets_a_dessiner(contrat, avertissements):
+        if any(cadre.intersects(g) for g in geometries):
+            visibles.append((categorie, [g for g in geometries if cadre.intersects(g)]))
+    return visibles
+
+
+def _plan_de_reperage(
+    planche, contrat, panneau, zone_x, zone_y, zone_l, zone_h, categories
+):
+    """L'emprise repérée et ses ouvrages, dans le panneau de gauche.
+
+    Le moteur centre la carte sur la zone de dessin entière. Pour qu'elle tombe
+    dans le panneau de gauche, c'est le centre terrain qu'on décale, du même
+    écart converti à l'échelle : la transformation n'est pas détournée, on lui
+    donne un autre centre.
     """
     panneau_x, panneau_y, panneau_l, panneau_h = panneau
     avertissements = []
@@ -457,12 +513,18 @@ def _plan_de_reperage(planche, contrat, panneau, zone_x, zone_y, zone_l, zone_h)
             "d'emprise à montrer."
         ]
 
-    minx, miny, maxx, maxy = emprise.bounds
+    cadre, resserre = _zone_reperee(contrat, categories, emprise)
+    # La légende est construite sur le cadre demandé ; elle sera reprise sur la
+    # fenêtre réellement affichée une fois l'échelle connue.
+    entrees = construire_legende(
+        [c for c, _ in _categories_visibles(contrat, cadre, avertissements)]
+    )
+    hauteur_legende = hauteur_bloc(len(entrees))
+
+    minx, miny, maxx, maxy = cadre.bounds
     largeur_m = max(maxx - minx, 1.0)
     hauteur_m = max(maxy - miny, 1.0)
 
-    # Le plan occupe le haut du panneau ; la légende prend le bas.
-    hauteur_legende = _hauteur_legende(contrat)
     hauteur_plan = panneau_h - HAUTEUR_ENTETE_MM - hauteur_legende - 3.0
     if hauteur_plan <= 20.0:
         raise ErreurComposition(
@@ -475,52 +537,72 @@ def _plan_de_reperage(planche, contrat, panneau, zone_x, zone_y, zone_l, zone_h)
         hauteur_m,
         (panneau_x, panneau_y + HAUTEUR_ENTETE_MM, panneau_l, hauteur_plan),
         ECHELLES_REPERAGE,
-        marge=0.08,
+        marge=0.02,
         libelle="plan de repérage DP 4",
     )
     if denominateur not in ECHELLES_REPERAGE_BRIEF:
         avertissements.append(
             f"Plan de repérage DP 4 dessiné au 1:{denominateur}, hors de la "
             f"liste retenue ({', '.join('1:' + str(e) for e in ECHELLES_REPERAGE_BRIEF)}) : "
-            f"l'emprise clôturée mesure {largeur_m:.0f} x {hauteur_m:.0f} m et "
-            "ne tient dans le panneau à aucune d'entre elles. L'échelle est "
-            "portée en clair sur la planche."
+            f"la zone repérée mesure {largeur_m:.0f} x {hauteur_m:.0f} m et ne "
+            "tient dans le panneau à aucune d'entre elles. L'échelle est portée "
+            "en clair sur la planche."
         )
     planche.definir_echelle(denominateur)
 
-    centre_emprise = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
     centre_zone_mm = (zone_x + zone_l / 2.0, zone_y + zone_h / 2.0)
     centre_plan_mm = (
         panneau_x + panneau_l / 2.0,
         panneau_y + HAUTEUR_ENTETE_MM + hauteur_plan / 2.0,
     )
     facteur = denominateur / 1000.0
+    centre_cadre = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+
     planche.centrer_sur(
         (
-            centre_emprise[0] + (centre_zone_mm[0] - centre_plan_mm[0]) * facteur,
-            centre_emprise[1] + (centre_plan_mm[1] - centre_zone_mm[1]) * facteur,
+            centre_cadre[0] + (centre_zone_mm[0] - centre_plan_mm[0]) * facteur,
+            centre_cadre[1] + (centre_plan_mm[1] - centre_zone_mm[1]) * facteur,
         )
     )
 
     mention_echelle(
         planche, panneau_x, panneau_y + 3.5, denominateur,
-        titre="Plan de repérage des ouvrages",
+        titre="Plan de repérage" + (" — zone concernée" if resserre else ""),
     )
 
-    objets = objets_a_dessiner(contrat)
-    for categorie, geometries in objets:
+    # Le contenu cartographique n'est découpé que sur la zone de dessin
+    # entière : sans découpe, la clôture d'un site de 5 ha traversait le
+    # panneau des ouvrages et passait par-dessus la légende. La fenêtre du
+    # panneau est donc calculée en Lambert 93, et chaque géométrie y est
+    # recoupée avant d'être tracée.
+    fenetre = box(
+        centre_cadre[0] - panneau_l * facteur / 2.0,
+        centre_cadre[1] - hauteur_plan * facteur / 2.0,
+        centre_cadre[0] + panneau_l * facteur / 2.0,
+        centre_cadre[1] + hauteur_plan * facteur / 2.0,
+    )
+    tracees = []
+    for categorie, geometries in _categories_visibles(
+        contrat, fenetre, avertissements
+    ):
         style = STYLES[categorie].style
+        dessine = False
         for geometrie in geometries:
-            planche.ajouter_geometrie(geometrie, style)
+            visible = geometrie.intersection(fenetre)
+            if visible.is_empty:
+                continue
+            planche.ajouter_geometrie(visible, style)
+            dessine = True
+        if dessine:
+            tracees.append(categorie)
 
-    # Le bloc de légende standard, et non des lignes de rappel : voir
-    # l'en-tête du module.
-    entrees = construire_legende([c for c, _ in objets])
-    y_legende = panneau_y + panneau_h - hauteur_legende - 1.0
-    planche.ajouter_legende(
-        entrees,
-        position=(panneau_x, y_legende),
-        largeur_mm=min(LARGEUR_LEGENDE_MM, panneau_l),
+    # Le bloc de légende, et non des lignes de rappel : voir l'en-tête du
+    # module. Il ne porte que ce que la fenêtre montre.
+    dessiner_legende(
+        planche,
+        construire_legende(tracees),
+        position=(panneau_x, panneau_y + panneau_h - hauteur_legende - 1.0),
+        largeur_mm=panneau_l,
     )
     return denominateur, avertissements
 
