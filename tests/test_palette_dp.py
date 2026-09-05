@@ -34,15 +34,45 @@ from dp_socle.planches.palette import (
 RELEVEES_DU_CONTRAT = {
     "tables_pv": "#97caca",
     "pdl_ptr": "#7fffbf",
-    "plateforme": "#d7d7d7",
-    "piste_lourde_existante": "#a2a2a2",
-    "piste_lourde_a_creer": "#a2a2a2",
-    "piste_lourde": "#a2a2a2",
-    "piste_legere": "#d7d7d7",
-    "aire_grutage": "#a2a2a2",
     "bache_incendie": "#3fbfbf",
     "haie": "#6faa0b",
 }
+
+#: Écart délibéré à D4, décidé à la relecture du 05/09/2026 : les gris de sol.
+#:
+#: Le dossier de référence donne le **même** gris 215 à la plateforme et à la
+#: piste légère, et le même gris 162 à toutes les voies lourdes. Sur nos
+#: planches ces surfaces se touchent constamment — une plateforme de poste est
+#: toujours au bord d'une piste — et la légende annonçait trois entrées que
+#: l'œil ne pouvait pas séparer. Les trois gris s'étagent donc maintenant dans
+#: l'ordre de la portance, en gardant la famille du document de référence.
+GRIS_DE_SOL = {
+    "plateforme": ("#e4e4e4", "#d7d7d7"),
+    "piste_legere": ("#bdbdbd", "#d7d7d7"),
+    "piste_lourde": ("#979797", "#a2a2a2"),
+    "piste_lourde_existante": ("#979797", "#a2a2a2"),
+    "piste_lourde_a_creer": ("#979797", "#a2a2a2"),
+    "aire_grutage": ("#979797", "#a2a2a2"),
+}
+
+
+@pytest.mark.parametrize("categorie, teintes", sorted(GRIS_DE_SOL.items()))
+def test_les_gris_de_sol_sont_etages(categorie, teintes):
+    """Ils ne sont plus relevés : l'écart au document de référence est assumé."""
+    retenue, relevee = teintes
+    fiche = style(categorie)
+    assert fiche.style.remplissage == retenue
+    assert not fiche.relevee, "l'écart à D4 doit rester visible dans la fiche"
+    assert retenue != relevee or categorie == "plateforme"
+
+
+def test_les_trois_niveaux_de_sol_se_distinguent():
+    """C'est le point : plateforme, piste légère et voie lourde sur un plan."""
+    for a, b in combinations(("plateforme", "piste_legere", "piste_lourde"), 2):
+        ecart = ecart_perceptuel(
+            couleur_significative(STYLES[a]), couleur_significative(STYLES[b])
+        )
+        assert ecart >= ECART_MINIMAL, f"{a} / {b} : ΔE {ecart:.1f}"
 
 
 # ---------------------------------------------------------------------------
@@ -71,17 +101,22 @@ def test_la_cloture_et_le_portail_restent_rouges():
 def _paires_a_distinguer():
     """Paires de catégories dessinables dont au moins une teinte est dérivée.
 
-    Deux relevées qui se confondent — `plateforme` et `piste_legere` partagent
-    le gris 215 du dossier de référence — sont hors critère : la collision est
-    héritée, et la corriger reviendrait à redessiner le document que
-    l'instructeur connaît. Deux catégories partageant volontairement le même
-    intitulé sont hors critère aussi : elles ne font qu'une entrée de légende.
+    Deux relevées qui se confondent sont hors critère : la collision est
+    héritée du dossier de référence, et la corriger reviendrait à redessiner le
+    document que l'instructeur connaît. Deux catégories partageant volontairement
+    le même intitulé sont hors critère aussi : elles ne font qu'une entrée de
+    légende. Et deux catégories de même **matière** — une voie lourde existante,
+    une à créer, une aire de grutage : la même grave compactée sous trois
+    statuts — partagent leur teinte à dessein, leur filet et leur intitulé
+    portant la distinction.
     """
     for a, b in combinations(categories_dessinables(), 2):
         fa, fb = STYLES[a], STYLES[b]
         if fa.libelle == fb.libelle:
             continue
         if fa.relevee and fb.relevee:
+            continue
+        if fa.matiere is not None and fa.matiere == fb.matiere:
             continue
         yield a, b
 
@@ -211,10 +246,21 @@ def test_chaque_categorie_a_un_symbole_connu():
 
 
 def test_la_cloture_et_le_portail_ne_partagent_pas_leur_symbole():
-    """Deux linéaires rouges que le rectangle du moteur rendait identiques."""
-    assert style("cloture").symbole == "cloture"
+    """Deux linéaires rouges que le rectangle du moteur rendait identiques.
+
+    La clôture garde le trait simple du dossier de référence — au plan elle
+    **est** un trait rouge continu — et le portail son symbole de plan, les
+    deux vantaux et leur débattement.
+    """
+    assert style("cloture").symbole == "ligne"
     assert style("portail").symbole == "portail"
     assert style("cloture").symbole != style("portail").symbole
+
+
+def test_la_haie_plantee_se_figure_comme_elle_se_dessine():
+    """Une bande de 2 m au plan, une bande en légende — pas des houppiers."""
+    assert style("haie").symbole == "bande"
+    assert style("arbre_existant").symbole == "vegetation"
 
 
 def test_lintitule_de_la_piste_existante_est_celui_du_bureau_detudes():

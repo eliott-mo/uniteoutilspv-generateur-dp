@@ -1345,6 +1345,14 @@ restant **à parts égales** entre eux, et chaque dessin est centré dans le cad
 qu'il reçoit. Les cadres n'ont pas la même taille — leurs contenus non plus —
 mais ils respirent de la même façon.
 
+### La page de garde tient la place du photomontage
+
+Sans image de couverture, la moitié gauche de la page restait blanche et se
+lisait comme une composition ratée. Un cadre tireté gris y tient désormais la
+place, sous sa case titrée « VUE EN PERSPECTIVE DU PROJET » et portant la
+mention « Photomontage à insérer » : le lecteur voit qu'il manque une pièce, et
+le chef de projet sait laquelle.
+
 ### DP 2 — Plan de masse
 
 Cadré sur l'**emprise cadastrale plus 10 %**, et non sur la clôture : le plan
@@ -1412,12 +1420,42 @@ De même, quand le Z des tables ne porte pas d'altitude de terrain, les tables d
 la coupe du terrain sont posées sur le profil RGE ALTI en leur appliquant les
 hauteurs déclarées. C'est le seul comportement possible, mais il se voit.
 
+#### Deux couples de hauteurs, et celui qui referme
+
+Le tableau bilan porte **deux** couples point bas / point haut : celui que le
+bureau d'études déclare pour le projet, et celui du bloc `standards_unite` du
+même fichier. Sur Saint-Cyr ils ne disent pas la même chose. Le couple déclaré —
+2,50 m et 4,00 m — donne un rampant de 5,80 m à 15°, soit 2,90 m par module pour
+deux modules, et un pas de 10,50 m contre 9,50 m portés au même tableau. Le
+couple standard — 1,10 m et 2,34 m — donne 4,79 m de rampant, 2,39 m par module
+(un G12R en mesure 2,384) et un pas qui referme à 3 cm près.
+
+Les deux hauteurs déclarées sont donc des **bornes d'enveloppe sur tout le
+site** — le PDF de profil du bureau d'études écrit « 2.5m min » et « 4m max » —
+et non les extrémités d'une table. C'est une table que la coupe de principe
+dessine : quand le couple déclaré ne referme pas la géométrie et que le couple
+standard la referme, c'est le second qui est retenu, et la substitution est
+écrite au rapport avec les deux couples et les deux pas. Le critère est mesuré
+sur le pas déclaré, pas supposé.
+
 ### DP 4 — Ouvrages techniques
 
 Chaque planche est partagée en deux : le plan de repérage à gauche, les dessins
 d'ouvrages à droite. Un ouvrage absent du projet n'a pas de bloc, et la planche
 se recompose sur ce qui reste ; une planche dont aucun ouvrage n'est au contrat
 n'est pas produite, et le rang des suivantes suit.
+
+Le plan de repérage porte le **parcellaire IGN** sous les ouvrages. Sans lui le
+zoom flottait au milieu de nulle part, sans rien pour situer les ouvrages dans le
+foncier ; c'est le fond du plan de repérage du dossier de référence. Une panne du
+service n'empêche pas de produire la planche — les ouvrages viennent du contrat —
+mais elle s'écrit au rapport.
+
+Un ouvrage présent en plusieurs exemplaires n'est repéré que sur **un** d'entre
+eux, le plus grand. Mesuré le 05/09/2026 sur Sarnois : ses deux citernes sont aux
+deux bouts du site, et les englober toutes les deux ramenait le zoom au plan de
+masse entier, au 1/2 000. Les élévations décrivent un ouvrage type, identique
+d'un exemplaire à l'autre ; les situer tous est le travail du plan de masse.
 
 | Planche | Ouvrages |
 |---|---|
@@ -1435,11 +1473,36 @@ disparaissent des façades et pas du dossier. Le transformateur de la batterie
 n'aura son bloc que le jour où le contrat le distinguera de celui du parc : aucune
 catégorie ne les sépare aujourd'hui.
 
-Seuls les postes reçoivent le traitement complet du dossier de référence : ce
-sont les seuls ouvrages bâtis du site. Les autres sont des équipements posés, que
-deux vues et un bloc de caractéristiques décrivent entièrement. Mesuré sur
-Sarnois le 04/09/2026 : à sept vues par ouvrage, les cinq équipements de sa
-DP 4-3 faisaient 21 vues qui ne tenaient pas sur la planche, même au 1/200.
+Une citerne n'a droit qu'à une planche de façade. Décidé le 05/09/2026 : dès
+qu'une citerne incendie est décrite, la citerne de refroidissement n'a pas la
+sienne — même cuve, mêmes congés, même vue de face, à la cote près, et les cotes
+sont au bloc de caractéristiques. Les deux restent dessinées et repérées au plan
+de masse, et l'ouvrage écarté est nommé au rapport.
+
+Chaque ouvrage se dessine ensuite pour ce qu'il est, sur le modèle du dossier de
+référence :
+
+- les **postes** reçoivent le traitement complet — plan de toiture, quatre
+  élévations, coupe : ce sont les seuls ouvrages bâtis du site ;
+- le **BESS** et le **local de stockage** sont des conteneurs maritimes. Tôle
+  nervurée, longerons haut et bas, portes à barres de condamnation sur le
+  pignon, pose sur plots de 0,3 à 0,5 m. Dessinés en rectangles pleins, un
+  conteneur et un bac de rétention sortaient identiques ;
+- les **citernes** ont une cuve à congés en plan, portant son trop-plein et ses
+  trappes de visite, et une vue de face bombée. Une citerne dessinée au carré se
+  lisait comme un bac ;
+- la **clôture** est un grillage à moutons à grosse maille, et le **portail** en
+  est l'interruption : deux vantaux barreaudés entre leurs poteaux, pris dans le
+  grillage courant montré de part et d'autre.
+
+Mesuré sur Sarnois le 04/09/2026 : à sept vues par ouvrage, les cinq équipements
+de sa DP 4-3 faisaient 21 vues qui ne tenaient pas sur la planche, même au 1/200.
+Seuls les postes en reçoivent donc autant.
+
+**La maille du grillage est en mètres, pas en millimètres de papier.** Elle était
+un figuré, et changeait donc de finesse avec l'échelle de la planche : mesuré le
+05/09/2026, le même grillage sortait à 8 cm de maille sur une planche au 1/100 et
+à 16 cm sur une planche au 1/200. Une maille est une dimension d'ouvrage.
 
 Un ouvrage dont le tableau bilan ne porte pas de hauteur se dessine en plan et
 rien de plus : plutôt que d'inventer une cote, la vue en plan le décrit avec les
@@ -1458,6 +1521,21 @@ le linéaire, le nombre de portails et leur largeur, jamais une hauteur. Les
 élévations sont dessinées à la valeur standard UNITe de 2,00 m, et chaque planche
 qui l'emploie le dit au rapport. C'est un manque du contrat, à combler des deux
 côtés à la fois — donc une décision, pas un correctif de ce lot.
+
+### La légende montre ce que le plan dessine
+
+Chaque catégorie porte son symbole, et le symbole doit être celui du plan.
+Trois l'ont changé à la relecture du 05/09/2026 :
+
+- la **clôture** est un simple trait rouge, parce qu'au plan elle *est* un
+  trait rouge continu. Le grillage sur poteaux qu'elle portait promettait un
+  figuré que la planche ne dessine nulle part ;
+- le **portail** est le symbole de plan du dossier de référence — les deux
+  vantaux et leurs arcs de débattement — et c'est exactement ce que le calque
+  du bureau d'études porte ;
+- la **haie plantée** est une bande, parce qu'au plan c'est une bande continue
+  de deux mètres. Le houppier bosselé reste aux arbres et aux haies existantes,
+  dont les géométries sont effectivement lobées.
 
 ### La légende se construit depuis ce qui a été dessiné
 
@@ -1493,11 +1571,24 @@ la palette de l'image de contrôle à l'écran. Les deux n'ont pas les mêmes
 contraintes : à l'écran on zoome, sur une épreuve A3 un poste de 12 x 3 m au
 1/1 000 fait 12 x 3 mm.
 
-Les douze teintes relevées au pixel sur la planche DP 2 du dossier HOCH sont
-reprises telles quelles : c'est le document que l'instructeur a l'habitude de
-voir. Deux d'entre elles se confondent — la plateforme et la piste légère
-partagent le gris 215 — et c'est un fait du document de référence, pas une
-décision de ce lot ; le filet les distingue, et la légende porte deux entrées.
+Les teintes relevées au pixel sur la planche DP 2 du dossier HOCH sont reprises
+telles quelles : c'est le document que l'instructeur a l'habitude de voir.
+
+**Une exception, décidée à la relecture du 05/09/2026 : les gris de sol.** Le
+document de référence donne le même gris 215 à la plateforme et à la piste
+légère, et le même gris 162 à toutes les voies lourdes. Sur nos planches ces
+surfaces se touchent constamment — une plateforme de poste est toujours au bord
+d'une piste — et la légende annonçait trois entrées que l'œil ne pouvait pas
+séparer. Les trois gris s'étagent donc maintenant dans l'ordre de la portance,
+en gardant la famille du document : plateforme `#e4e4e4`, piste légère
+`#bdbdbd`, voie lourde `#979797`, séparés d'au moins 12 ΔE deux à deux.
+
+Ce qui reste délibérément identique, c'est ce qui est **la même matière** : une
+voie lourde existante, une voie lourde à créer et une aire de grutage sont la
+même grave compactée sous trois statuts. Elles partagent leur teinte, leur
+filet et leur intitulé portent la distinction, et le champ `matiere` de
+`StyleDP` les sort du critère d'écart — les séparer ferait croire à trois
+revêtements là où il n'y en a qu'un.
 
 Les dérivées, elles, sont refaites sur un critère mesuré :
 `tests/test_palette_dp.py` vérifie que deux catégories pouvant se retrouver sur la
@@ -1511,6 +1602,42 @@ BESS, bac de rétention, local technique — n'a pas pu être consultée : ces a
 ne sont pas dans le dépôt. L'orangé du BESS, seul indice disponible, vient du
 contrat et est conservé ; les deux autres sont construites sur le seul critère
 mesurable ici. À reprendre sur pièce.
+
+### Un contour ouvert n'est pas un trait
+
+Mesuré le 05/09/2026 sur Sarnois : la citerne de refroidissement arrive au
+contrat en **onze objets** — un petit polygone et dix polylignes ouvertes, les
+quatre côtés et les quatre congés d'un rectangle à angles arrondis que la CAO a
+exportés séparément. Une polyligne ne se remplit pas : l'ouvrage sortait en
+contour bleu sur une planche dont la légende annonçait un aplat.
+
+`palette.fermer_les_contours` recoud ces polylignes et les ferme en surfaces,
+avec deux garde-fous mesurés le même jour :
+
+- seules les catégories **dessinées en aplat** y passent. Le portail est un
+  linéaire, et ses deux arcs de débattement se referment parfaitement en deux
+  surfaces de 9,6 m² qui n'existent pas ;
+- les côtés ne se touchent pas au point près : sans recollement à 1 cm la
+  citerne ne se referme pas du tout, à 20 cm elle se referme en six morceaux.
+  Les 108,7 m² obtenus à 1 cm valent les 108,8 m² du tableau bilan.
+
+Ce qui reste ouvert est dessiné tel quel, et la recomposition est écrite au
+rapport : ce n'est pas la géométrie du calque.
+
+### Une emprise de projet épouse le parcellaire
+
+L'emprise est une **donnée d'entrée** : c'est le shapefile que le chef de projet
+fournit, et les planches la dessinent telle quelle. Rien ne vérifiait qu'elle
+correspondait au foncier. Mesuré le 05/09/2026 : le premier jeu d'essai de
+Sarnois portait une emprise de 8,51 ha qui mordait sur dix parcelles voisines
+alors que le projet tient sur la seule ZA 0057, et la planche l'a dessinée sans
+broncher — le tableau annonçait 27,96 ha de contenance pour 8,51 ha d'emprise.
+
+Une emprise de projet est un découpage foncier : elle suit les limites
+cadastrales, elle ne les traverse pas. DP 1-3 signale donc au rapport toute
+parcelle recoupée entre 2 % et 98 % de sa surface. En deçà c'est une écharde de
+calage, au-delà la parcelle est prise entière ; entre les deux, c'est le fichier
+d'emprise qu'il faut reprendre.
 
 ### `voirie` bloque, elle ne se devine pas
 

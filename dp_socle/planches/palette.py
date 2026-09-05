@@ -33,6 +33,8 @@ from dataclasses import dataclass
 
 from dataclasses import dataclass as _dataclass
 
+from shapely.ops import unary_union
+
 from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, Style
 from .primitives import union_valide
 
@@ -73,6 +75,14 @@ class StyleDP:
     #: surface se lit comme un aplat, un linéaire comme un trait, un portail
     #: comme un portail : le rectangle du moteur les confondait tous.
     symbole: str = "surface"
+    #: Matière du sol, quand plusieurs catégories décrivent le **même**
+    #: revêtement sous des statuts différents — une voie lourde existante, une
+    #: à créer et une aire de grutage sont la même grave compactée. Elles
+    #: partagent donc délibérément leur teinte, et ce sont leur filet et leur
+    #: intitulé qui portent la distinction. Le critère d'écart perceptuel ne
+    #: s'applique pas entre elles : les séparer reviendrait à faire croire à
+    #: trois revêtements là où il n'y en a qu'un.
+    matiere: str | None = None
 
 
 def _remplie(couleur: str, filet: str, epaisseur: float = 0.2) -> Style:
@@ -96,8 +106,15 @@ STYLES = {
               tirets="2.2 1.2"),
         symbole="tirete",
     ),
+    # Les trois gris de sol s'étagent du plus clair au plus sombre, dans
+    # l'ordre de la portance : plateforme, piste légère, voie lourde. C'est un
+    # écart délibéré à D4, demandé à la relecture du 05/09/2026 — le dossier de
+    # référence donne le **même** gris 215 à la plateforme et à la piste
+    # légère, et sur nos planches les deux se touchent constamment. Les valeurs
+    # relevées étaient #d7d7d7 et #a2a2a2 ; les nouvelles gardent leur ordre et
+    # leur famille, et sont séparées d'au moins 12 unités ΔE deux à deux.
     "plateforme": StyleDP(
-        "Plateforme", 2, _remplie("#d7d7d7", "#6e6e6e"), relevee=True
+        "Plateforme", 2, _remplie("#e4e4e4", "#6e6e6e")
     ),
     # L'intitulé est celui de la légende du plan du bureau d'études, relevé sur
     # le PDF de Saint-Cyr le 04/09/2026 : « Piste lourde existante (à renforcer
@@ -105,26 +122,24 @@ STYLES = {
     # création d'une piste, et c'est la distinction qui compte à l'instruction.
     "piste_lourde_existante": StyleDP(
         "Piste lourde existante (à renforcer si nécessaire)", 3,
-        _remplie("#a2a2a2", "#6e6e6e"), relevee=True,
+        _remplie("#979797", "#6e6e6e"), matiere="voie_lourde",
     ),
     "piste_lourde_a_creer": StyleDP(
-        "Piste lourde à créer", 4, _remplie("#a2a2a2", "#000000"), relevee=True
+        "Piste lourde à créer", 4, _remplie("#979797", "#000000"),
+        matiere="voie_lourde",
     ),
-    # Le gris clair de la piste légère est celui de la plateforme : c'est ainsi
-    # sur le dossier de référence. Le filet plus clair et l'entrée de légende
-    # propre portent la distinction.
     "piste_legere": StyleDP(
-        "Piste légère", 5, _remplie("#d7d7d7", "#8c8c8c"), relevee=True
+        "Piste légère", 5, _remplie("#bdbdbd", "#8c8c8c")
     ),
     "piste_lourde": StyleDP(
-        "Voie lourde", 6, _remplie("#a2a2a2", "#6e6e6e"), relevee=True
+        "Voie lourde", 6, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
     ),
     # Même intitulé et même style que la voie lourde, délibérément : une aire de
     # grutage est un élargissement de voie, que le tableau bilan compte en
     # « supplément piste lourde » et que la légende du dossier ne distingue pas.
     # Une seule entrée en sort.
     "aire_grutage": StyleDP(
-        "Voie lourde", 7, _remplie("#a2a2a2", "#6e6e6e"), relevee=True
+        "Voie lourde", 7, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
     ),
     # Dérivée : le gris 215 du contrat la confondait avec la plateforme, dont
     # elle est toujours voisine. Bleu clair, comme l'ouvrage SDIS qu'elle sert.
@@ -146,10 +161,14 @@ STYLES = {
         "Stockage logistique (chantier)", 12, _remplie("#e8d8be", "#967646"),
         dessinee=False,
     ),
+    # Le symbole est une **bande**, et non le houppier bosselé des arbres : au
+    # plan, une haie plantée est une bande continue de 2 m de large, et c'est
+    # ainsi que le dossier de référence la dessine. Un houppier en légende pour
+    # une bande au plan faisait chercher des arbres qui n'y sont pas.
     "haie": StyleDP(
         "Haie plantée", 13,
         Style(trait="#50780a", epaisseur_mm=0.4, remplissage="#6faa0b"),
-        relevee=True, symbole="vegetation",
+        relevee=True, symbole="bande",
     ),
     # Dérivée : vert sombre, pour se lire contre la haie plantée sans lui
     # disputer sa teinte relevée.
@@ -230,10 +249,13 @@ STYLES = {
         Style(trait="#ff2d2d", epaisseur_mm=0.3, remplissage="none"),
         dessinee=False, symbole="tirete",
     ),
+    # Un simple trait, comme sur le dossier de référence : au plan la clôture
+    # **est** un trait rouge continu, et lui donner en légende un grillage sur
+    # poteaux promettait un figuré que la planche ne porte pas.
     "cloture": StyleDP(
         "Clôture du projet solaire", 32,
         Style(trait="#ff0000", epaisseur_mm=0.5, remplissage="none"),
-        relevee=True, symbole="cloture",
+        relevee=True, symbole="ligne",
     ),
     # Le portail porte le rouge de la clôture, relevé, dont il est
     # l'interruption : ce qui l'en distingue au plan est son épaisseur, et
@@ -408,6 +430,13 @@ REMPLISSAGE_RECTANGULAIRE = 0.97
 #: Écart admis entre l'emprise dessinée d'un poste et sa surface déclarée.
 TOLERANCE_EMPRISE_POSTE = 0.08
 
+#: Recollement admis entre deux bouts de contour, en mètres. La CAO ne referme
+#: pas ses polylignes au point près.
+TOLERANCE_CONTOUR_M = 0.01
+
+#: Surface en deçà de laquelle un contour recousu n'est pas un ouvrage.
+AIRE_CONTOUR_MINIMALE_M2 = 0.5
+
 
 def emprise_de_poste(contrat, categorie: str, avertissements: list) -> list:
     """Emprise au sol d'un poste, redressée et recoupée avec le tableau bilan.
@@ -477,6 +506,9 @@ def objets_a_dessiner(contrat, avertissements=None) -> list:
       légende (D3) ;
     - les voiries dont le calque ne disait pas le type rejoignent celle que le
       chef de projet a tranchée, et n'existent pas sous leur propre nom (D5).
+
+    S'y ajoute la recomposition des contours ouverts, pour la même raison : une
+    règle appliquée à deux endroits finit par y différer.
     """
     messages = [] if avertissements is None else avertissements
     resultat = []
@@ -487,6 +519,63 @@ def objets_a_dessiner(contrat, avertissements=None) -> list:
             geometries = list(contrat.geometries(categorie))
         if contrat.voirie == categorie:
             geometries.extend(contrat.geometries("voirie"))
+        geometries = fermer_les_contours(geometries, categorie, messages)
         if geometries:
             resultat.append((categorie, geometries))
     return resultat
+
+
+def fermer_les_contours(geometries, categorie: str, messages: list) -> list:
+    """Recompose en surfaces les contours que le calque a laissés ouverts.
+
+    Mesuré le 05/09/2026 sur Sarnois : la citerne de refroidissement arrive au
+    contrat en **onze objets** — un petit polygone et dix polylignes ouvertes,
+    les quatre côtés et les quatre congés d'un rectangle à angles arrondis que
+    la CAO a exportés séparément. Une polyligne ne se remplit pas : l'ouvrage
+    sortait en contour sur une planche dont la légende annonçait un aplat.
+
+    Deux garde-fous, tous deux mesurés le même jour :
+
+    - la recomposition ne vaut que pour les catégories **dessinées en aplat**.
+      Le portail est un linéaire, et ses deux arcs de débattement se referment
+      parfaitement en deux surfaces de 9,6 m² qui n'existent pas ;
+    - les côtés ne se touchent pas au point près — sans recollement à 1 cm, la
+      citerne ne se referme pas du tout ; à 20 cm, elle se referme en six
+      morceaux. Les 108,7 m² obtenus à 1 cm valent les 108,8 m² déclarés au
+      tableau bilan.
+
+    Ce qui reste ouvert est rendu tel quel, et la recomposition est écrite au
+    rapport : ce n'est pas la géométrie du calque.
+    """
+    if STYLES[categorie].style.remplissage in (None, "none"):
+        return geometries
+    lignes = [g for g in geometries if g.geom_type in ("LineString", "LinearRing")]
+    if not lignes:
+        return geometries
+
+    from shapely import snap
+    from shapely.ops import polygonize
+
+    reseau = unary_union(lignes)
+    reseau = snap(reseau, reseau, TOLERANCE_CONTOUR_M)
+    surfaces = [
+        s for s in polygonize(unary_union(reseau)) if s.area >= AIRE_CONTOUR_MINIMALE_M2
+    ]
+    if not surfaces:
+        return geometries
+
+    # Les lignes qui bordent une surface recomposée ne sont plus dessinées à
+    # part : leur tracé est devenu le filet du polygone.
+    recomposee = unary_union(surfaces)
+    contour = recomposee.buffer(TOLERANCE_CONTOUR_M)
+    restantes = [
+        g for g in geometries
+        if g.geom_type not in ("LineString", "LinearRing")
+        or not contour.contains(g)
+    ]
+    messages.append(
+        f"« {categorie} » : {len(lignes)} contour(s) ouvert(s) du calque "
+        f"recousus en {len(surfaces)} surface(s), {recomposee.area:.1f} m² au "
+        "total, pour que l'ouvrage se lise comme un aplat et non comme un trait."
+    )
+    return restantes + surfaces

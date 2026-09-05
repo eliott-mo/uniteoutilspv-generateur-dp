@@ -7,8 +7,9 @@ portail sont deux linéaires rouges sans remplissage, et leurs deux entrées
 sortaient identiques, deux rectangles au filet rouge.
 
 Ce module compose le même bloc, à la même géométrie, mais laisse chaque
-catégorie dessiner son propre symbole : un portail se reconnaît à ses deux
-vantaux, une clôture à ses poteaux, une haie à sa silhouette. C'est ce que fait
+catégorie dessiner son propre symbole : un portail se reconnaît à ses vantaux
+et à leur débattement, une clôture à son trait continu, une haie à sa
+silhouette. C'est ce que fait
 la légende du dossier de référence, et c'est ce qui permet de lire une planche
 sans compter les nuances de rouge.
 
@@ -17,6 +18,8 @@ Le moteur n'est pas modifié : ce bloc se compose avec `ajouter_rectangle`,
 """
 
 from __future__ import annotations
+
+import math
 
 from ..planche import NOIR, TAILLE_CARTOUCHE, TAILLE_COURANTE, Planche, Style
 
@@ -106,42 +109,44 @@ def _ligne(planche, style, x, y, largeur, hauteur) -> None:
     planche.ajouter_ligne(x, milieu, x + largeur, milieu, style)
 
 
-def _cloture(planche, style, x, y, largeur, hauteur) -> None:
-    """Un grillage sur ses poteaux, vu en élévation.
-
-    C'est ainsi que la clôture se lit sur une planche : un fil courant et des
-    poteaux réguliers, et non un rectangle plein.
-    """
-    haut = y + hauteur * 0.25
-    bas = y + hauteur * 0.85
-    fin = Style(trait=style.trait, epaisseur_mm=0.22, remplissage="none")
-    planche.ajouter_ligne(x, haut, x + largeur, haut, style)
-    planche.ajouter_ligne(x, bas, x + largeur, bas, fin)
-    for index in range(4):
-        abscisse = x + largeur * index / 3.0
-        planche.ajouter_ligne(abscisse, haut - 0.5, abscisse, bas, style)
-
-
 def _portail(planche, style, x, y, largeur, hauteur) -> None:
-    """Deux vantaux entre leurs poteaux, comme sur le dossier de référence."""
-    haut = y + hauteur * 0.2
-    bas = y + hauteur * 0.9
-    montant = Style(trait=style.trait, epaisseur_mm=0.35, remplissage="none")
-    barreau = Style(trait=style.trait, epaisseur_mm=0.15, remplissage="none")
+    """Un portail à deux vantaux, vu en plan : ses battants et leur débattement.
 
-    # Les deux poteaux d'ancrage, plus hauts que les vantaux.
-    for abscisse in (x, x + largeur):
-        planche.ajouter_ligne(abscisse, y, abscisse, bas + 0.3, montant)
-    # Les deux vantaux, avec leurs barreaux.
-    for vantail in range(2):
-        gauche = x + vantail * largeur / 2.0
-        droite = gauche + largeur / 2.0
-        planche.ajouter_rectangle(
-            gauche, haut, largeur / 2.0 - 0.15, bas - haut, montant
-        )
-        for index in range(1, 3):
-            abscisse = gauche + (droite - gauche) * index / 3.0
-            planche.ajouter_ligne(abscisse, haut, abscisse, bas, barreau)
+    C'est le symbole du dossier de référence, et c'est aussi ce que la planche
+    dessine — le calque du bureau d'études porte les arcs de débattement. La
+    légende montre donc la même chose que le plan, à la taille du pavé.
+    """
+    rayon = min(largeur / 2.0, hauteur * 0.8)
+    milieu = y + hauteur * 0.85
+    centre_x = x + largeur / 2.0
+    arc = Style(trait=style.trait, epaisseur_mm=0.22, remplissage="none")
+
+    for sens in (-1, 1):
+        pivot = centre_x - sens * rayon
+        # Le vantail ouvert, et l'arc que sa poignée décrit en se refermant.
+        planche.ajouter_ligne(pivot, milieu, pivot, milieu - rayon, style)
+        points = [
+            (
+                pivot + sens * rayon * math.sin(math.radians(angle)),
+                milieu - rayon * math.cos(math.radians(angle)),
+            )
+            for angle in range(0, 91, 15)
+        ]
+        for depart, arrivee in zip(points, points[1:]):
+            planche.ajouter_ligne(*depart, *arrivee, arc)
+
+
+def _bande(planche, style, x, y, largeur, hauteur) -> None:
+    """Une bande continue : la haie plantée, telle qu'elle est tracée au plan.
+
+    Une haie plantée est une bande de deux mètres de large, et non un
+    alignement de houppiers : c'est ce que le plan dessine, c'est ce que la
+    légende doit annoncer.
+    """
+    epaisseur = hauteur * 0.5
+    planche.ajouter_rectangle(
+        x, y + (hauteur - epaisseur) / 2.0, largeur, epaisseur, style
+    )
 
 
 def _vegetation(planche, style, x, y, largeur, hauteur) -> None:
@@ -170,7 +175,7 @@ def _tirete(planche, style, x, y, largeur, hauteur) -> None:
 _SYMBOLES = {
     "surface": _surface,
     "ligne": _ligne,
-    "cloture": _cloture,
+    "bande": _bande,
     "portail": _portail,
     "vegetation": _vegetation,
     "tirete": _tirete,

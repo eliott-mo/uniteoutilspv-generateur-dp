@@ -58,10 +58,25 @@ SURFACE_MIN_ETIQUETTE_MM2 = 12.0
 #: projet et qui pollueraient le tableau récapitulatif comme la notice.
 PART_MIN_ASSIETTE = 0.02
 
+#: Part au-delà de laquelle une parcelle est tenue pour entièrement couverte.
+#:
+#: L'emprise d'un projet est un **découpage foncier** : elle suit les limites
+#: cadastrales, elle ne les traverse pas. Une parcelle recoupée à 40 % n'est
+#: donc ni une écharde de calage ni une parcelle d'assiette : c'est le signe
+#: que le fichier d'emprise ne correspond pas au parcellaire.
+#:
+#: Mesuré le 05/09/2026 : le premier jeu d'essai de Sarnois portait une emprise
+#: de 8,51 ha qui mordait sur dix parcelles voisines, alors que le projet tient
+#: sur la seule ZA 0057. Rien ne le signalait — la planche dessinait fidèlement
+#: ce qu'on lui donnait, et le tableau annonçait 27,96 ha de contenance pour
+#: 8,51 ha d'emprise.
+PART_PLEINE_ASSIETTE = 0.98
+
 LARGEUR_TABLEAU_MM = 72.0
 
 
 def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
+    avertissements = []
     planche = nouvelle_planche(projet, NUMERO)
     zone = planche.zone_dessin()
 
@@ -94,12 +109,17 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
             parcelle.geometrie.intersection(emprise_geom).area / aire if aire else 0.0
         )
         (concernees if part >= PART_MIN_ASSIETTE else echardes).append(parcelle)
+    entamees = parcelles_entamees(touchees, emprise_geom)
     if not concernees:
         raise ErreurService(
             f"Les {len(touchees)} parcelles rencontrées ne sont recoupées par "
             f"l'emprise qu'à moins de {PART_MIN_ASSIETTE:.0%} de leur surface : "
             "aucune parcelle d'assiette identifiable. Vérifiez le fichier d'emprise."
         )
+
+    message = message_emprise_entamee(entamees)
+    if message:
+        avertissements.append(message)
 
     cadre_planche = box(minx, miny, maxx, maxy)
     ids_concernees = {p.idu for p in concernees}
@@ -163,6 +183,7 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         chemin=chemin,
         echelle=denominateur,
         details={
+            "avertissements": avertissements,
             "nb_parcelles_tracees": len(parcelles),
             "nb_batiments": len(batiments),
             "parcelles_echardes": [p.designation for p in _triees(echardes)],
@@ -178,6 +199,45 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
             ],
         },
     )
+
+
+def message_emprise_entamee(entamees) -> str:
+    """Ce qu'il faut dire d'une emprise qui coupe des parcelles en deux.
+
+    Rendu à part de la planche pour être vérifiable sans le WFS : le contrôle
+    porte sur des parts de surface, pas sur un service en ligne.
+    """
+    if not entamees:
+        return ""
+    detail = ", ".join(
+        f"{parcelle.section} {parcelle.numero} ({part:.0%})"
+        for parcelle, part in sorted(entamees, key=lambda e: e[1])[:6]
+    )
+    return (
+        f"L'emprise traverse {len(entamees)} parcelle(s) au lieu d'en suivre les "
+        f"limites : {detail}. Une emprise de projet est un découpage foncier, "
+        "elle épouse le parcellaire. Vérifiez le fichier d'emprise — le tableau "
+        "des parcelles d'assiette compte ces parcelles en entier, et sa "
+        "contenance ne vaudra pas celle du projet."
+    )
+
+
+def parcelles_entamees(parcelles, emprise_geom) -> list:
+    """Parcelles que l'emprise recoupe sans les prendre en entier.
+
+    En deçà de `PART_MIN_ASSIETTE` c'est une écharde de calage, au-delà de
+    `PART_PLEINE_ASSIETTE` la parcelle est prise entière : entre les deux,
+    l'emprise coupe la parcelle en deux, ce qu'un découpage foncier ne fait pas.
+    """
+    entamees = []
+    for parcelle in parcelles:
+        aire = parcelle.geometrie.area
+        if not aire:
+            continue
+        part = parcelle.geometrie.intersection(emprise_geom).area / aire
+        if PART_MIN_ASSIETTE <= part < PART_PLEINE_ASSIETTE:
+            entamees.append((parcelle, part))
+    return entamees
 
 
 def _triees(parcelles):
@@ -267,7 +327,8 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
         Style(trait=NOIR, epaisseur_mm=0.2),
     )
     planche.ajouter_texte(
-        colonnes[0], ordonnee, f"Total ({len(lignes)} parcelles)",
+        colonnes[0], ordonnee,
+        f"Total ({len(lignes)} parcelle{'s' if len(lignes) > 1 else ''})",
         taille=TAILLE_ETIQUETTE, gras=True,
     )
     planche.ajouter_texte(

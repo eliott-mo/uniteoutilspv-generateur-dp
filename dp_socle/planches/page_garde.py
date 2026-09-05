@@ -37,6 +37,11 @@ TITRE = "PAGE DE GARDE"
 #: un rectangle vide sur une page de garde se remarque plus que du blanc.
 CADRE_IMAGE = (22.0, 118.0, 228.0, 140.0)
 
+#: Gris du cadre qui tient la place du photomontage tant qu'il n'est pas
+#: fourni. Assez pâle pour ne pas concurrencer le titre, assez présent pour
+#: qu'on voie qu'il manque une pièce.
+GRIS_CADRE_VIDE = "#a8a8a8"
+
 #: Hauteur du bandeau de légende posé au-dessus du photomontage.
 HAUTEUR_LEGENDE_IMAGE = 6.5
 
@@ -110,6 +115,28 @@ def generer(
         planche.ajouter_rectangle(
             x_reel, y_reel, largeur_reelle, hauteur_reelle,
             Style(trait=NOIR, epaisseur_mm=0.25, remplissage="none"),
+        )
+    else:
+        # Sans photomontage, un cadre léger tient la place et la nomme. Le vide
+        # laissé nu se lisait comme une page mal composée ; un cadre annoncé
+        # « à insérer » se lit comme une pièce à venir, et rappelle au chef de
+        # projet ce qu'il reste à fournir.
+        x_img, y_img, largeur_img, hauteur_img = CADRE_IMAGE
+        _cellule_titre(
+            planche, x_img, y_img, largeur_img, HAUTEUR_LEGENDE_IMAGE,
+            "VUE EN PERSPECTIVE DU PROJET", centre=True,
+        )
+        planche.ajouter_rectangle(
+            x_img, y_img + HAUTEUR_LEGENDE_IMAGE, largeur_img,
+            hauteur_img - HAUTEUR_LEGENDE_IMAGE,
+            Style(trait=GRIS_CADRE_VIDE, epaisseur_mm=0.25, remplissage="none",
+                  tirets="2.5 2.0"),
+        )
+        planche.ajouter_texte(
+            x_img + largeur_img / 2.0,
+            y_img + HAUTEUR_LEGENDE_IMAGE + (hauteur_img - HAUTEUR_LEGENDE_IMAGE) / 2.0,
+            "Photomontage à insérer",
+            taille=8 * PT, couleur=GRIS_CADRE_VIDE, ancre="middle",
         )
 
     bas = _bloc_maitrise(planche, COLONNE_DROITE, 118.0)

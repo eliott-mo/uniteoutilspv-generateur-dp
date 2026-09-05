@@ -101,6 +101,11 @@ def generer_dossier(
             dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi),
             dp1_3_cadastre.generer(projet, emprise, dossier),
         ]
+        # Les planches du socle ont aussi des choses à dire : le contrôle du
+        # découpage foncier vit dans DP 1-3, et son message n'atteignait pas le
+        # rapport, qui ne collectait que celui des planches du lot 4.
+        for sortie in sorties:
+            avertissements.extend(sortie.details.get("avertissements", []))
         if contrat is not None:
             sorties.extend(
                 _planches_lot4(projet, contrat, emprise, dossier, avertissements)
@@ -108,6 +113,10 @@ def generer_dossier(
     avertissements.extend(
         str(c.message) for c in captees if issubclass(c.category, RuntimeWarning)
     )
+    # Le même constat vaut pour tout le dossier, mais chaque planche le fait
+    # pour son compte : le rapport portait quatre fois la même phrase sur
+    # l'emprise d'un poste, et devenait illisible à force de se répéter.
+    avertissements[:] = list(dict.fromkeys(avertissements))
 
     # Numéros de page réels : la page de garde occupe la page 1.
     pages = {"": 1}
@@ -209,6 +218,7 @@ def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements):
             "Tracez la ligne de coupe A-A' et relevez le profil à l'import."
         )
 
+    avertissements.extend(dp4_ouvrages.ouvrages_ecartes(contrat))
     for code in dp4_ouvrages.planches_necessaires(contrat):
         try:
             sortie = dp4_ouvrages.generer(
