@@ -323,9 +323,9 @@ if lancer:
             )
             with open(rapport.assemblage, "rb") as fichier:
                 st.download_button(
-                    "Télécharger DP_complet.pdf",
+                    f"Télécharger {rapport.assemblage.name}",
                     data=fichier.read(),
-                    file_name=f"{projet.nom}_DP_complet.pdf",
+                    file_name=rapport.assemblage.name,
                     mime="application/pdf",
                     width="stretch",
                 )

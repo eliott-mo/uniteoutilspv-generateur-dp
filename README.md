@@ -16,7 +16,8 @@ Le lot 1 couvre le moteur de planche et les trois planches cartographiques :
 | DP 1-2 | Photographie aérienne du terrain | 1:5 000 |
 | DP 1-3 | Plan de cadastre | adaptative |
 
-Sortie dans `sortie/{nom_projet}/` : un PDF par planche plus `DP_complet.pdf`.
+Sortie dans `sortie/{nom_projet}/` : un PDF par planche plus
+`{nom_projet}_DP_complet.pdf`.
 
 ## Principes
 

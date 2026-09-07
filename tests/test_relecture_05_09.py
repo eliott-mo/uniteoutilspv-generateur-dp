@@ -385,3 +385,19 @@ def test_les_hauteurs_de_table_viennent_du_tableau_bilan():
 
     assert not hasattr(dp3_coupes, "_hauteurs_qui_referment")
     assert not hasattr(dp3_coupes, "_piste_des_standards")
+
+
+def test_le_pdf_assemble_porte_le_nom_du_projet():
+    """Trois « DP_complet.pdf » côte à côte ne se distinguent plus.
+
+    Le fichier quitte presque toujours son dossier — courriel, guichet, relecture
+    de deux indices du même site — et c'est là qu'il doit se nommer.
+    """
+    from dp_socle.assemblage import nom_assemblage
+    from dp_socle.projet import Projet
+
+    projet = Projet(
+        nom="Sarnois-B", commune="Sarnois", code_postal="60210",
+        date="2026-09-05", emprise="emprise.geojson",
+    )
+    assert nom_assemblage(projet) == "Sarnois-B_DP_complet.pdf"

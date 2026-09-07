@@ -38,7 +38,19 @@ TOLERANCE_PT = 0.5
 #: Taille visée pour le dossier assemblé.
 TAILLE_MAX_MO = 25.0
 
-NOM_ASSEMBLAGE = "DP_complet.pdf"
+#: Motif du nom du PDF assemblé.
+#:
+#: Le nom du projet y figure. Le fichier quitte presque toujours son dossier —
+#: envoyé par courriel, déposé au guichet, relu à côté de deux autres indices du
+#: même site — et trois « DP_complet.pdf » côte à côte ne se distinguent plus.
+#: L'interface proposait déjà le téléchargement sous ce nom-là ; le fichier
+#: écrit sur le disque porte désormais le même.
+MOTIF_ASSEMBLAGE = "{nom}_DP_complet.pdf"
+
+
+def nom_assemblage(projet: Projet) -> str:
+    """Nom du PDF assemblé d'un projet."""
+    return MOTIF_ASSEMBLAGE.format(nom=projet.nom)
 
 
 @dataclass
@@ -148,11 +160,11 @@ def generer_dossier(
     garde = page_garde.generer(projet, dossier, pages=pages)
     ordre = [garde] + sorties
 
-    assemblage = _assembler(ordre, dossier / NOM_ASSEMBLAGE)
+    assemblage = _assembler(ordre, dossier / nom_assemblage(projet))
     taille_mo = assemblage.stat().st_size / (1024 * 1024)
     if taille_mo > TAILLE_MAX_MO:
         message = (
-            f"{NOM_ASSEMBLAGE} pèse {taille_mo:.1f} Mo, au-delà de la cible de "
+            f"{assemblage.name} pèse {taille_mo:.1f} Mo, au-delà de la cible de "
             f"{TAILLE_MAX_MO:.0f} Mo. Réduisez le DPI des fonds raster."
         )
         avertissements.append(message)
