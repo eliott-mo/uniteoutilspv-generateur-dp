@@ -29,3 +29,6 @@ exemples/sarnois-*/*.dxf
 # Classeur des dimensions standard UNITe : petit, lisible, et cest la
 # reference des cotes des ouvrages. Il reste versionne.
 !exemples/Standards UNITe*.xlsx
+
+# Fichiers de verrou Excel, créés tant que le classeur est ouvert.
+~$*
