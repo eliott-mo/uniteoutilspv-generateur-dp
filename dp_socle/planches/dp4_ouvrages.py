@@ -718,10 +718,15 @@ def _tracer_decoupe(planche, geometrie, style, fenetre) -> bool:
 #: site, et la planche des citernes se retrouvait au 1:2 000 alors que sa
 #: citerne mesure 8 m. Elle est donc écartée du calcul de la zone, mais reste
 #: dessinée — c'est elle qui situe les ouvrages dans le projet.
-CATEGORIES_ETENDUES = ("cloture", "portail", "portail_exploitant", "limite_paddock")
+#: Un portail n'en fait pas partie : c'est un ouvrage de 7 m, à un endroit
+#: précis, et c'est même le seul repère local d'une planche qui ne décrirait que
+#: la clôture. Relevé le 05/09/2026 sur Sarnois indice A, dont la DP 4-2 ne
+#: porte ni citerne ni poste : classé étendu, le portail laissait la planche se
+#: cadrer sur les 327 m du site, au 1:5 000.
+CATEGORIES_ETENDUES = ("cloture", "limite_paddock")
 
 
-def _zone_reperee(contrat: Contrat, categories, emprise):
+def _zone_reperee(contrat: Contrat, categories, emprise, avertissements=None):
     """Emprise à cadrer : les ouvrages décrits par la planche, élargis.
 
     Le dossier de référence ne remet pas tout le plan de masse sur ses planches
@@ -739,33 +744,81 @@ def _zone_reperee(contrat: Contrat, categories, emprise):
     plan de masse entier, au 1:2 000. Les élévations décrivent un ouvrage type,
     identique d'un exemplaire à l'autre ; les situer tous est le travail du
     plan de masse, pas celui de cette planche.
+
+    Quand ce sont des ouvrages **différents** qui sont dispersés d'un bout à
+    l'autre du site — le BESS d'un côté, le local de stockage de l'autre — le
+    même raisonnement vaut : la planche en situe **un seul, à titre d'exemple**,
+    et le dit. Les englober tous ramenait la DP 4-3 de Sarnois indice A au
+    1:2 000 sur une zone de 239 x 154 m, où aucun de ses trois ouvrages de 6 m
+    n'était lisible.
     """
+    messages = [] if avertissements is None else avertissements
     locales = [c for c in categories if c not in CATEGORIES_ETENDUES]
-    ouvrages = []
-    for categorie in locales:
-        ouvrages.append(_exemplaire_repere(contrat.geometries(categorie)))
-    ouvrages = [g for g in ouvrages if g is not None]
-    if not ouvrages:
+    par_categorie = {
+        categorie: _exemplaire_repere(contrat.geometries(categorie))
+        for categorie in locales
+    }
+    exemplaires = [g for g in par_categorie.values() if g is not None]
+    if not exemplaires:
         # Une planche qui ne décrit que des ouvrages étendus se cadre sur le
         # site : c'est bien lui qu'elle montre.
         return emprise, False
 
-    zone = union_valide(ouvrages)
-    if zone is None or zone.is_empty:
-        return emprise, False
+    cadre = _cadre_autour(union_valide(exemplaires), emprise)
+    if cadre is not None:
+        return cadre, True
 
+    # Les ouvrages sont dispersés : on en situe un seul, le plus grand.
+    retenues = sorted(
+        ((c, g) for c, g in par_categorie.items() if g is not None),
+        key=lambda paire: (paire[1].area, paire[1].length),
+        reverse=True,
+    )
+    for categorie, exemplaire in retenues:
+        cadre = _cadre_autour(exemplaire, emprise)
+        if cadre is None:
+            continue
+        if len(retenues) > 1:
+            messages.append(
+                f"Plan de repérage : les ouvrages de cette planche sont "
+                f"dispersés sur le site. Un seul y est situé, à titre "
+                f"d'exemple — « {STYLES[categorie].libelle} ». Les englober "
+                "tous aurait ramené le zoom au plan de masse entier, où aucun "
+                "d'eux n'est lisible ; c'est le plan de masse qui les situe "
+                "tous."
+            )
+        return cadre, True
+    return emprise, False
+
+
+def _cadre_autour(zone, emprise):
+    """Cadre resserré autour d'une zone, ou `None` si elle couvre déjà le site.
+
+    Au-delà de `PART_MAXIMALE_ZOOM` de l'emprise, le resserrement n'apporte
+    rien : autant montrer le site.
+    """
+    if zone is None or zone.is_empty:
+        return None
     minx, miny, maxx, maxy = zone.bounds
     largeur = max(maxx - minx, 1.0)
     hauteur = max(maxy - miny, 1.0)
+    marge = MARGE_REPERAGE * max(largeur, hauteur)
+    cadre = box(minx - marge, miny - marge, maxx + marge, maxy + marge)
+
+    # C'est le cadre **tracé** qu'on mesure, marge comprise, et non la zone nue.
+    # Mesuré le 05/09/2026 sur la DP 4-3 de Sarnois indice A : ses trois
+    # ouvrages tiennent dans 114 x 29 m, soit un tiers du site — sous le seuil —
+    # mais la marge portait le cadre à 239 x 154 m, les trois quarts du site, et
+    # la planche sortait au 1:2 000 pour des ouvrages de 6 m.
+    c_minx, c_miny, c_maxx, c_maxy = cadre.bounds
     e_minx, e_miny, e_maxx, e_maxy = emprise.bounds
     part = max(
-        largeur / max(e_maxx - e_minx, 1.0), hauteur / max(e_maxy - e_miny, 1.0)
+        (c_maxx - c_minx) / max(e_maxx - e_minx, 1.0),
+        (c_maxy - c_miny) / max(e_maxy - e_miny, 1.0),
     )
     if part > PART_MAXIMALE_ZOOM:
-        return emprise, False
-
-    marge = MARGE_REPERAGE * max(largeur, hauteur)
-    return box(minx - marge, miny - marge, maxx + marge, maxy + marge), True
+        return None
+    return cadre
 
 
 def _exemplaire_repere(geometries):
@@ -814,7 +867,7 @@ def _plan_de_reperage(planche, contrat, panneau, categories):
             "d'emprise à montrer."
         ]
 
-    cadre, resserre = _zone_reperee(contrat, categories, emprise)
+    cadre, resserre = _zone_reperee(contrat, categories, emprise, avertissements)
     minx, miny, maxx, maxy = cadre.bounds
     largeur_m = max(maxx - minx, 1.0)
     hauteur_m = max(maxy - miny, 1.0)

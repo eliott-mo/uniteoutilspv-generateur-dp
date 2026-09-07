@@ -1440,23 +1440,23 @@ De même, quand le Z des tables ne porte pas d'altitude de terrain, les tables d
 la coupe du terrain sont posées sur le profil RGE ALTI en leur appliquant les
 hauteurs déclarées. C'est le seul comportement possible, mais il se voit.
 
-#### Deux couples de hauteurs, et celui qui referme
+#### Les hauteurs viennent du tableau bilan, et de rien d'autre
 
 Le tableau bilan porte **deux** couples point bas / point haut : celui que le
 bureau d'études déclare pour le projet, et celui du bloc `standards_unite` du
 même fichier. Sur Saint-Cyr ils ne disent pas la même chose. Le couple déclaré —
-2,50 m et 4,00 m — donne un rampant de 5,80 m à 15°, soit 2,90 m par module pour
-deux modules, et un pas de 10,50 m contre 9,50 m portés au même tableau. Le
-couple standard — 1,10 m et 2,34 m — donne 4,79 m de rampant, 2,39 m par module
-(un G12R en mesure 2,384) et un pas qui referme à 3 cm près.
+2,50 m et 4,00 m — donne un rampant de 5,80 m à 15° et un pas de 10,50 m contre
+9,50 m portés au même tableau ; le couple standard — 1,10 m et 2,34 m — referme
+à 3 cm près.
 
-Les deux hauteurs déclarées sont donc des **bornes d'enveloppe sur tout le
-site** — le PDF de profil du bureau d'études écrit « 2.5m min » et « 4m max » —
-et non les extrémités d'une table. C'est une table que la coupe de principe
-dessine : quand le couple déclaré ne referme pas la géométrie et que le couple
-standard la referme, c'est le second qui est retenu, et la substitution est
-écrite au rapport avec les deux couples et les deux pas. Le critère est mesuré
-sur le pas déclaré, pas supposé.
+Une version de ce module retenait alors le couple qui refermait. **C'est
+retiré** (relecture du 05/09/2026) : les hauteurs déclarées sont les bonnes, une
+structure peut être haute, et aller chercher une autre valeur dans le même
+fichier était une liberté prise avec la donnée d'entrée.
+
+L'écart de pas reste écrit au rapport. Il porte sur trois valeurs d'un même
+tableau qui ne se recoupent pas, et c'est un fait qui mérite d'être vu ; mais
+c'est au tableau bilan qu'il se règle, pas à la planche.
 
 ### DP 4 — Ouvrages techniques
 
@@ -1476,6 +1476,18 @@ eux, le plus grand. Mesuré le 05/09/2026 sur Sarnois : ses deux citernes sont a
 deux bouts du site, et les englober toutes les deux ramenait le zoom au plan de
 masse entier, au 1/2 000. Les élévations décrivent un ouvrage type, identique
 d'un exemplaire à l'autre ; les situer tous est le travail du plan de masse.
+
+La même règle vaut pour des ouvrages **différents** dispersés d'un bout à l'autre
+du site : la planche en situe un seul, à titre d'exemple, et le nomme au rapport.
+Le critère porte sur le cadre **tracé**, marge comprise, et non sur la zone nue —
+les trois ouvrages de la DP 4-3 de Sarnois indice A tiennent dans 114 x 29 m,
+soit un tiers du site, mais la marge portait le cadre à 239 x 154 m et la planche
+sortait au 1/2 000 pour des ouvrages de 6 m.
+
+Un **portail** commande le cadrage, une clôture non : le premier est un ouvrage
+de 7 m à un endroit précis, la seconde ceint le site. Classé parmi les ouvrages
+étendus, le portail laissait la DP 4-2 de Sarnois indice A — qui ne porte ni
+citerne ni poste — se cadrer sur les 327 m du site, au 1/5 000.
 
 | Planche | Ouvrages |
 |---|---|

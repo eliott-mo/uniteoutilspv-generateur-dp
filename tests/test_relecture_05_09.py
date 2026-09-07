@@ -284,3 +284,104 @@ def test_le_1_50_n_est_jamais_choisi_tout_seul():
 
     minuscule = BlocOuvrage(titre="Portail", vues=[Vue("Élévation", 2.0, 2.0, _rien)])
     assert _echelles_des_blocs([minuscule], 260.0, 240.0) == [ECHELLE_OUVRAGE_PREFEREE]
+
+
+# ---------------------------------------------------------------------------
+# Des ouvrages dispersés : on en situe un seul
+# ---------------------------------------------------------------------------
+
+
+class _ContratFactice:
+    """Le strict nécessaire pour `_zone_reperee` : des géométries par catégorie."""
+
+    def __init__(self, couches):
+        self._couches = couches
+
+    def geometries(self, categorie):
+        return self._couches.get(categorie, [])
+
+
+def test_des_ouvrages_disperses_ne_sont_repere_que_sur_un():
+    """Les englober tous ramenait le zoom au plan de masse entier.
+
+    Mesuré sur la DP 4-3 de Sarnois indice A : ses trois ouvrages de 6 m sont
+    répartis sur 114 m ; le cadre les englobant faisait 239 x 154 m, les trois
+    quarts du site, et la planche sortait au 1:2 000.
+    """
+    from dp_socle.planches.dp4_ouvrages import _zone_reperee
+
+    emprise = box(0.0, 0.0, 300.0, 300.0)
+    contrat = _ContratFactice(
+        {
+            "bess": [box(10.0, 150.0, 16.0, 153.0)],
+            "local_technique": [box(270.0, 150.0, 276.0, 153.0)],
+        }
+    )
+    messages = []
+    cadre, resserre = _zone_reperee(
+        contrat, ("bess", "local_technique"), emprise, messages
+    )
+
+    assert resserre
+    minx, miny, maxx, maxy = cadre.bounds
+    assert maxx - minx < 0.45 * 300.0, "le cadre couvre encore tout le site"
+    assert any("dispersés" in message for message in messages)
+
+
+def test_des_ouvrages_voisins_sont_repere_ensemble():
+    """Deux ouvrages côte à côte tiennent dans le même cadre, et y restent."""
+    from dp_socle.planches.dp4_ouvrages import _zone_reperee
+
+    emprise = box(0.0, 0.0, 300.0, 300.0)
+    contrat = _ContratFactice(
+        {
+            "bess": [box(150.0, 150.0, 156.0, 153.0)],
+            "local_technique": [box(160.0, 150.0, 166.0, 153.0)],
+        }
+    )
+    messages = []
+    cadre, resserre = _zone_reperee(
+        contrat, ("bess", "local_technique"), emprise, messages
+    )
+
+    assert resserre
+    assert cadre.contains(box(150.0, 150.0, 166.0, 153.0))
+    assert not messages
+
+
+def test_le_portail_commande_le_cadrage():
+    """Un portail est un ouvrage de 7 m à un endroit précis, pas un linéaire.
+
+    Sur Sarnois indice A, la DP 4-2 ne porte ni citerne ni poste : classé parmi
+    les ouvrages étendus, le portail laissait la planche se cadrer sur les
+    327 m du site.
+    """
+    from dp_socle.planches.dp4_ouvrages import CATEGORIES_ETENDUES, _zone_reperee
+
+    assert "portail" not in CATEGORIES_ETENDUES
+    assert "cloture" in CATEGORIES_ETENDUES
+
+    emprise = box(0.0, 0.0, 300.0, 300.0)
+    contrat = _ContratFactice(
+        {
+            "cloture": [emprise.exterior],
+            "portail": [box(148.0, 0.0, 155.0, 1.0)],
+        }
+    )
+    cadre, resserre = _zone_reperee(contrat, ("cloture", "portail"), emprise, [])
+    assert resserre
+    minx, _, maxx, _ = cadre.bounds
+    assert maxx - minx < 0.45 * 300.0
+
+
+def test_les_hauteurs_de_table_viennent_du_tableau_bilan():
+    """Aucune liberté avec la donnée d'entrée : les hauteurs déclarées font foi.
+
+    Une version allait chercher les hauteurs du bloc `standards_unite` quand les
+    déclarées ne refermaient pas la géométrie du pas. C'est retiré : une
+    structure peut être haute, et l'écart se règle au tableau bilan.
+    """
+    from dp_socle.planches import dp3_coupes
+
+    assert not hasattr(dp3_coupes, "_hauteurs_qui_referment")
+    assert not hasattr(dp3_coupes, "_piste_des_standards")
