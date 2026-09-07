@@ -50,11 +50,12 @@ MESSAGE_VEGETATION = (
     "plan ne portent de hauteur de végétation."
 )
 
-MESSAGE_HAUTEURS = (
-    "Hauteur de clôture et de portail non portées au contrat d'entrée : les "
-    f"dessins sont établis à la valeur standard UNITe de "
-    f"{nombre_fr(HAUTEUR_CLOTURE_M)} m. Le tableau bilan ne donne que le "
-    "linéaire, le nombre de portails et leur largeur ; la légende du plan du "
-    "bureau d'études, elle, porte bien « clôture à créer (2m) », mais en texte "
-    "libre que l'import ne lit pas."
-)
+#: La hauteur de clôture et de portail ne se lit nulle part au contrat — le
+#: tableau bilan ne donne que le linéaire, le nombre de portails et leur
+#: largeur. Elle vaut **toujours 2,00 m** chez UNITe : confirmé à la relecture
+#: du 05/09/2026, et c'est ce que porte aussi la légende du plan du bureau
+#: d'études, « clôture à créer (2m) ».
+#:
+#: Ce n'est donc pas une substitution mais une constante de projet, et elle ne
+#: s'écrit plus au rapport : un avertissement qui tombe sur tous les dossiers
+#: sans jamais rien signaler apprend à ne plus les lire.

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import geopandas as gpd
 from shapely import force_2d, make_valid
+from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -221,7 +222,12 @@ class Contrat:
     donnees: dict
     couches: dict
     #: Type retenu pour la couche `voirie`, quand il a fallu trancher (D5).
-    voirie: str | None = None
+    #:
+    #: Une chaîne vaut pour toute la couche ; une liste donne un type par objet,
+    #: dans l'ordre de la couche. Le second cas est le courant : un projet a
+    #: presque toujours de la voie lourde **et** de la piste légère, et le calque
+    #: du bureau d'études les mélange sans les nommer.
+    voirie: str | list | None = None
 
     # -- métadonnées ---------------------------------------------------------
 
@@ -297,6 +303,22 @@ class Contrat:
         2bis, et rien ne dit que c'est le seul fichier du parc dans ce cas.
         """
         return [entite.geometrie for entite in self.entites(categorie)]
+
+    def voiries_de(self, categorie: str) -> list:
+        """Objets de la couche `voirie` que le chef de projet a rangés ici.
+
+        Le calque du bureau d'études mélange les deux revêtements sans les
+        nommer, et un projet a presque toujours les deux : le tri se fait objet
+        par objet, et cette méthode est le seul endroit qui sache le relire.
+        """
+        if not self.voirie:
+            return []
+        objets = self.geometries("voirie")
+        return [
+            geometrie
+            for geometrie, choisi in zip(objets, self.voirie)
+            if choisi == categorie
+        ]
 
     def entites(self, categorie: str) -> list:
         """Géométries d'une catégorie avec les bornes de leur Z, une par une.
@@ -429,7 +451,7 @@ def _surface_proche(cote: Cote, mesuree: float, tolerance: float) -> bool:
     return False
 
 
-def charger_contrat(dossier: str | Path, voirie: str | None = None) -> Contrat:
+def charger_contrat(dossier: str | Path, voirie=None) -> Contrat:
     """Lit le GeoPackage et le `projet.json` d'un dossier de sortie.
 
     `voirie` tranche le type des voiries dont le calque ne le disait pas
@@ -458,13 +480,23 @@ def charger_contrat(dossier: str | Path, voirie: str | None = None) -> Contrat:
 
     couches = _lire_couches(chemin_gpkg)
 
-    if voirie is not None and voirie not in VOIRIES_ADMISES:
-        raise ErreurVoirieIndecise(
-            f"Type de voirie « {voirie} » inconnu, attendu parmi "
-            f"{', '.join(VOIRIES_ADMISES)}."
-        )
     nb_voiries = len(couches.get("voirie", []))
-    if nb_voiries and voirie is None:
+    choix = [voirie] * nb_voiries if isinstance(voirie, str) else voirie
+    if choix is not None:
+        inconnus = sorted({c for c in choix if c not in VOIRIES_ADMISES})
+        if inconnus:
+            raise ErreurVoirieIndecise(
+                f"Type de voirie « {', '.join(map(str, inconnus))} » inconnu, "
+                f"attendu parmi {', '.join(VOIRIES_ADMISES)}."
+            )
+        if len(choix) != nb_voiries:
+            raise ErreurVoirieIndecise(
+                f"{len(choix)} type(s) de voirie tranché(s) pour "
+                f"{nb_voiries} objet(s) sur la couche « voirie » : le choix se "
+                "fait objet par objet, et il en faut autant que le plan en "
+                "porte. Rejouez le tri — le plan a probablement changé depuis."
+            )
+    if nb_voiries and choix is None:
         raise ErreurVoirieIndecise(
             f"{nb_voiries} objet(s) sur la couche « voirie » : le calque du "
             "bureau d'études ne dit pas s'il s'agit de voie lourde ou de piste "
@@ -473,7 +505,7 @@ def charger_contrat(dossier: str | Path, voirie: str | None = None) -> Contrat:
             "aucune des deux n'est plus probable que l'autre."
         )
 
-    return Contrat(dossier=dossier, donnees=donnees, couches=couches, voirie=voirie)
+    return Contrat(dossier=dossier, donnees=donnees, couches=couches, voirie=choix)
 
 
 def _lire_couches(chemin: Path) -> dict:
@@ -502,6 +534,75 @@ def _lire_couches(chemin: Path) -> dict:
 def version_lue() -> int:
     """Version maximale du contrat que le lot 4 sait lire."""
     return VERSION_CONTRAT
+
+
+def decrire_voiries(dossier: str | Path) -> list:
+    """Les objets de la couche `voirie` d'un dossier, décrits pour l'interface.
+
+    Un chef de projet ne peut pas trancher sur un numéro d'ordre : il lui faut
+    de quoi reconnaître chaque objet. Une voie lourde fait cinq à six mètres de
+    large, une piste légère trois à quatre — la largeur moyenne, surface divisée
+    par longueur, suffit le plus souvent à les séparer.
+    """
+    import fiona
+    from shapely.geometry import shape
+
+    chemin = Path(dossier) / NOM_GEOPACKAGE
+    if not chemin.exists():
+        return []
+    try:
+        if "voirie" not in fiona.listlayers(str(chemin)):
+            return []
+        with fiona.open(str(chemin), layer="voirie") as source:
+            objets = [shape(entite["geometry"]) for entite in source]
+    except Exception:
+        return []
+
+    descriptions = []
+    for rang, geometrie in enumerate(objets):
+        if geometrie is None or geometrie.is_empty:
+            descriptions.append({"rang": rang, "surfacique": False, "resume": "vide"})
+            continue
+        if geometrie.area <= 0:
+            # Un linéaire sur ce calque n'est pas une voirie dessinée mais un
+            # axe ou un bout de limite : il n'a ni surface ni largeur, et le
+            # dire vaut mieux que d'afficher deux zéros.
+            descriptions.append(
+                {
+                    "rang": rang,
+                    "surfacique": False,
+                    "longueur_m": geometrie.length,
+                    "resume": f"linéaire de {geometrie.length:.0f} m, sans surface",
+                }
+            )
+            continue
+        rectangle = geometrie.minimum_rotated_rectangle
+        longueur = geometrie.length
+        if rectangle.geom_type == "Polygon":
+            sommets = list(rectangle.exterior.coords)[:-1]
+            longueur = max(
+                Point(a).distance(Point(b))
+                for a, b in zip(sommets, sommets[1:] + sommets[:1])
+            )
+        largeur = geometrie.area / longueur if longueur else 0.0
+        descriptions.append(
+            {
+                "rang": rang,
+                "surfacique": True,
+                "surface_m2": geometrie.area,
+                "longueur_m": longueur,
+                "largeur_m": largeur,
+                # Les séparateurs de milliers se remplacent **dans les nombres**
+                # et non dans la phrase : un `.replace(",", " ")` global mangeait
+                # aussi les virgules du texte.
+                "resume": (
+                    f"{geometrie.area:,.0f}".replace(",", " ") + " m², "
+                    + f"{longueur:,.0f}".replace(",", " ") + " m de long, "
+                    + f"{largeur:.1f}".replace(".", ",") + " m de large"
+                ),
+            }
+        )
+    return descriptions
 
 
 def voiries_a_trancher(dossier: str | Path) -> int:

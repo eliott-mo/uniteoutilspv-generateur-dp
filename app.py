@@ -42,7 +42,7 @@ from dp_socle.coupe import (
     profil_terrain,
     reprendre_coupe,
 )
-from dp_socle.contrat import VOIRIES_ADMISES, voiries_a_trancher
+from dp_socle.contrat import VOIRIES_ADMISES, decrire_voiries
 from dp_socle.erreurs import ErreurCoupe, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
@@ -53,24 +53,10 @@ from dp_socle.import_be import (
     lire_parametres,
 )
 from dp_socle.geometrie import charger_emprise
-from dp_socle.helioscope import (
-    CORRECTION_NORD_SUD_MAX_M,
-    apercu_calage,
-    azimut_rangees,
-    cadre_apercu,
-    corriger_nord_sud,
-    decaler_longitude,
-    ecrire_sortie,
-    fond_apercu,
-    ligne_coupe_helioscope,
-    parametres_contrat,
-    prepositionner,
-    rangees,
-)
-from dp_socle.helioscope import importer as importer_helioscope
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
-from dp_socle.projet import Projet
+from dp_socle.import_be import SEUIL_DP_MWC
+from dp_socle.projet import Projet, identifiant_de_dossier
 from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
 DOSSIER_PROJETS = Path("projets")
@@ -165,50 +151,70 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
 st.subheader("1. Métadonnées du projet")
 colonne_gauche, colonne_droite = st.columns(2)
 with colonne_gauche:
-    nom = st.text_input(
-        "Identifiant du dossier", value="ALR_45_Bray-Saint-Aignan",
-        help="Sert à nommer le dossier de sortie. N'apparaît pas sur les planches.",
+    nom_projet = st.text_input(
+        "Nom du projet", value="Bray-Saint-Aignan",
+        help="Il figure au cartouche des planches et sur la page de garde, et "
+        "nomme le dossier de sortie.",
     )
     commune = st.text_input("Commune", value="Bray-Saint-Aignan")
 with colonne_droite:
     code_postal = st.text_input("Code postal", value="45460")
     date_projet = st.date_input("Date du dossier", value=_date.today())
 
-libelle = st.text_input(
-    "Nom du projet au cartouche",
-    value="",
-    placeholder="Nom retenu par le chef de projet — à défaut, l'identifiant du dossier",
-    help="C'est ce libellé qui figure dans le cartouche des planches et sur la "
-    "page de garde.",
-)
+# Un seul nom saisi, deux usages : le cartouche le reproduit tel quel, le
+# système de fichiers en reçoit une version sans caractère interdit. Les deux
+# champs d'avant — « identifiant du dossier » et « nom au cartouche » — se
+# recopiaient l'un l'autre dans neuf cas sur dix.
+nom = identifiant_de_dossier(nom_projet)
+libelle = nom_projet.strip() or None
+if nom and nom != nom_projet.strip():
+    st.caption(f"Dossier de sortie : `sortie/{nom}/`")
 
 #: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
-#: une voirie était lourde ou légère, le chef de projet tranche. Le bouton n'a
-#: **aucune valeur par défaut** — le tableau bilan sépare les deux, la légende
-#: du dossier les distingue, et aucune des deux n'est plus probable que
-#: l'autre. Sans réponse, les planches ne sont pas dessinées.
-_voiries = voiries_a_trancher(DOSSIER_SORTIE / nom.strip()) if nom.strip() else 0
+#: une voirie était lourde ou légère, le chef de projet tranche — **objet par
+#: objet**, parce qu'un projet a presque toujours les deux et que le calque les
+#: mélange. Aucune valeur par défaut : le tableau bilan sépare les deux, la
+#: légende du dossier les distingue, et aucune des deux n'est plus probable que
+#: l'autre. Tant qu'un objet n'est pas tranché, les planches ne sont pas
+#: dessinées.
+_voiries = decrire_voiries(DOSSIER_SORTIE / nom) if nom else []
 voirie = None
 if _voiries:
     st.warning(
-        f"Le plan importé porte {_voiries} objet(s) sur le calque « voirie » "
-        "dont le type n'était pas précisé. Le tableau bilan sépare la voie "
-        "lourde de la piste légère, et la légende du dossier les distingue : "
-        "tranchez avant de dessiner.",
+        f"Le plan importé porte {len(_voiries)} objet(s) sur le calque "
+        "« voirie » dont le type n'était pas précisé. Le tableau bilan sépare la "
+        "voie lourde de la piste légère, et la légende du dossier les "
+        "distingue : tranchez avant de dessiner.",
         icon="⚠️",
     )
-    voirie = st.radio(
-        "Type de ces voiries",
-        options=VOIRIES_ADMISES,
-        format_func=lambda v: {
-            "piste_lourde": "Voie lourde",
-            "piste_legere": "Piste légère",
-        }[v],
-        index=None,
-        horizontal=True,
-        help="Aucune valeur par défaut : c'est une décision de projet, pas un "
-        "réglage.",
+    st.caption(
+        "Un objet à la fois : un projet a presque toujours les deux. La largeur "
+        "moyenne aide à les séparer — une voie lourde fait cinq à six mètres, "
+        "une piste légère trois à quatre."
     )
+    choix = []
+    for objet in _voiries:
+        colonne_mesure, colonne_choix = st.columns([1, 2])
+        with colonne_mesure:
+            st.markdown(f"**Objet {objet['rang'] + 1}** — {objet['resume']}")
+        with colonne_choix:
+            choix.append(
+                st.radio(
+                    f"Type de l'objet {objet['rang'] + 1}",
+                    options=VOIRIES_ADMISES,
+                    format_func=lambda v: {
+                        "piste_lourde": "Voie lourde",
+                        "piste_legere": "Piste légère",
+                    }[v],
+                    index=None,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key=f"voirie_{objet['rang']}",
+                )
+            )
+    # Aucune valeur par défaut, et rien de partiel : tant qu'un objet n'est pas
+    # tranché, le contrat refuse — c'est une décision de projet, pas un réglage.
+    voirie = choix if all(c is not None for c in choix) else None
 
 st.subheader("2. Fichiers")
 fichiers_emprise = st.file_uploader(
@@ -226,10 +232,6 @@ image_garde = st.file_uploader(
 )
 
 st.subheader("3. Génération")
-colonne_json, colonne_generation = st.columns(2)
-
-if "chemin_projet_json" not in st.session_state:
-    st.session_state.chemin_projet_json = None
 
 
 def _construire_projet() -> Projet | None:
@@ -259,28 +261,11 @@ def _construire_projet() -> Projet | None:
     )
 
 
-with colonne_json:
-    if st.button("Écrire projet.json", width="stretch"):
-        try:
-            projet = _construire_projet()
-            if projet is not None:
-                projet.valider()
-                chemin = projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
-                st.session_state.chemin_projet_json = str(chemin)
-                st.success(f"Écrit : {chemin}")
-                st.code(
-                    json.dumps(
-                        json.loads(chemin.read_text(encoding="utf-8")),
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    language="json",
-                )
-        except ErreurDP as erreur:
-            st.error(str(erreur))
-
-with colonne_generation:
-    lancer = st.button("Générer le dossier", type="primary", width="stretch")
+# Un seul bouton. Le second, « Écrire projet.json », n'écrivait que le fichier
+# de métadonnées du lot 1 — que celui-ci écrit de toute façon avant de dessiner —
+# et se confondait avec le `projet.json` du contrat d'entrée, qui est un autre
+# fichier, dans un autre dossier, produit par l'import du plan BE.
+lancer = st.button("Générer le dossier", type="primary", width="stretch")
 
 if lancer:
     try:
@@ -393,357 +378,11 @@ def _tableau_controles(controles) -> None:
 
 
 
-@st.fragment
-def _coupe_helioscope(implantation, emprise_cadastrale) -> None:
-    """Tracé, redressement et profil de la coupe A-A' d'un projet HelioScope.
-
-    Même mécanique que celle de l'import BE : on trace grossièrement sur la
-    carte, la direction est imposée par la géométrie des rangées, et le profil
-    vient du RGE ALTI. En fragment, pour que le tracé ne relance pas tout le
-    script.
-    """
-    import folium
-    from folium.plugins import Draw
-
-    from dp_socle.apercu_be import bornes_wgs84, en_wgs84, figure_profil, trace_l93
-
-    couches = en_wgs84([emprise_cadastrale] + rangees(implantation))
-    minx, miny, maxx, maxy = bornes_wgs84(emprise_cadastrale)
-    carte = folium.Map(tiles=None)
-    folium.TileLayer(
-        tiles=URL_TUILES_ORTHO, attr="IGN — BD ORTHO", name="Ortho IGN"
-    ).add_to(carte)
-    for geometrie in couches["geometries"]:
-        folium.GeoJson(
-            geometrie,
-            style_function=lambda _: {
-                "color": "#0000ff",
-                "weight": 2,
-                "fillOpacity": 0.25,
-            },
-        ).add_to(carte)
-    carte.fit_bounds([[miny, minx], [maxy, maxx]])
-    Draw(
-        draw_options={
-            "polyline": {"shapeOptions": {"color": "#ff8c00", "weight": 4}},
-            "polygon": False,
-            "rectangle": False,
-            "circle": False,
-            "marker": False,
-            "circlemarker": False,
-        },
-        edit_options={"edit": False, "remove": True},
-    ).add_to(carte)
-
-    resultat = st_folium(carte, width=None, height=480, key="carte_coupe_helioscope")
-    trace = trace_l93(resultat)
-    if trace is None:
-        st.caption(
-            "Tracez un segment en travers des rangées avec l'outil ligne. La "
-            "direction sera redressée ; seul le point milieu est conservé."
-        )
-        return
-
-    try:
-        coupe = ligne_coupe_helioscope(implantation, trace, emprise_cadastrale)
-    except ErreurDP as erreur:
-        st.error(f"{type(erreur).__name__} : {erreur}")
-        return
-
-    st.session_state.coupe_helioscope = coupe
-    for message in coupe.avertissements:
-        st.warning(message, icon="⚠️")
-    colonnes = st.columns(3)
-    colonnes[0].metric("Azimut de la coupe", f"{coupe.azimut_coupe_deg:+.3f}°")
-    colonnes[1].metric("Longueur", f"{coupe.longueur_m:.1f} m")
-    colonnes[2].metric("Redressement", f"{coupe.ecart_initial_deg:.1f}°")
-
-    if st.button("Lever le profil du terrain (RGE ALTI)", width="stretch"):
-        try:
-            st.session_state.profil_helioscope = profil_terrain(coupe.geometrie)
-        except ErreurDP as erreur:
-            st.error(f"{type(erreur).__name__} : {erreur}")
-    profil = st.session_state.get("profil_helioscope")
-    if profil is not None:
-        st.pyplot(figure_profil(profil))
-        st.caption(
-            f"{profil.origine} — dénivelée {profil.denivelee_m:.1f} m, "
-            f"de {profil.altitude_min_m:.1f} à {profil.altitude_max_m:.1f} m NGF. "
-            "Aucun recoupement avec l'altitude des tables n'est possible : le "
-            "DXF HelioScope est plat."
-        )
-    st.caption(
-        "Relancez « Valider ce calage » pour écrire la coupe et le profil dans "
-        "le contrat."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Lot 2 — calepinage HelioScope
-# ---------------------------------------------------------------------------
-
-st.divider()
-st.subheader("4. Calepinage HelioScope")
-st.caption(
-    "Import de l'export CAO HelioScope et calage géographique. Produit les "
-    "géométries en Lambert 93 et les paramètres du calepinage ; ne dessine "
-    "aucune planche."
-)
-
-export_helioscope = st.file_uploader(
-    "Export HelioScope (le ZIP complet téléchargé depuis HelioScope)",
-    type=["zip"],
-    help="Celui qui contient le « Layout CAD ». Si le calque Modules est vide, "
-    "l'export a été fait avant la fin de la section électrique et sera refusé.",
-)
-
-for cle, defaut in (
-    ("implantation", None),
-    ("calage_valide", False),
-    ("decalage_est_ouest", 0.0),
-    ("correction_nord_sud", 0.0),
-):
-    if cle not in st.session_state:
-        st.session_state[cle] = defaut
-
-
-def _emprise_courante():
-    """Emprise du projet, depuis les fichiers téléversés plus haut."""
-    chemin = _enregistrer_fichiers(nom.strip() or "projet", fichiers_emprise)
-    return charger_emprise(chemin) if chemin else None
-
-
-@st.cache_data(show_spinner="Téléchargement de l'ortho IGN…")
-def _fond_cache(cadre: tuple, largeur_px: int = 1100):
-    """Ortho du cadre de réglage, téléchargée une fois pour toutes.
-
-    Le cadre ne bougeant pas pendant le réglage, l'image non plus : sans ce
-    cache, chaque cran de curseur relançait une requête WMS de plusieurs
-    secondes et l'aperçu disparaissait puis revenait.
-    """
-    return fond_apercu(cadre, largeur_px=largeur_px)
-
-
-def _sens(metres: float, negatif: str, positif: str) -> str:
-    if not metres:
-        return "aucun déplacement"
-    return f"{abs(metres):.1f} m vers {positif if metres > 0 else negatif}"
-
-
-if export_helioscope is not None:
-    dossier = DOSSIER_PROJETS / (nom.strip() or "projet")
-    dossier.mkdir(parents=True, exist_ok=True)
-    chemin_export = dossier / Path(export_helioscope.name).name
-    chemin_export.write_bytes(export_helioscope.getbuffer())
-
-    if st.button("Importer et pré-positionner", width="stretch"):
-        st.session_state.calage_valide = False
-        st.session_state.decalage_est_ouest = 0.0
-        st.session_state.correction_nord_sud = 0.0
-        try:
-            emprise = _emprise_courante()
-            if emprise is None:
-                st.error(
-                    "Téléversez d'abord l'emprise du projet : le calage se fait "
-                    "par superposition sur elle."
-                )
-            else:
-                implantation = importer_helioscope(chemin_export)
-                diagnostic = prepositionner(implantation, emprise.geometrie)
-                st.session_state.implantation = implantation
-                st.session_state.chemin_export = str(chemin_export)
-                st.session_state.diagnostic = diagnostic
-                # Figé au pré-positionnement : c'est ce qui rend le fond cachable.
-                st.session_state.cadre = cadre_apercu(implantation, emprise.geometrie)
-        except ErreurDP as erreur:
-            st.session_state.implantation = None
-            st.error(f"{type(erreur).__name__} : {erreur}")
-
-implantation = st.session_state.implantation
-if implantation is not None:
-    calepinage = implantation.calepinage
-    module = calepinage.module
-    colonnes = st.columns(4)
-    colonnes[0].metric("Modules", f"{calepinage.nb_modules:,}".replace(",", " "))
-    colonnes[1].metric("Inclinaison", f"{module.inclinaison_deg:g}°")
-    colonnes[2].metric("Rangées", calepinage.nb_rangees)
-    colonnes[3].metric("Pas inter-rangées", f"{calepinage.pas_rangees_m:.2f} m")
-
-    st.caption(
-        f"Design {implantation.identifiant_design} — {calepinage.nb_tables} tables "
-        f"de {calepinage.nb_modules_par_table} modules de "
-        f"{module.largeur_m:.3f} × {module.longueur_m:.3f} m en pose "
-        f"{module.pose}, pas inter-table {calepinage.pas_tables_m:.2f} m, "
-        f"orientation {calepinage.orientation_deg:.2f}°. Latitude déduite du "
-        f"fichier : {implantation.calage.latitude_origine:.6f}° "
-        f"(zoom {implantation.calage.zoom}, "
-        f"fraction {implantation.calage.fraction_zoom:.4f})."
-    )
-    for message in implantation.avertissements:
-        st.warning(message, icon="⚠️")
-    st.info(st.session_state.diagnostic.message)
-
-    st.markdown(
-        "**Validation du calage — obligatoire.** Deux réglages indépendants, à "
-        "faire l'un après l'autre plutôt qu'en glissant l'implantation à vue : "
-        "chacun se juge sur un critère simple, alors qu'un déplacement libre "
-        "laisse compenser l'erreur d'un axe par l'autre."
-    )
-
-    @st.fragment
-    def _reglage_du_calage():
-        """Curseurs et aperçu, rejoués seuls à chaque cran.
-
-        En fragment : sans cela, bouger un curseur relance tout le script, y
-        compris la relecture de l'emprise et le rendu des sections précédentes.
-        """
-        try:
-            emprise = _emprise_courante()
-            if emprise is None:
-                st.error("Emprise introuvable : retéléversez-la plus haut.")
-                return
-
-            colonne_eo, colonne_ns = st.columns(2)
-            with colonne_eo:
-                decalage = st.slider(
-                    "Décalage est-ouest (m) — ◀ ouest · est ▶",
-                    min_value=-150.0,
-                    max_value=150.0,
-                    value=float(st.session_state.decalage_est_ouest),
-                    step=0.5,
-                    help="Négatif vers l'ouest (gauche), positif vers l'est "
-                    "(droite). Réglage principal : la longitude est la seule "
-                    "inconnue du modèle de calage.",
-                )
-                st.caption(_sens(decalage, "l'ouest ◀", "l'est ▶"))
-            with colonne_ns:
-                correction = st.slider(
-                    "Correction nord-sud (m) — ▼ sud · nord ▲",
-                    min_value=-CORRECTION_NORD_SUD_MAX_M,
-                    max_value=CORRECTION_NORD_SUD_MAX_M,
-                    value=float(st.session_state.correction_nord_sud),
-                    step=0.5,
-                    help="Négatif vers le sud (bas), positif vers le nord "
-                    "(haut). Retouche de la latitude déduite du fichier, qui "
-                    "n'est bonne qu'à une dizaine de mètres. Laissez à 0 si "
-                    "l'implantation tombe juste : toute valeur saisie est "
-                    "conservée dans projet.json.",
-                )
-                st.caption(_sens(correction, "le sud ▼", "le nord ▲"))
-
-            if decalage != st.session_state.decalage_est_ouest:
-                decaler_longitude(
-                    implantation.calage,
-                    decalage - st.session_state.decalage_est_ouest,
-                )
-                st.session_state.decalage_est_ouest = decalage
-                st.session_state.calage_valide = False
-            if correction != st.session_state.correction_nord_sud:
-                corriger_nord_sud(implantation.calage, correction)
-                st.session_state.correction_nord_sud = correction
-                st.session_state.calage_valide = False
-
-            cadre = st.session_state.cadre
-            apercu = apercu_calage(
-                implantation,
-                emprise.geometrie,
-                fond=_fond_cache(cadre),
-                cadre=cadre,
-            )
-            st.image(apercu, width="stretch")
-            st.caption(
-                "Rouge : zone d'implantation HelioScope. Jaune : emprise "
-                "fournie. Bleu-vert : modules. Le nord est en haut. La zone "
-                "HelioScope est tracée à la main et ne suit pas le parcellaire : "
-                "c'est la position des modules sur le terrain qui fait foi."
-            )
-
-            if st.button("Valider ce calage", type="primary", width="stretch"):
-                st.session_state.calage_valide = True
-        except ErreurDP as erreur:
-            st.error(f"{type(erreur).__name__} : {erreur}")
-
-    _reglage_du_calage()
-
-    if st.session_state.calage_valide:
-        try:
-            projet = _construire_projet()
-            if projet is not None:
-                projet.helioscope = st.session_state.chemin_export
-                projet.longitude_calage = implantation.calage.longitude_origine
-                projet.correction_nord_sud_m = (
-                    implantation.calage.correction_nord_sud_m or None
-                )
-                projet.valider()
-                chemin = projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
-                emprise = _emprise_courante()
-
-                # Même contrat de sortie que l'import BE, dans sortie/{projet}/ :
-                # le lot 4 lira une seule structure, sans savoir de quel lot
-                # vient le dossier.
-                dossier_sortie = DOSSIER_SORTIE / projet.nom
-                gpkg, params, controles = ecrire_sortie(
-                    implantation,
-                    dossier_sortie,
-                    emprise_cadastrale=None if emprise is None else emprise.geometrie,
-                    projet=projet,
-                    ligne_coupe=st.session_state.get("coupe_helioscope"),
-                    profil=st.session_state.get("profil_helioscope"),
-                )
-                st.success(
-                    f"Calage enregistré dans {chemin} "
-                    f"(longitude {projet.longitude_calage:.8f}°, correction "
-                    f"nord-sud {implantation.calage.correction_nord_sud_m:+.1f} m). "
-                    f"Contrat écrit : {gpkg.name} et {params.name} dans "
-                    f"{dossier_sortie}."
-                )
-
-                st.markdown("### Contrôles")
-                _tableau_controles(controles)
-                st.caption(
-                    "∅ marque un contrôle que la source ne permet pas de faire. "
-                    "L'export HelioScope est la seule source du dossier : il n'y "
-                    "a pas de tableau bilan à lui opposer, et la plupart des "
-                    "recoupements du plan BE n'ont donc pas d'objet ici. C'est la "
-                    "contrepartie de ce lot, à ne pas confondre avec un contrôle "
-                    "réussi."
-                )
-                for controle in controles:
-                    if controle.statut == "avertissement":
-                        st.warning(
-                            f"{controle.libelle} — {controle.message}", icon="⚠️"
-                        )
-
-                azimut = azimut_rangees(implantation)
-                st.markdown("### Coupe A-A'")
-                st.caption(
-                    "Facultative à ce stade. Elle s'étend sur l'emprise "
-                    "cadastrale, faute de clôture dans l'export HelioScope, et "
-                    "son orientation est imposée par les rangées mesurées en "
-                    f"Lambert 93 : {azimut:+.3f}°, soit une coupe à "
-                    f"{azimut + 90:+.3f}°."
-                )
-                if emprise is None:
-                    st.info(
-                        "Emprise cadastrale absente : la coupe ne peut pas être "
-                        "étendue. Téléversez le shapefile d'emprise plus haut."
-                    )
-                else:
-                    _coupe_helioscope(implantation, emprise.geometrie)
-
-                with st.expander("Paramètres écrits dans le contrat"):
-                    st.code(
-                        json.dumps(
-                            parametres_contrat(
-                                implantation, controles, projet=projet
-                            ),
-                            ensure_ascii=False,
-                            indent=2,
-                        ),
-                        language="json",
-                    )
-        except ErreurDP as erreur:
-            st.error(f"{type(erreur).__name__} : {erreur}")
+# Le lot 2 — import du calepinage HelioScope — est en réserve : tous les
+# dossiers passent aujourd'hui par le plan du bureau d'études interne. Sa
+# section a été retirée de l'interface pour ne pas offrir deux entrées quand une
+# seule sert. Le module `dp_socle/helioscope.py` et ses tests restent en place :
+# c'est le chemin des projets sans plan BE, et il produit le même contrat.
 
 
 # ---------------------------------------------------------------------------
@@ -751,7 +390,7 @@ if implantation is not None:
 # ---------------------------------------------------------------------------
 
 st.divider()
-st.subheader("5. Plan du bureau d'études")
+st.subheader("4. Plan du bureau d'études")
 st.caption(
     "Import du DXF et du tableau bilan fournis par le BE, recoupement des deux, "
     "tracé de la ligne de coupe A-A' et profil du terrain. Produit "
@@ -804,16 +443,6 @@ with colonne_alti:
         "« abscisse Z ». Ce fichier prend le pas sur l'appel automatique.",
     )
 
-seuil_puissance = st.number_input(
-    "Seuil de recevabilité en déclaration préalable (MWc)",
-    min_value=0.0,
-    max_value=50.0,
-    value=3.0,
-    step=0.1,
-    help="Aucune règle d'urbanisme n'est codée dans l'outil : c'est la valeur "
-    "saisie ici qui sert de repère, et la puissance du projet est affichée en "
-    "évidence dans tous les cas.",
-)
 
 
 def _deposer(fichier, defaut_nom: str = "projet") -> Path | None:
@@ -1025,7 +654,7 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 indice,
                 correspondance=st.session_state.correspondance_be or None,
                 emprise_cadastrale=emprise_cadastrale,
-                seuil_puissance_mwc=float(seuil_puissance),
+                seuil_puissance_mwc=SEUIL_DP_MWC,
             )
             st.session_state.emprise_cadastrale_be = emprise_cadastrale
             _reprendre_import_precedent(

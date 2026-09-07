@@ -44,7 +44,6 @@ from .standards import (
     ESPACEMENT_POTEAUX_M,
     HAUTEUR_CLOTURE_M,
     HAUTEUR_PORTAIL_M,
-    MESSAGE_HAUTEURS,
     PASSAGE_FAUNE_HAUTEUR_M,
     PASSAGE_FAUNE_LARGEUR_M,
 )
@@ -201,7 +200,6 @@ HAUTEUR_ENTETE_MM = 11.0
 
 #: Hauteurs standard UNITe, absentes du contrat : voir `standards.py`, qui
 #: porte leur justification et le message qui les accompagne au rapport.
-MESSAGE_HAUTEURS_STANDARD = MESSAGE_HAUTEURS
 
 #: Figuré d'un poste préfabriqué, relevé sur les élévations du dossier de
 #: Massay du 17/04/2025 et sur la planche type UNITe.
@@ -1016,7 +1014,6 @@ def _centre_zone(planche: Planche) -> tuple:
 
 def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> BlocOuvrage:
     if categorie == "cloture":
-        avertissements.append(MESSAGE_HAUTEURS_STANDARD)
         return _bloc_cloture()
     if categorie == "portail":
         largeur = contrat.generalites.get("largeur_portails_m")
@@ -1025,8 +1022,6 @@ def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> Blo
                 "Largeur de portail absente de `parametres.generalites` : "
                 "l'élévation du portail n'est pas dessinée."
             )
-        if MESSAGE_HAUTEURS_STANDARD not in avertissements:
-            avertissements.append(MESSAGE_HAUTEURS_STANDARD)
         return _bloc_portail(float(largeur))
 
     surface = _surface_au_sol(contrat, categorie)

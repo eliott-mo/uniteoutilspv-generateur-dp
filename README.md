@@ -1703,9 +1703,19 @@ d'emprise qu'il faut reprendre.
 La catégorie `voirie` existe parce qu'un calque du bureau d'études ne disait pas
 si la piste était lourde ou légère, alors que le tableau bilan sépare les deux et
 que la légende du dossier les distingue. Une couche `voirie` peuplée **refuse** de
-dessiner tant que le chef de projet n'a pas tranché, par un bouton radio sans
-valeur par défaut. La décision se conserve dans le `projet.json` du lot 1, le
-format pivot, pour qu'une régénération ne la redemande pas.
+dessiner tant que le chef de projet n'a pas tranché, sans valeur par défaut. La
+décision se conserve dans le `projet.json` du lot 1, le format pivot, pour qu'une
+régénération ne la redemande pas.
+
+Le tri se fait **objet par objet**, et non d'un seul choix pour toute la couche :
+un projet a presque toujours de la voie lourde *et* de la piste légère, et le
+calque les mélange sans les nommer. `projet.json` porte donc une liste, un type
+par objet dans l'ordre de la couche ; une chaîne, forme des dossiers antérieurs,
+vaut pour toute la couche. Le nombre de choix doit valoir le nombre d'objets — un
+plan réimporté qui en porterait un de plus décalerait tout le reste, et le
+contrat refuse plutôt que de décaler. L'interface donne à chaque objet sa surface,
+sa longueur et sa largeur moyenne : une voie lourde fait cinq à six mètres de
+large, une piste légère trois à quatre.
 
 ## Hors périmètre de ces lots
 

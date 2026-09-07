@@ -201,9 +201,34 @@ def test_voirie_peuplee_bloque(tmp_path):
 
 
 def test_voirie_tranchee_passe(tmp_path):
+    """Une chaîne vaut pour toute la couche, et se déplie en un choix par objet."""
     synthese.ecrire(tmp_path, avec_voirie=True)
     contrat = charger_contrat(tmp_path, voirie="piste_legere")
-    assert contrat.voirie == "piste_legere"
+    assert contrat.voirie == ["piste_legere"]
+    assert contrat.voiries_de("piste_legere") == contrat.geometries("voirie")
+    assert contrat.voiries_de("piste_lourde") == []
+
+
+def test_la_voirie_se_tranche_objet_par_objet(tmp_path):
+    """Un projet a presque toujours de la voie lourde ET de la piste légère.
+
+    Le calque du bureau d'études les mélange sans les nommer : le tri se fait
+    donc objet par objet, et non d'un seul choix pour toute la couche.
+    """
+    synthese.ecrire(tmp_path, avec_voirie=True)
+    nombre = len(charger_contrat(tmp_path, voirie="piste_legere").geometries("voirie"))
+    choix = ["piste_lourde"] + ["piste_legere"] * (nombre - 1)
+
+    contrat = charger_contrat(tmp_path, voirie=choix)
+    assert len(contrat.voiries_de("piste_lourde")) == 1
+    assert len(contrat.voiries_de("piste_legere")) == nombre - 1
+
+
+def test_un_choix_par_objet_et_pas_un_de_moins(tmp_path):
+    """Le plan a changé depuis le tri : mieux vaut refuser que décaler."""
+    synthese.ecrire(tmp_path, avec_voirie=True)
+    with pytest.raises(ErreurVoirieIndecise, match="objet par objet"):
+        charger_contrat(tmp_path, voirie=["piste_lourde", "piste_legere"])
 
 
 def test_voirie_absente_ne_demande_rien(tmp_path):

@@ -401,3 +401,39 @@ def test_le_pdf_assemble_porte_le_nom_du_projet():
         date="2026-09-05", emprise="emprise.geojson",
     )
     assert nom_assemblage(projet) == "Sarnois-B_DP_complet.pdf"
+
+
+# ---------------------------------------------------------------------------
+# Décisions de la relecture du 05/09/2026
+# ---------------------------------------------------------------------------
+
+
+def test_un_seul_nom_saisi_donne_un_dossier_sur():
+    """Le cartouche reproduit le nom tel quel, le disque en reçoit une version sûre."""
+    from dp_socle.projet import identifiant_de_dossier
+
+    assert identifiant_de_dossier("Saint-Cyr-en-Val") == "Saint-Cyr-en-Val"
+    assert identifiant_de_dossier("Centrale PV : tranche 2") == "Centrale-PV-tranche-2"
+    assert identifiant_de_dossier("Bray/Saint-Aignan") == "Bray-Saint-Aignan"
+    assert identifiant_de_dossier("  Sarnois  indice A ") == "Sarnois-indice-A"
+
+
+def test_la_coupe_de_principe_montre_deux_rangees():
+    """Trois ne tenaient jamais au 1:80, et la troisième ne dit rien de plus."""
+    from dp_socle.planches.dp3_coupes import RANGEES_DESSINEES, RANGEES_MINIMALES
+
+    assert RANGEES_DESSINEES == RANGEES_MINIMALES == 2
+
+
+def test_la_hauteur_de_cloture_n_est_plus_un_avertissement():
+    """2,00 m est une constante UNITe confirmée, pas une substitution."""
+    from dp_socle.planches import standards
+
+    assert standards.HAUTEUR_CLOTURE_M == standards.HAUTEUR_PORTAIL_M == 2.00
+    assert not hasattr(standards, "MESSAGE_HAUTEURS")
+
+
+def test_le_seuil_de_recevabilite_est_une_regle_pas_un_reglage():
+    from dp_socle.import_be import SEUIL_DP_MWC
+
+    assert SEUIL_DP_MWC == 3.0

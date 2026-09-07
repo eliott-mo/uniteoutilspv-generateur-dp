@@ -1347,6 +1347,16 @@ class Controle:
     def bloquant(self) -> bool:
         return self.statut == BLOQUANT
 
+#: Seuil de recevabilité d'un projet en déclaration préalable, en MWc.
+#:
+#: C'est une règle d'urbanisme, pas un réglage de l'outil : au-delà, le projet
+#: relève du permis de construire. Elle était offerte en champ modifiable dans
+#: l'interface, ce qui laissait croire qu'elle se négociait ; elle est figée
+#: (relecture du 05/09/2026). La puissance du projet reste affichée en évidence
+#: dans tous les cas, et le contrôle dit de quel côté du seuil elle tombe.
+SEUIL_DP_MWC = 3.0
+
+
 
 def controler(
     plan: PlanBE,

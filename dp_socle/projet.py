@@ -21,6 +21,28 @@ MOA_VILLE = "69006 LYON"
 CHAMPS_OBLIGATOIRES = ("nom", "commune", "code_postal", "date", "emprise")
 
 
+#: Caractères qu'un nom de dossier ne peut pas porter sous Windows.
+_INTERDITS = r'<>:"/\|?*'
+
+
+def identifiant_de_dossier(nom: str) -> str:
+    """Nom de dossier sûr, tiré du nom de projet saisi.
+
+    Le chef de projet ne saisit qu'un nom — celui qui figure au cartouche. Le
+    système de fichiers, lui, refuse une partie des caractères qu'on met dans un
+    nom de projet : « Saint-Cyr-en-Val (45) » passe, « Centrale PV : tranche 2 »
+    non. Les caractères interdits deviennent des tirets, les espaces aussi, et
+    les répétitions sont réduites.
+
+    Rendre le nom tel quel quand il est déjà sûr : c'est le cas courant, et le
+    dossier doit garder le nom qu'on lui a donné.
+    """
+    propre = "".join("-" if c in _INTERDITS or c.isspace() else c for c in nom.strip())
+    while "--" in propre:
+        propre = propre.replace("--", "-")
+    return propre.strip("-. ")
+
+
 @dataclass
 class Projet:
     """Métadonnées d'un dossier de déclaration préalable."""
@@ -44,12 +66,17 @@ class Projet:
     #: Type retenu pour les voiries dont le calque du bureau d'études ne disait
     #: pas si elles étaient lourdes ou légères (décision D5 du lot 4).
     #:
+    #: Une **liste**, un type par objet dans l'ordre de la couche : un projet a
+    #: presque toujours de la voie lourde et de la piste légère, et le calque les
+    #: mélange. Une chaîne, forme des dossiers antérieurs, vaut pour toute la
+    #: couche.
+    #:
     #: Sans valeur, une couche `voirie` peuplée bloque la génération des
     #: planches : le tableau bilan sépare les deux et la légende du dossier les
     #: distingue, aucune des deux n'est plus probable que l'autre. La décision
     #: est celle du chef de projet, et elle se conserve ici pour qu'une
     #: régénération ne la redemande pas.
-    voirie: str | None = None
+    voirie: str | list | None = None
     #: Correction nord-sud saisie à la main, en mètres vers le nord, à partir de
     #: la latitude déduite du fichier. Stockée en écart plutôt qu'en latitude
     #: corrigée : la valeur du fichier reste lisible et la retouche se voit.
@@ -121,10 +148,15 @@ class Projet:
         if self.voirie is not None:
             from .contrat import VOIRIES_ADMISES
 
-            if self.voirie not in VOIRIES_ADMISES:
+            # Une chaîne vaut pour toute la couche — c'est la forme des
+            # `projet.json` écrits avant que le tri ne se fasse objet par objet,
+            # et elle reste lisible. Une liste donne un type par objet.
+            choix = [self.voirie] if isinstance(self.voirie, str) else self.voirie
+            inconnus = sorted({c for c in choix if c not in VOIRIES_ADMISES})
+            if inconnus:
                 raise ErreurDP(
-                    f"voirie = « {self.voirie} » inconnu dans projet.json ; "
-                    f"attendu parmi {', '.join(VOIRIES_ADMISES)}."
+                    f"voirie = « {', '.join(map(str, inconnus))} » inconnu dans "
+                    f"projet.json ; attendu parmi {', '.join(VOIRIES_ADMISES)}."
                 )
         if self.correction_nord_sud_m is not None:
             if self.longitude_calage is None:

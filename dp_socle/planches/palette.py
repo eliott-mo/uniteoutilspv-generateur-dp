@@ -517,8 +517,7 @@ def objets_a_dessiner(contrat, avertissements=None) -> list:
             geometries = list(emprise_de_poste(contrat, categorie, messages))
         else:
             geometries = list(contrat.geometries(categorie))
-        if contrat.voirie == categorie:
-            geometries.extend(contrat.geometries("voirie"))
+        geometries.extend(contrat.voiries_de(categorie))
         geometries = fermer_les_contours(geometries, categorie, messages)
         if geometries:
             resultat.append((categorie, geometries))

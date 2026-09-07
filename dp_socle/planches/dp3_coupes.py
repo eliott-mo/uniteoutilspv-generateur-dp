@@ -44,7 +44,6 @@ from .standards import (
     HAUTEUR_ARBRE_M,
     HAUTEUR_CLOTURE_M,
     HAUTEUR_HAIE_M,
-    MESSAGE_HAUTEURS,
     MESSAGE_VEGETATION,
 )
 from .primitives import (
@@ -81,10 +80,15 @@ ECHELLES_TABLES = (50, 80, 100, 200)
 ECHELLES_TERRAIN = (200, 250, 300, 500, 750, 1000)
 
 #: Rangées dessinées sur la coupe de type, et minimum garanti par l'échelle.
-#: Le brief cale l'échelle sur deux rangées complètes et leurs cotes, et le
-#: dessin en montre trois quand la place le permet : c'est la répétition qui
-#: fait comprendre le pas.
-RANGEES_DESSINEES = 3
+#:
+#: Deux, décidé à la relecture du 05/09/2026. Le brief calait l'échelle sur deux
+#: rangées complètes et le dessin en montrait trois quand la place le permettait,
+#: mais elle ne le permettait jamais : au 1:80, trois rangées d'un pas de 9,50 m
+#: demandent 400 mm quand le cadre en offre 380, et l'avertissement « 2 rangées
+#: au lieu de 3 » tombait sur les trois dossiers d'essai. Or deux rangées
+#: suffisent à faire lire le pas et l'inter-table ; la troisième était une
+#: répétition, et la chercher coûtait le passage au 1:100.
+RANGEES_DESSINEES = 2
 RANGEES_MINIMALES = 2
 
 #: Longueurs de module admises pour le contrôle d'ordre de grandeur du
@@ -1112,8 +1116,7 @@ def _sols_sur_le_profil(dessin, contrat: Contrat, profil) -> None:
     epaisseur = dessin.metres(EPAISSEUR_PISTE_MM)
     for categorie in SOLS_TRAVERSES:
         geometries = list(contrat.geometries(categorie))
-        if contrat.voirie == categorie:
-            geometries.extend(contrat.geometries("voirie"))
+        geometries.extend(contrat.voiries_de(categorie))
         if not geometries:
             continue
         style = STYLES[categorie].style
@@ -1185,7 +1188,7 @@ def _cloture_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
             abscisse, haut, "Clôture", taille=5.5 * PT, ancre="middle",
             decalage_mm=(0.0, -1.4), couleur=style.trait,
         )
-    return [MESSAGE_HAUTEURS]
+    return []
 
 
 def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
