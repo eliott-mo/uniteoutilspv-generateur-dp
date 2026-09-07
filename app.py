@@ -871,7 +871,8 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
 
     try:
         coupe, profil_reutilisable = reprendre_coupe(
-            enregistree, plan.azimut_tables_deg, emprise_cloturee
+            enregistree, plan.azimut_tables_deg, emprise_cloturee,
+            tables=plan.tables,
         )
     except ErreurCoupe as erreur:
         # Le dossier de sortie porte le tracé d'un autre projet : on ne le
@@ -1195,7 +1196,8 @@ if import_be_courant is not None:
     if trace is not None and st.button("Corriger et relever le profil", width="stretch"):
         try:
             coupe = corriger_ligne_coupe(
-                trace, plan.azimut_tables_deg, emprise_cloturee, manuel=manuel
+                trace, plan.azimut_tables_deg, emprise_cloturee, manuel=manuel,
+                tables=plan.tables,
             )
             st.session_state.coupe_be = coupe
             with st.spinner("Interrogation du RGE ALTI…"):

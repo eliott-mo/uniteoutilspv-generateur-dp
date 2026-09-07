@@ -24,6 +24,7 @@ n'est pas dessiné, et son absence est portée au rapport.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,7 @@ from .primitives import (
     cote_horizontale,
     cote_verticale,
     echelle_du_dessin,
+    forme_pleine,
     hachurer,
     mention_echelle,
     repartir_hauteurs,
@@ -82,6 +84,10 @@ CONTENEURS = ("bess", "local_technique")
 #: Ouvrages qui sont des citernes : cuve à angles arrondis, vue de dessus avec
 #: son trop-plein et ses trappes, vue de face bombée.
 CITERNES = ("bache_incendie", "citerne_refroidissement")
+
+#: Ouvrages livrés en teinte de catalogue, dessinés à leur RAL sur les
+#: élévations : conteneurs et citernes, comme les postes et la clôture.
+TEINTE_RAL = CONTENEURS + CITERNES
 
 #: Ouvrages dont la façade n'apprend rien de plus dès qu'un autre du même genre
 #: est déjà décrit dans le dossier, et le second qui les couvre.
@@ -111,8 +117,24 @@ REPARTITION = {
     "DP 4-3": ("bess", "local_technique", "citerne_refroidissement"),
 }
 
-#: Échelles autorisées (décision D2).
+#: Échelles autorisées pour les dessins d'ouvrages (décision D2).
 ECHELLES_OUVRAGES = (50, 100, 200)
+
+#: Échelle de référence des planches d'ouvrages : celle du dossier HOCH, dont
+#: les cartouches portent tous « 1 : 100 ».
+#:
+#: Chaque ouvrage la reçoit, et n'en descend que s'il n'y tient pas. Deux
+#: raisons de ne pas chercher plus grand que le 1:100 : un panneau de clôture de
+#: 7,50 m y fait déjà 75 mm, et au 1:50 il écraserait ses voisins ; et une
+#: planche dont les cadres mélangeraient trois échelles ne se compare plus.
+#:
+#: Écart assumé à D2, décidé à la relecture du 05/09/2026. D2 posait **une**
+#: échelle par planche : la citerne de 11,7 m tirait alors tout le reste au
+#: 1:200, où un conteneur de 6 m mesurait 30 mm. L'échelle se choisit donc
+#: maintenant par ouvrage, et chaque sous-cadre porte la sienne en clair — c'est
+#: ce que fait le dossier de référence, dont le plan de repérage est au 1:500
+#: quand ses élévations sont au 1:100.
+ECHELLE_OUVRAGE_PREFEREE = 100
 
 #: Échelles du plan de repérage, en deux listes.
 #:
@@ -465,41 +487,76 @@ def _hauteur_contenu(bloc, denominateur: int, largeur_mm: float) -> float:
     return total
 
 
-def _hauteur_disposition(blocs, denominateur: int, largeur_mm: float) -> float:
-    """Hauteur qu'occuperaient tous les blocs, cadres et blancs compris."""
+def _echelles_des_blocs(blocs, largeur_mm: float, hauteur_mm: float) -> list:
+    """Une échelle par ouvrage : le 1:100 de référence, sauf s'il n'y tient pas.
+
+    L'ouvrage qui déborde descend d'un cran, et lui seul : c'est la citerne de
+    11,7 m qui doit passer au 1:200, pas le conteneur de 6 m qui l'accompagne.
+    Si la colonne déborde encore en hauteur, on redescend l'ouvrage le plus
+    encombrant, jusqu'à ce que l'ensemble tienne.
+    """
+    candidates = [e for e in sorted(ECHELLES_OUVRAGES) if e >= ECHELLE_OUVRAGE_PREFEREE]
     utile = zone_interieure(0.0, 0.0, largeur_mm, 0.0)[2]
-    total = 0.0
+
+    echelles = []
     for bloc in blocs:
-        total += _hauteur_contenu(bloc, denominateur, utile)
-        total += hauteur_titre_cadre() + BLANC_TOURNANT_MM
-    return total
+        for candidate in candidates:
+            # Une vue plus large que le panneau ne tiendra à aucune hauteur.
+            if all(
+                v.largeur_m * 1000.0 / candidate <= utile - MARGE_VUE_MM
+                for v in bloc.vues
+            ):
+                echelles.append(candidate)
+                break
+        else:
+            plus_grand = max((v.largeur_m for v in bloc.vues), default=0.0)
+            raise ErreurComposition(
+                f"« {bloc.titre} » ne tient pas dans les {utile:.0f} mm du "
+                f"panneau, même au 1:{max(candidates)} : sa plus grande vue "
+                f"mesure {plus_grand:.1f} m."
+            )
+
+    def _hauteur_totale() -> float:
+        return sum(
+            _hauteur_contenu(bloc, echelle, utile)
+            + hauteur_titre_cadre()
+            + BLANC_TOURNANT_MM
+            for bloc, echelle in zip(blocs, echelles)
+        )
+
+    while _hauteur_totale() > hauteur_mm:
+        # Le bloc le plus haut est celui qui coûte le plus : c'est lui qui
+        # descend, et pas ses voisins qui n'y sont pour rien.
+        reductibles = [
+            index
+            for index, echelle in enumerate(echelles)
+            if echelle != max(candidates)
+        ]
+        if not reductibles:
+            raise ErreurComposition(
+                f"Les {sum(len(b.vues) for b in blocs)} vues d'ouvrages ne "
+                f"tiennent pas dans {largeur_mm:.0f} x {hauteur_mm:.0f} mm, même "
+                f"au 1:{max(candidates)}. Répartissez les ouvrages sur une "
+                "planche de plus."
+            )
+        pire = max(
+            reductibles,
+            key=lambda i: _hauteur_contenu(blocs[i], echelles[i], utile),
+        )
+        suivante = candidates[candidates.index(echelles[pire]) + 1]
+        echelles[pire] = suivante
+    return echelles
 
 
 def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
     """Dispose les blocs d'ouvrages, chacun dans son sous-cadre.
 
-    Une planche, une échelle pour ses ouvrages : elle est calée sur le plus
-    grand d'entre eux (D2) et inscrite au cartouche. Chaque ouvrage a son
-    cadre, comme sur le dossier de référence, et ses vues y sont centrées.
+    Chaque ouvrage a son cadre, comme sur le dossier de référence, porte son
+    échelle en clair et voit ses vues centrées. Le cartouche reçoit l'échelle
+    partagée par le plus grand nombre de cadres.
     """
     x, y, largeur, hauteur = panneau
-
-    denominateur = None
-    for candidat in sorted(ECHELLES_OUVRAGES):
-        if _hauteur_disposition(blocs, candidat, largeur) <= hauteur:
-            denominateur = candidat
-            break
-    if denominateur is None:
-        plus_grand = max(
-            (v.largeur_m for bloc in blocs for v in bloc.vues), default=0.0
-        )
-        raise ErreurComposition(
-            f"Les {sum(len(b.vues) for b in blocs)} vues d'ouvrages ne tiennent "
-            f"pas dans {largeur:.0f} x {hauteur:.0f} mm, même au "
-            f"1:{max(ECHELLES_OUVRAGES)} — le plus grand ouvrage mesure "
-            f"{plus_grand:.1f} m. Répartissez les ouvrages sur une planche de "
-            "plus."
-        )
+    echelles = _echelles_des_blocs(blocs, largeur, hauteur)
 
     # Le blanc qui reste se partage à parts égales entre les cadres, au lieu
     # de s'accumuler en bas de la colonne : deux cadres serrés sur leur contenu
@@ -507,21 +564,23 @@ def _dessiner_ouvrages(planche: Planche, blocs, panneau) -> int:
     utile = zone_interieure(x, y, largeur, 0.0)[2]
     hauteurs = repartir_hauteurs(
         [
-            _hauteur_contenu(bloc, denominateur, utile) + hauteur_titre_cadre()
-            for bloc in blocs
+            _hauteur_contenu(bloc, echelle, utile) + hauteur_titre_cadre()
+            for bloc, echelle in zip(blocs, echelles)
         ],
         hauteur,
     )
 
     curseur_y = y
-    for bloc, hauteur_cadre in zip(blocs, hauteurs):
+    for bloc, echelle, hauteur_cadre in zip(blocs, echelles, hauteurs):
         interieur = sous_cadre(
             planche, x, curseur_y, largeur, hauteur_cadre,
-            titre=bloc.titre, echelle=denominateur,
+            titre=bloc.titre, echelle=echelle,
         )
-        _disposer_vues(planche, bloc, denominateur, interieur)
+        _disposer_vues(planche, bloc, echelle, interieur)
         curseur_y += hauteur_cadre + BLANC_TOURNANT_MM
-    return denominateur
+    # Au cartouche, l'échelle du plus grand nombre de cadres ; à égalité, la
+    # plus grande. Chaque cadre porte la sienne, comme chez HOCH.
+    return max(set(echelles), key=lambda e: (echelles.count(e), -e))
 
 
 def _disposer_vues(planche, bloc, denominateur, interieur) -> None:
@@ -948,6 +1007,20 @@ def _surface_au_sol(contrat: Contrat, categorie: str) -> float | None:
 
 
 def _style_ouvrage(categorie: str) -> Style:
+    """Teinte d'un ouvrage sur son dessin de façade.
+
+    Un dessin de façade montre l'ouvrage **tel qu'il sera**, pas la couleur qui
+    le repère au plan : les ouvrages livrés en teinte de catalogue portent donc
+    leur RAL, comme le poste et comme la clôture. Le dossier de référence fait
+    de même — sa citerne est cyan sur le plan de repérage et olive sur son
+    dessin de face.
+
+    Relevé le 05/09/2026 : la citerne sortait au cyan de la légende sous une
+    ligne de caractéristiques annonçant « teinte RAL 6003 ». Le dessin
+    contredisait sa propre légende.
+    """
+    if categorie in TEINTE_RAL:
+        return Style(trait="#2f3529", epaisseur_mm=0.3, remplissage=COULEUR_POSTE)
     fond = STYLES[categorie].style
     return Style(
         trait=fond.trait or "#000000",
@@ -1208,8 +1281,33 @@ def _poteau(dessin: Dessin, x: float, hauteur: float, largeur: float = 0.10) -> 
     )
 
 
+def _contour_plein(dessin: Dessin, points_m, style: Style) -> None:
+    """Remplit un contour quelconque du dessin, puis le cerne.
+
+    `Dessin.polyligne` ne trace que des segments : un contour fermé y sortait en
+    filet, sans remplissage. Mesuré le 05/09/2026 sur la citerne, dont la cuve
+    ressortait blanche sur une planche dont la légende annonçait un aplat RAL
+    6003. Le remplissage passe donc par `forme_pleine`, le balayage vectoriel du
+    lot 4, et l'étendue est notée à la main puisqu'il court-circuite le dessin.
+    """
+    points_mm = [dessin.point(x, y) for x, y in points_m]
+    if style.remplissage and style.remplissage != "none":
+        forme_pleine(dessin.planche, points_mm, style.remplissage)
+    boucle = points_mm + [points_mm[0]]
+    filet = Style(
+        trait=style.trait or "#000000",
+        epaisseur_mm=style.epaisseur_mm,
+        remplissage="none",
+    )
+    for depart, arrivee in zip(boucle, boucle[1:]):
+        dessin.planche.ajouter_ligne(
+            depart[0], depart[1], arrivee[0], arrivee[1], filet
+        )
+    dessin._noter(*points_mm)
+
+
 def _rectangle_arrondi(dessin: Dessin, x, y, largeur, hauteur, rayon, style) -> None:
-    """Un rectangle à congés, tracé en polyligne.
+    """Un rectangle à congés, plein.
 
     Le moteur ne connaît que le rectangle à angles vifs. Une citerne n'en a
     pas : ses quatre congés sont ce qui la distingue au premier coup d'œil d'un
@@ -1227,7 +1325,7 @@ def _rectangle_arrondi(dessin: Dessin, x, y, largeur, hauteur, rayon, style) -> 
         for pas in range(0, 91, 15):
             angle = math.radians(depart + pas)
             points.append((cx + rayon * math.cos(angle), cy + rayon * math.sin(angle)))
-    dessin.polyligne(points, style, fermer=True)
+    _contour_plein(dessin, points, style)
 
 
 def _bloc_conteneur(cote, libelle: str, categorie: str) -> BlocOuvrage:
@@ -1360,7 +1458,7 @@ def _bloc_citerne(cote, libelle: str, categorie: str) -> BlocOuvrage:
                 (longueur * part, hauteur * math.sin(math.pi * part) ** 0.6)
             )
         points.append((longueur, 0.0))
-        dessin.polyligne(points, style, fermer=True)
+        _contour_plein(dessin, points, style)
         cote_verticale(
             dessin, 0.0, hauteur, -dessin.metres(3.0), f"{nombre_fr(hauteur)} m"
         )
@@ -1368,23 +1466,40 @@ def _bloc_citerne(cote, libelle: str, categorie: str) -> BlocOuvrage:
             dessin, 0.0, longueur, -dessin.metres(6.5), f"{nombre_fr(longueur)} m"
         )
 
-    fin_du_libelle = cote.ouvrage.rsplit("—", 1)[-1].strip()
+    volume = _volume_de_citerne(cote)
     caracteristiques = [
-        f"Volume : {fin_du_libelle} m³"
-        if fin_du_libelle.isdigit()
-        else f"Type : {cote.ouvrage}",
+        f"Volume : {volume} m³" if volume else f"Type : {cote.ouvrage}",
         f"Cuve à congés, teinte {REFERENCE_RAL}.",
         f"Emprise : {nombre_fr(longueur)} x {nombre_fr(largeur)} m.",
         f"Hauteur hors sol : {nombre_fr(hauteur)} m",
     ]
+    # Le volume au titre : c'est la première chose qu'un pompier y cherche, et
+    # le dossier de référence titre sa planche « CITERNE ~ 60 m³ ».
+    intitule = f"{libelle} {volume} m³" if volume else libelle
     return BlocOuvrage(
-        titre=f"{libelle} — {cote.dimensions}",
+        titre=f"{intitule} — {cote.dimensions}",
         vues=[
             Vue("Vue de dessus", longueur, largeur, dessus),
             Vue("Vue de face", longueur, max(hauteur, 1.0), face),
         ],
         caracteristiques=caracteristiques,
     )
+
+
+def _volume_de_citerne(cote) -> str:
+    """Volume porté par le catalogue du tableau bilan, en m³, ou chaîne vide.
+
+    Le libellé de catalogue d'une citerne incendie finit par son volume
+    (« Citerne incendie — 120 ») ; celui d'une citerne de refroidissement le
+    porte ailleurs, et le tableau bilan la compte en « Citerne de
+    refroidissement (120m3) ». On ne lit que ce qui est écrit : à défaut de
+    volume, le titre reste celui de l'ouvrage.
+    """
+    fin = cote.ouvrage.rsplit("—", 1)[-1].strip()
+    if fin.isdigit():
+        return fin
+    trouve = re.search(r"\((\d+)\s*m3\)", cote.ouvrage, flags=re.IGNORECASE)
+    return trouve.group(1) if trouve else ""
 
 
 def _bloc_cloture() -> BlocOuvrage:

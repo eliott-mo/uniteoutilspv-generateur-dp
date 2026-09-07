@@ -947,6 +947,26 @@ indice il engage le dossier.
 
 ### Ligne de coupe A-A'
 
+**Sa direction vient des rangées, sa position du nombre de rangées traversées.**
+Le tracé du chef de projet dit qu'il veut une coupe ; la géométrie dit où elle
+apprend le plus. La coupe étant perpendiculaire aux rangées, la déplacer revient
+à la faire glisser le long d'elles, et la recherche se fait sur la **moitié
+centrale** de l'emprise : une coupe collée au bord du site ne montre ni terrain
+ni tables, et un dossier ne se juge pas sur son coin. À nombre de rangées égal,
+la position la plus centrale l'emporte — deux générations du même dossier coupent
+ainsi au même endroit.
+
+Le critère est celui du dessin, et il a fallu le mesurer pour s'en rendre compte.
+Compter les tables avec `intersects` compte aussi celles qu'on effleure au coin :
+mesuré le 05/09/2026 sur Sarnois, la position ainsi jugée optimale longeait le
+bord d'une rangée, annonçait 15 tables et n'en coupait réellement que 5 — la
+planche en montrait cinq, groupées sur un bout du profil. Une table ne compte
+donc que si la ligne la traverse sur une longueur.
+
+Le lot 2 (HelioScope) n'en bénéficie pas : ses tables sont en repère DXF local
+quand le tracé et l'emprise sont en Lambert 93, et les confronter demanderait un
+travail de calage. Sa coupe garde le point milieu du tracé, et sa façade le dit.
+
 Elle n'existe ni dans le DXF ni dans le tableau : le chef de projet la trace sur
 une carte interactive, sur fond d'ortho IGN, avec les tables et la clôture en
 surimpression.
@@ -1307,7 +1327,7 @@ principal, en clair à côté de lui pour les autres.
 | Plan de masse | 1/500 à 1/5 000 | l'emprise cadastrale + 10 % |
 | Coupe des tables | 1/50 à 1/200 | deux rangées complètes et leurs cotes |
 | Coupe du terrain | 1/200 à 1/1 000 | la longueur de la coupe |
-| Ouvrages DP 4 | 1/50, 1/100, 1/200 | le plus grand ouvrage de la planche |
+| Ouvrages DP 4 | 1/100, sinon 1/200 | **chaque** ouvrage, dans son cadre |
 | Plan de repérage DP 4 | 1/300 à 1/1 000, **prolongée** | la zone concernée |
 
 La dernière ligne est un écart au cadrage retenu, et il est mesuré. L'emprise
@@ -1503,6 +1523,32 @@ Seuls les postes en reçoivent donc autant.
 un figuré, et changeait donc de finesse avec l'échelle de la planche : mesuré le
 05/09/2026, le même grillage sortait à 8 cm de maille sur une planche au 1/100 et
 à 16 cm sur une planche au 1/200. Une maille est une dimension d'ouvrage.
+
+**Une élévation porte le RAL, un plan porte la couleur de repérage.** Postes,
+clôture, portail, conteneurs et citernes sont livrés en teinte de catalogue : sur
+leur dessin de façade ils sont donc dessinés en RAL 6003, et sur les plans à la
+couleur qui les repère. C'est ce que fait le dossier de référence, dont la
+citerne est cyan sur le plan de repérage et olive sur sa vue de face. Relevé le
+05/09/2026 : la nôtre sortait au cyan de la légende sous une ligne de
+caractéristiques annonçant « teinte RAL 6003 » — le dessin contredisait sa
+propre légende.
+
+#### Une échelle par ouvrage, le 1/100 par défaut
+
+Écart assumé à D2, décidé le 05/09/2026. D2 posait **une** échelle par planche,
+calée sur son plus grand ouvrage : la citerne de 11,7 m tirait alors tout le
+reste au 1/200, où un conteneur de 6 m mesurait 30 mm et un panneau de clôture
+devenait illisible.
+
+Chaque ouvrage reçoit donc le 1/100 du dossier de référence — ses cartouches
+portent tous « 1 : 100 » — et n'en descend que s'il n'y tient pas ; si la colonne
+déborde encore en hauteur, c'est l'ouvrage le plus encombrant qui redescend, et
+lui seul. Le 1/50 reste dans la liste mais n'est jamais choisi automatiquement :
+un panneau de clôture de 7,50 m y ferait 150 mm et écraserait ses voisins.
+
+Chaque sous-cadre porte son échelle en clair, et le cartouche celle du plus grand
+nombre de cadres. Là encore c'est la présentation du dossier de référence, dont
+le plan de repérage est au 1/500 quand ses élévations sont au 1/100.
 
 Un ouvrage dont le tableau bilan ne porte pas de hauteur se dessine en plan et
 rien de plus : plutôt que d'inventer une cote, la vue en plan le décrit avec les

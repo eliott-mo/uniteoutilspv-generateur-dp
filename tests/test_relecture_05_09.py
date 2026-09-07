@@ -177,3 +177,110 @@ def test_une_emprise_qui_suit_le_parcellaire_ne_dit_rien():
 def test_les_deux_seuils_de_l_assiette_encadrent_bien():
     """Une écharde de calage n'est pas une parcelle coupée en deux."""
     assert 0.0 < PART_MIN_ASSIETTE < PART_PLEINE_ASSIETTE < 1.0
+
+
+# ---------------------------------------------------------------------------
+# La coupe se place là où elle traverse le plus de rangées
+# ---------------------------------------------------------------------------
+
+
+def _rangees(nombre: int, pas: float = 10.0, longueur: float = 200.0) -> list:
+    """Un champ de rangées est-ouest, régulières, larges de 4 m."""
+    return [
+        box(0.0, index * pas, longueur, index * pas + 4.0) for index in range(nombre)
+    ]
+
+
+def test_la_coupe_se_place_dans_la_moitie_centrale():
+    """Une coupe collée au bord du site ne montre ni terrain ni rangées."""
+    from dp_socle.coupe import BANDE_EXCLUE, position_de_coupe
+
+    tables = _rangees(20)
+    emprise = box(0.0, -10.0, 200.0, 210.0)
+    point, _, _ = position_de_coupe(0.0, emprise, tables)
+
+    # Les rangées courent d'est en ouest : la coupe glisse sur l'axe des x.
+    largeur = 200.0
+    assert BANDE_EXCLUE * largeur <= point.x <= (1.0 - BANDE_EXCLUE) * largeur
+
+
+def test_la_coupe_prefere_traverser_plutot_qu_effleurer():
+    """`intersects` compte les tables qu'on frôle au coin, et trompe la mesure.
+
+    Le champ ci-dessous a un trou au milieu de sa moitié centrale : la coupe
+    doit l'éviter et se poser là où elle coupe vraiment les rangées.
+    """
+    from dp_socle.coupe import LARGEUR_TRAVERSEE_MIN_M, position_de_coupe
+
+    pleines = [box(0.0, index * 10.0, 200.0, index * 10.0 + 4.0) for index in range(20)]
+    # Un couloir vide de 60 à 140 m en x, sur toute la hauteur du champ.
+    troue = [
+        geom
+        for bande in pleines
+        for geom in (
+            box(0.0, bande.bounds[1], 60.0, bande.bounds[3]),
+            box(140.0, bande.bounds[1], 200.0, bande.bounds[3]),
+        )
+    ]
+    emprise = box(0.0, -10.0, 200.0, 210.0)
+    point, retenues, _ = position_de_coupe(0.0, emprise, troue)
+
+    assert not 60.0 < point.x < 140.0, "la coupe s'est posée dans le couloir vide"
+    assert retenues == 20, "les vingt rangées doivent être vraiment traversées"
+    # Et ce sont bien des traversées, pas des contacts de bord.
+    for table in troue:
+        if table.bounds[0] <= point.x <= table.bounds[2]:
+            assert table.bounds[3] - table.bounds[1] >= LARGEUR_TRAVERSEE_MIN_M
+
+
+def test_une_coupe_sans_table_refuse_de_se_placer():
+    from dp_socle.coupe import position_de_coupe
+    from dp_socle.erreurs import ErreurCoupe
+
+    with pytest.raises(ErreurCoupe, match="Aucune table"):
+        position_de_coupe(0.0, box(0.0, 0.0, 100.0, 100.0), [])
+
+
+# ---------------------------------------------------------------------------
+# Une échelle par ouvrage, le 1:100 par défaut
+# ---------------------------------------------------------------------------
+
+
+def test_un_grand_ouvrage_descend_seul_au_1_200():
+    """La citerne tirait toute la planche au 1:200, conteneurs compris."""
+    from dp_socle.planches.dp4_ouvrages import (
+        ECHELLE_OUVRAGE_PREFEREE,
+        Vue,
+        BlocOuvrage,
+        _echelles_des_blocs,
+    )
+
+    def _rien(dessin):
+        return None
+
+    petit = BlocOuvrage(
+        titre="Conteneur", vues=[Vue("Élévation", 6.0, 3.0, _rien)]
+    )
+    grand = BlocOuvrage(
+        titre="Citerne", vues=[Vue("Vue de dessus", 40.0, 9.3, _rien)]
+    )
+    echelles = _echelles_des_blocs([petit, grand], largeur_mm=260.0, hauteur_mm=240.0)
+
+    assert echelles[0] == ECHELLE_OUVRAGE_PREFEREE
+    assert echelles[1] > echelles[0], "le grand ouvrage seul descend d'un cran"
+
+
+def test_le_1_50_n_est_jamais_choisi_tout_seul():
+    """Un panneau de clôture au 1:50 écraserait ses voisins."""
+    from dp_socle.planches.dp4_ouvrages import (
+        ECHELLE_OUVRAGE_PREFEREE,
+        Vue,
+        BlocOuvrage,
+        _echelles_des_blocs,
+    )
+
+    def _rien(dessin):
+        return None
+
+    minuscule = BlocOuvrage(titre="Portail", vues=[Vue("Élévation", 2.0, 2.0, _rien)])
+    assert _echelles_des_blocs([minuscule], 260.0, 240.0) == [ECHELLE_OUVRAGE_PREFEREE]

@@ -1440,6 +1440,12 @@ def ligne_coupe_helioscope(
       coupe à l'emprise clôturée ; HelioScope n'a pas de clôture, et sa zone
       d'implantation est un tracé d'étude à main levée qui ne suit pas le
       parcellaire. Le cadastre est la seule limite dont on réponde.
+
+    Écart assumé avec le lot 2bis : la coupe n'y est pas replacée sur le nombre
+    de rangées traversées. `implantation.tables` est en repère DXF local, quand
+    le tracé et l'emprise sont en Lambert 93 ; les confronter demanderait de
+    reprojeter les tables, ce qui est un travail de calage et non de coupe. Le
+    point milieu du tracé est donc conservé ici.
     """
     from .coupe import corriger_ligne_coupe
 

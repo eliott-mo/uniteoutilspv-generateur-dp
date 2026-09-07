@@ -34,6 +34,28 @@ from .ign import telecharger_altitudes
 #: coupe la traverse entièrement et montre le terrain de part et d'autre.
 MARGE_COUPE_M = 10.0
 
+#: Part de l'emprise écartée à chaque bout pour le placement de la coupe.
+#:
+#: Une coupe qui longe le bord du site ne montre ni le terrain ni les rangées :
+#: elle traverse deux tables et beaucoup d'herbe. Le quart de chaque côté est
+#: donc exclu de la recherche, et la ligne se place dans la moitié centrale.
+BANDE_EXCLUE = 0.25
+
+#: Longueur minimale d'une traversée pour qu'une table compte, en mètres.
+#:
+#: `intersects` compte aussi les tables qu'on effleure au coin. Mesuré le
+#: 05/09/2026 sur Sarnois : la position ainsi jugée optimale longeait le bord
+#: d'une rangée, comptait 15 tables et n'en coupait réellement que 5 — la coupe
+#: dessinée en montrait cinq, groupées sur un bout du profil. Le critère de
+#: recherche doit être celui du dessin : une table compte quand la ligne la
+#: traverse sur une longueur.
+LARGEUR_TRAVERSEE_MIN_M = 0.5
+
+#: Pas de la recherche de position, en mètres. Plus fin que la largeur d'une
+#: table : c'est ce qui permet de trouver le passage entre deux rangées décalées
+#: plutôt que de tomber dessus par hasard.
+PAS_RECHERCHE_M = 1.0
+
 #: Écart au-delà duquel le tracé de l'utilisateur est jugé pris à l'envers, en
 #: degrés. Au-delà de 45°, il a probablement voulu couper dans l'autre sens ou
 #: s'est trompé de repère. La correction s'applique quand même, jamais en
@@ -120,22 +142,91 @@ class LigneCoupe:
         return degrees(atan2(y2 - y1, x2 - x1))
 
 
+def position_de_coupe(
+    azimut_tables_deg: float,
+    emprise_cloturee: BaseGeometry,
+    tables: list[BaseGeometry],
+) -> tuple[Point, int, int]:
+    """Point de passage de la coupe : celui qui traverse le plus de rangées.
+
+    La coupe est perpendiculaire aux rangées ; la déplacer revient donc à la
+    faire glisser **le long** des rangées, sur l'axe `azimut_tables_deg`. La
+    recherche se fait sur la moitié centrale de l'emprise : une coupe collée au
+    bord du site ne montre presque aucune table, et un dossier ne se juge pas
+    sur son coin.
+
+    Rend le point retenu, le nombre de tables qu'il fait traverser, et le nombre
+    que traversait le milieu de la bande — de quoi dire au rapport ce que le
+    déplacement a gagné.
+    """
+    if not tables:
+        raise ErreurCoupe(
+            "Aucune table au plan : la position de la coupe ne peut pas être "
+            "choisie sur le nombre de rangées traversées."
+        )
+    ux, uy = cos(radians(azimut_tables_deg)), sin(radians(azimut_tables_deg))
+    sommets = list(_sommets(emprise_cloturee))
+    if not sommets:
+        raise ErreurCoupe(
+            "L'emprise clôturée ne porte aucun sommet exploitable : la position "
+            "de la coupe ne peut pas être cherchée."
+        )
+    origine = emprise_cloturee.centroid
+    projections = [(x - origine.x) * ux + (y - origine.y) * uy for x, y in sommets]
+    debut, fin = min(projections), max(projections)
+    largeur = fin - debut
+    bas = debut + BANDE_EXCLUE * largeur
+    haut = fin - BANDE_EXCLUE * largeur
+
+    def _point(decalage: float) -> Point:
+        return Point(origine.x + decalage * ux, origine.y + decalage * uy)
+
+    def _traversees(decalage: float) -> int:
+        ligne = _etendre(
+            _point(decalage), azimut_tables_deg + 90.0, emprise_cloturee, MARGE_COUPE_M
+        )
+        return sum(
+            1
+            for table in tables
+            if ligne.intersection(table).length >= LARGEUR_TRAVERSEE_MIN_M
+        )
+
+    milieu = (bas + haut) / 2.0
+    pas = max(PAS_RECHERCHE_M, largeur / 400.0)
+    candidats = []
+    decalage = bas
+    while decalage <= haut + 1e-9:
+        candidats.append(decalage)
+        decalage += pas
+    if not candidats:
+        candidats = [milieu]
+
+    # À nombre de rangées égal, la position la plus centrale l'emporte : c'est
+    # celle qui décrit le mieux le site, et elle ne dépend pas du pas de
+    # recherche — deux générations du même dossier coupent au même endroit.
+    meilleur = max(candidats, key=lambda d: (_traversees(d), -abs(d - milieu)))
+    return _point(meilleur), _traversees(meilleur), _traversees(milieu)
+
+
 def corriger_ligne_coupe(
     trace: LineString,
     azimut_tables_deg: float,
     emprise_cloturee: BaseGeometry,
     marge_m: float = MARGE_COUPE_M,
     manuel: bool = False,
+    tables: list[BaseGeometry] | None = None,
 ) -> LigneCoupe:
     """Redresse le tracé perpendiculairement aux rangées et l'étend à l'emprise.
 
-    Le **point milieu** du tracé est conservé : c'est lui qui exprime l'intention
-    du chef de projet, l'endroit où il veut couper. La direction, elle, est
-    imposée par la géométrie des tables.
+    La direction est imposée par la géométrie des tables. La **position**, elle,
+    est choisie sur le nombre de rangées traversées dès que les tables sont
+    fournies : le tracé du chef de projet dit qu'il veut une coupe, la
+    géométrie dit où elle apprend le plus. Sans `tables`, le point milieu du
+    tracé est conservé et rien ne bouge.
 
-    `manuel=True` conserve la direction tracée. C'est un contournement, désactivé
-    par défaut : il doit rester un choix explicite, pour les rares cas où la
-    perpendicularité ne conviendrait pas.
+    `manuel=True` conserve la direction **et** la position tracées. C'est un
+    contournement, désactivé par défaut : il doit rester un choix explicite,
+    pour les rares cas où la perpendicularité ne conviendrait pas.
     """
     if trace is None or trace.is_empty or len(trace.coords) < 2:
         raise ErreurCoupe(
@@ -157,6 +248,7 @@ def corriger_ligne_coupe(
         )
 
     milieu = trace.interpolate(0.5, normalized=True)
+    trace_milieu = milieu
     direction_tracee = degrees(atan2(arrivee[1] - depart[1], arrivee[0] - depart[0]))
     perpendiculaire = azimut_tables_deg + 90.0
     ecart = abs(_dans_demi_tour(direction_tracee - perpendiculaire))
@@ -171,6 +263,20 @@ def corriger_ligne_coupe(
         )
     else:
         direction = perpendiculaire
+        if tables:
+            milieu, retenues, au_milieu = position_de_coupe(
+                azimut_tables_deg, emprise_cloturee, tables
+            )
+            deplacement = trace_milieu.distance(milieu)
+            avertissements.append(
+                f"Coupe placée à {deplacement:.0f} m du tracé, dans la moitié "
+                f"centrale de l'emprise : elle y traverse {retenues} table(s) "
+                f"contre {au_milieu} au centre exact. Le tracé donne la coupe, "
+                "sa position se choisit sur le nombre de rangées traversées."
+                if deplacement >= 1.0
+                else f"Coupe placée au centre de l'emprise, où elle traverse "
+                f"{retenues} table(s)."
+            )
         if ecart > ECART_SUSPECT_DEG:
             avertissements.append(
                 f"Le tracé fait {ecart:.0f}° avec la perpendiculaire aux rangées, "
@@ -683,6 +789,7 @@ def reprendre_coupe(
     azimut_tables_deg: float,
     emprise_cloturee: BaseGeometry,
     marge_m: float = MARGE_COUPE_M,
+    tables: list[BaseGeometry] | None = None,
 ) -> tuple[LigneCoupe, bool]:
     """Rejoue la correction sur le tracé conservé, avec le plan d'aujourd'hui.
 
@@ -698,6 +805,7 @@ def reprendre_coupe(
         emprise_cloturee,
         marge_m=marge_m,
         manuel=enregistree.manuel,
+        tables=tables,
     )
     ecart = float(
         coupe.geometrie.hausdorff_distance(enregistree.geometrie_enregistree)
