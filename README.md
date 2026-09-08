@@ -1678,6 +1678,34 @@ ne sont pas dans le dépôt. L'orangé du BESS, seul indice disponible, vient du
 contrat et est conservé ; les deux autres sont construites sur le seul critère
 mesurable ici. À reprendre sur pièce.
 
+### Le poste est reconnu, pas reconstruit
+
+Un calque de poste ne porte pas que le poste. Mesuré le 05/09/2026 sur les trois
+dossiers d'essai :
+
+| Dossier | Calque | Ce qu'il porte |
+|---|---|---|
+| Saint-Cyr | `pdl_ptr` | **12,00 x 3,00 m**, plus deux bandes de 12 x 1,50 et 12 x 1,00 |
+| Sarnois A | `pdl_ptr` | un seul 10,00 x 3,00 m |
+| Sarnois B | `ptr` | **10,00 x 3,00 m**, plus deux patatoïdes de 41 et 83 m² et deux plots |
+
+Ce qui entoure le poste est la **terre remise autour de lui** : un poste
+préfabriqué a son seuil de porte cinquante à soixante-dix centimètres au-dessus
+de sa semelle, et le talus comble la différence. Dessiné de la couleur du poste,
+il lui donnait une emprise deux fois trop large — 12 x 5,50 m à Saint-Cyr pour
+un poste de 12 x 3, quand l'élévation de DP 4 le dessine à ses cotes de
+catalogue.
+
+Le poste est donc **reconnu à ses cotes** plutôt que reconstruit : il est déjà
+là, au centimètre, sur deux des trois dossiers. Ce qui l'entoure rejoint la
+plateforme, où il se lit comme le sol remanié qu'il est, et le rapport le dit.
+
+Faute d'objet aux cotes du catalogue — Sarnois indice A porte un 10 x 3 là où le
+tableau déclare un PDL/PTR de 12 x 3 — rien n'est reconstruit : le plan se
+dessine tel quel. Le recoupement avec la surface déclarée porte, lui, sur le
+calque entier dans tous les cas : c'est bien poste **et** abords que le tableau
+compte, et Saint-Cyr y déclare 66 m² pour 36 m² de poste.
+
 ### Un contour ouvert n'est pas un trait
 
 Mesuré le 05/09/2026 sur Sarnois : la citerne de refroidissement arrive au

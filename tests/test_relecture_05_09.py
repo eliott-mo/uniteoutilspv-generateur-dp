@@ -437,3 +437,40 @@ def test_le_seuil_de_recevabilite_est_une_regle_pas_un_reglage():
     from dp_socle.import_be import SEUIL_DP_MWC
 
     assert SEUIL_DP_MWC == 3.0
+
+
+# ---------------------------------------------------------------------------
+# Le poste est reconnu, pas reconstruit
+# ---------------------------------------------------------------------------
+
+
+def test_le_poste_se_reconnait_a_ses_cotes_de_catalogue():
+    """Un calque de poste porte le poste **et** la terre remise autour de lui.
+
+    Mesuré le 05/09/2026 : à Saint-Cyr le calque `pdl_ptr` porte un rectangle de
+    12,00 x 3,00 m — exactement le PDL/PTR du catalogue — et deux bandes de
+    12 x 1,50 et 12 x 1,00 qui le bordent. Dessiné d'un bloc, le poste sortait à
+    12 x 5,50 m quand son élévation le dessine à 12 x 3.
+    """
+    from dp_socle.planches.palette import _est_le_poste, dimensions_au_sol
+
+    poste = box(0.0, 0.0, 12.0, 3.0)
+    assert dimensions_au_sol(poste) == pytest.approx((12.0, 3.0))
+    # Les cotes du catalogue se donnent dans n'importe quel ordre : le
+    # catalogue UNITe écrit tantôt « longueur x largeur », tantôt l'inverse.
+    assert _est_le_poste(poste, 12.0, 3.0)
+    assert _est_le_poste(poste, 3.0, 12.0)
+
+    assert not _est_le_poste(box(0.0, 0.0, 12.0, 1.5), 12.0, 3.0)
+    assert not _est_le_poste(box(0.0, 0.0, 12.0, 5.5), 12.0, 3.0)
+
+
+def test_un_poste_hors_catalogue_reste_dessine_tel_quel():
+    """Sarnois indice A porte un 10 x 3 là où le tableau déclare un 12 x 3.
+
+    Aucun objet du calque n'a les cotes du catalogue : on ne reconstruit rien,
+    on dessine le plan, et l'écart au tableau se dit.
+    """
+    from dp_socle.planches.palette import _est_le_poste
+
+    assert not _est_le_poste(box(0.0, 0.0, 10.0, 3.0), 12.0, 3.0)

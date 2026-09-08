@@ -29,6 +29,7 @@ mesurable ici, la distinguabilité à l'impression. À reprendre sur pièce.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from dataclasses import dataclass as _dataclass
@@ -430,6 +431,16 @@ REMPLISSAGE_RECTANGULAIRE = 0.97
 #: Écart admis entre l'emprise dessinée d'un poste et sa surface déclarée.
 TOLERANCE_EMPRISE_POSTE = 0.08
 
+#: Écart admis entre les côtés d'un objet du calque et les cotes du catalogue
+#: pour le reconnaître comme étant le poste lui-même.
+#:
+#: 5 % : mesuré le 05/09/2026, les postes des trois dossiers d'essai sont
+#: dessinés **au centimètre** des cotes du catalogue — 12,00 x 3,00 m à
+#: Saint-Cyr pour un PDL/PTR de 12 x 3, 10,00 x 3,00 m à Sarnois indice B pour
+#: un PTR de 10 x 3. La tolérance n'a pas à être large ; elle absorbe un arrondi
+#: de tracé, pas un objet d'une autre nature.
+TOLERANCE_COTES_POSTE = 0.05
+
 #: Recollement admis entre deux bouts de contour, en mètres. La CAO ne referme
 #: pas ses polylignes au point près.
 TOLERANCE_CONTOUR_M = 0.01
@@ -438,33 +449,111 @@ TOLERANCE_CONTOUR_M = 0.01
 AIRE_CONTOUR_MINIMALE_M2 = 0.5
 
 
-def emprise_de_poste(contrat, categorie: str, avertissements: list) -> list:
-    """Emprise au sol d'un poste, redressée et recoupée avec le tableau bilan.
+def dimensions_au_sol(geometrie) -> tuple | None:
+    """Longueur et largeur du rectangle minimal d'une géométrie, en mètres."""
+    rectangle = geometrie.minimum_rotated_rectangle
+    if rectangle.geom_type != "Polygon":
+        return None
+    sommets = list(rectangle.exterior.coords)[:-1]
+    if len(sommets) < 4:
+        return None
+    cotes = sorted(
+        math.dist(sommets[index][:2], sommets[(index + 1) % 4][:2])
+        for index in range(4)
+    )
+    return cotes[-1], cotes[0]
 
-    Un calque de poste n'est pas toujours dessiné d'un seul trait. Mesuré sur
-    Saint-Cyr le 04/09/2026 : `UNI_PDL` y porte **trois** rectangles de 12 m de
-    long accolés — 3,00, 1,50 et 1,00 m de large — dont les bouts sont
-    légèrement décalés parce qu'ils n'ont pas exactement la même orientation.
-    Dessinés tels quels, ils donnent au poste une emprise en escalier.
 
-    Ce n'est pas un objet de trop : le tableau bilan y déclare bien un PDL/PTR
-    de 66 m², et les trois bandes en totalisent 66,0. C'est le **tracé** qui est
-    approximatif, pas le contenu. Le rectangle minimal de leur union mesure
-    12,0 x 5,5 m, soit exactement les 66 m² déclarés : c'est l'emprise du poste,
-    et c'est elle qui se dessine.
+def _est_le_poste(geometrie, longueur_m: float, largeur_m: float) -> bool:
+    """Vrai si cette géométrie a les cotes du poste au catalogue."""
+    mesure = dimensions_au_sol(geometrie)
+    if mesure is None:
+        return False
+    for attendu, obtenu in zip(sorted((longueur_m, largeur_m), reverse=True), mesure):
+        if not attendu or abs(obtenu - attendu) > TOLERANCE_COTES_POSTE * attendu:
+            return False
+    return True
 
-    Le redressement n'a lieu que si l'emprise est déjà rectangulaire à 3 % près
-    — un poste est un bâtiment rectangulaire, et redresser autre chose
-    inventerait une forme. La surface dessinée est comparée à celle du tableau
-    dans tous les cas, et l'écart est dit.
+
+def _cotes_au_catalogue(contrat, categorie: str, surface_m2: float):
+    """Cotes du poste au catalogue, ou `None` si le catalogue ne tranche pas."""
+    from ..erreurs import ErreurCoteOuvrage
+
+    try:
+        cote = contrat.cote_de_categorie(categorie, surface_m2=surface_m2)
+    except ErreurCoteOuvrage:
+        return None
+    if not cote.longueur_m or not cote.largeur_m:
+        return None
+    return cote.longueur_m, cote.largeur_m
+
+
+def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
+    """Le poste dessiné au plan, et ce que le calque porte autour de lui.
+
+    Un calque de poste ne porte pas que le poste. Mesuré le 05/09/2026 sur les
+    trois dossiers d'essai :
+
+    - Saint-Cyr, `pdl_ptr` : un rectangle de **12,00 x 3,00 m** — exactement le
+      PDL/PTR du catalogue — accompagné de deux bandes de 12 x 1,50 et 12 x 1,00
+      qui le bordent sur toute sa longueur ;
+    - Sarnois indice B, `ptr` : un rectangle de **10,00 x 3,00 m**, le PTR du
+      catalogue, au milieu de deux patatoïdes de 41 et 83 m² et de deux plots.
+
+    Ces objets qui entourent le poste sont la terre remise autour de lui : un
+    poste préfabriqué a son seuil de porte cinquante à soixante-dix centimètres
+    au-dessus de sa semelle, et le talus comble la différence. Ce n'est pas du
+    poste, et le dessiner de la couleur du poste lui donnait une emprise deux
+    fois trop large — 12 x 5,50 m à Saint-Cyr pour un poste de 12 x 3, quand
+    l'élévation de DP 4 le dessine, elle, à ses cotes de catalogue.
+
+    Le poste est donc **reconnu** à ses cotes plutôt que reconstruit : il est
+    déjà là, au centimètre. Ce qui l'entoure est rendu à part, pour être dessiné
+    comme du sol remanié.
+
+    Faute d'objet aux cotes du catalogue — le calque de Sarnois indice A porte un
+    seul rectangle de 10 x 3 m là où le tableau déclare un PDL/PTR de 12 x 3 —
+    on retombe sur l'ancienne règle : l'union du calque, redressée si elle est
+    déjà rectangulaire, et l'écart au tableau écrit au rapport.
     """
     parties = contrat.geometries(categorie)
     if not parties:
-        return parties
+        return parties, []
 
     union = union_valide(parties)
     if union is None or union.is_empty or union.area <= 0:
-        return parties
+        return parties, []
+
+    cles = COMPTEES_AU_TABLEAU.get(categorie)
+    if cles:
+        declaree = (contrat.postes or {}).get(cles[1])
+        if declaree and abs(union.area - declaree) > TOLERANCE_EMPRISE_POSTE * declaree:
+            avertissements.append(
+                f"« {categorie} » : {union.area:.1f} m² dessinés au plan pour "
+                f"{declaree:.1f} m² déclarés au tableau bilan. La planche "
+                "montre ce que le plan porte."
+            )
+
+    catalogue = _cotes_au_catalogue(contrat, categorie, union.area)
+    if catalogue is not None:
+        retenus = [g for g in parties if _est_le_poste(g, *catalogue)]
+        if retenus:
+            poste = max(retenus, key=lambda g: g.area)
+            abords = [g for g in parties if g is not poste]
+            if abords:
+                # Les cotes se lisent du plus grand côté au plus petit : le
+                # catalogue les porte tantôt « longueur x largeur », tantôt
+                # l'inverse, et « 3,00 x 10,00 m » se lit mal.
+                grand, petit = sorted(catalogue, reverse=True)
+                avertissements.append(
+                    f"« {categorie} » : le poste est l'objet de "
+                    f"{grand:.2f} x {petit:.2f} m du calque, aux "
+                    f"cotes du catalogue. Les {len(abords)} autre(s) objet(s) du "
+                    f"calque, {sum(g.area for g in abords):.1f} m² au total, sont "
+                    "la terre remise autour de lui : ils sont dessinés comme du "
+                    "sol et non comme du poste."
+                )
+            return [poste], abords
 
     dessinee = parties
     rectangle = union.minimum_rotated_rectangle
@@ -481,17 +570,133 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> list:
                 "silhouette en escalier."
             )
 
-    cles = COMPTEES_AU_TABLEAU.get(categorie)
-    if cles:
-        declaree = (contrat.postes or {}).get(cles[1])
-        aire = sum(g.area for g in dessinee)
-        if declaree and abs(aire - declaree) > TOLERANCE_EMPRISE_POSTE * declaree:
-            avertissements.append(
-                f"« {categorie} » : {aire:.1f} m² dessinés au plan pour "
-                f"{declaree:.1f} m² déclarés au tableau bilan. La planche "
-                "montre ce que le plan porte."
-            )
-    return dessinee
+    return dessinee, []
+
+
+def construire_legende(
+    categories,
+    avec_parcelles: bool = False,
+    avec_batiments: bool = False,
+) -> list:
+    """Légende bâtie sur ce qui a été dessiné, et sur rien d'autre (D3).
+
+    Une catégorie sans objet dessiné n'y figure pas ; deux catégories partageant
+    le même intitulé n'y font qu'une entrée — le dédoublonnage se fait sur
+    l'intitulé, pas sur la catégorie. L'ordre est celui du rang de dessin du
+    contrat.
+    """
+    entrees = []
+    if avec_parcelles:
+        entrees.append(
+            (RANG_PARCELLE, LIBELLE_PARCELLE, STYLE_PARCELLE, SYMBOLE_PARCELLE)
+        )
+    if avec_batiments:
+        entrees.append(
+            (RANG_BATIMENT, LIBELLE_BATIMENT, STYLE_BATIMENT, SYMBOLE_BATIMENT)
+        )
+
+    for categorie in categories:
+        if categorie in EXCLUES or categorie in SANS_STYLE:
+            continue
+        fiche = style(categorie)
+        entrees.append((fiche.rang, fiche.libelle, fiche.style, fiche.symbole))
+
+    entrees.sort(key=lambda e: e[0])
+    vues = set()
+    legende = []
+    for _, libelle, trace, symbole in entrees:
+        if libelle in vues:
+            continue
+        vues.add(libelle)
+        legende.append(EntreeDP(libelle, trace, symbole))
+    return legende
+
+
+# ---------------------------------------------------------------------------
+# Contrôle de distinguabilité
+# ---------------------------------------------------------------------------
+
+
+def _canal_lineaire(valeur: float) -> float:
+    return valeur / 12.92 if valeur <= 0.04045 else ((valeur + 0.055) / 1.055) ** 2.4
+
+
+def vers_lab(couleur: str) -> tuple[float, float, float]:
+    """Couleur hexadécimale sRGB vers CIE L*a*b*, illuminant D65.
+
+    Passer par Lab plutôt que comparer des RVB : deux gris séparés de 30 unités
+    RVB se distinguent, deux verts séparés d'autant ne se distinguent pas, et
+    c'est l'œil qui juge la planche.
+    """
+    texte = couleur.lstrip("#")
+    if len(texte) != 6:
+        raise ValueError(f"Couleur hexadécimale attendue, reçu « {couleur} ».")
+    r, v, b = (int(texte[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
+    r, v, b = (_canal_lineaire(c) for c in (r, v, b))
+
+    # Matrice sRGB → XYZ (D65), et blanc de référence associé.
+    x = (0.4124564 * r + 0.3575761 * v + 0.1804375 * b) / 0.95047
+    y = 0.2126729 * r + 0.7151522 * v + 0.0721750 * b
+    z = (0.0193339 * r + 0.1191920 * v + 0.9503041 * b) / 1.08883
+
+    def f(t: float) -> float:
+        return t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def ecart_perceptuel(couleur_a: str, couleur_b: str) -> float:
+    """ΔE CIE76 entre deux couleurs, en unités perceptuelles."""
+    la, aa, ba = vers_lab(couleur_a)
+    lb, ab, bb = vers_lab(couleur_b)
+    return ((la - lb) ** 2 + (aa - ab) ** 2 + (ba - bb) ** 2) ** 0.5
+
+
+def couleur_significative(fiche: StyleDP) -> str:
+    """Couleur qui porte l'identité de la catégorie : son fond, sinon son trait.
+
+    Une clôture ou un portail n'ont pas de remplissage : ce qui les distingue
+    l'un de l'autre est la couleur du filet.
+    """
+    remplissage = fiche.style.remplissage
+    if remplissage and remplissage != "none":
+        return remplissage
+    return fiche.style.trait or "#000000"
+
+
+#: Catégories dont le tableau bilan donne le nombre et la surface au sol, et
+#: dont l'emprise dessinée se recoupe donc avec lui.
+COMPTEES_AU_TABLEAU = {
+    "pdl_ptr": ("nb_pdl_ptr", "surface_pdl_ptr_m2"),
+    "ptr": ("nb_ptr", "surface_ptr_m2"),
+    "pdl": ("nb_pdl", "surface_pdl_m2"),
+}
+
+#: Part de son rectangle minimal qu'une emprise doit remplir pour être tenue
+#: pour rectangulaire. 0,97 : un poste est un bâtiment rectangulaire, et ce qui
+#: manque à ce point-là n'est plus un défaut de tracé.
+REMPLISSAGE_RECTANGULAIRE = 0.97
+
+#: Écart admis entre l'emprise dessinée d'un poste et sa surface déclarée.
+TOLERANCE_EMPRISE_POSTE = 0.08
+
+#: Écart admis entre les côtés d'un objet du calque et les cotes du catalogue
+#: pour le reconnaître comme étant le poste lui-même.
+#:
+#: 5 % : mesuré le 05/09/2026, les postes des trois dossiers d'essai sont
+#: dessinés **au centimètre** des cotes du catalogue — 12,00 x 3,00 m à
+#: Saint-Cyr pour un PDL/PTR de 12 x 3, 10,00 x 3,00 m à Sarnois indice B pour
+#: un PTR de 10 x 3. La tolérance n'a pas à être large ; elle absorbe un arrondi
+#: de tracé, pas un objet d'une autre nature.
+TOLERANCE_COTES_POSTE = 0.05
+
+#: Recollement admis entre deux bouts de contour, en mètres. La CAO ne referme
+#: pas ses polylignes au point près.
+TOLERANCE_CONTOUR_M = 0.01
+
+#: Surface en deçà de laquelle un contour recousu n'est pas un ouvrage.
+AIRE_CONTOUR_MINIMALE_M2 = 0.5
 
 
 def objets_a_dessiner(contrat, avertissements=None) -> list:
@@ -512,15 +717,30 @@ def objets_a_dessiner(contrat, avertissements=None) -> list:
     """
     messages = [] if avertissements is None else avertissements
     resultat = []
+    abords_de_poste = []
     for categorie in categories_dessinables():
         if categorie in COMPTEES_AU_TABLEAU:
-            geometries = list(emprise_de_poste(contrat, categorie, messages))
+            geometries, abords = emprise_de_poste(contrat, categorie, messages)
+            geometries = list(geometries)
+            abords_de_poste.extend(abords)
         else:
             geometries = list(contrat.geometries(categorie))
         geometries.extend(contrat.voiries_de(categorie))
         geometries = fermer_les_contours(geometries, categorie, messages)
         if geometries:
             resultat.append((categorie, geometries))
+
+    # La plateforme est vue au rang 2, les postes aux rangs 18 à 20 : les abords
+    # ne sont connus qu'une fois la boucle finie, et c'est là qu'ils rejoignent
+    # le sol. Sans plateforme au plan, ils en ouvrent une — c'est bien du sol
+    # remanié, et il doit se voir.
+    if abords_de_poste:
+        for rang, (categorie, geometries) in enumerate(resultat):
+            if categorie == "plateforme":
+                resultat[rang] = (categorie, geometries + abords_de_poste)
+                break
+        else:
+            resultat.insert(0, ("plateforme", abords_de_poste))
     return resultat
 
 

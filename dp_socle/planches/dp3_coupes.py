@@ -916,12 +916,17 @@ def _gabarit(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None:
     maximum = table.point_haut_max_m
     if maximum is None or maximum <= table.point_haut_m + 0.02:
         return
-    droite = table.pas_m * max(nb_rangees - 1, 0) + table.projection_m
+    # Le gabarit court sur toute la figure, débords de sol compris : une limite
+    # qui s'arrête au-dessus de la dernière table se lit comme une cote de cette
+    # table, et non comme la hauteur maximale du projet.
+    debord = table.inter_table_m / 2.0
+    gauche = -debord
+    droite = table.pas_m * max(nb_rangees - 1, 0) + table.projection_m + debord
     style = type(TRAIT_COTE)(
         trait=TRAIT_COTE.trait, epaisseur_mm=0.25, remplissage="none",
         tirets="3.0 1.2 0.6 1.2",
     )
-    dessin.ligne((-table.inter_table_m / 2.0, maximum), (droite, maximum), style)
+    dessin.ligne((gauche, maximum), (droite, maximum), style)
     dessin.texte(
         droite, maximum, f"{nombre_fr(maximum)} m max",
         taille=TAILLE_COTE, ancre="end", decalage_mm=(0.0, -1.4),

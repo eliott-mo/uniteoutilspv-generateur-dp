@@ -385,12 +385,14 @@ def test_un_poste_dessine_en_plusieurs_bandes_devient_une_emprise(tmp_path):
     assert len(contrat.geometries("pdl_ptr")) == 3
 
     avertissements = []
-    emprise = emprise_de_poste(contrat, "pdl_ptr", avertissements)
+    emprise, abords = emprise_de_poste(contrat, "pdl_ptr", avertissements)
+
+    # La première bande a les cotes du catalogue : c'est le poste, et les deux
+    # autres sont la terre remise autour de lui.
     assert len(emprise) == 1
-    assert emprise[0].geom_type == "Polygon"
-    # Un rectangle : quatre côtés, et pas d'escalier en bout.
-    assert len(emprise[0].exterior.coords) == 5
-    assert any("escalier" in m for m in avertissements)
+    assert emprise[0].area == pytest.approx(12.0 * 3.0, rel=1e-3)
+    assert len(abords) == 2
+    assert any("terre remise" in m for m in avertissements)
 
 
 def test_une_emprise_de_poste_non_rectangulaire_reste_telle_quelle(tmp_path):
@@ -411,9 +413,10 @@ def test_une_emprise_de_poste_non_rectangulaire_reste_telle_quelle(tmp_path):
     ecrire_parametres(synthese.parametres(), tmp_path)
 
     contrat = charger_contrat(tmp_path)
-    emprise = emprise_de_poste(contrat, "pdl_ptr", [])
+    emprise, abords = emprise_de_poste(contrat, "pdl_ptr", [])
     assert len(emprise) == 1
     assert emprise[0].area == pytest.approx(triangle.area)
+    assert abords == []
 
 
 def test_un_ecart_de_surface_avec_le_tableau_est_signale(tmp_path):
