@@ -56,7 +56,7 @@ from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
 from dp_socle.import_be import SEUIL_DP_MWC
-from dp_socle.projet import Projet, identifiant_de_dossier
+from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
 from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
 DOSSIER_PROJETS = Path("projets")
@@ -119,6 +119,25 @@ with st.sidebar:
     )
 
 
+def _enregistrer_photomontages(nom_projet: str, fichiers, retenu) -> str | None:
+    """Écrit les photomontages du projet et rend le chemin de celui de couverture.
+
+    Tous sont conservés, pas seulement celui de couverture : les autres sont les
+    pièces DP 6 à DP 8, jointes au dossier à la main pour l'instant.
+    """
+    if not fichiers:
+        return None
+    dossier = DOSSIER_PROJETS / nom_projet / "photomontages"
+    dossier.mkdir(parents=True, exist_ok=True)
+    couverture = None
+    for fichier in fichiers:
+        cible = dossier / Path(fichier.name).name
+        cible.write_bytes(fichier.getbuffer())
+        if retenu is not None and fichier.name == retenu.name:
+            couverture = cible
+    return str(couverture) if couverture else None
+
+
 def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
     """Écrit les fichiers téléversés et renvoie le chemin d'emprise à utiliser."""
     if not fichiers:
@@ -151,182 +170,29 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
 st.subheader("1. Métadonnées du projet")
 colonne_gauche, colonne_droite = st.columns(2)
 with colonne_gauche:
-    nom_projet = st.text_input(
-        "Nom du projet", value="Bray-Saint-Aignan",
-        help="Il figure au cartouche des planches et sur la page de garde, et "
-        "nomme le dossier de sortie.",
-    )
     commune = st.text_input("Commune", value="Bray-Saint-Aignan")
 with colonne_droite:
     code_postal = st.text_input("Code postal", value="45460")
-    date_projet = st.date_input("Date du dossier", value=_date.today())
 
-# Un seul nom saisi, deux usages : le cartouche le reproduit tel quel, le
-# système de fichiers en reçoit une version sans caractère interdit. Les deux
-# champs d'avant — « identifiant du dossier » et « nom au cartouche » — se
-# recopiaient l'un l'autre dans neuf cas sur dix.
-nom = identifiant_de_dossier(nom_projet)
-libelle = nom_projet.strip() or None
-if nom and nom != nom_projet.strip():
-    st.caption(f"Dossier de sortie : `sortie/{nom}/`")
-
-#: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
-#: une voirie était lourde ou légère, le chef de projet tranche — **objet par
-#: objet**, parce qu'un projet a presque toujours les deux et que le calque les
-#: mélange. Aucune valeur par défaut : le tableau bilan sépare les deux, la
-#: légende du dossier les distingue, et aucune des deux n'est plus probable que
-#: l'autre. Tant qu'un objet n'est pas tranché, les planches ne sont pas
-#: dessinées.
-_voiries = decrire_voiries(DOSSIER_SORTIE / nom) if nom else []
-voirie = None
-if _voiries:
-    st.warning(
-        f"Le plan importé porte {len(_voiries)} objet(s) sur le calque "
-        "« voirie » dont le type n'était pas précisé. Le tableau bilan sépare la "
-        "voie lourde de la piste légère, et la légende du dossier les "
-        "distingue : tranchez avant de dessiner.",
-        icon="⚠️",
-    )
+# Le nom du projet et la date ne se saisissent pas : l'un est toujours « PV »
+# suivi de la commune, l'autre est le jour où le dossier est produit. Deux
+# champs de moins à remplir, et deux occasions de moins de se tromper.
+libelle = nom_de_projet(commune)
+nom = identifiant_de_dossier(libelle)
+date_projet = _date.today()
+if nom:
     st.caption(
-        "Un objet à la fois : un projet a presque toujours les deux. La largeur "
-        "moyenne aide à les séparer — une voie lourde fait cinq à six mètres, "
-        "une piste légère trois à quatre."
+        f"Projet **{libelle}**, daté du {date_projet.strftime('%d/%m/%Y')}, "
+        f"dossier `sortie/{nom}/`."
     )
-    choix = []
-    for objet in _voiries:
-        colonne_mesure, colonne_choix = st.columns([1, 2])
-        with colonne_mesure:
-            st.markdown(f"**Objet {objet['rang'] + 1}** — {objet['resume']}")
-        with colonne_choix:
-            choix.append(
-                st.radio(
-                    f"Type de l'objet {objet['rang'] + 1}",
-                    options=VOIRIES_ADMISES,
-                    format_func=lambda v: {
-                        "piste_lourde": "Voie lourde",
-                        "piste_legere": "Piste légère",
-                    }[v],
-                    index=None,
-                    horizontal=True,
-                    label_visibility="collapsed",
-                    key=f"voirie_{objet['rang']}",
-                )
-            )
-    # Aucune valeur par défaut, et rien de partiel : tant qu'un objet n'est pas
-    # tranché, le contrat refuse — c'est une décision de projet, pas un réglage.
-    voirie = choix if all(c is not None for c in choix) else None
 
-st.subheader("2. Fichiers")
 fichiers_emprise = st.file_uploader(
-    "Emprise (ZIP du shapefile, ou .shp + .shx + .dbf + .prj)",
+    "Emprise cadastrale (ZIP du shapefile, ou .shp + .shx + .dbf + .prj)",
     type=[e.lstrip(".") for e in EXTENSIONS_SHAPEFILE] + ["zip"],
     accept_multiple_files=True,
     help="Le fichier .prj est obligatoire : sans lui le CRS est inconnu et la "
     "génération est refusée.",
 )
-image_garde = st.file_uploader(
-    "Photomontage de la page de garde (facultatif)",
-    type=["jpg", "jpeg", "png"],
-    help="Occupe la moitié gauche de la page de garde. Sans image, la place "
-    "reste blanche plutôt que d'afficher un cadre vide.",
-)
-
-st.subheader("3. Génération")
-
-
-def _construire_projet() -> Projet | None:
-    if not nom.strip():
-        st.error("Le nom du projet est obligatoire.")
-        return None
-    chemin_emprise = _enregistrer_fichiers(nom.strip(), fichiers_emprise)
-    if chemin_emprise is None:
-        return None
-
-    chemin_image = None
-    if image_garde is not None:
-        dossier = DOSSIER_PROJETS / nom.strip()
-        dossier.mkdir(parents=True, exist_ok=True)
-        chemin_image = dossier / Path(image_garde.name).name
-        chemin_image.write_bytes(image_garde.getbuffer())
-
-    return Projet(
-        nom=nom.strip(),
-        commune=commune.strip(),
-        code_postal=code_postal.strip(),
-        date=date_projet.isoformat(),
-        emprise=str(chemin_emprise),
-        image_garde=str(chemin_image) if chemin_image else None,
-        libelle=libelle.strip() or None,
-        voirie=voirie,
-    )
-
-
-# Un seul bouton. Le second, « Écrire projet.json », n'écrivait que le fichier
-# de métadonnées du lot 1 — que celui-ci écrit de toute façon avant de dessiner —
-# et se confondait avec le `projet.json` du contrat d'entrée, qui est un autre
-# fichier, dans un autre dossier, produit par l'import du plan BE.
-lancer = st.button("Générer le dossier", type="primary", width="stretch")
-
-if lancer:
-    try:
-        projet = _construire_projet()
-        if projet is not None:
-            projet.valider()
-            projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
-            emprise = charger_emprise(projet.chemin_emprise)
-            st.info(
-                f"Emprise : {emprise.nb_polygones} polygone(s), "
-                f"{emprise.surface_m2 / 10_000:.2f} ha, CRS source {emprise.crs_source}."
-            )
-            with st.spinner("Téléchargement des fonds IGN et composition des planches…"):
-                rapport = generer_dossier(projet, DOSSIER_SORTIE, dpi=int(dpi))
-
-            if rapport.origine_contrat:
-                st.caption(
-                    f"Planches DP 2 à DP 4 dessinées depuis le contrat d'entrée "
-                    f"« {rapport.origine_contrat} » de {rapport.dossier}."
-                )
-
-            for message in rapport.avertissements:
-                st.warning(message, icon="⚠️")
-
-            st.success(
-                f"{rapport.assemblage} — {rapport.taille_mo:.1f} Mo, "
-                f"{len(rapport.planches)} planches."
-            )
-            st.dataframe(
-                [
-                    {
-                        "Pièce": entree["numero"],
-                        "Titre": entree["titre"],
-                        "Page": entree["page"],
-                    }
-                    for entree in rapport.sommaire
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-            with open(rapport.assemblage, "rb") as fichier:
-                st.download_button(
-                    f"Télécharger {rapport.assemblage.name}",
-                    data=fichier.read(),
-                    file_name=rapport.assemblage.name,
-                    mime="application/pdf",
-                    width="stretch",
-                )
-            for sortie in rapport.planches:
-                chemin = Path(sortie.chemin)
-                with open(chemin, "rb") as fichier:
-                    st.download_button(
-                        f"{sortie.numero} — {chemin.name}",
-                        data=fichier.read(),
-                        file_name=chemin.name,
-                        mime="application/pdf",
-                        key=f"dl_{sortie.numero}",
-                    )
-    except ErreurDP as erreur:
-        st.error(f"{type(erreur).__name__} : {erreur}")
-
 
 # ---------------------------------------------------------------------------
 # Rendu des contrôles, commun aux deux imports
@@ -390,7 +256,7 @@ def _tableau_controles(controles) -> None:
 # ---------------------------------------------------------------------------
 
 st.divider()
-st.subheader("4. Plan du bureau d'études")
+st.subheader("2. Plan du bureau d'études")
 st.caption(
     "Import du DXF et du tableau bilan fournis par le BE, recoupement des deux, "
     "tracé de la ligne de coupe A-A' et profil du terrain. Produit "
@@ -961,3 +827,191 @@ if import_be_courant is not None:
             )
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
+
+
+# ---------------------------------------------------------------------------
+# Photomontages
+# ---------------------------------------------------------------------------
+
+st.divider()
+st.subheader("3. Photomontages")
+st.caption(
+    "Les photomontages fournis par le paysagiste. Celui qui est retenu occupe la "
+    "moitié gauche de la page de garde ; les autres sont conservés dans le "
+    "dossier du projet en vue des pièces DP 6 à DP 8, qui sont aujourd'hui "
+    "jointes au dossier à la main. Le report de la position de prise de vue sur "
+    "une carte de repérage reste à construire."
+)
+
+fichiers_photomontages = st.file_uploader(
+    "Photomontages (facultatif)",
+    type=["jpg", "jpeg", "png"],
+    accept_multiple_files=True,
+    key="photomontages",
+)
+
+image_garde = None
+if fichiers_photomontages:
+    # Un seul peut être en couverture : c'est un choix exclusif, donc un bouton
+    # radio et non des cases à cocher, qui laisseraient en cocher deux.
+    noms = [fichier.name for fichier in fichiers_photomontages]
+    retenu = st.radio(
+        "Photomontage de couverture",
+        options=noms,
+        index=0,
+        help="Il occupe la moitié gauche de la page de garde. Sans photomontage, "
+        "un cadre tireté y tient la place et la nomme.",
+    )
+    image_garde = fichiers_photomontages[noms.index(retenu)]
+    apercus = st.columns(min(len(fichiers_photomontages), 4))
+    for colonne, fichier in zip(apercus, fichiers_photomontages):
+        with colonne:
+            st.image(
+                fichier,
+                caption=("couverture — " if fichier.name == retenu else "")
+                + fichier.name,
+                width="stretch",
+            )
+
+st.divider()
+st.subheader("4. Génération")
+
+#: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
+#: une voirie était lourde ou légère, le chef de projet tranche — **objet par
+#: objet**, parce qu'un projet a presque toujours les deux et que le calque les
+#: mélange. Aucune valeur par défaut : le tableau bilan sépare les deux, la
+#: légende du dossier les distingue, et aucune des deux n'est plus probable que
+#: l'autre. Tant qu'un objet n'est pas tranché, les planches ne sont pas
+#: dessinées.
+_voiries = decrire_voiries(DOSSIER_SORTIE / nom) if nom else []
+voirie = None
+if _voiries:
+    st.warning(
+        f"Le plan importé porte {len(_voiries)} objet(s) sur le calque "
+        "« voirie » dont le type n'était pas précisé. Le tableau bilan sépare la "
+        "voie lourde de la piste légère, et la légende du dossier les "
+        "distingue : tranchez avant de dessiner.",
+        icon="⚠️",
+    )
+    st.caption(
+        "Un objet à la fois : un projet a presque toujours les deux. La largeur "
+        "moyenne aide à les séparer — une voie lourde fait cinq à six mètres, "
+        "une piste légère trois à quatre."
+    )
+    choix = []
+    for objet in _voiries:
+        colonne_mesure, colonne_choix = st.columns([1, 2])
+        with colonne_mesure:
+            st.markdown(f"**Objet {objet['rang'] + 1}** — {objet['resume']}")
+        with colonne_choix:
+            choix.append(
+                st.radio(
+                    f"Type de l'objet {objet['rang'] + 1}",
+                    options=VOIRIES_ADMISES,
+                    format_func=lambda v: {
+                        "piste_lourde": "Voie lourde",
+                        "piste_legere": "Piste légère",
+                    }[v],
+                    index=None,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key=f"voirie_{objet['rang']}",
+                )
+            )
+    # Aucune valeur par défaut, et rien de partiel : tant qu'un objet n'est pas
+    # tranché, le contrat refuse — c'est une décision de projet, pas un réglage.
+    voirie = choix if all(c is not None for c in choix) else None
+
+
+
+def _construire_projet() -> Projet | None:
+    if not commune.strip():
+        st.error("La commune est obligatoire : c'est elle qui nomme le projet.")
+        return None
+    chemin_emprise = _enregistrer_fichiers(nom.strip(), fichiers_emprise)
+    if chemin_emprise is None:
+        return None
+
+    chemin_image = _enregistrer_photomontages(
+        nom.strip(), fichiers_photomontages, image_garde
+    )
+
+    return Projet(
+        nom=nom.strip(),
+        commune=commune.strip(),
+        code_postal=code_postal.strip(),
+        date=date_projet.isoformat(),
+        emprise=str(chemin_emprise),
+        image_garde=chemin_image,
+        libelle=libelle or None,
+        voirie=voirie,
+    )
+
+
+# Un seul bouton. Le second, « Écrire projet.json », n'écrivait que le fichier
+# de métadonnées du lot 1 — que celui-ci écrit de toute façon avant de dessiner —
+# et se confondait avec le `projet.json` du contrat d'entrée, qui est un autre
+# fichier, dans un autre dossier, produit par l'import du plan BE.
+lancer = st.button("Générer le dossier", type="primary", width="stretch")
+
+if lancer:
+    try:
+        projet = _construire_projet()
+        if projet is not None:
+            projet.valider()
+            projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
+            emprise = charger_emprise(projet.chemin_emprise)
+            st.info(
+                f"Emprise : {emprise.nb_polygones} polygone(s), "
+                f"{emprise.surface_m2 / 10_000:.2f} ha, CRS source {emprise.crs_source}."
+            )
+            with st.spinner("Téléchargement des fonds IGN et composition des planches…"):
+                rapport = generer_dossier(projet, DOSSIER_SORTIE, dpi=int(dpi))
+
+            if rapport.origine_contrat:
+                st.caption(
+                    f"Planches DP 2 à DP 4 dessinées depuis le contrat d'entrée "
+                    f"« {rapport.origine_contrat} » de {rapport.dossier}."
+                )
+
+            for message in rapport.avertissements:
+                st.warning(message, icon="⚠️")
+
+            st.success(
+                f"{rapport.assemblage} — {rapport.taille_mo:.1f} Mo, "
+                f"{len(rapport.planches)} planches."
+            )
+            st.dataframe(
+                [
+                    {
+                        "Pièce": entree["numero"],
+                        "Titre": entree["titre"],
+                        "Page": entree["page"],
+                    }
+                    for entree in rapport.sommaire
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+            with open(rapport.assemblage, "rb") as fichier:
+                st.download_button(
+                    f"Télécharger {rapport.assemblage.name}",
+                    data=fichier.read(),
+                    file_name=rapport.assemblage.name,
+                    mime="application/pdf",
+                    width="stretch",
+                )
+            for sortie in rapport.planches:
+                chemin = Path(sortie.chemin)
+                with open(chemin, "rb") as fichier:
+                    st.download_button(
+                        f"{sortie.numero} — {chemin.name}",
+                        data=fichier.read(),
+                        file_name=chemin.name,
+                        mime="application/pdf",
+                        key=f"dl_{sortie.numero}",
+                    )
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+
+

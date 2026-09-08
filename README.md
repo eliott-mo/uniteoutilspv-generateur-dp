@@ -34,6 +34,24 @@ Sortie dans `sortie/{nom_projet}/` : un PDF par planche plus
   absent, géométrie dégénérée : chacun produit un message visible ou une
   exception nommée (`dp_socle/erreurs.py`).
 
+## L'application, dans l'ordre du travail
+
+Quatre sections, qui suivent l'ordre dans lequel le dossier se monte :
+
+1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale. Le nom du
+   projet et la date ne se saisissent pas : l'un est toujours « PV » suivi de la
+   commune, l'autre est le jour où le dossier est produit. Deux champs de moins
+   à remplir, deux occasions de moins de se tromper, et le nom obtenu est montré
+   avec le dossier de sortie qu'il entraîne.
+2. **Plan du bureau d'études** — le DXF et le tableau bilan, leurs contrôles
+   croisés, la ligne de coupe A-A' et le profil du terrain. C'est le gros de la
+   saisie, et c'est pour cela qu'elle vient avant le bouton.
+3. **Photomontages** — celui qui est retenu occupe la page de garde, les autres
+   sont conservés pour les pièces DP 6 à DP 8.
+4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
+   bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
+   lui.
+
 ## Installation
 
 ```bash

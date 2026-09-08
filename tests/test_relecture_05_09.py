@@ -474,3 +474,20 @@ def test_un_poste_hors_catalogue_reste_dessine_tel_quel():
     from dp_socle.planches.palette import _est_le_poste
 
     assert not _est_le_poste(box(0.0, 0.0, 10.0, 3.0), 12.0, 3.0)
+
+
+def test_le_nom_du_projet_se_deduit_de_la_commune():
+    """« PV » plus la commune : deux champs de moins à remplir.
+
+    Le champ qui demandait le nom recopiait la commune neuf fois sur dix, et la
+    dixième était une coquille.
+    """
+    from dp_socle.projet import identifiant_de_dossier, nom_de_projet
+
+    assert nom_de_projet("Bray-Saint-Aignan") == "PV Bray-Saint-Aignan"
+    assert nom_de_projet("  Sarnois ") == "PV Sarnois"
+    assert nom_de_projet("") == ""
+    # Et le dossier de sortie en découle, sans caractère interdit.
+    assert identifiant_de_dossier(nom_de_projet("Saint-Cyr-en-Val")) == (
+        "PV-Saint-Cyr-en-Val"
+    )

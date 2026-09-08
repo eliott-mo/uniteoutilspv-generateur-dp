@@ -21,6 +21,20 @@ MOA_VILLE = "69006 LYON"
 CHAMPS_OBLIGATOIRES = ("nom", "commune", "code_postal", "date", "emprise")
 
 
+#: Nom d'un projet, tel qu'il figure au cartouche et sur la page de garde.
+#:
+#: Il ne se saisit pas : il est toujours « PV » suivi de la commune. Le champ
+#: qui le demandait recopiait la commune neuf fois sur dix, et la dixième était
+#: une coquille (relecture du 05/09/2026).
+MOTIF_NOM_PROJET = "PV {commune}"
+
+
+def nom_de_projet(commune: str) -> str:
+    """Nom du projet d'une commune, vide si la commune ne l'est pas encore."""
+    commune = (commune or "").strip()
+    return MOTIF_NOM_PROJET.format(commune=commune) if commune else ""
+
+
 #: Caractères qu'un nom de dossier ne peut pas porter sous Windows.
 _INTERDITS = r'<>:"/\|?*'
 
