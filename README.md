@@ -1699,6 +1699,9 @@ catalogue.
 Le poste est donc **reconnu à ses cotes** plutôt que reconstruit : il est déjà
 là, au centimètre, sur deux des trois dossiers. Ce qui l'entoure rejoint la
 plateforme, où il se lit comme le sol remanié qu'il est, et le rapport le dit.
+Il garde le gris de plateforme, sans teinte ni entrée de légende propres
+(décidé le 05/09/2026) : c'est du sol, et une onzième entrée de légende pour un
+talus de quelques dizaines de centimètres coûterait plus qu'elle n'apprend.
 
 Faute d'objet aux cotes du catalogue — Sarnois indice A porte un 10 x 3 là où le
 tableau déclare un PDL/PTR de 12 x 3 — rien n'est reconstruit : le plan se
