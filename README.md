@@ -40,17 +40,30 @@ Quatre sections, qui suivent l'ordre dans lequel le dossier se monte :
 
 1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale. Le nom du
    projet et la date ne se saisissent pas : l'un est toujours « PV » suivi de la
-   commune, l'autre est le jour où le dossier est produit. Deux champs de moins
-   à remplir, deux occasions de moins de se tromper, et le nom obtenu est montré
-   avec le dossier de sortie qu'il entraîne.
+   commune et de l'indice du tableau bilan, l'autre est le jour où le dossier est
+   produit. Deux champs de moins à remplir, deux occasions de moins de se
+   tromper.
 2. **Plan du bureau d'études** — le DXF et le tableau bilan, leurs contrôles
    croisés, la ligne de coupe A-A' et le profil du terrain. C'est le gros de la
    saisie, et c'est pour cela qu'elle vient avant le bouton.
-3. **Photomontages** — celui qui est retenu occupe la page de garde, les autres
-   sont conservés pour les pièces DP 6 à DP 8.
+3. **Photographies et photomontages** — une ligne par pièce, DP 6, DP 7 et DP 8.
+   Ce sont trois pièces distinctes, qui ne montrent pas la même chose et ne se
+   rangent pas au même endroit du dossier : les mélanger obligerait à les
+   retrier à la main. L'insertion paysagère de DP 6 monte en page de garde ;
+   quand il y en a plusieurs, un bouton radio désigne laquelle.
 4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
    bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
-   lui.
+   lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
+   qu'après l'import.
+
+**L'indice fait partie du nom du dossier.** Sarnois a deux indices, qui diffèrent
+par leur poste, leur citerne et leur zone de contention : sans l'indice au nom,
+le second écrasait le premier dans `sortie/`. Le nom complet est affiché avant la
+génération et rappelé après, avec le dossier obtenu.
+
+L'assemblage des pièces DP 6 à DP 8 au dossier, et le **report de la position de
+prise de vue sur un plan de repérage**, restent à construire — le dossier de
+référence en met un par vue, au 1/1 500 et au 1/2 500.
 
 ## Installation
 

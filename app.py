@@ -52,6 +52,7 @@ from dp_socle.import_be import (
     importer_be,
     lire_parametres,
 )
+from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
@@ -119,22 +120,24 @@ with st.sidebar:
     )
 
 
-def _enregistrer_photomontages(nom_projet: str, fichiers, retenu) -> str | None:
-    """Écrit les photomontages du projet et rend le chemin de celui de couverture.
+def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
+    """Écrit les photographies du projet, une pièce par sous-dossier.
 
-    Tous sont conservés, pas seulement celui de couverture : les autres sont les
-    pièces DP 6 à DP 8, jointes au dossier à la main pour l'instant.
+    Rend le chemin de l'insertion paysagère retenue pour la page de garde. Les
+    autres sont conservées telles quelles : elles constituent les pièces DP 6 à
+    DP 8, jointes au dossier à la main pour l'instant.
     """
-    if not fichiers:
-        return None
-    dossier = DOSSIER_PROJETS / nom_projet / "photomontages"
-    dossier.mkdir(parents=True, exist_ok=True)
     couverture = None
-    for fichier in fichiers:
-        cible = dossier / Path(fichier.name).name
-        cible.write_bytes(fichier.getbuffer())
-        if retenu is not None and fichier.name == retenu.name:
-            couverture = cible
+    for code, fichiers in (par_piece or {}).items():
+        if not fichiers:
+            continue
+        dossier = DOSSIER_PROJETS / nom_projet / code.replace(" ", "_")
+        dossier.mkdir(parents=True, exist_ok=True)
+        for fichier in fichiers:
+            cible = dossier / Path(fichier.name).name
+            cible.write_bytes(fichier.getbuffer())
+            if retenu is not None and fichier.name == retenu.name:
+                couverture = cible
     return str(couverture) if couverture else None
 
 
@@ -175,15 +178,19 @@ with colonne_droite:
     code_postal = st.text_input("Code postal", value="45460")
 
 # Le nom du projet et la date ne se saisissent pas : l'un est toujours « PV »
-# suivi de la commune, l'autre est le jour où le dossier est produit. Deux
-# champs de moins à remplir, et deux occasions de moins de se tromper.
-libelle = nom_de_projet(commune)
-nom = identifiant_de_dossier(libelle)
+# suivi de la commune et de l'indice du tableau bilan, l'autre est le jour où le
+# dossier est produit. Deux champs de moins à remplir, et deux occasions de
+# moins de se tromper.
+#
+# L'indice n'est connu qu'après l'import du plan, en section 2 : le nom définitif
+# se compose donc en section 4, juste avant de dessiner. Ce qui s'affiche ici est
+# provisoire, et le dit.
 date_projet = _date.today()
-if nom:
+if commune.strip():
     st.caption(
-        f"Projet **{libelle}**, daté du {date_projet.strftime('%d/%m/%Y')}, "
-        f"dossier `sortie/{nom}/`."
+        f"Projet **{nom_de_projet(commune)}**, daté du "
+        f"{date_projet.strftime('%d/%m/%Y')}. L'indice du tableau bilan "
+        "complétera le nom une fois le plan importé."
     )
 
 fichiers_emprise = st.file_uploader(
@@ -422,6 +429,8 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 "tableau ne sont probablement pas de la même version.",
                 icon="🚫",
             )
+        # Retenu pour nommer le dossier de sortie : deux indices d'un même
+        # projet sont deux dossiers, et le second écrasait le premier.
         indice = st.selectbox(
             "Colonne du tableau bilan à lire",
             indices,
@@ -429,6 +438,7 @@ if fichier_dxf is not None and fichier_tableau is not None:
             help="Le nom du DXF sert à proposer l'indice ; la confirmation reste "
             "obligatoire, un export peut être renommé.",
         )
+        st.session_state["indice_tableau_bilan"] = indice
 
         with st.expander("Correspondance des calques — modifiable", expanded=False):
             st.caption(
@@ -830,51 +840,87 @@ if import_be_courant is not None:
 
 
 # ---------------------------------------------------------------------------
-# Photomontages
+# Photographies et photomontages — DP 6, DP 7, DP 8
 # ---------------------------------------------------------------------------
 
+#: Les trois pièces photographiques du dossier, dans l'ordre du CERFA.
+#:
+#: Une ligne chacune, et non un dépôt commun : ce sont trois pièces distinctes,
+#: qui ne montrent pas la même chose et ne se rangent pas au même endroit du
+#: dossier. Les mélanger obligerait à les retrier à la main au moment de
+#: constituer le dépôt.
+PIECES_PHOTOS = ("DP 6", "DP 7", "DP 8")
+
 st.divider()
-st.subheader("3. Photomontages")
+st.subheader("3. Photographies et photomontages")
 st.caption(
-    "Les photomontages fournis par le paysagiste. Celui qui est retenu occupe la "
-    "moitié gauche de la page de garde ; les autres sont conservés dans le "
-    "dossier du projet en vue des pièces DP 6 à DP 8, qui sont aujourd'hui "
-    "jointes au dossier à la main. Le report de la position de prise de vue sur "
-    "une carte de repérage reste à construire."
+    "Une ligne par pièce. Elles sont conservées dans le dossier du projet ; leur "
+    "assemblage au dossier et le **report de la position de prise de vue sur un "
+    "plan de repérage** restent à construire — le dossier de référence en met un "
+    "par vue, au 1/1 500 et au 1/2 500."
 )
 
-fichiers_photomontages = st.file_uploader(
-    "Photomontages (facultatif)",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=True,
-    key="photomontages",
-)
+photos = {}
+for code in PIECES_PHOTOS:
+    photos[code] = st.file_uploader(
+        f"{code} — {piece(code).titre}",
+        type=["jpg", "jpeg", "png", "pdf"],
+        accept_multiple_files=True,
+        key=f"photos_{code.replace(' ', '_')}",
+    )
 
+# La page de garde prend l'insertion paysagère : c'est la vue du projet fini,
+# et c'est elle que le dossier de référence met en couverture. Une seule le
+# plus souvent — on ne demande alors rien — mais le cas de plusieurs vues
+# existe, et il faut pouvoir désigner celle qui monte en couverture.
+insertions = [f for f in photos["DP 6"] if not f.name.lower().endswith(".pdf")]
 image_garde = None
-if fichiers_photomontages:
-    # Un seul peut être en couverture : c'est un choix exclusif, donc un bouton
-    # radio et non des cases à cocher, qui laisseraient en cocher deux.
-    noms = [fichier.name for fichier in fichiers_photomontages]
+if len(insertions) == 1:
+    image_garde = insertions[0]
+    st.caption(f"Page de garde : {image_garde.name}.")
+elif len(insertions) > 1:
+    noms = [fichier.name for fichier in insertions]
     retenu = st.radio(
-        "Photomontage de couverture",
+        "Insertion paysagère à mettre en page de garde",
         options=noms,
         index=0,
-        help="Il occupe la moitié gauche de la page de garde. Sans photomontage, "
-        "un cadre tireté y tient la place et la nomme.",
+        horizontal=True,
     )
-    image_garde = fichiers_photomontages[noms.index(retenu)]
-    apercus = st.columns(min(len(fichiers_photomontages), 4))
-    for colonne, fichier in zip(apercus, fichiers_photomontages):
+    image_garde = insertions[noms.index(retenu)]
+
+if insertions:
+    apercus = st.columns(min(len(insertions), 4))
+    for colonne, fichier in zip(apercus, insertions):
         with colonne:
             st.image(
                 fichier,
-                caption=("couverture — " if fichier.name == retenu else "")
+                caption=("couverture — " if image_garde is fichier else "")
                 + fichier.name,
                 width="stretch",
             )
+elif not any(photos.values()):
+    st.caption(
+        "Sans insertion paysagère, un cadre tireté tient la place en page de "
+        "garde et la nomme."
+    )
+
 
 st.divider()
 st.subheader("4. Génération")
+
+# L'indice vient de la section 2, qui s'exécute avant celle-ci : le nom du
+# dossier est donc complet ici, et c'est le seul endroit où il l'est.
+indice_retenu = st.session_state.get("indice_tableau_bilan")
+libelle = nom_de_projet(commune, indice_retenu)
+nom = identifiant_de_dossier(libelle)
+if nom:
+    st.markdown(f"Projet **{libelle}** — dossier `sortie/{nom}/`")
+    if not indice_retenu:
+        st.caption(
+            "Le plan du bureau d'études n'a pas été importé : le nom ne porte "
+            "pas encore d'indice, et un second indice du même projet écraserait "
+            "ce dossier."
+        )
 
 #: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
 #: une voirie était lourde ou légère, le chef de projet tranche — **objet par
@@ -932,9 +978,7 @@ def _construire_projet() -> Projet | None:
     if chemin_emprise is None:
         return None
 
-    chemin_image = _enregistrer_photomontages(
-        nom.strip(), fichiers_photomontages, image_garde
-    )
+    chemin_image = _enregistrer_photos(nom.strip(), photos, image_garde)
 
     return Projet(
         nom=nom.strip(),
@@ -978,8 +1022,9 @@ if lancer:
                 st.warning(message, icon="⚠️")
 
             st.success(
-                f"{rapport.assemblage} — {rapport.taille_mo:.1f} Mo, "
-                f"{len(rapport.planches)} planches."
+                f"**{projet.libelle_affiche}** — {rapport.assemblage.name}, "
+                f"{rapport.taille_mo:.1f} Mo, {len(rapport.planches)} planches. "
+                f"Dossier : `{rapport.dossier}/`."
             )
             st.dataframe(
                 [

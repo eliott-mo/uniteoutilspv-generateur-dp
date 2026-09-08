@@ -491,3 +491,21 @@ def test_le_nom_du_projet_se_deduit_de_la_commune():
     assert identifiant_de_dossier(nom_de_projet("Saint-Cyr-en-Val")) == (
         "PV-Saint-Cyr-en-Val"
     )
+
+
+def test_l_indice_fait_partie_du_nom_du_projet():
+    """Deux indices d'un même projet sont deux dossiers.
+
+    Sarnois en a deux, qui diffèrent par leur poste, leur citerne et leur zone de
+    contention. Sans l'indice au nom, le second écrasait le premier.
+    """
+    from dp_socle.projet import identifiant_de_dossier, nom_de_projet
+
+    assert nom_de_projet("Sarnois", "IND10A") == "PV Sarnois IND10A"
+    assert nom_de_projet("Sarnois", "IND10B") == "PV Sarnois IND10B"
+    assert identifiant_de_dossier(nom_de_projet("Sarnois", "IND10A")) != (
+        identifiant_de_dossier(nom_de_projet("Sarnois", "IND10B"))
+    )
+    # Sans indice — le plan n'a pas encore été importé — le nom reste utilisable.
+    assert nom_de_projet("Sarnois") == "PV Sarnois"
+    assert nom_de_projet("Sarnois", "  ") == "PV Sarnois"

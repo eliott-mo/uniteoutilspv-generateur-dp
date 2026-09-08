@@ -23,16 +23,27 @@ CHAMPS_OBLIGATOIRES = ("nom", "commune", "code_postal", "date", "emprise")
 
 #: Nom d'un projet, tel qu'il figure au cartouche et sur la page de garde.
 #:
-#: Il ne se saisit pas : il est toujours « PV » suivi de la commune. Le champ
-#: qui le demandait recopiait la commune neuf fois sur dix, et la dixième était
-#: une coquille (relecture du 05/09/2026).
+#: Il ne se saisit pas : il est toujours « PV » suivi de la commune, et de
+#: l'indice du tableau bilan quand il est connu. Le champ qui le demandait
+#: recopiait la commune neuf fois sur dix, et la dixième était une coquille
+#: (relecture du 05/09/2026).
 MOTIF_NOM_PROJET = "PV {commune}"
 
 
-def nom_de_projet(commune: str) -> str:
-    """Nom du projet d'une commune, vide si la commune ne l'est pas encore."""
+def nom_de_projet(commune: str, indice: str | None = None) -> str:
+    """Nom du projet d'une commune, à son indice, vide sans commune.
+
+    L'indice fait partie du nom, et pas seulement du tableau bilan. Deux indices
+    d'un même projet sont deux dossiers — Sarnois en a deux, qui diffèrent par
+    leur poste, leur citerne et leur zone de contention — et sans l'indice au
+    nom, le second écrasait le premier dans `sortie/`.
+    """
     commune = (commune or "").strip()
-    return MOTIF_NOM_PROJET.format(commune=commune) if commune else ""
+    if not commune:
+        return ""
+    nom = MOTIF_NOM_PROJET.format(commune=commune)
+    indice = (indice or "").strip()
+    return f"{nom} {indice}" if indice else nom
 
 
 #: Caractères qu'un nom de dossier ne peut pas porter sous Windows.
