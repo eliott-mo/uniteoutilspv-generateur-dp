@@ -26,6 +26,7 @@ une.
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -241,9 +242,26 @@ ECART_GRADUATIONS_MM = 4.0
 
 @dataclass(frozen=True)
 class GeometrieTable:
-    """Profil d'une table, déduit des paramètres du tableau bilan."""
+    """Profil d'une table, et le gabarit que le dossier s'engage à respecter.
 
+    Les deux hauteurs du tableau bilan ne sont pas les deux extrémités d'une
+    table : ce sont les **bornes de l'autorisation**. Le point bas est un
+    minimum garanti au service instructeur — la structure ne descendra pas plus
+    bas — et le point haut un maximum, qui laisse un peu de marge pour une
+    modification de structure ou la micro-topographie du terrain.
+
+    Les lire comme les deux bouts d'une même table était l'erreur : à 15°, un
+    écart de 1,50 m entre 2,50 m et 4,00 m impose un rampant de 5,80 m, soit
+    2,90 m par module pour deux modules — une longueur qui n'existe pas. Le
+    rampant se mesure donc sur les tables du plan, et les deux hauteurs
+    reprennent leur rôle de bornes.
+    """
+
+    #: Hauteur du bord bas de la table dessinée : le minimum déclaré, que le
+    #: dossier s'engage à respecter.
     point_bas_m: float
+    #: Hauteur du bord haut de la table **dessinée**, déduite du rampant et de
+    #: l'inclinaison. Ce n'est pas le maximum déclaré.
     point_haut_m: float
     inclinaison_deg: float
     inter_table_m: float
@@ -251,6 +269,9 @@ class GeometrieTable:
     rampant_m: float
     projection_m: float
     nb_modules_rampant: int | None
+    #: Maximum déclaré au tableau bilan, tracé en gabarit au-dessus de la table
+    #: quand il la surplombe. `None` s'il n'est pas porté.
+    point_haut_max_m: float | None = None
 
 
 #: Où lire chaque paramètre de la coupe de type, dans l'ordre d'essai.
@@ -356,6 +377,37 @@ def resoudre_parametre(contrat: Contrat, nom: str, avertissements: list) -> floa
     )
 
 
+def rampant_mesure(contrat: Contrat, inclinaison_deg: float) -> float | None:
+    """Rampant d'une table, mesuré sur les tables du plan.
+
+    La largeur au sol d'une table est la projection de son rampant : le rampant
+    s'en déduit par le cosinus de l'inclinaison. La médiane des largeurs, et non
+    la moyenne, pour qu'une table de bout de rangée ne tire pas la valeur.
+
+    Mesuré le 05/09/2026 : 4,784 m sur les trois dossiers d'essai, soit deux
+    modules de 2,392 m — un G12R en mesure 2,384 au catalogue. Le pas qui s'en
+    déduit referme le pas déclaré à 2 cm près sur Saint-Cyr comme sur Sarnois.
+    """
+    tables = contrat.geometries("tables_pv")
+    if not tables:
+        return None
+    largeurs = []
+    for table in tables:
+        rectangle = table.minimum_rotated_rectangle
+        if rectangle.geom_type != "Polygon":
+            continue
+        sommets = list(rectangle.exterior.coords)[:-1]
+        cotes = sorted(
+            math.dist(a[:2], b[:2])
+            for a, b in zip(sommets, sommets[1:] + sommets[:1])
+        )
+        if cotes:
+            largeurs.append(cotes[0])
+    if not largeurs:
+        return None
+    return statistics.median(largeurs) / math.cos(math.radians(inclinaison_deg))
+
+
 def geometrie_table(contrat: Contrat) -> tuple:
     """Profil de type d'une table, et ce que les recoupements ont montré.
 
@@ -386,8 +438,24 @@ def geometrie_table(contrat: Contrat) -> tuple:
             f"contredit l'inclinaison de {inclinaison}° du même tableau."
         )
 
-    rampant = (point_haut - point_bas) / math.sin(math.radians(inclinaison))
+    # Le rampant vient des tables du plan, pas de l'écart entre les deux
+    # hauteurs : celles-ci bornent l'autorisation, elles ne décrivent pas une
+    # table. Faute de tables au plan — un contrat sans calepinage — on retombe
+    # sur l'écart des bornes, et on le dit.
+    point_haut_max = point_haut
+    rampant = rampant_mesure(contrat, inclinaison)
+    if rampant is None:
+        rampant = (point_haut - point_bas) / math.sin(math.radians(inclinaison))
+        point_haut_max = None
+        avertissements.append(
+            "Aucune table au plan : le rampant de la coupe de principe est "
+            "déduit de l'écart entre les deux hauteurs du tableau bilan "
+            f"({nombre_fr(point_bas)} m et {nombre_fr(point_haut)} m), qui sont "
+            "des bornes d'autorisation et non les extrémités d'une table. "
+            "Vérifiez la coupe."
+        )
     projection = rampant * math.cos(math.radians(inclinaison))
+    point_haut = point_bas + rampant * math.sin(math.radians(inclinaison))
 
     # L'inter-table se déduit du pas quand elle n'est pas portée : les deux
     # décrivent la même géométrie, et c'est le pas qui commande le dessin.
@@ -420,6 +488,14 @@ def geometrie_table(contrat: Contrat) -> tuple:
             "voulu."
         )
 
+    if point_haut_max is not None and point_haut > point_haut_max + TOLERANCE_PAS_M:
+        avertissements.append(
+            f"Point haut dessiné à {nombre_fr(point_haut)} m, au-dessus du "
+            f"maximum de {nombre_fr(point_haut_max)} m porté au tableau bilan : "
+            "la table dépasse le gabarit que le dossier déclare. Reprenez le "
+            "tableau, ou la structure."
+        )
+
     structures = contrat.structures
     nb_modules = structures.get("nb_modules_rampant")
     if nb_modules:
@@ -444,6 +520,7 @@ def geometrie_table(contrat: Contrat) -> tuple:
             rampant_m=rampant,
             projection_m=projection,
             nb_modules_rampant=int(nb_modules) if nb_modules else None,
+            point_haut_max_m=point_haut_max,
         ),
         avertissements,
     )
@@ -781,15 +858,18 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) ->
 def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None:
     """Les cinq cotes du PDF de profil du bureau d'études."""
     ecart = dessin.metres(ECART_COTE_VERTICALE_MM)
-    # Hauteurs, de part et d'autre de la première table.
+    # Hauteurs, de part et d'autre de la première table. Le point bas porte la
+    # mention « min » : c'est l'engagement pris au service instructeur, la
+    # structure ne descendra pas plus bas.
     cote_verticale(
         dessin, 0.0, table.point_bas_m, -ecart,
-        f"{nombre_fr(table.point_bas_m)} m",
+        f"{nombre_fr(table.point_bas_m)} m min",
     )
     cote_verticale(
         dessin, 0.0, table.point_haut_m, table.projection_m + ecart,
         f"{nombre_fr(table.point_haut_m)} m", a_gauche=False,
     )
+    _gabarit(dessin, table, nb_rangees)
 
     if nb_rangees >= 2:
         # Inter-table : du haut d'une rangée au bas de la suivante, cotée
@@ -819,6 +899,33 @@ def _coter_table(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None
         decalage_mm=7.0,
     )
     _coter_angle(dessin, table)
+
+
+def _gabarit(dessin: Dessin, table: GeometrieTable, nb_rangees: int) -> None:
+    """La hauteur maximale autorisée, en trait d'axe au-dessus des tables.
+
+    Le tableau bilan déclare un point haut **maximum** : le dossier prend un peu
+    de marge sur l'autorisation, pour une modification de structure ou la
+    micro-topographie du terrain. La table, elle, est dessinée à sa géométrie
+    réelle. Le maximum se lit donc comme ce qu'il est — une limite à ne pas
+    dépasser — et non comme une cote de la table.
+
+    Tracé seulement s'il surplombe la table : un maximum sous la table dessinée
+    n'est pas un gabarit mais un dépassement, et c'est le rapport qui le dit.
+    """
+    maximum = table.point_haut_max_m
+    if maximum is None or maximum <= table.point_haut_m + 0.02:
+        return
+    droite = table.pas_m * max(nb_rangees - 1, 0) + table.projection_m
+    style = type(TRAIT_COTE)(
+        trait=TRAIT_COTE.trait, epaisseur_mm=0.25, remplissage="none",
+        tirets="3.0 1.2 0.6 1.2",
+    )
+    dessin.ligne((-table.inter_table_m / 2.0, maximum), (droite, maximum), style)
+    dessin.texte(
+        droite, maximum, f"{nombre_fr(maximum)} m max",
+        taille=TAILLE_COTE, ancre="end", decalage_mm=(0.0, -1.4),
+    )
 
 
 def _coter_angle(dessin: Dessin, table: GeometrieTable) -> None:

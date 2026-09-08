@@ -220,18 +220,36 @@ def test_une_planche_dp4_sans_ouvrage_leve(site, tmp_path):
         dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-3")
 
 
-def test_la_coupe_de_type_recoupe_le_pas_et_le_rampant(site):
-    """Les trois valeurs viennent du même tableau et doivent se recouper."""
-    _, dossier = site()
-    table, avertissements = dp3_coupes.geometrie_table(charger_contrat(dossier))
+def test_le_rampant_se_mesure_sur_les_tables_du_plan(site):
+    """Et non sur l'écart des deux hauteurs, qui bornent l'autorisation.
 
-    attendu = (
-        synthese.parametres()["parametres"]["structures"]["point_haut_m"]
-        - synthese.parametres()["parametres"]["structures"]["point_bas_m"]
-    ) / math.sin(math.radians(25.0))
-    assert table.rampant_m == pytest.approx(attendu)
+    Les deux hauteurs du tableau bilan sont un minimum garanti et un maximum
+    autorisé, pas les deux bouts d'une table : les lire comme une géométrie
+    donnait un rampant qui ne refermait ni le pas ni le nombre de modules.
+    """
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    table, avertissements = dp3_coupes.geometrie_table(contrat)
+
+    mesure = dp3_coupes.rampant_mesure(contrat, table.inclinaison_deg)
+    assert mesure is not None
+    assert table.rampant_m == pytest.approx(mesure)
+    # Le point haut dessiné se déduit du rampant, et reste sous le maximum.
+    assert table.point_haut_m == pytest.approx(
+        table.point_bas_m + mesure * math.sin(math.radians(table.inclinaison_deg))
+    )
+    assert table.point_haut_max_m >= table.point_haut_m
     assert table.pas_m == pytest.approx(table.inter_table_m + table.projection_m, abs=0.5)
     assert avertissements == []
+
+
+def test_une_table_qui_perce_le_gabarit_est_signalee(site):
+    """Le maximum déclaré est un engagement : le dépasser doit se voir."""
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    contrat.donnees["parametres"]["structures"]["point_haut_m"] = 2.0
+    _, avertissements = dp3_coupes.geometrie_table(contrat)
+    assert any("gabarit" in message for message in avertissements)
 
 
 def test_un_pas_incoherent_est_signale(site):

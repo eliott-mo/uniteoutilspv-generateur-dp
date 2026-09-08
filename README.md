@@ -1441,23 +1441,39 @@ De même, quand le Z des tables ne porte pas d'altitude de terrain, les tables d
 la coupe du terrain sont posées sur le profil RGE ALTI en leur appliquant les
 hauteurs déclarées. C'est le seul comportement possible, mais il se voit.
 
-#### Les hauteurs viennent du tableau bilan, et de rien d'autre
+#### Les deux hauteurs sont un gabarit, pas une géométrie
 
-Le tableau bilan porte **deux** couples point bas / point haut : celui que le
-bureau d'études déclare pour le projet, et celui du bloc `standards_unite` du
-même fichier. Sur Saint-Cyr ils ne disent pas la même chose. Le couple déclaré —
-2,50 m et 4,00 m — donne un rampant de 5,80 m à 15° et un pas de 10,50 m contre
-9,50 m portés au même tableau ; le couple standard — 1,10 m et 2,34 m — referme
-à 3 cm près.
+C'est l'erreur qui a coûté le plus de détours. Le tableau bilan porte un « Point
+bas (m) » et un « Point haut (m) » — onglet « 2. Caractéristiques du projet »,
+colonne de l'indice. On les lisait comme les deux extrémités d'une table, ce qui
+donnait sur Saint-Cyr un rampant de (4,00 − 2,50)/sin 15° = 5,80 m, soit 2,90 m
+par module pour deux modules : une longueur qui n'existe pas, et un pas de
+10,50 m contre 9,50 m portés au même tableau.
 
-Une version de ce module retenait alors le couple qui refermait. **C'est
-retiré** (relecture du 05/09/2026) : les hauteurs déclarées sont les bonnes, une
-structure peut être haute, et aller chercher une autre valeur dans le même
-fichier était une liberté prise avec la donnée d'entrée.
+**Ce sont des bornes d'autorisation.** Le point bas est un minimum garanti au
+service instructeur — la structure ne descendra pas plus bas — et le point haut
+un maximum, qui prend un peu de marge pour une modification de structure ou la
+micro-topographie du terrain. Rien n'oblige une table à toucher les deux, et
+l'inclinaison fixe n'entre pas en contradiction avec elles : elle fixe l'écart
+entre les deux bords d'une table, pas la position de la table dans le gabarit.
 
-L'écart de pas reste écrit au rapport. Il porte sur trois valeurs d'un même
-tableau qui ne se recoupent pas, et c'est un fait qui mérite d'être vu ; mais
-c'est au tableau bilan qu'il se règle, pas à la planche.
+Le rampant se mesure donc sur les **tables du plan** — largeur au sol médiane
+divisée par le cosinus de l'inclinaison. Mesuré le 05/09/2026 : 4,784 m sur les
+trois dossiers d'essai, soit deux modules de 2,392 m quand un G12R en mesure
+2,384 au catalogue. Le pas qui s'en déduit referme le pas déclaré à 2 cm près,
+sur Saint-Cyr comme sur Sarnois, et l'avertissement qui tombait sur tous les
+dossiers a disparu.
+
+La coupe de principe porte alors ce que le dossier engage :
+
+- le point bas coté « 2,50 m **min** » ;
+- le point haut de la table dessinée, à sa géométrie réelle — 3,74 m ;
+- le maximum en **trait d'axe au-dessus des tables**, coté « 4,00 m max ». Un
+  gabarit se lit comme une limite, pas comme une cote de la table.
+
+Et le contrôle s'inverse : si la table dessinée perce le gabarit, ce n'est plus
+une incohérence de tableau mais un dépassement d'autorisation, et le rapport le
+dit en ces termes.
 
 ### DP 4 — Ouvrages techniques
 
