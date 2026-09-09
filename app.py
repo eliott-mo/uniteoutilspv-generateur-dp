@@ -120,6 +120,31 @@ with st.sidebar:
     )
 
 
+def _nom_depot(commune: str) -> str:
+    """Dossier où atterrissent les fichiers téléversés par le chef de projet.
+
+    Il ne porte **pas** l'indice, contrairement au dossier produit : le tableau
+    bilan est déposé avant qu'on sache quel indice y lire — c'est lui qui en
+    donne la liste — et il porte de toute façon tous les indices du projet. Un
+    dépôt par commune, donc, et un dossier de sortie par indice.
+    """
+    return identifiant_de_dossier(nom_de_projet(commune)) or "projet"
+
+
+def _nom_dossier(commune: str) -> str:
+    """Identifiant du dossier produit : la commune et l'indice du tableau bilan.
+
+    Une fonction, et non une variable posée en tête de script : l'indice est
+    choisi au milieu de la section 2, et tout ce qui écrit dans `sortie/` vient
+    après. Le composer plus haut le laissait en retard d'une exécution —
+    Streamlit rejoue le script entier à chaque interaction — et le composer plus
+    bas, en section 4, laissait la section 2 sans nom du tout : c'est la
+    `NameError` du 09/09/2026, levée dès le dépôt du DXF.
+    """
+    indice = st.session_state.get("indice_tableau_bilan")
+    return identifiant_de_dossier(nom_de_projet(commune, indice)) or "projet"
+
+
 def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
     """Écrit les photographies du projet, une pièce par sous-dossier.
 
@@ -318,11 +343,11 @@ with colonne_alti:
 
 
 
-def _deposer(fichier, defaut_nom: str = "projet") -> Path | None:
-    """Écrit un fichier téléversé dans le dossier du projet et rend son chemin."""
+def _deposer(fichier, commune: str) -> Path | None:
+    """Écrit un fichier téléversé dans le dépôt du projet et rend son chemin."""
     if fichier is None:
         return None
-    dossier = DOSSIER_PROJETS / (nom.strip() or defaut_nom)
+    dossier = DOSSIER_PROJETS / _nom_depot(commune)
     dossier.mkdir(parents=True, exist_ok=True)
     cible = dossier / Path(fichier.name).name
     cible.write_bytes(fichier.getbuffer())
@@ -406,10 +431,10 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
     )
 
 if fichier_dxf is not None and fichier_tableau is not None:
-    chemin_dxf = _deposer(fichier_dxf)
-    chemin_tableau = _deposer(fichier_tableau)
-    chemin_pdf_be = _deposer(fichier_pdf_be)
-    chemin_altimetrie = _deposer(fichier_altimetrie)
+    chemin_dxf = _deposer(fichier_dxf, commune)
+    chemin_tableau = _deposer(fichier_tableau, commune)
+    chemin_pdf_be = _deposer(fichier_pdf_be, commune)
+    chemin_altimetrie = _deposer(fichier_altimetrie, commune)
 
     try:
         indices = indices_disponibles(chemin_tableau)
@@ -520,7 +545,7 @@ if fichier_dxf is not None and fichier_tableau is not None:
             st.session_state.profil_be = None
             emprise_cadastrale = None
             chemin_emprise = _enregistrer_fichiers(
-                nom.strip() or "projet", fichiers_emprise
+                _nom_dossier(commune), fichiers_emprise
             )
             if chemin_emprise is not None:
                 emprise_cadastrale = charger_emprise(chemin_emprise).geometrie
@@ -534,7 +559,7 @@ if fichier_dxf is not None and fichier_tableau is not None:
             )
             st.session_state.emprise_cadastrale_be = emprise_cadastrale
             _reprendre_import_precedent(
-                DOSSIER_SORTIE / (nom.strip() or "projet"),
+                DOSSIER_SORTIE / _nom_dossier(commune),
                 st.session_state.import_be,
                 emprise_cadastrale,
             )
@@ -813,7 +838,7 @@ if import_be_courant is not None:
         )
     elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
         try:
-            dossier_sortie = DOSSIER_SORTIE / (nom.strip() or "projet")
+            dossier_sortie = DOSSIER_SORTIE / _nom_dossier(commune)
             gpkg, parametres = import_be_courant.ecrire(dossier_sortie)
             st.success(
                 f"Import validé. {gpkg} et {parametres} écrits — c'est le contrat "
@@ -823,7 +848,7 @@ if import_be_courant is not None:
                 st.download_button(
                     "Télécharger geometries.gpkg",
                     data=fichier.read(),
-                    file_name=f"{nom.strip() or 'projet'}_geometries.gpkg",
+                    file_name=f"{_nom_dossier(commune)}_geometries.gpkg",
                     mime="application/geopackage+sqlite3",
                     width="stretch",
                 )
@@ -908,11 +933,12 @@ elif not any(photos.values()):
 st.divider()
 st.subheader("4. Génération")
 
-# L'indice vient de la section 2, qui s'exécute avant celle-ci : le nom du
-# dossier est donc complet ici, et c'est le seul endroit où il l'est.
+# L'indice vient de la section 2, qui s'exécute avant celle-ci : le nom est donc
+# complet ici. La section 2 le compose de la même façon, par `_nom_dossier()`,
+# et écrit donc bien dans le dossier que celle-ci va lire.
 indice_retenu = st.session_state.get("indice_tableau_bilan")
 libelle = nom_de_projet(commune, indice_retenu)
-nom = identifiant_de_dossier(libelle)
+nom = _nom_dossier(commune) if commune.strip() else ""
 if nom:
     st.markdown(f"Projet **{libelle}** — dossier `sortie/{nom}/`")
     if not indice_retenu:
@@ -974,14 +1000,14 @@ def _construire_projet() -> Projet | None:
     if not commune.strip():
         st.error("La commune est obligatoire : c'est elle qui nomme le projet.")
         return None
-    chemin_emprise = _enregistrer_fichiers(nom.strip(), fichiers_emprise)
+    chemin_emprise = _enregistrer_fichiers(nom, fichiers_emprise)
     if chemin_emprise is None:
         return None
 
-    chemin_image = _enregistrer_photos(nom.strip(), photos, image_garde)
+    chemin_image = _enregistrer_photos(nom, photos, image_garde)
 
     return Projet(
-        nom=nom.strip(),
+        nom=nom,
         commune=commune.strip(),
         code_postal=code_postal.strip(),
         date=date_projet.isoformat(),

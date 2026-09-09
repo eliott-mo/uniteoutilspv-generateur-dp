@@ -61,6 +61,22 @@ par leur poste, leur citerne et leur zone de contention : sans l'indice au nom,
 le second écrasait le premier dans `sortie/`. Le nom complet est affiché avant la
 génération et rappelé après, avec le dossier obtenu.
 
+Le **dépôt** des fichiers du bureau d'études, lui, ne porte pas l'indice :
+`projets/{commune}/` reçoit le DXF, le tableau bilan, le PDF et le relevé
+altimétrique. Ils y arrivent avant qu'on sache quel indice lire — c'est le
+tableau déposé là qui en donne la liste — et le tableau porte de toute façon
+tous les indices du projet. Un dépôt par commune, donc, et un dossier par
+indice : `projets/{commune}-{indice}/` pour l'emprise, les photos et le
+`projet.json` du lot 1, `sortie/{commune}-{indice}/` pour le contrat et les
+planches.
+
+Ces deux noms se composent par `_nom_depot()` et `_nom_dossier()`, appelés là où
+le nom sert. Ce ne sont pas des variables posées en tête de script : Streamlit
+rejoue `app.py` de haut en bas à chaque interaction, l'indice est choisi au
+milieu de la section 2, et une variable serait en retard d'une exécution en tête
+de script — ou absente en section 2 si on la composait en section 4, ce qui a
+levé une `NameError` au dépôt du DXF le 09/09/2026.
+
 L'assemblage des pièces DP 6 à DP 8 au dossier, et le **report de la position de
 prise de vue sur un plan de repérage**, restent à construire — le dossier de
 référence en met un par vue, au 1/1 500 et au 1/2 500.
@@ -286,6 +302,17 @@ python -m pytest -q
   longueur, et sur un profil à 2 % qui doit se retrouver à 2 % dans le fichier.
   Ces deux-là ne demandent aucun service en ligne : ce sont ceux qui comptent le
   plus, et un `-m "not reseau"` ne doit pas les sauter.
+- `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
+  par `AppTest` : les quatre sections dans l'ordre, puis le dépôt du DXF et du
+  tableau de Saint-Cyr, puis l'indice retrouvé dans le nom du dossier annoncé.
+  C'est le seul contrôle qui exécute `app.py` ; les tests des modules ne le
+  touchent pas, et une `NameError` y est restée invisible jusqu'à ce qu'un chef
+  de projet la rencontre.
+- `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
+  syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
+  qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle
+  refuse aussi qu'une fonction lise un global écrit plus bas que sa définition —
+  ce qu'elle doit prendre en paramètre.
 
 Les tests du lot 4 s'appuient sur un contrat **synthétique**
 (`tests/contrat_synthetique.py`), dimensionné en nombres ronds — clôture de
