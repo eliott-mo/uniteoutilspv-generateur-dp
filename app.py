@@ -127,8 +127,12 @@ def _nom_depot(commune: str) -> str:
     bilan est déposé avant qu'on sache quel indice y lire — c'est lui qui en
     donne la liste — et il porte de toute façon tous les indices du projet. Un
     dépôt par commune, donc, et un dossier de sortie par indice.
+
+    Vide sans commune, et sans valeur de repli : `projets/projet/` recevait
+    sinon les plans de tous les projets encore sans nom, chacun écrasant les
+    fichiers de même nom du précédent, en silence (relecture du 09/09/2026).
     """
-    return identifiant_de_dossier(nom_de_projet(commune)) or "projet"
+    return identifiant_de_dossier(nom_de_projet(commune))
 
 
 def _nom_dossier(commune: str) -> str:
@@ -147,7 +151,7 @@ def _nom_dossier(commune: str) -> str:
     « Importer et contrôler » laissait l'import en place et déplaçait la cible.
     """
     indice = st.session_state.get("indice_tableau_bilan")
-    return identifiant_de_dossier(nom_de_projet(commune, indice)) or "projet"
+    return identifiant_de_dossier(nom_de_projet(commune, indice))
 
 
 def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
@@ -156,6 +160,12 @@ def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
     Rend le chemin de l'insertion paysagère retenue pour la page de garde. Les
     autres sont conservées telles quelles : elles constituent les pièces DP 6 à
     DP 8, jointes au dossier à la main pour l'instant.
+
+    La couverture se reconnaît à l'**objet** déposé, et non à son nom. Comparer
+    les noms, sur les trois pièces à la fois, suffisait à ce qu'une photo de
+    DP 7 ou DP 8 appelée comme l'insertion retenue prenne sa place en page de
+    garde — le dossier partait alors avec une photo de l'existant en couverture
+    au lieu du projet fini (relecture du 09/09/2026).
     """
     couverture = None
     for code, fichiers in (par_piece or {}).items():
@@ -166,7 +176,7 @@ def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
         for fichier in fichiers:
             cible = dossier / Path(fichier.name).name
             cible.write_bytes(fichier.getbuffer())
-            if retenu is not None and fichier.name == retenu.name:
+            if fichier is retenu:
                 couverture = cible
     return str(couverture) if couverture else None
 
@@ -444,7 +454,16 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
 #: nom devait empêcher (relecture du 09/09/2026).
 indice_choisi = None
 
-if fichier_dxf is not None and fichier_tableau is not None:
+if not commune.strip() and (fichier_dxf is not None or fichier_tableau is not None):
+    st.error(
+        "Saisissez la commune en section 1 avant d'importer : c'est elle qui "
+        "nomme le dépôt et le dossier de sortie. Sans elle, les plans de tous "
+        "les projets encore sans nom atterrissaient dans le même "
+        "`projets/projet/`, et s'y écrasaient.",
+        icon="🚫",
+    )
+
+if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf, commune)
     chemin_tableau = _deposer(fichier_tableau, commune)
     chemin_pdf_be = _deposer(fichier_pdf_be, commune)
@@ -557,6 +576,11 @@ if fichier_dxf is not None and fichier_tableau is not None:
         if st.button("Importer et contrôler", type="primary", width="stretch"):
             st.session_state.coupe_be = None
             st.session_state.profil_be = None
+            # Le cadre aussi : il n'était calculé qu'une fois par session, et le
+            # second projet importé se dessinait dans le cadre et sur l'ortho du
+            # premier — un aperçu faux, à l'endroit précis où le chef de projet
+            # vérifie que l'import a bien lu son plan.
+            st.session_state.cadre_apercu_be = None
             emprise_cadastrale = None
             # Le nom se compose ici avec l'indice qu'on est en train
             # d'importer : `_nom_dossier` porte encore celui de l'import
@@ -579,23 +603,29 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 st.session_state.import_be.tableau.indice
             )
             st.session_state.emprise_cadastrale_be = emprise_cadastrale
-            _reprendre_import_precedent(
-                DOSSIER_SORTIE / nom_importe,
-                st.session_state.import_be,
-                emprise_cadastrale,
-            )
+            # Avant la reprise de coupe, et non après : c'est elle qui relit le
+            # relevé altimétrique dans l'état de session. Écrits après, ils
+            # n'arrivaient qu'au deuxième import, et le premier retombait sur le
+            # RGE ALTI en silence — alors que l'aide du champ annonce l'inverse.
             st.session_state.chemin_pdf_be = (
                 str(chemin_pdf_be) if chemin_pdf_be else None
             )
             st.session_state.chemin_altimetrie_be = (
                 str(chemin_altimetrie) if chemin_altimetrie else None
             )
+            _reprendre_import_precedent(
+                DOSSIER_SORTIE / nom_importe,
+                st.session_state.import_be,
+                emprise_cadastrale,
+            )
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
 
 
 import_be_courant = st.session_state.import_be
-if import_be_courant is not None:
+# La commune conditionne tout ce qui suit : les contrôles s'affichent, mais la
+# validation écrit, et sans commune elle n'a pas de dossier où écrire.
+if import_be_courant is not None and commune.strip():
     plan = import_be_courant.plan
     tableau = import_be_courant.tableau
     emprise_cloturee = plan.polygone_cloture
@@ -615,8 +645,12 @@ if import_be_courant is not None:
     _tableau_controles(import_be_courant.controles)
     for controle in import_be_courant.bloquants:
         st.error(f"{controle.libelle} — {controle.message}", icon="🚫")
-    for message in import_be_courant.avertissements:
-        st.warning(message, icon="⚠️")
+    # Réservé ici, rempli une fois la coupe traitée. `avertissements` compte
+    # ceux de la ligne de coupe, du profil et des contrôles de terrain, qui ne
+    # sont produits que deux cents lignes plus bas : les rendre à cet endroit du
+    # script les montrait avec une exécution de retard, et le chef de projet qui
+    # trace sa coupe puis valide dans la foulée ne les voyait jamais.
+    emplacement_avertissements = st.container()
 
     with st.expander("Paramètres extraits du tableau bilan"):
         for titre, valeurs in (
@@ -778,6 +812,10 @@ if import_be_courant is not None:
             "d'origine en orange. Tracez une nouvelle ligne pour la remplacer."
         )
 
+    with emplacement_avertissements:
+        for message in import_be_courant.avertissements:
+            st.warning(message, icon="⚠️")
+
     # -----------------------------------------------------------------------
     # Aperçu et validation
     # -----------------------------------------------------------------------
@@ -930,6 +968,7 @@ for code in PIECES_PHOTOS:
 # plus souvent — on ne demande alors rien — mais le cas de plusieurs vues
 # existe, et il faut pouvoir désigner celle qui monte en couverture.
 insertions = [f for f in photos["DP 6"] if not f.name.lower().endswith(".pdf")]
+pdfs_insertion = [f for f in photos["DP 6"] if f.name.lower().endswith(".pdf")]
 image_garde = None
 if len(insertions) == 1:
     image_garde = insertions[0]
@@ -945,19 +984,48 @@ elif len(insertions) > 1:
     image_garde = insertions[noms.index(retenu)]
 
 if insertions:
-    apercus = st.columns(min(len(insertions), 4))
-    for colonne, fichier in zip(apercus, insertions):
-        with colonne:
-            st.image(
-                fichier,
-                caption=("couverture — " if image_garde is fichier else "")
-                + fichier.name,
-                width="stretch",
-            )
-elif not any(photos.values()):
+    # Par rangées de quatre, et non les quatre premières : la vignette manquante
+    # pouvait être celle de la couverture, la seule qu'on ait besoin de voir.
+    for depart in range(0, len(insertions), 4):
+        rangee = insertions[depart : depart + 4]
+        for colonne, fichier in zip(st.columns(len(rangee)), rangee):
+            with colonne:
+                st.image(
+                    fichier,
+                    caption=("couverture — " if image_garde is fichier else "")
+                    + fichier.name,
+                    width="stretch",
+                )
+else:
+    if pdfs_insertion:
+        st.warning(
+            "L'insertion paysagère déposée est un PDF : la page de garde attend "
+            "une image et gardera son cadre tireté. Déposez aussi le JPG ou le "
+            "PNG de la vue.",
+            icon="⚠️",
+        )
     st.caption(
         "Sans insertion paysagère, un cadre tireté tient la place en page de "
         "garde et la nomme."
+    )
+
+#: Les pièces où deux fichiers portent le même nom, avec les noms en cause.
+#:
+#: Ils s'écrasent sur le disque — la cible est nommée par le nom du fichier — et
+#: le second est perdu sans un mot. Le chef de projet renomme, ou retire : ce
+#: n'est pas à l'outil de choisir lequel des deux survit.
+photos_en_double = {}
+for code, fichiers in photos.items():
+    noms_deposes = [fichier.name for fichier in fichiers or []]
+    doubles = sorted({nom for nom in noms_deposes if noms_deposes.count(nom) > 1})
+    if doubles:
+        photos_en_double[code] = doubles
+for code, doubles in photos_en_double.items():
+    st.error(
+        f"{code} : deux fichiers portent le même nom ({', '.join(doubles)}). "
+        "Le second écraserait le premier dans le dossier du projet — renommez-en "
+        "un avant de générer.",
+        icon="🚫",
     )
 
 
@@ -1030,6 +1098,22 @@ if _voiries:
 def _construire_projet() -> Projet | None:
     if not commune.strip():
         st.error("La commune est obligatoire : c'est elle qui nomme le projet.")
+        return None
+    if photos_en_double:
+        st.error(
+            "Deux photographies portent le même nom dans "
+            f"{', '.join(photos_en_double)} : l'une écraserait l'autre. "
+            "Renommez-en une en section 3."
+        )
+        return None
+    if not fichiers_emprise:
+        # Sans ce message, le clic était absorbé sans rien produire : ni
+        # planche, ni erreur, l'écran inchangé. `_enregistrer_fichiers` rendait
+        # `None` sans un mot quand la liste était vide.
+        st.error(
+            "L'emprise cadastrale est obligatoire : c'est elle qui cadre "
+            "toutes les planches. Déposez-la en section 1."
+        )
         return None
     chemin_emprise = _enregistrer_fichiers(nom, fichiers_emprise)
     if chemin_emprise is None:

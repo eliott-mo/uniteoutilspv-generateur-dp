@@ -77,6 +77,20 @@ milieu de la section 2, et une variable serait en retard d'une exécution en tê
 de script — ou absente en section 2 si on la composait en section 4, ce qui a
 levé une `NameError` au dépôt du DXF le 09/09/2026.
 
+**Ce que l'application refuse.** Elle ne devine pas et ne se rabat sur rien :
+
+- importer sans commune — c'est elle qui nomme le dépôt et le dossier ;
+- écrire la sortie quand la liste d'indices s'est écartée de l'import en
+  mémoire, ce qui déposerait la géométrie d'un indice dans le dossier d'un
+  autre ;
+- générer sans emprise cadastrale, ou avec deux photographies de même nom dans
+  une même pièce, la seconde écrasant la première sur le disque ;
+- trancher à votre place le type d'une voirie que le plan laisse indécise.
+
+Chacun de ces cas affiche ce qui manque et pourquoi. C'est la règle du dépôt :
+une planche fausse qui s'affiche correctement est pire qu'un refus, parce que
+personne ne la détecte avant l'instruction du dossier.
+
 L'assemblage des pièces DP 6 à DP 8 au dossier, et le **report de la position de
 prise de vue sur un plan de repérage**, restent à construire — le dossier de
 référence en met un par vue, au 1/1 500 et au 1/2 500.
@@ -152,8 +166,8 @@ python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import g
 - `libelle` est le nom du projet retenu par le chef de projet. C'est lui qui
   figure au cartouche et sur la page de garde. À défaut, `nom` est repris.
 - `image_garde` est le photomontage de la page de garde. Il occupe la moitié
-  gauche de la page ; sans lui, la place reste blanche plutôt que d'afficher un
-  cadre vide.
+  gauche de la page ; sans lui, un cadre tireté gris y tient la place et la
+  nomme, « Photomontage à insérer ».
 
 Les chemins relatifs le sont par rapport au dossier du `projet.json`. Une
 correction de dernière minute se fait en modifiant une valeur ici puis en
@@ -185,9 +199,11 @@ produites**, et `assemblage.py` continue de le vérifier sur le PDF assemblé.
 
 **Photomontage.** Il occupe la moitié gauche de la page de garde, surmonté d'un
 bandeau « VUE EN PERSPECTIVE DU PROJET » calé sur la largeur réelle de l'image.
-Sans photomontage, ni bandeau ni cadre : une case titrée surmontant du vide se
-remarquerait plus que du blanc. Tout vient de `dp_socle/dossier.py`, qui alimente aussi les
-titres de cartouche — les deux ne peuvent pas diverger.
+Sans photomontage, un cadre tireté gris tient la place et la nomme
+« Photomontage à insérer » : la moitié gauche laissée blanche se lisait comme
+une composition ratée, et rien ne rappelait la pièce manquante. Tout vient de
+`dp_socle/dossier.py`, qui alimente aussi les titres de cartouche — les deux ne
+peuvent pas diverger.
 
 **Surfaces.** Deux nombres coexistent, et ils ne se recouvrent pas :
 
@@ -303,11 +319,13 @@ python -m pytest -q
   Ces deux-là ne demandent aucun service en ligne : ce sont ceux qui comptent le
   plus, et un `-m "not reseau"` ne doit pas les sauter.
 - `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
-  par `AppTest` : les quatre sections dans l'ordre, puis le dépôt du DXF et du
-  tableau de Saint-Cyr, puis l'indice retrouvé dans le nom du dossier annoncé.
-  C'est le seul contrôle qui exécute `app.py` ; les tests des modules ne le
-  touchent pas, et une `NameError` y est restée invisible jusqu'à ce qu'un chef
-  de projet la rencontre.
+  par `AppTest` : les quatre sections dans l'ordre, le dépôt du DXF et du
+  tableau de Saint-Cyr, l'indice retrouvé dans le nom du dossier annoncé, et
+  surtout les **refus** — changer d'indice sans réimporter, générer sans
+  emprise, importer sans commune, déposer deux photos de même nom. C'est le seul
+  contrôle qui exécute `app.py` ; les tests des modules ne le touchent pas, et
+  une `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
+  rencontre.
 - `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
   syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
   qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle

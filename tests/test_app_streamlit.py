@@ -42,6 +42,28 @@ def _application(tmp_path, monkeypatch):
     return AppTest.from_file(str(APP), default_timeout=DELAI_S)
 
 
+def _image_png(couleur=(120, 140, 160)) -> bytes:
+    """Une image minuscule mais valide : `st.image` refuse des octets factices."""
+    import io
+
+    from PIL import Image
+
+    tampon = io.BytesIO()
+    Image.new("RGB", (8, 6), couleur).save(tampon, format="PNG")
+    return tampon.getvalue()
+
+
+def _deposer_photos(application, code: str, fichiers):
+    """Dépose plusieurs fichiers dans la ligne d'une pièce photographique."""
+    for televersement in application.get("file_uploader"):
+        if televersement.label.startswith(code):
+            return televersement.set_value(list(fichiers))
+    raise AssertionError(
+        f"Aucune ligne « {code} » parmi : "
+        + ", ".join(t.label for t in application.get("file_uploader"))
+    )
+
+
 def _televerser(application, libelle_partiel: str, chemin: Path, mime: str):
     """Dépose un fichier dans le téléversement dont le libellé porte ce texte."""
     for televersement in application.get("file_uploader"):
@@ -183,3 +205,169 @@ def test_changer_d_indice_sans_reimporter_refuse_d_ecrire(tmp_path, monkeypatch)
     annonces = [texte.value for texte in application.markdown]
     assert any("sortie/PV-SAINT-CYR-IND06/" in annonce for annonce in annonces)
     assert not any("sortie/PV-SAINT-CYR-IND05/" in annonce for annonce in annonces)
+
+
+def test_generer_sans_emprise_le_dit(tmp_path, monkeypatch):
+    """Le clic sans emprise cadastrale produit une erreur, pas un silence.
+
+    Relevé le 09/09/2026 : `_enregistrer_fichiers` rendait `None` sans un mot
+    quand aucun fichier n'était déposé, `_construire_projet` rendait `None` à
+    son tour, et le clic n'avait strictement aucun effet à l'écran. Un chef de
+    projet ne peut pas deviner ce qui manque devant un écran inchangé.
+    """
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("SAINT CYR")
+    application.run()
+
+    _cliquer(application, "Générer le dossier")
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    refus = [erreur.value for erreur in application.error]
+    assert any("emprise cadastrale" in message.lower() for message in refus), refus
+    assert not (tmp_path / "sortie").exists()
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
+def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
+    """Les avertissements passent bien par le conteneur réservé plus haut.
+
+    Ils sont rendus à l'emplacement des contrôles croisés mais remplis après le
+    bloc de coupe, faute de quoi ceux de la coupe, du profil et du terrain
+    arrivaient avec une exécution de retard. Ce test garde surtout contre le
+    risque inverse : qu'en déplaçant leur écriture on les perde tous.
+    """
+    application = _plan_depose(tmp_path, monkeypatch)
+    _cliquer(application, "Importer et contrôler")
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    messages = [avertissement.value for avertissement in application.warning]
+    assert any("emprise cadastrale" in message.lower() for message in messages), messages
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
+def test_le_cadre_de_l_apercu_est_refait_a_chaque_import(tmp_path, monkeypatch):
+    """Un nouvel import repart d'un cadre neuf, pas de celui du projet d'avant.
+
+    Le cadre n'était calculé que lorsqu'il valait `None`, et rien ne l'y
+    remettait : le second projet importé dans une même session se dessinait
+    dans le cadre et sur l'ortho du premier — un aperçu faux, à l'endroit
+    précis où le chef de projet vérifie que l'import a lu son plan.
+
+    Faute d'un second jeu réel dans le dépôt, le rejeu de deux projets n'est pas
+    possible ici : on contrôle que le cadre est bien produit, puis que le
+    gestionnaire d'import l'invalide avec les autres états dérivés.
+    """
+    application = _plan_depose(tmp_path, monkeypatch)
+    _cliquer(application, "Importer et contrôler")
+    application.run()
+    assert application.session_state["cadre_apercu_be"] is not None
+
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index('if st.button("Importer et contrôler"')
+    fin = source.index("import_be_courant = st.session_state.import_be")
+    gestionnaire = source[debut:fin]
+    for cle in ("coupe_be", "profil_be", "cadre_apercu_be"):
+        assert f"st.session_state.{cle} = None" in gestionnaire, cle
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
+def test_importer_sans_commune_est_refuse(tmp_path, monkeypatch):
+    """Sans commune, le plan n'est pas déposé : il n'a pas de dossier à lui.
+
+    `_nom_depot` se rabattait sur « projet » : les plans de tous les projets
+    encore sans nom atterrissaient dans `projets/projet/`, où les fichiers de
+    même nom s'écrasaient l'un l'autre sans un mot. Un repli silencieux, ce que
+    le dépôt interdit.
+    """
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("")
+    _televerser(application, "Plan BE", DXF, "application/dxf")
+    _televerser(
+        application,
+        "Tableau bilan",
+        TABLEAU,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    refus = [erreur.value for erreur in application.error]
+    assert any("commune" in message.lower() for message in refus), refus
+    assert not (tmp_path / "projets" / "projet").exists()
+    assert not (tmp_path / "projets").exists()
+
+
+def test_deux_photos_de_meme_nom_sont_refusees(tmp_path, monkeypatch):
+    """Deux fichiers de même nom dans une pièce s'écraseraient : on refuse.
+
+    Le dossier de la pièce nomme sa cible d'après le nom du fichier déposé. Deux
+    « vue.png » dans DP 7, et le second remplaçait le premier sur le disque sans
+    que rien ne le dise ; le dossier partait avec une vue de moins.
+    """
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("SAINT CYR")
+    _deposer_photos(
+        application,
+        "DP 7",
+        [
+            ("vue.png", _image_png((200, 120, 90)), "image/png"),
+            ("vue.png", _image_png((90, 120, 200)), "image/png"),
+        ],
+    )
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    refus = [erreur.value for erreur in application.error]
+    assert any("même nom" in message and "DP 7" in message for message in refus), refus
+
+    _cliquer(application, "Générer le dossier")
+    application.run()
+    assert any(
+        "même nom" in erreur.value for erreur in application.error
+    ), [e.value for e in application.error]
+    assert not (tmp_path / "sortie").exists()
+
+
+def test_une_insertion_paysagere_en_pdf_le_dit(tmp_path, monkeypatch):
+    """Un PDF déposé en DP 6 ne peut pas monter en page de garde, et on le dit.
+
+    Le dépôt accepte le PDF — c'est un format normal pour la pièce — mais la
+    page de garde attend une image. Sans message, le chef de projet croyait sa
+    couverture fournie et recevait le cadre tireté.
+    """
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("SAINT CYR")
+    _deposer_photos(
+        application,
+        "DP 6",
+        [("insertion.pdf", b"%PDF-1.4 factice", "application/pdf")],
+    )
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    messages = [avertissement.value for avertissement in application.warning]
+    assert any("PDF" in message and "page de garde" in message for message in messages), (
+        messages
+    )
+
+
+def test_la_couverture_se_reconnait_a_l_objet_et_non_au_nom():
+    """La page de garde prend l'insertion retenue, pas son homonyme d'une autre pièce.
+
+    `_enregistrer_photos` comparait les noms de fichiers, sur les trois pièces à
+    la fois : une photo de DP 7 appelée comme l'insertion retenue prenait sa
+    place en couverture, et le dossier partait avec une vue de l'existant au
+    lieu du projet fini.
+
+    Exercer la fonction demanderait une génération complète — emprise, fonds
+    IGN, contrat sur le disque. On contrôle donc la règle à la source : la
+    comparaison se fait sur l'objet déposé.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _enregistrer_photos(")
+    fin = source.index("def _enregistrer_fichiers(")
+    corps = source[debut:fin]
+    assert "if fichier is retenu:" in corps
+    assert "retenu.name" not in corps
