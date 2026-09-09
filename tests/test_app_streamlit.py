@@ -93,13 +93,27 @@ def test_le_depot_du_plan_ne_leve_pas(tmp_path, monkeypatch):
     assert (tmp_path / "projets" / "PV-SAINT-CYR" / TABLEAU.name).exists()
 
 
-@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
-def test_l_indice_du_tableau_entre_dans_le_nom_du_dossier(tmp_path, monkeypatch):
-    """Le dossier annoncé en section 4 porte l'indice choisi en section 2.
+def _cliquer(application, libelle_partiel: str):
+    """Clique le bouton dont le libellé porte ce texte."""
+    for bouton in application.button:
+        if libelle_partiel.lower() in bouton.label.lower():
+            return bouton.click()
+    raise AssertionError(
+        f"Aucun bouton « {libelle_partiel} » parmi : "
+        + ", ".join(b.label for b in application.button)
+    )
 
-    Sans lui, deux indices d'un même projet écrivaient dans le même dossier et
-    le second écrasait le premier — Sarnois en a deux.
-    """
+
+def _boite_indice(application):
+    """La liste déroulante de choix de l'indice du tableau bilan."""
+    for boite in application.selectbox:
+        if "tableau bilan" in boite.label.lower():
+            return boite
+    raise AssertionError("la liste de choix de l'indice n'est pas affichée")
+
+
+def _plan_depose(tmp_path, monkeypatch):
+    """Une application avec la commune saisie et le plan de Saint-Cyr déposé."""
     application = _application(tmp_path, monkeypatch).run()
     application.text_input[0].set_value("SAINT CYR")
     _televerser(application, "Plan BE", DXF, "application/dxf")
@@ -109,18 +123,63 @@ def test_l_indice_du_tableau_entre_dans_le_nom_du_dossier(tmp_path, monkeypatch)
         TABLEAU,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+    return application.run()
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
+def test_l_indice_ne_nomme_le_dossier_qu_une_fois_importe(tmp_path, monkeypatch):
+    """Le dossier porte l'indice de l'import, pas celui que la liste affiche.
+
+    Tant qu'on n'a pas importé, la liste n'est qu'une proposition : le dossier
+    ne porte pas encore d'indice, et la section 4 le dit.
+    """
+    application = _plan_depose(tmp_path, monkeypatch)
+
+    assert _boite_indice(application).value == "IND06"
+    assert "indice_tableau_bilan" not in application.session_state
+    assert any(
+        "n'a pas été importé" in legende.value for legende in application.caption
+    )
+
+    _cliquer(application, "Importer et contrôler")
     application.run()
 
-    indices = [
-        boite
-        for boite in application.selectbox
-        if "tableau bilan" in boite.label.lower()
-    ]
-    assert indices, "la boîte de choix de l'indice doit être affichée"
+    assert not application.exception, [str(e.value) for e in application.exception]
     assert application.session_state["indice_tableau_bilan"] == "IND06"
-
     annonces = [texte.value for texte in application.markdown]
     assert any(
         "PV SAINT CYR IND06" in annonce and "sortie/PV-SAINT-CYR-IND06/" in annonce
         for annonce in annonces
     ), [a for a in annonces if "sortie/" in a]
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="DXF de référence absent")
+def test_changer_d_indice_sans_reimporter_refuse_d_ecrire(tmp_path, monkeypatch):
+    """Déplacer la liste après l'import ne déplace pas la cible de l'écriture.
+
+    Relevé le 09/09/2026 : la liste déroulante nommait le dossier de sortie
+    alors que l'import en mémoire était celui de l'indice précédent. Écrire
+    déposait la géométrie d'IND06 dans `sortie/…-IND05/`, en supprimant le
+    GeoPackage qui s'y trouvait — l'écrasement même que l'indice au nom devait
+    empêcher, et sous une étiquette fausse.
+    """
+    application = _plan_depose(tmp_path, monkeypatch)
+    _cliquer(application, "Importer et contrôler")
+    application.run()
+    assert application.session_state["indice_tableau_bilan"] == "IND06"
+
+    _boite_indice(application).set_value("IND05")
+    application.run()
+
+    # Le dossier reste celui de l'import : la liste ne le renomme pas.
+    assert application.session_state["indice_tableau_bilan"] == "IND06"
+    refus = [erreur.value for erreur in application.error]
+    assert any(
+        "IND05" in message and "IND06" in message and "Importer et contrôler" in message
+        for message in refus
+    ), refus
+    # Et la section 4 continue de nommer le dossier de l'import, pas celui de
+    # la liste : c'est là que le chef de projet lit ce qu'il va produire.
+    annonces = [texte.value for texte in application.markdown]
+    assert any("sortie/PV-SAINT-CYR-IND06/" in annonce for annonce in annonces)
+    assert not any("sortie/PV-SAINT-CYR-IND05/" in annonce for annonce in annonces)

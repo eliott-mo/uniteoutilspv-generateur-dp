@@ -132,7 +132,7 @@ def _nom_depot(commune: str) -> str:
 
 
 def _nom_dossier(commune: str) -> str:
-    """Identifiant du dossier produit : la commune et l'indice du tableau bilan.
+    """Identifiant du dossier produit : la commune et l'indice **importé**.
 
     Une fonction, et non une variable posée en tête de script : l'indice est
     choisi au milieu de la section 2, et tout ce qui écrit dans `sortie/` vient
@@ -140,6 +140,11 @@ def _nom_dossier(commune: str) -> str:
     Streamlit rejoue le script entier à chaque interaction — et le composer plus
     bas, en section 4, laissait la section 2 sans nom du tout : c'est la
     `NameError` du 09/09/2026, levée dès le dépôt du DXF.
+
+    L'indice lu ici est celui que l'import a **réellement lu**, pas celui que la
+    liste déroulante affiche. Les confondre suffisait à écrire la géométrie d'un
+    indice dans le dossier d'un autre : changer la liste sans recliquer sur
+    « Importer et contrôler » laissait l'import en place et déplaçait la cible.
     """
     indice = st.session_state.get("indice_tableau_bilan")
     return identifiant_de_dossier(nom_de_projet(commune, indice)) or "projet"
@@ -430,6 +435,15 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
         st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
     )
 
+#: L'indice affiché par la liste déroulante, pour cette exécution seulement.
+#:
+#: Il n'est pas encore celui de l'import : tant qu'on n'a pas recliqué sur
+#: « Importer et contrôler », l'import en mémoire est celui de l'indice
+#: précédent. Les confondre écrivait sa géométrie dans le dossier du nouvel
+#: indice, en écrasant ce qui s'y trouvait — l'écrasement même que l'indice au
+#: nom devait empêcher (relecture du 09/09/2026).
+indice_choisi = None
+
 if fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf, commune)
     chemin_tableau = _deposer(fichier_tableau, commune)
@@ -454,8 +468,8 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 "tableau ne sont probablement pas de la même version.",
                 icon="🚫",
             )
-        # Retenu pour nommer le dossier de sortie : deux indices d'un même
-        # projet sont deux dossiers, et le second écrasait le premier.
+        # Une proposition, pas encore une décision : c'est l'import qui
+        # tranche, plus bas, et c'est lui qui nomme le dossier de sortie.
         indice = st.selectbox(
             "Colonne du tableau bilan à lire",
             indices,
@@ -463,7 +477,7 @@ if fichier_dxf is not None and fichier_tableau is not None:
             help="Le nom du DXF sert à proposer l'indice ; la confirmation reste "
             "obligatoire, un export peut être renommé.",
         )
-        st.session_state["indice_tableau_bilan"] = indice
+        indice_choisi = indice
 
         with st.expander("Correspondance des calques — modifiable", expanded=False):
             st.caption(
@@ -544,9 +558,11 @@ if fichier_dxf is not None and fichier_tableau is not None:
             st.session_state.coupe_be = None
             st.session_state.profil_be = None
             emprise_cadastrale = None
-            chemin_emprise = _enregistrer_fichiers(
-                _nom_dossier(commune), fichiers_emprise
-            )
+            # Le nom se compose ici avec l'indice qu'on est en train
+            # d'importer : `_nom_dossier` porte encore celui de l'import
+            # précédent, et le premier import n'en a aucun.
+            nom_importe = identifiant_de_dossier(nom_de_projet(commune, indice))
+            chemin_emprise = _enregistrer_fichiers(nom_importe, fichiers_emprise)
             if chemin_emprise is not None:
                 emprise_cadastrale = charger_emprise(chemin_emprise).geometrie
             st.session_state.import_be = importer_be(
@@ -557,9 +573,14 @@ if fichier_dxf is not None and fichier_tableau is not None:
                 emprise_cadastrale=emprise_cadastrale,
                 seuil_puissance_mwc=SEUIL_DP_MWC,
             )
+            # Ce que l'import a lu, et non ce que la liste affiche : à partir
+            # d'ici, c'est cet indice qui nomme le dossier.
+            st.session_state["indice_tableau_bilan"] = (
+                st.session_state.import_be.tableau.indice
+            )
             st.session_state.emprise_cadastrale_be = emprise_cadastrale
             _reprendre_import_precedent(
-                DOSSIER_SORTIE / _nom_dossier(commune),
+                DOSSIER_SORTIE / nom_importe,
                 st.session_state.import_be,
                 emprise_cadastrale,
             )
@@ -825,7 +846,17 @@ if import_be_courant is not None:
             )
 
     st.markdown("### Validation")
-    if import_be_courant.bloquants:
+    if indice_choisi is not None and indice_choisi != tableau.indice:
+        st.error(
+            f"La liste affiche l'indice {indice_choisi}, l'import en mémoire "
+            f"est celui de {tableau.indice}. Écrire maintenant déposerait la "
+            f"géométrie de {tableau.indice} dans `sortie/"
+            f"{identifiant_de_dossier(nom_de_projet(commune, indice_choisi))}/`, "
+            f"en écrasant ce qui s'y trouve. Recliquez sur « Importer et "
+            f"contrôler ».",
+            icon="🚫",
+        )
+    elif import_be_courant.bloquants:
         st.error(
             "Des contrôles croisés bloquants subsistent : corrigez les fichiers "
             "d'entrée. Les assouplir reviendrait à déposer un dossier faux.",
