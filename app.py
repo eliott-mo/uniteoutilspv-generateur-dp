@@ -352,8 +352,10 @@ with colonne_alti:
         "Relevé altimétrique (.txt, facultatif)",
         type=["txt", "csv"],
         help="Repli quand le RGE ALTI est indisponible, ou relevé drone plus "
-        "précis. Trois colonnes « X Y Z » en Lambert 93, ou deux colonnes "
-        "« abscisse Z ». Ce fichier prend le pas sur l'appel automatique.",
+        "précis. **Trois colonnes « X Y Z » en Lambert 93**, et elles seules : "
+        "la forme à deux colonnes a été retirée le 03/09/2026, rien n'y "
+        "distinguant une abscisse d'un matricule. Ce fichier prend le pas sur "
+        "l'appel automatique.",
     )
 
 
