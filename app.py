@@ -25,15 +25,14 @@ preparer_cairo()
 # les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
 # dans leur module, pour ne pas toucher au lot 2.
 from dp_socle.apercu_be import (
+    ORDRE_DESSIN,
+    STYLES,
     URL_TUILES_ORTHO,
-    apercu_plan,
     bornes_wgs84,
     en_wgs84,
     legende_presente,
     trace_l93,
 )
-from dp_socle.apercu_be import cadre_apercu as cadre_apercu_be
-from dp_socle.apercu_be import fond_apercu as fond_apercu_be
 from dp_socle.assemblage import generer_dossier
 from dp_socle.coupe import (
     controler_coherence,
@@ -323,6 +322,47 @@ def _icone(statut: str) -> str:
     return ICONES_STATUT.get(statut, "❔")
 
 
+#: Opacité des remplissages sur la carte, plus basse que sur la planche.
+#:
+#: La planche DP 2 remplit à 235/255 : elle se lit sur papier, sans fond. Ici
+#: l'ortho doit rester visible sous les géométries — c'est ce qui permet de
+#: placer la coupe par rapport au terrain, aux haies et aux bâtiments voisins.
+OPACITE_CARTE = 0.68
+
+#: Les modules ne sont pas dessinés sur la carte.
+#:
+#: Ils redisent ce que la silhouette des rangées montre déjà, et un plan qui les
+#: porte en compte des milliers : leur trame fait la lisibilité de la planche
+#: imprimée, elle ne ferait ici que ralentir le navigateur au moment où le chef
+#: de projet trace sa coupe.
+CATEGORIES_HORS_CARTE = ("modules_pv",)
+
+
+def _teinte(composantes) -> str:
+    """Couleur CSS d'un triplet RVB de la palette DP."""
+    rouge, vert, bleu = composantes
+    return f"#{rouge:02x}{vert:02x}{bleu:02x}"
+
+
+def _style_carte(style) -> dict:
+    """Style Leaflet d'une catégorie, aux couleurs de la légende DP.
+
+    Les mêmes teintes que la planche produite : ce que le chef de projet voit
+    ici est ce qu'il retrouvera sur DP 2, à l'opacité près.
+    """
+    dessin = {
+        "color": _teinte(style.filet),
+        "weight": max(style.epaisseur, 1),
+        "fill": False,
+        "fillOpacity": 0.0,
+    }
+    if style.remplissage is not None:
+        dessin["fill"] = True
+        dessin["fillColor"] = _teinte(style.remplissage)
+        dessin["fillOpacity"] = OPACITE_CARTE
+    return dessin
+
+
 def _tableau_controles(controles) -> None:
     """Rend les contrôles croisés, quel que soit leur producteur."""
     st.dataframe(
@@ -387,7 +427,6 @@ for cle, defaut in (
     ("coupe_be", None),
     ("profil_be", None),
     ("correspondance_be", None),
-    ("cadre_apercu_be", None),
 ):
     if cle not in st.session_state:
         st.session_state[cle] = defaut
@@ -451,11 +490,6 @@ def _calques_caches(chemin: str, taille: int, charte: str):
     rien à l'écran, qui continuait de servir l'appariement d'avant.
     """
     return calques_du_dxf(chemin)
-
-
-@st.cache_data(show_spinner="Téléchargement de l'ortho IGN…")
-def _fond_be_cache(cadre: tuple, largeur_px: int = 1100):
-    return fond_apercu_be(cadre, largeur_px=largeur_px)
 
 
 def _proposer_la_coupe(import_be) -> None:
@@ -706,11 +740,6 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
         if st.button("Importer et contrôler", type="primary", width="stretch"):
             st.session_state.coupe_be = None
             st.session_state.profil_be = None
-            # Le cadre aussi : il n'était calculé qu'une fois par session, et le
-            # second projet importé se dessinait dans le cadre et sur l'ortho du
-            # premier — un aperçu faux, à l'endroit précis où le chef de projet
-            # vérifie que l'import a bien lu son plan.
-            st.session_state.cadre_apercu_be = None
             emprise_cadastrale = None
             # Le nom se compose ici avec l'indice qu'on est en train
             # d'importer : `_nom_dossier` porte encore celui de l'import
@@ -773,8 +802,11 @@ if import_be_courant is not None and commune.strip():
         "Puissance", f"{tableau.modules['puissance_mwc']:.5f} MWc".replace(".", ",")
     )
 
-    st.markdown("### Contrôles croisés")
-    _tableau_controles(import_be_courant.controles)
+    # Les bloquants d'abord, seuls, et rien d'autre au premier plan : ce sont
+    # les seuls contrôles sur lesquels le chef de projet ait quelque chose à
+    # faire — appeler le bureau d'études. Le tableau complet des recoupements
+    # plan/tableau, lui, est une quinzaine de lignes qu'il ne peut pas corriger
+    # et qui noyaient l'écran ; il reste consultable, replié.
     for controle in import_be_courant.bloquants:
         st.error(f"{controle.libelle} — {controle.message}", icon="🚫")
     # Réservé ici, rempli une fois la coupe traitée. `avertissements` compte
@@ -783,6 +815,17 @@ if import_be_courant is not None and commune.strip():
     # script les montrait avec une exécution de retard, et le chef de projet qui
     # trace sa coupe puis valide dans la foulée ne les voyait jamais.
     emplacement_avertissements = st.container()
+
+    with st.expander(
+        f"Le détail des contrôles croisés ({len(import_be_courant.controles)} "
+        "recoupements entre le plan et le tableau)"
+    ):
+        st.caption(
+            "Ce que le plan porte, ce que le tableau déclare, et l'écart admis. "
+            "Rien à corriger ici : un écart se traite avec le bureau d'études, "
+            "sur ses fichiers."
+        )
+        _tableau_controles(import_be_courant.controles)
 
     with st.expander("Paramètres extraits du tableau bilan"):
         for titre, valeurs in (
@@ -841,9 +884,15 @@ if import_be_courant is not None and commune.strip():
             )
 
     # -----------------------------------------------------------------------
-    # Ligne de coupe A-A'
+    # Le plan importé, et la coupe qui se trace dessus
     # -----------------------------------------------------------------------
-    st.markdown("### Ligne de coupe A-A'")
+    #
+    # Une seule carte, et non un aperçu statique suivi d'une carte à tracer :
+    # les deux montraient presque la même chose, et le chef de projet traçait sa
+    # coupe sur des tables et une clôture sans voir ce qu'elle allait couper. Il
+    # procédait par essai-erreur — tracer, corriger, descendre lire l'aperçu,
+    # remonter. Ici il trace sur le plan lui-même, aux couleurs de la planche.
+    st.markdown("### Le plan importé, et la ligne de coupe A-A'")
     st.caption(
         "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
         "et posée là où elle traverse le plus de tables. Si elle vous convient, "
@@ -871,32 +920,47 @@ if import_be_courant is not None and commune.strip():
         name="Ortho IGN",
         max_zoom=21,
     ).add_to(carte)
-    for couche, style in (
-        ("tables_pv", {"color": "#0000ff", "weight": 1, "fillColor": "#97caca"}),
-        ("cloture", {"color": "#ff0000", "weight": 3, "fill": False}),
-    ):
-        collection = en_wgs84(plan.geometries(couche))
-        if collection["features"]:
-            folium.GeoJson(
-                collection,
-                style_function=lambda _trait, style=style: style,
-                name=couche,
-            ).add_to(carte)
-    # La coupe déjà retenue est montrée sur la carte : sans elle, l'écran
-    # inviterait à retracer ce qui existe déjà.
+
+    # L'emprise cadastrale sous le reste : c'est le cadre foncier, pas un objet
+    # du projet.
+    emprise_cadastrale = st.session_state.get("emprise_cadastrale_be")
+    if emprise_cadastrale is not None:
+        folium.GeoJson(
+            en_wgs84([emprise_cadastrale]),
+            style_function=lambda _trait: {
+                "color": "#ffd700",
+                "weight": 3,
+                "fill": False,
+            },
+            name="Emprise cadastrale",
+        ).add_to(carte)
+
+    # Dans l'ordre de la planche : ce qui se recouvre se recouvre pareil ici.
+    for categorie in ORDRE_DESSIN:
+        if categorie in CATEGORIES_HORS_CARTE:
+            continue
+        style = STYLES.get(categorie)
+        if style is None:
+            continue
+        collection = en_wgs84(plan.geometries(categorie))
+        if not collection["features"]:
+            continue
+        folium.GeoJson(
+            collection,
+            style_function=lambda _trait, style=style: _style_carte(style),
+            name=style.libelle,
+        ).add_to(carte)
+
+    # La coupe retenue, et elle seule. Le tracé d'origine était montré à côté,
+    # en orange : le chef de projet qui traçait volontairement de travers voyait
+    # son trait oblique persister et croyait que rien n'avait été redressé.
     if st.session_state.coupe_be is not None:
-        for geometrie, couleur in (
-            (st.session_state.coupe_be.trace_initial, "#ff8c00"),
-            (st.session_state.coupe_be.geometrie, "#000000"),
-        ):
-            folium.GeoJson(
-                en_wgs84([geometrie]),
-                style_function=lambda _trait, couleur=couleur: {
-                    "color": couleur,
-                    "weight": 4,
-                },
-                name="coupe",
-            ).add_to(carte)
+        folium.GeoJson(
+            en_wgs84([st.session_state.coupe_be.geometrie]),
+            style_function=lambda _trait: {"color": "#000000", "weight": 4},
+            name="Coupe A-A'",
+        ).add_to(carte)
+
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
     carte.fit_bounds([[sud, ouest], [nord, est]])
     Draw(
@@ -912,8 +976,30 @@ if import_be_courant is not None and commune.strip():
         edit_options={"edit": False, "remove": True},
     ).add_to(carte)
 
-    resultat_carte = st_folium(carte, width=None, height=520, key="carte_coupe_be")
+    # La clé porte un compteur : elle change à chaque coupe retenue, ce qui
+    # remonte la carte à neuf. Sans cela le trait tracé par le chef de projet
+    # restait affiché par Leaflet, par-dessus la coupe redressée, et le bouton
+    # « Corriger » se represéntait indéfiniment.
+    resultat_carte = st_folium(
+        carte,
+        width=None,
+        height=560,
+        key=f"carte_coupe_be_{st.session_state.get('tour_carte', 0)}",
+    )
     trace = trace_l93(resultat_carte)
+
+    st.caption(
+        "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier de "
+        "référence HOCH « Les Islettes » : "
+        + " · ".join(
+            f"{style.libelle} ({nombre})"
+            for _, style, nombre in legende_presente(plan)
+        )
+        + ". Jaune : emprise cadastrale. Noir : coupe A-A' retenue. Les modules "
+        "ne sont pas dessinés ici — la silhouette des rangées dit la même chose "
+        "et un plan en compte des milliers. Les couleurs du DXF ne sont pas "
+        "reprises, les codes ACI y sont des couleurs de travail."
+    )
 
     if trace is not None and st.button("Corriger et relever le profil", width="stretch"):
         try:
@@ -936,6 +1022,8 @@ if import_be_courant is not None and commune.strip():
             import_be_courant.terrain_be = controler_terrain_embarque(
                 st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
             )
+            st.session_state["tour_carte"] = st.session_state.get("tour_carte", 0) + 1
+            st.rerun()
         except ErreurDP as erreur:
             st.session_state.coupe_be = None
             st.error(f"{type(erreur).__name__} : {erreur}")
@@ -948,39 +1036,6 @@ if import_be_courant is not None and commune.strip():
     with emplacement_avertissements:
         for message in import_be_courant.avertissements:
             st.warning(message, icon="⚠️")
-
-    # -----------------------------------------------------------------------
-    # Aperçu et validation
-    # -----------------------------------------------------------------------
-    st.markdown("### Aperçu des géométries importées")
-    try:
-        emprise_cadastrale = st.session_state.get("emprise_cadastrale_be")
-        if st.session_state.cadre_apercu_be is None:
-            st.session_state.cadre_apercu_be = cadre_apercu_be(plan, emprise_cadastrale)
-        image = apercu_plan(
-            plan,
-            ligne_coupe=st.session_state.coupe_be,
-            emprise_cadastrale=emprise_cadastrale,
-            fond=_fond_be_cache(st.session_state.cadre_apercu_be),
-            cadre=st.session_state.cadre_apercu_be,
-        )
-        # Deux tiers de la largeur : en pleine page l'aperçu écrasait tout le
-        # reste de l'écran sans rien montrer de plus.
-        colonne_apercu, _ = st.columns([2, 1])
-        colonne_apercu.image(image, width="stretch")
-        st.caption(
-            "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier "
-            "de référence HOCH « Les Islettes » : "
-            + " · ".join(
-                f"{style.libelle} ({nombre})"
-                for _, style, nombre in legende_presente(plan)
-            )
-            + ". Jaune : emprise cadastrale. Orange : tracé initial de la coupe. "
-            "Noir : coupe corrigée. Les couleurs du DXF ne sont pas reprises, "
-            "les codes ACI y sont des couleurs de travail."
-        )
-    except ErreurDP as erreur:
-        st.error(f"{type(erreur).__name__} : {erreur}")
 
     coupe = st.session_state.coupe_be
     profil = st.session_state.profil_be

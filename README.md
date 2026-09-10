@@ -59,6 +59,16 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    Qui la trouve bien placée n'a rien à tracer ; qui veut la déplacer trace un
    segment *globalement* perpendiculaire aux rangées, l'outil se chargeant du
    reste — il impose la direction exacte et ne retient du tracé que sa position.
+
+   **Le tracé se fait sur le plan importé lui-même**, aux couleurs de la
+   légende DP, sur l'ortho IGN. L'écran portait auparavant deux vues presque
+   identiques — une carte à tracer qui ne montrait que les tables et la
+   clôture, puis un aperçu statique de tout le plan : on traçait sans voir ce
+   que la ligne allait couper, puis on descendait vérifier. Les modules sont
+   les seuls écartés de la carte : la silhouette des rangées dit la même chose,
+   et un plan en compte des milliers. Seule la coupe **retenue** est dessinée,
+   jamais le tracé d'origine — le voir persister donnait à croire que rien
+   n'avait été redressé.
 3. **Photographies et photomontages** — une ligne par pièce, DP 6, DP 7 et DP 8.
    Ce sont trois pièces distinctes, qui ne montrent pas la même chose et ne se
    rangent pas au même endroit du dossier : les mélanger obligerait à les
@@ -96,6 +106,12 @@ rejoue `app.py` de haut en bas à chaque interaction, l'indice est choisi au
 milieu de la section 2, et une variable serait en retard d'une exécution en tête
 de script — ou absente en section 2 si on la composait en section 4, ce qui a
 levé une `NameError` au dépôt du DXF le 09/09/2026.
+
+**Les contrôles croisés sont repliés.** Une quinzaine de recoupements entre le
+plan et le tableau, sur lesquels le chef de projet n'a pas la main : un écart se
+traite avec le bureau d'études, sur ses fichiers. Seuls les **bloquants**
+restent au premier plan, parce qu'ils arrêtent le dossier et qu'il faut savoir
+lequel appeler. Le reste est consultable dans un dépliant.
 
 **Ce que l'application refuse.** Elle ne devine pas et ne se rabat sur rien :
 

@@ -354,27 +354,59 @@ def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_le_cadre_de_l_apercu_est_refait_a_chaque_import(tmp_path, monkeypatch):
-    """Un nouvel import repart d'un cadre neuf, pas de celui du projet d'avant.
+def test_le_plan_importe_ne_s_affiche_qu_une_fois(tmp_path, monkeypatch):
+    """La coupe se trace sur le plan lui-même, et non à côté d'un aperçu.
 
-    Le cadre n'était calculé que lorsqu'il valait `None`, et rien ne l'y
-    remettait : le second projet importé dans une même session se dessinait
-    dans le cadre et sur l'ortho du premier — un aperçu faux, à l'endroit
-    précis où le chef de projet vérifie que l'import a lu son plan.
-
-    Faute d'un second jeu réel dans le dépôt, le rejeu de deux projets n'est pas
-    possible ici : on contrôle que le cadre est bien produit, puis que le
-    gestionnaire d'import l'invalide avec les autres états dérivés.
+    L'écran portait deux vues presque identiques : une carte à tracer, qui ne
+    montrait que les tables et la clôture, puis un aperçu statique de tout le
+    plan. Le chef de projet traçait donc sa coupe sans voir ce qu'elle allait
+    couper, et procédait par essai-erreur — tracer, corriger, descendre lire
+    l'aperçu, remonter.
     """
     application = _plan_importe(tmp_path, monkeypatch)
-    assert application.session_state["cadre_apercu_be"] is not None
 
+    assert not application.exception, [str(e.value) for e in application.exception]
+    # Plus aucune image dans la section 2 : la carte porte tout.
+    assert not application.get("imgs")
+
+
+def test_la_carte_porte_toutes_les_categories_de_la_planche():
+    """La carte dessine le plan aux couleurs de la légende DP, pas deux calques.
+
+    Elle ne montrait que `tables_pv` et `cloture`, en dur : ni les pistes, ni les
+    postes, ni la citerne, ni l'emprise cadastrale. Le contrôle se fait à la
+    source — le contenu d'un composant `st_folium` n'est pas lisible depuis
+    `AppTest`.
+    """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index('if st.button("Importer et contrôler"')
-    fin = source.index("import_be_courant = st.session_state.import_be")
-    gestionnaire = source[debut:fin]
-    for cle in ("coupe_be", "profil_be", "cadre_apercu_be"):
-        assert f"st.session_state.{cle} = None" in gestionnaire, cle
+    debut = source.index("### Le plan importé, et la ligne de coupe")
+    fin = source.index("if trace is not None and st.button")
+    bloc = source[debut:fin]
+
+    assert "for categorie in ORDRE_DESSIN:" in bloc
+    assert "_style_carte(style)" in bloc
+    assert "emprise_cadastrale" in bloc
+    # Et les modules en sont écartés : un plan en compte des milliers.
+    assert "CATEGORIES_HORS_CARTE" in bloc
+
+
+def test_seule_la_coupe_redressee_est_montree():
+    """Le tracé d'origine ne s'affiche plus à côté de la coupe corrigée.
+
+    Relevé le 10/09/2026 par le chef de projet : tracer volontairement de
+    travers, corriger, et voir son trait oblique persister sur la carte donnait
+    à croire que rien n'avait été redressé. La carte remonte aussi à neuf après
+    chaque correction, faute de quoi Leaflet gardait le trait dessiné à la main
+    par-dessus la ligne retenue.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("### Le plan importé, et la ligne de coupe")
+    fin = source.index("with emplacement_avertissements:")
+    bloc = source[debut:fin]
+
+    assert "trace_initial" not in bloc
+    assert 'st.session_state["tour_carte"]' in bloc
+    assert "key=f\"carte_coupe_be_{st.session_state.get('tour_carte', 0)}\"" in bloc
 
 
 # ---------------------------------------------------------------------------
