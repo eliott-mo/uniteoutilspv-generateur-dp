@@ -59,7 +59,7 @@ Prototype **non versionné** (aucun `.git`), mono-cas, sans `requirements.txt`. 
 
 ## Décisions prises en amont
 
-Sept points arbitrés avant rédaction. Ils ne sont pas à rediscuter ni à « améliorer ».
+Dix points arbitrés avant rédaction. Ils ne sont pas à rediscuter ni à « améliorer ».
 
 ### D0 — La carte de `photos-geoloc` est une entrée de premier choix
 
@@ -269,6 +269,95 @@ Un repère numéroté à la position, et un cône de visée quand le cap est con
 **Piège mesuré, à traiter dès la conception** — `photomontage/RESULTATS_validation.md:97-100` : GPS Map Camera rogne la photo en 9:16 alors que le capteur sort du 3:4. La règle « 24 mm = largeur » donne alors une focale en pixels fausse, et donc un demi-champ faux. Détecter le rognage par le rapport d'image et calculer sur le côté non rogné.
 
 À défaut de focale connue, ne pas inventer un champ de vue : dessiner le repère seul, et le dire.
+
+### D7 — Les photos du rapport s'affectent sur vignettes, pas sur numéros
+
+Un rapport de visite porte des dizaines de points ; une pièce DP en demande une
+ou deux. Il faut donc choisir, et **un numéro seul ne dit pas ce qu'une photo
+montre**.
+
+Une **galerie de vignettes**, donc, chacune portant le numéro qu'elle a sur la
+carte du rapport — `generation_html.py:1169` trie les points visibles par
+`ordre`, et c'est ce rang que le chef de projet a vu sur ses marqueurs. C'est son
+seul repère commun entre les deux écrans : le lui retirer l'obligerait à
+rouvrir sa carte à côté.
+
+Sous chaque vignette, une liste d'affectation, **proposée puis corrigée** :
+
+> `(ignorer)` · `DP 7` · `DP 8` · `DP 6 — vue 1, image brute` · …
+
+La proposition se calcule. DP 7 est « l'environnement **proche** », DP 8 « le
+paysage **lointain** » : c'est une distance, et nous avons l'emprise des deux
+côtés — la nôtre en section 1, celle du rapport dans son bloc JSON. Chaque point
+de vue se range donc seul, et le chef de projet ne corrige que ce qui n'est pas
+évident.
+
+C'est le geste de la **correspondance des calques** de la section 2 : proposée
+par la charte de nommage, modifiable, et ce qui reste sur « (ignorer) » n'entre
+pas. Même idiome, déjà éprouvé dans cette application, déjà connu du chef de
+projet. Ne pas en inventer un autre.
+
+Trois règles qui suivent :
+
+- les points `masque: true` ne sont pas proposés — ils sont en corbeille ;
+- un point sans cap donne un repère sans cône, sans que ce soit une erreur ;
+- la numérotation du dossier repart par pièce — `PC7-1`, `PC7-2` — sans reprendre
+  celle du rapport, qui compte tous les points de la visite et n'a pas le même
+  sens dans le dossier.
+
+**Le rapport ne fournit jamais un photomontage.** Un photomontage est un rendu :
+il n'est allé sur aucune visite. Le rapport donne les photographies de DP 7,
+celles de DP 8, et l'**image brute** d'une vue de DP 6 — le volet (i) de D5. Les
+volets (ii) et (iii) viennent du prestataire et se déposent à part.
+
+### D8 — Le rapport est une importation, pas un stockage
+
+L'application tourne sur Streamlit Community Cloud : 690 Mo garantis, 2,7 Go au
+maximum, et la génération d'un dossier culmine déjà à 367 Mo mesurés — 523 Mo à
+300 dpi. Une carte de quarante photos pèse une vingtaine de mégaoctets de base64.
+Il n'est donc pas question de la garder en session.
+
+La règle :
+
+1. lire le fichier **une fois**, en extraire le bloc JSON et n'en garder que les
+   **métadonnées** — `id`, `nom`, `ordre`, `lat`, `lon`, `cap`, `precision_m` ;
+2. ne décoder les images qu'à la demande, en **vignettes réduites** pour la
+   galerie ;
+3. à l'affectation, écrire les seules photos retenues dans
+   `projets/{nom}/DP_6|DP_7|DP_8/`, comme n'importe quelle photo déposée ;
+4. **oublier le rapport.** Il ne survit pas à l'affectation.
+
+Le dossier ne voit donc jamais qu'un chemin de fichier, celui qu'il connaît
+déjà. Pas de second chemin de traitement selon la provenance, et rien de lourd
+qui traîne en session.
+
+`photos-geoloc` a rencontré ce problème avant nous et l'a mesuré : voir ses
+commits `0edafc7` « Lire la carte deposee en octets, sans jamais la decoder »,
+`79fd5ef` « Ecrire le gabarit en ASCII : quatre fois moins de memoire par
+carte », `cf21784` « Borner le cache des apercus et ramasser les dossiers
+abandonnes ». **Lire ces trois-là avant d'écrire la lecture du fichier** : les
+techniques y sont établies sur mesure, pas sur intuition.
+
+### D9 — Une photo hors rapport se place d'un trait sur la carte
+
+Il faut pouvoir ajouter une photo que le rapport ne contient pas. Ce n'est pas un
+cas marginal, c'est le cas normal de DP 6 : le photomontage n'a jamais été sur le
+terrain, et l'image brute peut venir d'ailleurs qu'une visite.
+
+Le geste existe déjà dans l'application. La carte de la section 2 porte
+`folium.plugins.Draw`, aujourd'hui restreint à la polyligne pour la coupe A-A'.
+Or **un trait donne exactement les deux valeurs qu'un point de vue demande** :
+son origine est la position, sa direction est le cap. Une seule geste pour les
+deux, sur le plan importé, aux couleurs de la planche.
+
+C'est aussi, mot pour mot, le geste que `photos-geoloc` appelle **🎯 Viser** — le
+chef de projet le connaît, et il désigne là-bas la même chose : non pas où est la
+photo, mais ce qu'elle regarde.
+
+Pour DP 6, un seul trait sert toute la vue : les volets (ii) et (iii) héritent du
+point de vue du volet (i), puisque c'est la même prise de vue (D3).
+
+Ne pas offrir de saisie de coordonnées. Jamais.
 
 ---
 
