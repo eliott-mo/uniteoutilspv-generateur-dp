@@ -331,12 +331,65 @@ Le dossier ne voit donc jamais qu'un chemin de fichier, celui qu'il connaît
 déjà. Pas de second chemin de traitement selon la provenance, et rien de lourd
 qui traîne en session.
 
-`photos-geoloc` a rencontré ce problème avant nous et l'a mesuré : voir ses
-commits `0edafc7` « Lire la carte deposee en octets, sans jamais la decoder »,
-`79fd5ef` « Ecrire le gabarit en ASCII : quatre fois moins de memoire par
-carte », `cf21784` « Borner le cache des apercus et ramasser les dossiers
-abandonnes ». **Lire ces trois-là avant d'écrire la lecture du fichier** : les
-techniques y sont établies sur mesure, pas sur intuition.
+#### Ce que `photos-geoloc` a déjà mesuré, et qui s'applique ici
+
+Le dépôt voisin a rencontré ce problème avant nous, s'est fait **couper par
+l'hébergeur pour dépassement mémoire**, et a mesuré chaque poste. Trois commits
+portent les techniques ; ils sont à lire avant d'écrire la lecture du fichier.
+
+`0edafc7` « Lire la carte deposee en octets, sans jamais la decoder » — pic de
+**78 à 26 Mo** sur 40 photos. La leçon la plus transposable est dans son message :
+sur Streamlit, **un fichier déposé est relu à chaque exécution du script**. Tout
+décodage coûteux est donc payé à chaque interaction, pas une fois. Le remède est
+de rester en **octets** de bout en bout — `_marqueurs()`
+(`generation_html.py:466-479`) prend d'ailleurs déjà le type du document reçu, et
+`json.loads` accepte les octets.
+
+`79fd5ef` « Ecrire le gabarit en ASCII » — une chaîne Python a une **largeur
+uniforme**, dictée par son caractère le plus large : six emoji dans le gabarit
+faisaient stocker des millions de caractères de base64 sur 4 octets pièce. Carte
+de 13 Mo : **52 Mo en RAM avant, 13 Mo après** ; pic d'assemblage **130 → 39 Mo**.
+
+`cf21784` « Borner le cache des apercus » — un `@st.cache_data` sans
+`max_entries` gardait une image décodée par photo inspectée, ~3 Mo pièce, dans un
+cache **global à toutes les sessions** : 100 photos inspectées dans la journée,
+300 Mo qui ne redescendent qu'au redémarrage.
+
+#### Le piège que nous héritons, et qu'il faut traiter
+
+`extraire_donnees()` (`generation_html.py:558-620`) **rend les images avec les
+métadonnées** : chaque `points[i]["image"]` porte le base64 complet, et il
+n'existe aucune variante allégée — `grep '"image"'` ne donne que trois
+occurrences dans tout le dépôt. Appeler la fonction telle quelle met donc la
+carte entière en mémoire.
+
+Pire : `html[debut:fin]` **recopie** le bloc, puis `json.loads` en fait un `str`.
+Or Python échappe les accents à l'écriture, mais **`JSON.stringify` non** — une
+carte réenregistrée depuis le navigateur porte ses accents en clair. C'est le
+mécanisme de `79fd5ef` qui se retourne contre le lecteur : une carte de 13 Mo
+coûte alors **26 Mo, et 52 s'il y a un emoji** dans un commentaire ou un titre.
+
+Trois voies, de la plus sûre à la plus économe :
+
+1. **Purger après coup** — `p.pop("image", None)`. Simple, mais le pic est déjà
+   payé. Acceptable si l'on tolère 40 à 50 Mo transitoires.
+2. **Élaguer avant de parser** — substituer la valeur de `"image"` sur les
+   octets, puis `json.loads`. Deux appuis dans le format actuel : le base64 n'a
+   que `[A-Za-z0-9+/=]`, et `image` est la **dernière clé** de chaque point. Vrai
+   aujourd'hui, **non garanti par le format** : à traiter comme une optimisation,
+   avec repli sur (1) si la substitution ne rend rien.
+3. **Ne jamais matérialiser le bloc** — `mmap` puis parcours incrémental. Coûte
+   une dépendance ou du code, et `CLAUDE.md` limite les dépendances.
+
+Retenir (2) avec repli (1), et **chercher le marqueur par `rfind`** : le bloc
+`#donnees-carte` est écrit **quasiment à la fin du document**
+(`generation_html.py:1037`), après Leaflet inliné. Un scan avant traverse tout
+Leaflet pour rien.
+
+Deux gains gratuits, enfin : `lat`, `lon` et `cap` sont **déjà déduits et
+réécrits** à chaque enregistrement — corrections manuelles et calibration
+appliquées — donc à lire tels quels, sans rejouer les règles ; et il n'y a que
+**2 à 6 points de vue** à retenir sur des dizaines.
 
 ### D9 — Une photo hors rapport se place d'un trait sur la carte
 
