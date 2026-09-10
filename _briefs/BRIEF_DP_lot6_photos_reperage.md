@@ -282,6 +282,11 @@ carte du rapport — `generation_html.py:1169` trie les points visibles par
 seul repère commun entre les deux écrans : le lui retirer l'obligerait à
 rouvrir sa carte à côté.
 
+Ce numéro est **stable** : décision du 10/09/2026 côté `photos-geoloc`, il se
+calcule sur la liste complète et ne bouge pas quand une photo est placée — un
+numéro peut être cité dans un compte rendu ou un mail, et une référence qui se
+décale est une référence fausse. Nous pouvons donc l'afficher sans réserve.
+
 Sous chaque vignette, une liste d'affectation, **proposée puis corrigée** :
 
 > `(ignorer)` · `DP 7` · `DP 8` · `DP 6 — vue 1, image brute` · …
