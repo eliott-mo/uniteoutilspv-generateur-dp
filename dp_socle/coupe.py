@@ -208,6 +208,52 @@ def position_de_coupe(
     return _point(meilleur), _traversees(meilleur), _traversees(milieu)
 
 
+def coupe_par_defaut(
+    azimut_tables_deg: float,
+    emprise_cloturee: BaseGeometry,
+    tables: list[BaseGeometry],
+    marge_m: float = MARGE_COUPE_M,
+) -> LigneCoupe:
+    """La coupe que l'outil propose de lui-même, sans que rien n'ait été tracé.
+
+    Le tracé du chef de projet n'apporte, en pratique, que l'intention : la
+    direction vient de l'azimut des tables et la position se choisit sur le
+    nombre de rangées traversées. Autant la proposer d'emblée — celui qui la
+    trouve bien placée n'a plus rien à faire, et celui qui veut la déplacer
+    trace par-dessus.
+
+    Elle n'a pas de tracé d'origine à redresser : `trace_initial` est la ligne
+    elle-même et l'écart est nul. Ce n'est pas une valeur de repli muette, elle
+    dit au rapport où elle s'est placée et ce qu'elle y traverse.
+    """
+    milieu, retenues, au_milieu = position_de_coupe(
+        azimut_tables_deg, emprise_cloturee, tables
+    )
+    geometrie = _etendre(
+        milieu, azimut_tables_deg + 90.0, emprise_cloturee, marge_m
+    )
+    if retenues > au_milieu:
+        message = (
+            f"Coupe par défaut : placée dans la moitié centrale de l'emprise, "
+            f"où elle traverse {retenues} table(s) contre {au_milieu} au centre "
+            "exact."
+        )
+    else:
+        message = (
+            f"Coupe par défaut : placée au centre de l'emprise, "
+            f"perpendiculairement aux rangées, où elle traverse {retenues} "
+            "table(s)."
+        )
+    return LigneCoupe(
+        geometrie=geometrie,
+        trace_initial=geometrie,
+        azimut_tables_deg=azimut_tables_deg,
+        ecart_initial_deg=0.0,
+        corrigee=True,
+        avertissements=[message],
+    )
+
+
 def corriger_ligne_coupe(
     trace: LineString,
     azimut_tables_deg: float,

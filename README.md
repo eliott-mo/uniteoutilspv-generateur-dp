@@ -36,7 +36,16 @@ Sortie dans `sortie/{nom_projet}/` : un PDF par planche plus
 
 ## L'application, dans l'ordre du travail
 
-Quatre sections, qui suivent l'ordre dans lequel le dossier se monte :
+Une **liste de prérequis** ouvre la page : ce qu'il faut avoir sous la main, ce
+qui est obligatoire et ce qui ne l'est pas. La découverte d'un fichier manquant
+au milieu du parcours coûte un aller-retour au bureau d'études.
+
+Puis quatre sections, qui **apparaissent au fur et à mesure** — chacune attend
+que la précédente soit satisfaite. C'est ce qui empêche de lancer une génération
+avant d'avoir importé le plan : le dossier obtenu s'arrêtait alors aux pièces
+DP 1, quatre planches sur neuf, dans un PDF de 17 Mo d'apparence complète.
+Techniquement, un `st.stop()` à chaque porte : Streamlit rejoue le script de
+haut en bas, arrêter la lecture revient à ne pas afficher la suite.
 
 1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale. Le nom du
    projet et la date ne se saisissent pas : l'un est toujours « PV » suivi de la
@@ -44,8 +53,12 @@ Quatre sections, qui suivent l'ordre dans lequel le dossier se monte :
    produit. Deux champs de moins à remplir, deux occasions de moins de se
    tromper.
 2. **Plan du bureau d'études** — le DXF et le tableau bilan, leurs contrôles
-   croisés, la ligne de coupe A-A' et le profil du terrain. C'est le gros de la
-   saisie, et c'est pour cela qu'elle vient avant le bouton.
+   croisés et la ligne de coupe A-A'. C'est le gros de la saisie, et c'est pour
+   cela qu'elle vient avant le bouton. **La coupe est proposée dès l'import** :
+   perpendiculaire aux rangées, posée là où elle traverse le plus de tables.
+   Qui la trouve bien placée n'a rien à tracer ; qui veut la déplacer trace un
+   segment *globalement* perpendiculaire aux rangées, l'outil se chargeant du
+   reste — il impose la direction exacte et ne retient du tracé que sa position.
 3. **Photographies et photomontages** — une ligne par pièce, DP 6, DP 7 et DP 8.
    Ce sont trois pièces distinctes, qui ne montrent pas la même chose et ne se
    rangent pas au même endroit du dossier : les mélanger obligerait à les
@@ -54,7 +67,14 @@ Quatre sections, qui suivent l'ordre dans lequel le dossier se monte :
 4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
    bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
    lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
-   qu'après l'import.
+   qu'après l'import. Le dossier produit se **télécharge** — en une archive ZIP,
+   ou en PDF assemblé seul. L'application tourne sur un serveur : `sortie/` y
+   reste, hors de portée du chef de projet.
+
+**Le dossier réduit aux seules pièces DP 1** — page de garde, situation,
+photographie aérienne, cadastre — reste possible pour une étude amont, mais il
+se demande : une case à cocher, qui dit ce à quoi on renonce. Il était obtenu
+par simple inadvertance.
 
 **L'indice fait partie du nom du dossier.** Sarnois a deux indices, qui diffèrent
 par leur poste, leur citerne et leur zone de contention : sans l'indice au nom,
@@ -319,13 +339,16 @@ python -m pytest -q
   Ces deux-là ne demandent aucun service en ligne : ce sont ceux qui comptent le
   plus, et un `-m "not reseau"` ne doit pas les sauter.
 - `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
-  par `AppTest` : les quatre sections dans l'ordre, le dépôt du DXF et du
-  tableau de Saint-Cyr, l'indice retrouvé dans le nom du dossier annoncé, et
-  surtout les **refus** — changer d'indice sans réimporter, générer sans
-  emprise, importer sans commune, déposer deux photos de même nom. C'est le seul
-  contrôle qui exécute `app.py` ; les tests des modules ne le touchent pas, et
-  une `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
-  rencontre.
+  par `AppTest`, qui suit le parcours du chef de projet : cadrer le projet,
+  déposer le plan, importer, valider, générer. Il contrôle l'ouverture des
+  sections une à une, la coupe proposée dès l'import, et surtout les **refus** —
+  changer d'indice sans réimporter, générer hors de portée d'une emprise,
+  importer sans commune, déposer deux photos de même nom. C'est le seul contrôle
+  qui exécute `app.py` ; les tests des modules ne le touchent pas, et une
+  `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
+  rencontre. Un relevé altimétrique de synthèse y est déposé à chaque fois,
+  pour que le profil se lise dans un fichier plutôt que sur le RGE ALTI : seul
+  le test de téléchargement, qui produit un vrai dossier, est marqué `reseau`.
 - `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
   syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
   qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle

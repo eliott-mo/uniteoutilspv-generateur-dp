@@ -6,7 +6,9 @@ dernière minute se fait en modifiant ce fichier et en relançant la génératio
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from datetime import date as _date
 from pathlib import Path
 
@@ -27,7 +29,6 @@ from dp_socle.apercu_be import (
     apercu_plan,
     bornes_wgs84,
     en_wgs84,
-    figure_profil,
     legende_presente,
     trace_l93,
 )
@@ -39,10 +40,11 @@ from dp_socle.coupe import (
     controler_terrain_embarque,
     corriger_ligne_coupe,
     coupe_enregistree,
+    coupe_par_defaut,
     profil_terrain,
     reprendre_coupe,
 )
-from dp_socle.contrat import VOIRIES_ADMISES, decrire_voiries
+from dp_socle.contrat import NOM_GEOPACKAGE, VOIRIES_ADMISES, decrire_voiries
 from dp_socle.erreurs import ErreurCoupe, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
@@ -71,6 +73,34 @@ st.caption(
     "Page de garde, DP 1-1 plan de situation, DP 1-2 photographie aérienne, "
     "DP 1-3 plan de cadastre. Fonds IGN Géoplateforme, Lambert 93, A3 paysage à "
     "l'échelle vraie."
+)
+
+# Les quatre sections n'apparaissent qu'au fur et à mesure : rassembler les
+# fichiers d'abord évite de découvrir en cours de route qu'il en manque un, et
+# de repartir avec un dossier incomplet.
+st.info(
+    """**À rassembler avant de commencer.**
+
+**Obligatoire pour tout dossier**
+- **Emprise cadastrale** — le shapefile du géomètre : `.shp` + `.shx` + `.dbf`
+  + `.prj`, ou le ZIP qui les contient. Le `.prj` en fait partie : sans lui, le
+  système de coordonnées est inconnu et la génération est refusée.
+
+**Obligatoire pour les planches DP 2, DP 3 et DP 4** — plan de masse, coupes et
+ouvrages techniques, c'est-à-dire l'essentiel du dossier
+- **Plan du bureau d'études** — le DXF exporté d'AutoCAD, géoréférencé en
+  Lambert 93.
+- **Tableau bilan** — le `.xlsx` du bureau d'études, **au même indice que le
+  plan**. C'est lui qui engage les surfaces et les puissances déclarées.
+
+**Facultatif**
+- **Relevé altimétrique** — `.txt` ou `.csv`, trois colonnes « X Y Z » en
+  Lambert 93. Il remplace le RGE ALTI, plus précis qu'un relevé national.
+- **Plan du BE en PDF** — pour comparer l'aperçu à ce que le BE a dessiné.
+- **Photographies** — DP 6 insertion paysagère (en JPG ou PNG si elle doit
+  monter en page de garde), DP 7 environnement proche, DP 8 paysage lointain.
+""",
+    icon="🗂️",
 )
 
 
@@ -152,6 +182,28 @@ def _nom_dossier(commune: str) -> str:
     """
     indice = st.session_state.get("indice_tableau_bilan")
     return identifiant_de_dossier(nom_de_projet(commune, indice))
+
+
+def _archive_du_dossier(rapport) -> bytes:
+    """Le dossier complet en une archive ZIP, prête à être téléchargée.
+
+    Le chef de projet travaille sur une application distante : le dossier
+    `sortie/` vit sur le serveur et lui reste inaccessible. Lui annoncer un
+    chemin qu'il ne peut pas ouvrir ne servait à rien, et neuf boutons de
+    téléchargement — un par planche — chargeaient neuf PDF en mémoire pour lui
+    faire faire neuf clics.
+
+    L'archive porte le PDF assemblé et les planches séparées, à plat. Les PDF
+    sont déjà compressés : `ZIP_STORED` évite de les recompresser pour rien,
+    et l'archive pèse donc le poids du dossier.
+    """
+    tampon = io.BytesIO()
+    with zipfile.ZipFile(tampon, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.write(rapport.assemblage, arcname=rapport.assemblage.name)
+        for sortie in rapport.planches:
+            chemin = Path(sortie.chemin)
+            archive.write(chemin, arcname=f"planches/{chemin.name}")
+    return tampon.getvalue()
 
 
 def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
@@ -302,6 +354,25 @@ def _tableau_controles(controles) -> None:
 # Lot 2bis — plan du bureau d'études interne
 # ---------------------------------------------------------------------------
 
+# `st.stop()` plutôt qu'un `if` enveloppant les six cents lignes qui suivent :
+# Streamlit rejoue le script de haut en bas, arrêter la lecture revient à ne
+# pas afficher la suite. Les sections apparaissent donc au fur et à mesure, et
+# le chef de projet ne peut pas cliquer « Générer le dossier » avant d'avoir
+# importé son plan — ce qui produisait un PDF de 17 Mo à quatre planches sur
+# neuf, d'apparence complète.
+if not (commune.strip() and fichiers_emprise):
+    manquant = []
+    if not commune.strip():
+        manquant.append("la commune")
+    if not fichiers_emprise:
+        manquant.append("l'emprise cadastrale")
+    st.info(
+        f"Renseignez {' et '.join(manquant)} ci-dessus : l'import du plan du "
+        "bureau d'études vient ensuite.",
+        icon="⬆️",
+    )
+    st.stop()
+
 st.divider()
 st.subheader("2. Plan du bureau d'études")
 st.caption(
@@ -385,6 +456,63 @@ def _calques_caches(chemin: str, taille: int, charte: str):
 @st.cache_data(show_spinner="Téléchargement de l'ortho IGN…")
 def _fond_be_cache(cadre: tuple, largeur_px: int = 1100):
     return fond_apercu_be(cadre, largeur_px=largeur_px)
+
+
+def _proposer_la_coupe(import_be) -> None:
+    """Place la coupe par défaut et relève son profil, dès l'import.
+
+    Le chef de projet n'a plus à tracer pour avancer : il regarde où la coupe
+    s'est posée et il la déplace seulement si elle lui déplaît. C'est un gain
+    net, la position tracée n'ayant jamais servi qu'à choisir l'endroit — la
+    direction, elle, a toujours été imposée par les rangées.
+
+    Rien de muet ici : un plan sans table, ou un RGE ALTI qui ne répond pas,
+    laisse la coupe ou le profil à `None` et le dit à l'écran. Le chef de projet
+    trace alors lui-même, comme avant.
+    """
+    if st.session_state.coupe_be is not None:
+        # Une coupe reprise d'un import précédent a la priorité : elle porte le
+        # choix déjà fait sur ce projet, que le nôtre écraserait.
+        st.session_state["origine_coupe"] = "reprise"
+        return
+    try:
+        coupe = coupe_par_defaut(
+            import_be.plan.azimut_tables_deg,
+            import_be.plan.polygone_cloture,
+            import_be.plan.tables,
+        )
+    except ErreurDP as erreur:
+        st.warning(
+            f"Aucune coupe n'a pu être proposée ({erreur}). Tracez-la sur la "
+            "carte.",
+            icon="⚠️",
+        )
+        return
+    st.session_state.coupe_be = coupe
+    st.session_state["origine_coupe"] = "defaut"
+    import_be.ligne_coupe = coupe
+    try:
+        with st.spinner("Relevé du profil du terrain…"):
+            st.session_state.profil_be = profil_terrain(
+                coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+            )
+    except ErreurDP as erreur:
+        st.warning(
+            f"Coupe proposée, mais le profil du terrain n'a pas pu être relevé "
+            f"({erreur}). Relancez-le avec « Corriger et relever le profil ».",
+            icon="⚠️",
+        )
+        return
+    import_be.profil = st.session_state.profil_be
+    import_be.coherence = controler_coherence(
+        st.session_state.profil_be, coupe, import_be.plan.tables
+    )
+    import_be.terrain_be = controler_terrain_embarque(
+        st.session_state.profil_be,
+        coupe,
+        import_be.plan.points_terrain,
+        CALQUES_TERRAIN,
+    )
 
 
 def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) -> None:
@@ -591,6 +719,7 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             chemin_emprise = _enregistrer_fichiers(nom_importe, fichiers_emprise)
             if chemin_emprise is not None:
                 emprise_cadastrale = charger_emprise(chemin_emprise).geometrie
+            st.session_state["origine_coupe"] = None
             st.session_state.import_be = importer_be(
                 chemin_dxf,
                 chemin_tableau,
@@ -620,6 +749,7 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
                 st.session_state.import_be,
                 emprise_cadastrale,
             )
+            _proposer_la_coupe(st.session_state.import_be)
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
 
@@ -715,10 +845,15 @@ if import_be_courant is not None and commune.strip():
     # -----------------------------------------------------------------------
     st.markdown("### Ligne de coupe A-A'")
     st.caption(
-        "Tracez un segment là où la coupe doit passer. Seul son **point milieu** "
-        "est retenu : la direction vient de l'azimut mesuré sur les tables "
-        f"({plan.azimut_tables_deg:.2f}° depuis l'est), et la ligne est étendue "
-        "à toute l'emprise clôturée avec 10 m de marge."
+        "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
+        "et posée là où elle traverse le plus de tables. Si elle vous convient, "
+        "il n'y a rien à faire.\n\n"
+        "Pour la déplacer, tracez un segment **globalement perpendiculaire aux "
+        "rangées** — un geste approximatif suffit, l'outil le réajuste : il "
+        "impose la direction exacte (azimut des tables mesuré à "
+        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°), ne retient de "
+        "votre tracé que sa **position**, et étend la ligne à toute l'emprise "
+        "clôturée avec 10 m de marge."
     )
 
     manuel = st.checkbox(
@@ -787,6 +922,7 @@ if import_be_courant is not None and commune.strip():
                 tables=plan.tables,
             )
             st.session_state.coupe_be = coupe
+            st.session_state["origine_coupe"] = "tracee"
             with st.spinner("Interrogation du RGE ALTI…"):
                 st.session_state.profil_be = profil_terrain(
                     coupe,
@@ -805,13 +941,8 @@ if import_be_courant is not None and commune.strip():
             st.error(f"{type(erreur).__name__} : {erreur}")
     elif trace is None and st.session_state.coupe_be is None:
         st.info(
-            "Aucun tracé sur la carte : utilisez l'outil ligne (icône polyligne) "
-            "à gauche de la carte."
-        )
-    elif trace is None:
-        st.caption(
-            "Coupe déjà retenue, montrée sur la carte en noir avec le tracé "
-            "d'origine en orange. Tracez une nouvelle ligne pour la remplacer."
+            "Aucune coupe retenue : tracez-la avec l'outil ligne (icône "
+            "polyligne) à gauche de la carte."
         )
 
     with emplacement_avertissements:
@@ -833,7 +964,10 @@ if import_be_courant is not None and commune.strip():
             fond=_fond_be_cache(st.session_state.cadre_apercu_be),
             cadre=st.session_state.cadre_apercu_be,
         )
-        st.image(image, width="stretch")
+        # Deux tiers de la largeur : en pleine page l'aperçu écrasait tout le
+        # reste de l'écran sans rien montrer de plus.
+        colonne_apercu, _ = st.columns([2, 1])
+        colonne_apercu.image(image, width="stretch")
         st.caption(
             "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier "
             "de référence HOCH « Les Islettes » : "
@@ -850,50 +984,45 @@ if import_be_courant is not None and commune.strip():
 
     coupe = st.session_state.coupe_be
     profil = st.session_state.profil_be
+    # Une ligne, et rien de plus. La figure du profil était tracée sans respecter
+    # le rapport entre les abscisses et les altitudes — 350 m de long pour 3 m de
+    # dénivelée — et donnait à lire une colline là où le terrain est plat. Ses
+    # chiffres n'engagent rien : ce qui compte, la cohérence de la pente et le
+    # contrôle des altitudes du DXF, remonte déjà en avertissement quand il
+    # cloche. La coupe se juge sur la carte et sur la planche DP 3.
     if coupe is not None:
-        colonnes = st.columns(3)
-        colonnes[0].metric("Longueur de la coupe", f"{coupe.longueur_m:.0f} m")
-        colonnes[1].metric(
-            "Écart redressé", f"{coupe.ecart_initial_deg:.1f}°",
-            help="Angle entre le tracé initial et la perpendiculaire aux rangées.",
+        origine_profil = (
+            f", profil relevé sur {profil.origine}" if profil is not None else ""
         )
-        colonnes[2].metric(
-            "Azimut de la coupe", f"{coupe.azimut_coupe_deg:.2f}° depuis l'est"
+        annonces = {
+            "defaut": (
+                "**Coupe par défaut** : perpendiculaire aux rangées, posée là "
+                f"où elle traverse le plus de tables{origine_profil}. Tracez sur "
+                "la carte si vous voulez la déplacer."
+            ),
+            "tracee": (
+                "**Coupe personnalisée** : redressée perpendiculairement aux "
+                f"rangées à partir de votre tracé{origine_profil}."
+            ),
+            "reprise": (
+                "**Coupe reprise de l'import précédent** de ce projet, telle "
+                f"qu'elle avait été retenue{origine_profil}. Tracez sur la carte "
+                "si vous voulez la déplacer."
+            ),
+        }
+        st.success(
+            annonces.get(st.session_state.get("origine_coupe"), annonces["tracee"]),
+            icon="📐",
         )
-
-    if profil is not None:
-        st.image(figure_profil(profil), width="stretch")
-        colonnes = st.columns(3)
-        colonnes[0].metric("Dénivelée totale", f"{profil.denivelee_m:.2f} m")
-        colonnes[1].metric("Altitude mini", f"{profil.altitude_min_m:.2f} m NGF")
-        colonnes[2].metric("Altitude maxi", f"{profil.altitude_max_m:.2f} m NGF")
-        st.caption(f"Source du profil : {profil.origine}.")
-        coherence = import_be_courant.coherence
-        if coherence is not None:
-            (st.success if coherence.conforme else st.warning)(
-                coherence.message, icon="📐" if coherence.conforme else "⚠️"
-            )
-        for controle in import_be_courant.terrain_be:
-            (st.success if controle.conforme else st.warning)(
-                controle.message, icon="📐" if controle.conforme else "⚠️"
-            )
-        if import_be_courant.terrain_be:
-            st.caption(
-                "Le profil du dossier reste celui du RGE ALTI, référence "
-                "altimétrique nationale que l'instructeur peut vérifier. Les "
-                "altitudes portées par le DXF le contrôlent, elles ne le "
-                "remplacent pas."
-            )
 
     st.markdown("### Validation")
     if indice_choisi is not None and indice_choisi != tableau.indice:
         st.error(
             f"La liste affiche l'indice {indice_choisi}, l'import en mémoire "
-            f"est celui de {tableau.indice}. Écrire maintenant déposerait la "
-            f"géométrie de {tableau.indice} dans `sortie/"
-            f"{identifiant_de_dossier(nom_de_projet(commune, indice_choisi))}/`, "
-            f"en écrasant ce qui s'y trouve. Recliquez sur « Importer et "
-            f"contrôler ».",
+            f"est celui de {tableau.indice}. Écrire maintenant donnerait au "
+            f"dossier « {nom_de_projet(commune, indice_choisi)} » la géométrie "
+            f"de {tableau.indice}, en écrasant ce qu'il contenait. Recliquez sur "
+            "« Importer et contrôler ».",
             icon="🚫",
         )
     elif import_be_courant.bloquants:
@@ -909,27 +1038,11 @@ if import_be_courant is not None and commune.strip():
         )
     elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
         try:
-            dossier_sortie = DOSSIER_SORTIE / _nom_dossier(commune)
-            gpkg, parametres = import_be_courant.ecrire(dossier_sortie)
+            import_be_courant.ecrire(DOSSIER_SORTIE / _nom_dossier(commune))
             st.success(
-                f"Import validé. {gpkg} et {parametres} écrits — c'est le contrat "
-                "d'entrée du lot 4."
-            )
-            with open(gpkg, "rb") as fichier:
-                st.download_button(
-                    "Télécharger geometries.gpkg",
-                    data=fichier.read(),
-                    file_name=f"{_nom_dossier(commune)}_geometries.gpkg",
-                    mime="application/geopackage+sqlite3",
-                    width="stretch",
-                )
-            st.code(
-                json.dumps(
-                    json.loads(parametres.read_text(encoding="utf-8")),
-                    ensure_ascii=False,
-                    indent=2,
-                )[:4000],
-                language="json",
+                "Import validé. Les photographies et la génération du dossier "
+                "s'ouvrent ci-dessous.",
+                icon="✅",
             )
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
@@ -938,6 +1051,61 @@ if import_be_courant is not None and commune.strip():
 # ---------------------------------------------------------------------------
 # Photographies et photomontages — DP 6, DP 7, DP 8
 # ---------------------------------------------------------------------------
+
+# Le contrat sur le disque, et non l'import en mémoire : c'est lui que la
+# génération lira, et lui seul décide de ce que le dossier contiendra.
+_dossier_contrat = DOSSIER_SORTIE / _nom_dossier(commune)
+contrat_present = (_dossier_contrat / NOM_GEOPACKAGE).exists()
+if contrat_present:
+    # Hors du clic sur « Valider » : ce bloc y disparaissait à la première
+    # réexécution du script, et le téléchargement du GeoPackage avec lui.
+    with st.expander("Le contrat d'entrée écrit — pour vérification"):
+        st.caption(
+            "Ce que le lot 4 lira pour dessiner DP 2, DP 3 et DP 4. Rien à en "
+            "faire pour monter le dossier : c'est de quoi contrôler l'import "
+            "dans un SIG, ou joindre à une question au bureau d'études."
+        )
+        with open(_dossier_contrat / NOM_GEOPACKAGE, "rb") as fichier:
+            st.download_button(
+                "⬇️ Les géométries importées (GeoPackage)",
+                data=fichier.read(),
+                file_name=f"{_nom_dossier(commune)}_geometries.gpkg",
+                mime="application/geopackage+sqlite3",
+                on_click="ignore",
+                width="stretch",
+            )
+        _parametres = _dossier_contrat / "projet.json"
+        if _parametres.exists():
+            st.code(
+                json.dumps(
+                    json.loads(_parametres.read_text(encoding="utf-8")),
+                    ensure_ascii=False,
+                    indent=2,
+                )[:4000],
+                language="json",
+            )
+if not contrat_present:
+    st.divider()
+    st.info(
+        "**Validez l'import ci-dessus pour continuer.** Les photographies et la "
+        "génération viennent ensuite. Sans plan validé, le dossier s'arrêterait "
+        "à la page de garde et aux pièces DP 1 — sans le plan de masse DP 2, les "
+        "coupes DP 3 ni les ouvrages techniques DP 4.",
+        icon="⬆️",
+    )
+    # La capacité existe et reste offerte, mais elle se demande : c'est un
+    # dossier d'étude amont, pas un dossier déposable, et l'obtenir par
+    # inadvertance donnait un PDF de 17 Mo d'apparence complète.
+    socle_seul = st.checkbox(
+        "Je veux seulement les pièces DP 1 — page de garde, plan de situation, "
+        "photographie aérienne, plan de cadastre",
+        value=False,
+        key="socle_seul",
+        help="Pour une étude amont, avant que le bureau d'études ait livré son "
+        "plan. Le dossier obtenu n'est pas déposable en l'état.",
+    )
+    if not socle_seul:
+        st.stop()
 
 #: Les trois pièces photographiques du dossier, dans l'ordre du CERFA.
 #:
@@ -986,11 +1154,14 @@ elif len(insertions) > 1:
     image_garde = insertions[noms.index(retenu)]
 
 if insertions:
-    # Par rangées de quatre, et non les quatre premières : la vignette manquante
-    # pouvait être celle de la couverture, la seule qu'on ait besoin de voir.
-    for depart in range(0, len(insertions), 4):
-        rangee = insertions[depart : depart + 4]
-        for colonne, fichier in zip(st.columns(len(rangee)), rangee):
+    # Deux par rangée, et toutes : une seule insertion prenait la largeur entière
+    # de la page pour une vignette de contrôle, et au-delà de quatre la vignette
+    # manquante pouvait être celle de la couverture.
+    par_rangee = 2 if len(insertions) <= 2 else 4
+    for depart in range(0, len(insertions), par_rangee):
+        rangee = insertions[depart : depart + par_rangee]
+        colonnes = st.columns(par_rangee)
+        for colonne, fichier in zip(colonnes, rangee):
             with colonne:
                 st.image(
                     fichier,
@@ -1041,7 +1212,7 @@ indice_retenu = st.session_state.get("indice_tableau_bilan")
 libelle = nom_de_projet(commune, indice_retenu)
 nom = _nom_dossier(commune) if commune.strip() else ""
 if nom:
-    st.markdown(f"Projet **{libelle}** — dossier `sortie/{nom}/`")
+    st.markdown(f"Dossier à produire : **{libelle}**")
     if not indice_retenu:
         st.caption(
             "Le plan du bureau d'études n'a pas été importé : le nom ne porte "
@@ -1148,58 +1319,90 @@ if lancer:
             projet.valider()
             projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
             emprise = charger_emprise(projet.chemin_emprise)
-            st.info(
-                f"Emprise : {emprise.nb_polygones} polygone(s), "
-                f"{emprise.surface_m2 / 10_000:.2f} ha, CRS source {emprise.crs_source}."
-            )
             with st.spinner("Téléchargement des fonds IGN et composition des planches…"):
                 rapport = generer_dossier(projet, DOSSIER_SORTIE, dpi=int(dpi))
-
-            if rapport.origine_contrat:
-                st.caption(
-                    f"Planches DP 2 à DP 4 dessinées depuis le contrat d'entrée "
-                    f"« {rapport.origine_contrat} » de {rapport.dossier}."
-                )
-
-            for message in rapport.avertissements:
-                st.warning(message, icon="⚠️")
-
-            st.success(
-                f"**{projet.libelle_affiche}** — {rapport.assemblage.name}, "
-                f"{rapport.taille_mo:.1f} Mo, {len(rapport.planches)} planches. "
-                f"Dossier : `{rapport.dossier}/`."
-            )
-            st.dataframe(
-                [
-                    {
-                        "Pièce": entree["numero"],
-                        "Titre": entree["titre"],
-                        "Page": entree["page"],
-                    }
-                    for entree in rapport.sommaire
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-            with open(rapport.assemblage, "rb") as fichier:
-                st.download_button(
-                    f"Télécharger {rapport.assemblage.name}",
-                    data=fichier.read(),
-                    file_name=rapport.assemblage.name,
-                    mime="application/pdf",
-                    width="stretch",
-                )
-            for sortie in rapport.planches:
-                chemin = Path(sortie.chemin)
-                with open(chemin, "rb") as fichier:
-                    st.download_button(
-                        f"{sortie.numero} — {chemin.name}",
-                        data=fichier.read(),
-                        file_name=chemin.name,
-                        mime="application/pdf",
-                        key=f"dl_{sortie.numero}",
-                    )
+            # Conservé en session, et non affiché dans la foulée : tout clic sur
+            # un bouton de téléchargement rejoue le script, `lancer` retombe à
+            # faux, et le compte rendu — les autres boutons compris — disparaît
+            # de l'écran. Le chef de projet ne pouvait donc télécharger qu'un
+            # seul fichier, puis devait tout regénérer.
+            st.session_state["dossier_genere"] = {
+                "nom": projet.nom,
+                "libelle": projet.libelle_affiche,
+                "emprise": (
+                    emprise.nb_polygones,
+                    emprise.surface_m2 / 10_000,
+                    emprise.crs_source,
+                ),
+                "rapport": rapport,
+                "archive": _archive_du_dossier(rapport),
+            }
     except ErreurDP as erreur:
+        st.session_state.pop("dossier_genere", None)
         st.error(f"{type(erreur).__name__} : {erreur}")
+
+
+# Le compte rendu du dernier dossier produit, tant qu'il décrit bien le projet
+# affiché : changer de commune ou d'indice le rendrait mensonger.
+_genere = st.session_state.get("dossier_genere")
+if _genere is not None and _genere["nom"] == nom:
+    rapport = _genere["rapport"]
+    polygones, hectares, crs = _genere["emprise"]
+    st.divider()
+    st.success(
+        f"**{_genere['libelle']}** — {len(rapport.planches)} planches, "
+        f"{rapport.taille_mo:.1f} Mo. Téléchargez-le ci-dessous : l'application "
+        "tourne sur un serveur, les fichiers n'y restent pas à votre disposition."
+    )
+
+    # `on_click="ignore"` : sans lui, Streamlit rejoue le script entier pour
+    # livrer un fichier — c'est son défaut, documenté. Le compte rendu survit
+    # désormais à cette réexécution, mais la provoquer pour rien reste un
+    # aller-retour serveur à chaque téléchargement.
+    colonne_dossier, colonne_pdf = st.columns(2)
+    with colonne_dossier:
+        st.download_button(
+            f"⬇️ Le dossier complet ({len(rapport.planches)} planches, ZIP)",
+            data=_genere["archive"],
+            file_name=f"{_genere['nom']}_DP.zip",
+            mime="application/zip",
+            type="primary",
+            on_click="ignore",
+            width="stretch",
+        )
+    with colonne_pdf:
+        with open(rapport.assemblage, "rb") as fichier:
+            st.download_button(
+                f"⬇️ Le PDF assemblé seul ({rapport.taille_mo:.1f} Mo)",
+                data=fichier.read(),
+                file_name=rapport.assemblage.name,
+                mime="application/pdf",
+                on_click="ignore",
+                width="stretch",
+            )
+
+    for message in rapport.avertissements:
+        st.warning(message, icon="⚠️")
+    st.caption(
+        f"Emprise : {polygones} polygone(s), {hectares:.2f} ha, CRS source {crs}."
+        + (
+            f" Planches DP 2 à DP 4 dessinées depuis le contrat d'entrée "
+            f"« {rapport.origine_contrat} »."
+            if rapport.origine_contrat
+            else ""
+        )
+    )
+    st.dataframe(
+        [
+            {
+                "Pièce": entree["numero"],
+                "Titre": entree["titre"],
+                "Page": entree["page"],
+            }
+            for entree in rapport.sommaire
+        ],
+        width="stretch",
+        hide_index=True,
+    )
 
 

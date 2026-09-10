@@ -1186,3 +1186,46 @@ def test_recouvrement_de_pistes_compte_une_seule_fois(tmp_path):
     assert _surface_dessinee(plan_recouvert, CATEGORIES_VOIE_LOURDE) == pytest.approx(
         100.0
     )
+
+
+def test_la_coupe_par_defaut_est_perpendiculaire_et_bien_placee():
+    """L'outil propose une coupe d'emblée, sans qu'on ait rien tracé.
+
+    Le tracé du chef de projet n'apportait que l'intention : la direction vient
+    de l'azimut des tables, la position du nombre de rangées traversées. Celui
+    qui trouve la proposition bien placée n'a plus rien à faire.
+    """
+    from dp_socle.coupe import coupe_par_defaut
+
+    # Vingt rangées est-ouest, mais aucune table entre x = 60 et x = 140 :
+    # la coupe par défaut doit éviter ce couloir vide.
+    rangees = [
+        geom
+        for index in range(20)
+        for geom in (
+            box(0.0, index * 10.0, 60.0, index * 10.0 + 4.0),
+            box(140.0, index * 10.0, 200.0, index * 10.0 + 4.0),
+        )
+    ]
+    emprise = box(0.0, -10.0, 200.0, 210.0)
+
+    coupe = coupe_par_defaut(0.0, emprise, rangees)
+
+    # Perpendiculaire aux rangées, qui courent d'est en ouest.
+    assert abs(abs(coupe.azimut_coupe_deg) - 90.0) < 1e-6
+    assert coupe.ecart_initial_deg == 0.0
+    assert coupe.corrigee
+    # Elle traverse le site sur toute sa hauteur, marge comprise.
+    assert coupe.geometrie.intersects(emprise)
+    assert coupe.longueur_m == pytest.approx(220.0 + 2 * 10.0, abs=0.5)
+    # Et elle dit où elle s'est posée : rien de muet.
+    assert coupe.avertissements
+    assert "Coupe par défaut" in coupe.avertissements[0]
+
+
+def test_la_coupe_par_defaut_refuse_un_plan_sans_table():
+    """Sans rangée, la position ne peut pas se choisir : on le dit."""
+    from dp_socle.coupe import coupe_par_defaut
+
+    with pytest.raises(ErreurCoupe, match="Aucune table"):
+        coupe_par_defaut(0.0, box(0.0, 0.0, 100.0, 100.0), [])
