@@ -99,6 +99,43 @@ récente** que celle qu'on connaît plutôt que de la lire à moitié — c'est 
 règle du contrat d'entrée du lot 4 ; et écarter les points `masque: true`, qui
 sont en corbeille.
 
+**Un point replacé à la main vaut un point mesuré.** La carte distingue et
+compte les photos repositionnées, parce que sur un rapport de visite qui fait
+foi, déplacer une photo touche à ce qui est attesté. Pour notre usage, la
+question a été tranchée le 10/09/2026 : **le choix est assumé**, une position
+replacée par le chef de projet part au dossier comme une autre. Ne rien en faire
+de particulier — ni avertissement, ni mention sur la planche. Le rapport de
+génération peut dire d'où vient chaque point de vue ; c'est une information, pas
+une alerte.
+
+#### Perspective — et pourquoi elle n'est pas une dépendance
+
+`photos-geoloc` écarte aujourd'hui une photo sans position : `analyser()`
+(`app.py:160-193`) n'en garde que le nom et le motif, l'image est perdue. Une
+évolution est envisagée de son côté : **forcer l'insertion d'une photo non
+géoréférencée**, à charge pour le chef de projet de la placer lui-même. Le
+travail de géolocalisation resterait alors entièrement dans l'outil dont c'est le
+métier, et ce lot n'aurait plus qu'une seule entrée à connaître.
+
+La carte a déjà tout l'outillage : **📍 Replacer** pose une position d'un clic,
+**🎯 Viser** donne la direction, un bouton rend à l'origine, et la corbeille
+prouve que la page sait tenir un point présent dans le fichier mais absent de la
+carte (`generation_html.py:700` : `visibles = [point for point in points if not
+point.get("masque")]`). Ce qui manque est la porte d'entrée, plus un état « à
+placer » sur le modèle de la corbeille, plus une montée de format.
+
+**Ne pas attendre cette évolution.** Elle vit dans un autre dépôt, elle a sa
+propre conversation, et les rapports déjà produits resteront au format courant.
+Le dépôt photo par photo doit donc marcher de bout en bout dans ce lot-ci. Il
+gardera d'ailleurs son utilité : l'image brute d'une DP 6 n'a pas toujours été
+une photo de visite — un paysagiste travaille parfois sur une vue qu'il a prise
+lui-même.
+
+Ce que ce lot doit en revanche prévoir : lire **v5 et v6** le jour venu, et
+refuser au-dessus. Les deux dépôts ont désormais un contrat, à traiter avec la
+discipline de celui du lot 4 — format documenté, champ de version, refus de ce
+qu'on ne connaît pas.
+
 ### D1 — La position se lit, le cap se propose et se confirme
 
 **La position GPS de l'EXIF est fiable** et n'a jamais été prise en défaut sur les deux dépôts. Elle se lit, et l'incertitude que l'appareil annonce (`GPSHPositioningError`) se lit avec : au-delà de `SEUIL_PRECISION_M = 20` m, `photos-geoloc` signale la photo sans jamais l'écarter — « à l'échelle d'une visite de site, 100 m ne voulait plus rien dire (on change de parcelle) ». Un cas réel y a placé une photo à 4 km de son emplacement.
