@@ -135,42 +135,49 @@ sans l'avoir mesuré.
 Rappel du contexte : 690 Mo garantis sur Streamlit Community Cloud, et la
 génération culmine déjà à 367 Mo mesurés — 523 à 300 dpi.
 
----
+### D6 — Un cartouche de notice, sans nord ni échelle
 
-## Le point qui demande un arbitrage
+**Le cartouche d'une planche de notice porte aujourd'hui une flèche nord et une
+case d'échelle.** `planche.py:700-702` dessine `_fleche_nord()` **sans
+condition**, et l. 706 affiche `"—"` dans la case d'échelle quand `echelle is
+None`. Sur une notice, l'un et l'autre ne veulent rien dire.
 
-**Le cartouche d'une planche de notice porte une flèche nord et une case
-d'échelle.** `planche.py:700-702` dessine `_fleche_nord()` **sans condition**, et
-l. 706 affiche `"—"` dans la case d'échelle quand `echelle is None`.
+Le dossier de référence le confirme : les pages 16 et 17 de Massay portent
+`Massay`, `PHASE: DPC`, `NUMERO`, `DATE:` et `DPC 4 Notice` — **ni ÉCHELLE, ni
+NORD**, là où la page 2 du même dossier porte `ECHELLE 1 : 10 000`.
 
-Sur une notice, l'un et l'autre ne veulent rien dire. Le dossier de référence le
-confirme : les pages 16 et 17 de Massay portent `Massay`, `PHASE: DPC`,
-`NUMERO`, `DATE:` et `DPC 4 Notice` — **ni ÉCHELLE, ni NORD**, là où la page 2 du
-même dossier porte `ECHELLE 1 : 10 000`.
+**Décision : un paramètre additif sur `Planche`.** Autorisé explicitement par le
+chef de projet le 14/09/2026, par exception à la règle de `CLAUDE.md` selon
+laquelle « les lots suivants ne touchent pas au moteur `Planche` du lot 1 ».
 
-Or `CLAUDE.md` est explicite : « les lots suivants ne touchent pas au moteur
-`Planche` du lot 1 ». Trois voies, aucune gratuite :
+Les deux autres voies ont été écartées, et il n'y a pas à y revenir : accepter un
+nord qui ne désigne rien laisse un écart visible au dossier de référence ;
+recomposer un cartouche réduit dans le module du lot 5, à partir des primitives
+publiques, **duplique la géométrie du cartouche** et crée deux versions qui
+divergeront le jour où l'une des deux bougera.
 
-1. **Accepter** la flèche nord et le tiret sur les pages de notice. Coût nul,
-   mais l'écart au dossier de référence est visible, et un lecteur peut se
-   demander ce que le nord vient faire là.
-2. **Ajouter un paramètre** à `Planche` — par exemple `avec_reperes=False` —
-   additif, par défaut sans effet sur les planches existantes. C'est la solution
-   propre, et la seule qui garde un seul cartouche dans le dépôt. Mais elle
-   **touche le moteur du lot 1**, ce que la règle interdit : il faut une
-   autorisation explicite.
-3. **Composer un cartouche réduit** dans le module du lot 5, avec
-   `avec_cartouche=False` et les primitives publiques (`ajouter_rectangle`,
-   `ajouter_texte`, `ajouter_ligne`). Respecte la règle à la lettre, mais
-   **duplique la géométrie du cartouche** — deux cartouches à maintenir, qui
-   divergeront le jour où l'un des deux bougera.
+#### Ce que l'exception exige en retour
 
-**Recommandation : la voie 2**, avec l'autorisation explicite du chef de projet
-notée ici. Un paramètre additif dont la valeur par défaut ne change rien n'est
-pas le refactoring opportuniste que la règle cherche à empêcher, et la voie 3
-crée exactement le genre de divergence que ce dépôt passe son temps à éviter.
+Une exception à une règle non négociable se paie en garanties. Trois, à tenir :
 
-*(À compléter par la décision une fois prise.)*
+1. **Additif, jamais soustractif.** Un paramètre de plus, avec une valeur par
+   défaut qui reproduit le comportement actuel. Rien ne se déplace, rien ne se
+   renomme, aucune signature existante ne change.
+2. **Les planches existantes restent identiques.** C'est vérifiable, et c'est la
+   preuve que l'exception est sans effet de bord : les 436 tests du dépôt — dont
+   `test_echelle_pdf.py` et `test_planches_lot4.py`, qui mesurent dans le flux de
+   contenu du PDF produit — doivent rester au vert **sans qu'aucun soit
+   retouché**. Un test qu'il faut ajuster est le signe que la modification n'était
+   pas additive.
+3. **Le paramètre nomme ce qu'il retire, pas le lot qui le demande.** Il supprime
+   des repères cartographiques sur une planche qui n'en porte pas ; il ne
+   s'appelle pas « notice ». La page de garde du lot 1 pourrait en avoir l'usage
+   un jour.
+
+Portée exacte : la flèche nord (`_fleche_nord`, l. 734) et la case ÉCHELLE
+(l. 706). Le reste du cartouche — logo, projet, titre, date, numéro — ne bouge
+pas : c'est lui que le chef de projet veut voir, et c'est l'habillage commun du
+dossier.
 
 ---
 
