@@ -14,7 +14,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 from .contrat import Contrat, charger_contrat
-from .erreurs import ErreurContrat, ErreurDP, ErreurNotice, ErreurRendu
+from .erreurs import ErreurContrat, ErreurDP, ErreurRendu
 from .dossier import codes_produits, numero_planche
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
@@ -122,23 +122,6 @@ def generer_dossier(
     if message:
         avertissements.append(message)
 
-    # La notice est **obligatoire** pour un dossier déposable — tranché par le
-    # chef de projet le 14/09/2026, contre la décision D4 du brief qui la
-    # disait facultative. Refusé ici, avant la première requête au WMS-R : un
-    # dossier amputé de sa notice n'est pas un dossier, et le découvrir après
-    # la génération coûte le temps de la refaire.
-    #
-    # Un dossier réduit au socle échappe à la règle : sans plan du bureau
-    # d'études, c'est une étude amont, annoncée comme non déposable, et sa
-    # notice n'est pas encore écrite.
-    if contrat is not None and projet.chemin_notice is None:
-        raise ErreurNotice(
-            "Aucune notice DP 11 fournie : elle est obligatoire pour un "
-            "dossier déposable. Déposez-la en PDF avant de générer. Seul un "
-            "dossier d'étude amont, réduit aux pièces DP 1, se produit sans "
-            "elle."
-        )
-
     with warnings.catch_warnings(record=True) as captees:
         warnings.simplefilter("always", RuntimeWarning)
         sorties = [
@@ -158,7 +141,9 @@ def generer_dossier(
         # La notice ferme le dossier : c'est la dernière pièce, et la seule qui
         # puisse couvrir plusieurs pages. Aucune pièce ne la suit, donc aucune
         # n'est décalée par son épaisseur.
-        notice, message = _notice_eventuelle(projet, sorties, dossier)
+        notice, message = _notice_eventuelle(
+            projet, sorties, dossier, complet=contrat is not None
+        )
         if message:
             avertissements.append(message)
         if notice is not None:
@@ -249,24 +234,34 @@ def _verifier_numerotation(sortie, nb_pages: int, premiere_page: int, produites)
         )
 
 
-def _notice_eventuelle(projet: Projet, sorties, dossier: Path):
+def _notice_eventuelle(projet: Projet, sorties, dossier: Path, complet: bool = True):
     """La pièce DP 11, si une notice a été déposée, et ce qu'il faut en dire.
 
-    Arrivé ici, un dossier complet en a forcément une : `generer_dossier` a
-    refusé plus haut celui qui n'en avait pas. Le seul cas sans notice est le
-    dossier réduit au socle, où elle n'est pas encore écrite — il se produit
-    alors sans elle, en le disant.
+    Son absence **n'arrête pas** la génération. La notice est attendue de tout
+    dossier déposable, mais l'outil ne l'exige pas : tant que le dépôt est en
+    phase de mise au point, un contrôle bloquant empêcherait d'éprouver le
+    reste de la chaîne (décision du 14/09/2026). Ce qui manque est écrit au
+    rapport, qui est le seul endroit où le chef de projet peut s'en apercevoir
+    avant le dépôt — et `complet` sert à ne pas reprocher sa notice à un
+    dossier d'étude amont, qui ne l'a pas encore écrite.
 
     Le rang de sa première page se **compte** sur les PDF déjà produits plutôt
     que de se déduire du nombre de pièces : le jour où l'une d'elles s'étendra
     à son tour, la notice suivra sans qu'on ait à y penser.
     """
     chemin = projet.chemin_notice
-    if chemin is None:
+    if chemin is None and not complet:
         return None, (
             "Aucune notice DP 11 : ce dossier d'étude amont est produit sans "
             "elle. Un dossier déposable en porte une, habillée du cadre et du "
             "cartouche et paginée avec les autres pièces."
+        )
+    if chemin is None:
+        return None, (
+            "Aucune notice DP 11 : le dossier est produit sans elle, mais il "
+            "est incomplet pour le dépôt. Déposez le PDF de la notice pour "
+            "qu'elle soit habillée du cadre et du cartouche et paginée avec "
+            "les autres pièces."
         )
     # La page de garde occupe la page 1, les pièces déjà produites la suivent,
     # et la notice commence à la page d'après.

@@ -71,10 +71,10 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    jamais le tracé d'origine — le voir persister donnait à croire que rien
    n'avait été redressé.
 3. **Pièces fournies** — ce que l'outil ne dessine pas. La **notice DP 11**
-   ouvre la section : c'est la seule pièce obligatoire qu'on y dépose, et la
-   seule que l'outil intègre au dossier assemblé — voir « Notice DP 11 » plus
-   bas. Seul un dossier d'étude amont, réduit aux pièces DP 1, se produit sans
-   elle. Viennent ensuite les photographies et photomontages, une ligne par
+   ouvre la section : c'est la seule que l'outil intègre au dossier assemblé —
+   voir « Notice DP 11 » plus bas. Elle est attendue de tout dossier déposable
+   sans être exigée : sans elle le dossier sort quand même, et le rapport dit
+   qu'il est incomplet. Viennent ensuite les photographies et photomontages, une ligne par
    pièce, DP 6, DP 7 et DP 8 : ce sont trois pièces distinctes, qui ne montrent
    pas la même chose et ne se rangent pas au même endroit du dossier, et les
    mélanger obligerait à les retrier à la main. L'insertion paysagère de DP 6
@@ -371,7 +371,9 @@ python -m pytest -q
   deux, ce qui est la garantie que le paramètre est additif. Les refus y sont
   mesurés aussi : fichier qui n'est pas un PDF, PDF sans page, plan A1 déposé à
   la place de la notice. La notice de synthèse est composée par cairo : aucun
-  service en ligne n'est demandé.
+  service en ligne n'est demandé. Le **critère n°6** y figure aussi, sous deux
+  angles : un dossier complet sans notice s'entend dire qu'il est incomplet, un
+  dossier d'étude amont ne s'entend rien reprocher.
 - `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
   par `AppTest`, qui suit le parcours du chef de projet : cadrer le projet,
   déposer le plan, importer, valider, générer. Il contrôle l'ouverture des
@@ -382,9 +384,10 @@ python -m pytest -q
   `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
   rencontre. Un relevé altimétrique de synthèse y est déposé à chaque fois,
   pour que le profil se lise dans un fichier plutôt que sur le RGE ALTI : seuls
-  les tests qui produisent un vrai dossier — le téléchargement, et le **critère
-  n°8 du lot 5**, qui dépose la notice, génère et la retrouve dans l'archive
-  ZIP — sont marqués `reseau`.
+  les tests qui produisent un vrai dossier sont marqués `reseau` : le
+  téléchargement, le **critère n°8 du lot 5** — déposer la notice, générer, la
+  retrouver dans l'archive ZIP — et la génération sans notice, qui doit aboutir
+  à un dossier produit et à un rapport qui le dit incomplet.
 - `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
   syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
   qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle
@@ -1988,22 +1991,39 @@ produits, et ne se déduit pas du nombre de pièces : le jour où une autre piè
 s'étendra, la notice suivra sans qu'on ait à y penser. La notice étant la
 dernière pièce, aucune n'est décalée par son épaisseur.
 
-### Où elle se dépose, et pourquoi elle est obligatoire
+### Où elle se dépose, et ce qui se passe sans elle
 
-En section 3, avec les photographies : `projets/{nom}/DP_11/`, par le même
-patron que `_enregistrer_photos`.
+En section 3, qu'elle ouvre : `projets/{nom}/DP_11/`, par le même patron que
+`_enregistrer_photos`.
 
-Elle est **obligatoire pour un dossier déposable**. C'est un écart assumé à la
-décision D4 du brief, qui la disait facultative : le chef de projet a tranché
-l'inverse le 14/09/2026, un dossier amputé de sa notice n'étant pas un dossier.
-`generer_dossier` refuse donc de produire un dossier complet sans elle, et le
-refus tombe **avant la première requête au WMS-R** — le découvrir après la
-génération coûte le temps de la refaire.
+Elle est **attendue de tout dossier déposable, et pas exigée par l'outil**. Un
+dossier déposé sans notice est incomplet — c'est ce que dit la décision du
+14/09/2026 qui a corrigé D4 — mais rien ne bloque : tant que le dépôt est en
+mise au point, un contrôle bloquant sur une pièce manquante empêcherait
+d'éprouver le reste de la chaîne. Le dossier sort donc sans elle, et son absence
+est écrite au **rapport de génération**, qui devient le seul garde-fou : c'est
+là, et nulle part ailleurs, que le chef de projet peut s'apercevoir que la pièce
+manque avant de déposer.
 
-La seule exception est le **dossier d'étude amont**, réduit aux pièces DP 1 et
-produit sans plan du bureau d'études : il est déjà annoncé comme non déposable,
-et sa notice n'est pas encore écrite. C'est la présence du contrat d'entrée qui
-fait la différence, et `assemblage` est le seul à la connaître.
+Le message distingue deux cas, parce qu'un rapport qui répète ce qu'on sait déjà
+cesse d'être lu. Un dossier complet s'entend dire qu'il est « incomplet pour le
+dépôt ». Un **dossier d'étude amont**, réduit aux pièces DP 1 et produit sans
+plan du bureau d'études, ne s'entend rien reprocher : il est déjà annoncé comme
+non déposable, et sa notice n'est pas encore écrite. C'est la présence du
+contrat d'entrée qui fait la différence, et `assemblage` est le seul à la
+connaître.
+
+### Ce qui deviendra bloquant
+
+Les pièces attendues d'un dossier déposable seront passées en obligatoire
+**quand la chaîne sera éprouvée** — décision du 14/09/2026, à reprendre à la fin
+de la mise au point. La notice DP 11 est la première de cette liste : le
+contrôle existait, il a été retiré, et le rétablir tient en deux endroits — un
+refus dans `generer_dossier` après le chargement du contrat, et un dans
+`_construire_projet` côté application. Aujourd'hui, les seuls refus sont ceux
+sans lesquels rien ne peut être dessiné : l'emprise cadastrale absente, une
+voirie dont le type n'est pas tranché, deux photographies de même nom qui
+s'écraseraient.
 
 ### Le format déposé, en pratique
 

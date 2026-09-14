@@ -93,11 +93,11 @@ ouvrages techniques, c'est-à-dire l'essentiel du dossier
 - **Tableau bilan** — le `.xlsx` du bureau d'études, **au même indice que le
   plan**. C'est lui qui engage les surfaces et les puissances déclarées.
 
-**Obligatoire pour un dossier déposable**
+**Attendu de tout dossier déposable**
 - **Notice DP 11** — le PDF que vous avez rédigé. L'outil ne l'écrit pas : il
   l'habille du cadre et du cartouche du dossier, et la pagine avec les autres
-  pièces. Seul un dossier d'étude amont, réduit aux pièces DP 1, se produit
-  sans elle.
+  pièces. Il ne l'exige pas encore — le dossier sort sans elle et le rapport le
+  signale — mais un dossier déposé sans notice est incomplet.
 
 **Facultatif**
 - **Relevé altimétrique** — `.txt` ou `.csv`, trois colonnes « X Y Z » en
@@ -1203,7 +1203,7 @@ st.caption(
 # La notice ouvre la section : c'est la seule pièce obligatoire qu'on y dépose,
 # et la seule que l'outil intègre au dossier assemblé — chacune de ses pages
 # devient une planche, sous le cadre et le cartouche communs. C'est le lot 5.
-st.markdown("**Notice — obligatoire**")
+st.markdown("**Notice — attendue de tout dossier déposable**")
 st.caption(
     "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
     "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
@@ -1221,10 +1221,13 @@ fichier_notice = st.file_uploader(
     help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
 )
 if fichier_notice is None and contrat_present:
+    # Pas de refus : le dépôt est en phase de mise au point, et bloquer sur une
+    # pièce manquante empêcherait d'éprouver le reste de la chaîne (décision du
+    # 14/09/2026). Le dossier sort quand même, et il le dit — ici, et au
+    # rapport de génération.
     st.warning(
-        "La notice DP 11 est obligatoire : un dossier déposable en porte une, "
-        "et la génération est refusée sans elle. Seul un dossier d'étude "
-        "amont, réduit aux pièces DP 1, s'en passe.",
+        "Aucune notice DP 11 déposée : le dossier sera produit sans elle, et "
+        "il sera **incomplet pour le dépôt**. L'outil ne l'exige pas encore.",
         icon="⚠️",
     )
 
@@ -1389,19 +1392,6 @@ def _construire_projet() -> Projet | None:
             "Deux photographies portent le même nom dans "
             f"{', '.join(photos_en_double)} : l'une écraserait l'autre. "
             "Renommez-en une en section 3."
-        )
-        return None
-    # La notice n'est obligatoire que pour un dossier déposable : un dossier
-    # d'étude amont, produit sans le plan du bureau d'études, est annoncé comme
-    # non déposable et sa notice n'est pas encore écrite. `generer_dossier`
-    # refuse de la même façon — le contrôle est ici en plus, pour dire lequel
-    # des deux dépôts manque avant d'écrire quoi que ce soit sur le disque.
-    if contrat_present and fichier_notice is None:
-        st.error(
-            "La notice DP 11 est obligatoire : déposez-la en section 3. Elle "
-            "est habillée du cadre et du cartouche du dossier et paginée avec "
-            "les autres pièces. Seul un dossier d'étude amont, réduit aux "
-            "pièces DP 1, se produit sans elle."
         )
         return None
     if not fichiers_emprise:

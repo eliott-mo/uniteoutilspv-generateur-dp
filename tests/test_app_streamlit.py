@@ -602,30 +602,50 @@ def test_la_notice_se_depose_en_section_3(tmp_path, monkeypatch):
 
     assert not application.exception, [str(e.value) for e in application.exception]
     assert _televersement(application, "DP 11").label.startswith("DP 11 — Notice")
-    # Déposée, elle ne fait plus l'objet du rappel d'obligation.
+    # Déposée, elle ne fait plus l'objet du rappel.
     rappels = [avertissement.value for avertissement in application.warning]
-    assert not any("notice DP 11 est obligatoire" in m for m in rappels), rappels
+    assert not any("Aucune notice DP 11" in m for m in rappels), rappels
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_generer_sans_notice_est_refuse(tmp_path, monkeypatch):
-    """La notice n'est pas facultative, et le refus le dit avant de dessiner.
+def test_l_absence_de_notice_avertit_sans_bloquer(tmp_path, monkeypatch):
+    """Le dépôt est en mise au point : rien ne bloque sur une pièce manquante.
 
-    Aucun fond IGN n'est téléchargé : le contrôle tombe à la construction du
-    projet, d'où l'absence de marque `reseau`. C'est aussi ce qui garantit que
-    rien n'est écrit dans `sortie/`.
+    L'avertissement est le seul garde-fou, et il doit donc être là — sans lui,
+    un dossier partirait incomplet sans que rien ne l'ait dit. Le bouton de
+    génération, lui, reste offert.
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    rappels = [avertissement.value for avertissement in application.warning]
+    assert any("Aucune notice DP 11" in message for message in rappels), rappels
+    assert not [
+        erreur.value for erreur in application.error if "notice" in erreur.value
+    ]
+    assert _bouton_present(application, "Générer le dossier")
+
+
+@pytest.mark.reseau
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_dossier_sans_notice_se_produit_quand_meme(tmp_path, monkeypatch):
+    """Critère de validation n°6 du lot 5, sur le parcours complet.
+
+    Le dossier sort, sans la pièce DP 11, et le rapport dit qu'il est incomplet
+    pour le dépôt. C'est le seul endroit où le chef de projet peut s'en
+    apercevoir avant de déposer.
     """
     application = _import_valide(tmp_path, monkeypatch)
     _cliquer(application, "Générer le dossier")
     application.run()
-
     assert not application.exception, [str(e.value) for e in application.exception]
-    refus = [erreur.value for erreur in application.error]
-    assert any("notice DP 11 est obligatoire" in message for message in refus), refus
-    # Le dossier de sortie existe — l'import y a écrit le contrat — mais aucune
-    # planche n'y a été dessinée.
-    planches = list((tmp_path / "sortie").rglob("*.pdf"))
-    assert not planches, planches
+
+    rapport = application.session_state["dossier_genere"]["rapport"]
+    assert rapport.notice is None
+    assert any(
+        "incomplet pour le dépôt" in message for message in rapport.avertissements
+    ), rapport.avertissements
+    assert "DP 11" not in [entree["numero"] for entree in rapport.sommaire]
 
 
 @pytest.mark.reseau
@@ -683,8 +703,8 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     réexécution provoquée par un clic.
     """
     application = _import_valide(tmp_path, monkeypatch)
-    # La notice est obligatoire depuis le 14/09/2026 : sans elle, le dossier
-    # n'est pas produit et il n'y a rien à télécharger.
+    # Une notice est déposée pour que le dossier produit soit complet : ce
+    # test-ci porte sur les boutons de téléchargement, pas sur ce qui manque.
     _televerser(
         application, "DP 11", ("notice.pdf", _notice_pdf(), "application/pdf")
     )

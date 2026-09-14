@@ -412,62 +412,43 @@ def test_une_piece_qui_s_etend_sans_le_declarer_est_refusee():
             piece, nb_pages=2, premiere_page=2, produites=produites
         )
 # ---------------------------------------------------------------------------
-# La notice est obligatoire, sauf pour un dossier d'étude amont
+# Critère n°6 — un dossier sans notice se produit quand même, et le dit
 # ---------------------------------------------------------------------------
 #
-# Le critère n°6 du brief disait l'inverse — « un dossier sans notice se
-# produit quand même » — et la décision D4 avec lui. Le chef de projet a
-# tranché le 14/09/2026 : la notice n'est pas facultative. Seul le dossier
-# réduit au socle, produit sans plan du bureau d'études et annoncé comme non
-# déposable, s'en passe : sa notice n'est pas encore écrite.
+# La notice est attendue de tout dossier déposable, mais l'outil ne l'exige
+# pas : tant que le dépôt est en mise au point, un contrôle bloquant
+# empêcherait d'éprouver le reste de la chaîne (décision du 14/09/2026). Le
+# rapport est donc le seul endroit où le chef de projet peut s'apercevoir que
+# la pièce manque, et ce qu'il y lit doit distinguer les deux cas.
 
 
-def test_un_dossier_d_etude_amont_se_produit_sans_notice(tmp_path):
+def test_un_dossier_complet_sans_notice_se_produit_et_se_dit_incomplet(tmp_path):
     from dp_socle.assemblage import _notice_eventuelle
 
-    sortie, message = _notice_eventuelle(_projet(tmp_path), [], tmp_path)
+    sortie, message = _notice_eventuelle(
+        _projet(tmp_path), [], tmp_path, complet=True
+    )
+
+    assert sortie is None
+    assert "incomplet pour le dépôt" in message
+
+
+def test_un_dossier_d_etude_amont_ne_se_voit_pas_reprocher_sa_notice(tmp_path):
+    """Sans plan du bureau d'études, la notice n'est pas encore écrite.
+
+    Lui annoncer un dossier « incomplet pour le dépôt » serait juste sur le
+    fond et inutile sur la forme : ce dossier est déjà annoncé comme non
+    déposable, et un rapport qui répète ce qu'on sait déjà se cesse d'être lu.
+    """
+    from dp_socle.assemblage import _notice_eventuelle
+
+    sortie, message = _notice_eventuelle(
+        _projet(tmp_path), [], tmp_path, complet=False
+    )
 
     assert sortie is None
     assert "étude amont" in message
-
-
-def test_un_dossier_complet_sans_notice_est_refuse(tmp_path, monkeypatch):
-    """Et refusé **avant** de télécharger le moindre fond IGN.
-
-    Le refus tombe entre le chargement du contrat d'entrée et la première
-    planche : `dp1_1_situation.generer` est remplacé par une sentinelle qui
-    échouerait si on allait jusque-là.
-    """
-    import dp_socle.assemblage as assemblage
-
-    def jamais(*args, **kwargs):  # pragma: no cover - ne doit pas être atteint
-        raise AssertionError("une planche a été dessinée malgré l'absence de notice")
-
-    monkeypatch.setattr(assemblage.dp1_1_situation, "generer", jamais)
-    monkeypatch.setattr(
-        assemblage, "charger_emprise", lambda _chemin: _EmpriseFactice()
-    )
-    monkeypatch.setattr(
-        assemblage,
-        "_charger_contrat_eventuel",
-        lambda _dossier, _projet: (_ContratFactice(), None),
-    )
-
-    projet = _projet(tmp_path)
-    projet.emprise = str(tmp_path / "emprise.geojson")
-    with pytest.raises(ErreurNotice, match="obligatoire"):
-        assemblage.generer_dossier(projet, tmp_path / "sortie")
-
-
-class _EmpriseFactice:
-    reprojetee = False
-    nb_polygones = 1
-    crs_source = "EPSG:2154"
-
-
-class _ContratFactice:
-    origine = "import_be"
-    profil = None
+    assert "incomplet" not in message
 
 
 def test_la_notice_est_controlee_avant_de_dessiner(tmp_path):
