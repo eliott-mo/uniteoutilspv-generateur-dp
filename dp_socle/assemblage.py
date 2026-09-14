@@ -14,7 +14,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 from .contrat import Contrat, charger_contrat
-from .erreurs import ErreurContrat, ErreurDP, ErreurRendu
+from .erreurs import ErreurContrat, ErreurDP, ErreurNotice, ErreurRendu
 from .dossier import codes_produits, numero_planche
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
@@ -121,6 +121,23 @@ def generer_dossier(
     contrat, message = _charger_contrat_eventuel(dossier, projet)
     if message:
         avertissements.append(message)
+
+    # La notice est **obligatoire** pour un dossier déposable — tranché par le
+    # chef de projet le 14/09/2026, contre la décision D4 du brief qui la
+    # disait facultative. Refusé ici, avant la première requête au WMS-R : un
+    # dossier amputé de sa notice n'est pas un dossier, et le découvrir après
+    # la génération coûte le temps de la refaire.
+    #
+    # Un dossier réduit au socle échappe à la règle : sans plan du bureau
+    # d'études, c'est une étude amont, annoncée comme non déposable, et sa
+    # notice n'est pas encore écrite.
+    if contrat is not None and projet.chemin_notice is None:
+        raise ErreurNotice(
+            "Aucune notice DP 11 fournie : elle est obligatoire pour un "
+            "dossier déposable. Déposez-la en PDF avant de générer. Seul un "
+            "dossier d'étude amont, réduit aux pièces DP 1, se produit sans "
+            "elle."
+        )
 
     with warnings.catch_warnings(record=True) as captees:
         warnings.simplefilter("always", RuntimeWarning)
@@ -235,10 +252,10 @@ def _verifier_numerotation(sortie, nb_pages: int, premiere_page: int, produites)
 def _notice_eventuelle(projet: Projet, sorties, dossier: Path):
     """La pièce DP 11, si une notice a été déposée, et ce qu'il faut en dire.
 
-    Son absence est un cas normal — un dossier d'étude amont n'a pas de notice
-    — et le dossier se produit sans elle, en le disant. C'est le comportement
-    de `_charger_contrat_eventuel` pour le plan, et il vaut ici pour la même
-    raison.
+    Arrivé ici, un dossier complet en a forcément une : `generer_dossier` a
+    refusé plus haut celui qui n'en avait pas. Le seul cas sans notice est le
+    dossier réduit au socle, où elle n'est pas encore écrite — il se produit
+    alors sans elle, en le disant.
 
     Le rang de sa première page se **compte** sur les PDF déjà produits plutôt
     que de se déduire du nombre de pièces : le jour où l'une d'elles s'étendra
@@ -247,9 +264,9 @@ def _notice_eventuelle(projet: Projet, sorties, dossier: Path):
     chemin = projet.chemin_notice
     if chemin is None:
         return None, (
-            "Aucune notice DP 11 fournie : le dossier est produit sans elle. "
-            "Déposez-la en PDF pour qu'elle soit habillée du cadre et du "
-            "cartouche du dossier, et paginée avec les autres pièces."
+            "Aucune notice DP 11 : ce dossier d'étude amont est produit sans "
+            "elle. Un dossier déposable en porte une, habillée du cadre et du "
+            "cartouche et paginée avec les autres pièces."
         )
     # La page de garde occupe la page 1, les pièces déjà produites la suivent,
     # et la notice commence à la page d'après.

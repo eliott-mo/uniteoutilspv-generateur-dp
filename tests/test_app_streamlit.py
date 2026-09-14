@@ -602,6 +602,30 @@ def test_la_notice_se_depose_en_section_3(tmp_path, monkeypatch):
 
     assert not application.exception, [str(e.value) for e in application.exception]
     assert _televersement(application, "DP 11").label.startswith("DP 11 — Notice")
+    # Déposée, elle ne fait plus l'objet du rappel d'obligation.
+    rappels = [avertissement.value for avertissement in application.warning]
+    assert not any("notice DP 11 est obligatoire" in m for m in rappels), rappels
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_generer_sans_notice_est_refuse(tmp_path, monkeypatch):
+    """La notice n'est pas facultative, et le refus le dit avant de dessiner.
+
+    Aucun fond IGN n'est téléchargé : le contrôle tombe à la construction du
+    projet, d'où l'absence de marque `reseau`. C'est aussi ce qui garantit que
+    rien n'est écrit dans `sortie/`.
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+    _cliquer(application, "Générer le dossier")
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    refus = [erreur.value for erreur in application.error]
+    assert any("notice DP 11 est obligatoire" in message for message in refus), refus
+    # Le dossier de sortie existe — l'import y a écrit le contrat — mais aucune
+    # planche n'y a été dessinée.
+    planches = list((tmp_path / "sortie").rglob("*.pdf"))
+    assert not planches, planches
 
 
 @pytest.mark.reseau
@@ -659,6 +683,12 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     réexécution provoquée par un clic.
     """
     application = _import_valide(tmp_path, monkeypatch)
+    # La notice est obligatoire depuis le 14/09/2026 : sans elle, le dossier
+    # n'est pas produit et il n'y a rien à télécharger.
+    _televerser(
+        application, "DP 11", ("notice.pdf", _notice_pdf(), "application/pdf")
+    )
+    application = application.run()
     _cliquer(application, "Générer le dossier")
     application.run()
 

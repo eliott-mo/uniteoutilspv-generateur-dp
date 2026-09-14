@@ -70,15 +70,16 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    et un plan en compte des milliers. Seule la coupe **retenue** est dessinée,
    jamais le tracé d'origine — le voir persister donnait à croire que rien
    n'avait été redressé.
-3. **Pièces fournies** — ce que l'outil ne dessine pas. Les photographies et
-   photomontages d'abord, une ligne par pièce, DP 6, DP 7 et DP 8 : ce sont
-   trois pièces distinctes, qui ne montrent pas la même chose et ne se rangent
-   pas au même endroit du dossier, et les mélanger obligerait à les retrier à
-   la main. L'insertion paysagère de DP 6 monte en page de garde ; quand il y en
-   a plusieurs, un bouton radio désigne laquelle. Puis la **notice DP 11**, en
-   PDF : contrairement aux photographies, elle est intégrée au dossier assemblé
-   — voir « Notice DP 11 » plus bas. Elle est facultative ; sans elle le dossier
-   est produit quand même, et le rapport le dit.
+3. **Pièces fournies** — ce que l'outil ne dessine pas. La **notice DP 11**
+   ouvre la section : c'est la seule pièce obligatoire qu'on y dépose, et la
+   seule que l'outil intègre au dossier assemblé — voir « Notice DP 11 » plus
+   bas. Seul un dossier d'étude amont, réduit aux pièces DP 1, se produit sans
+   elle. Viennent ensuite les photographies et photomontages, une ligne par
+   pièce, DP 6, DP 7 et DP 8 : ce sont trois pièces distinctes, qui ne montrent
+   pas la même chose et ne se rangent pas au même endroit du dossier, et les
+   mélanger obligerait à les retrier à la main. L'insertion paysagère de DP 6
+   monte en page de garde ; quand il y en a plusieurs, un bouton radio désigne
+   laquelle.
 4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
    bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
    lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
@@ -1939,6 +1940,7 @@ Les facteurs mesurés le 14/09/2026, qui fixent aussi les seuils :
 
 | Format déposé | Facteur | Sort |
 |---|---|---|
+| **A4 paysage** (le cas courant) | **1,238** | **intégrée, agrandie, 26 mm de blanc de chaque côté** |
 | A4 portrait | 0,875 | intégrée, 113 mm de blanc de chaque côté |
 | A3 paysage | 0,875 | intégrée — et non au facteur 1 : 420 × 297 ne tient pas dans 402 × 260 |
 | A3 portrait | 0,619 | intégrée |
@@ -1986,12 +1988,38 @@ produits, et ne se déduit pas du nombre de pièces : le jour où une autre piè
 s'étendra, la notice suivra sans qu'on ait à y penser. La notice étant la
 dernière pièce, aucune n'est décalée par son épaisseur.
 
-### Où elle se dépose
+### Où elle se dépose, et pourquoi elle est obligatoire
 
 En section 3, avec les photographies : `projets/{nom}/DP_11/`, par le même
-patron que `_enregistrer_photos`. Elle est **facultative** — un dossier d'étude
-amont n'a pas de notice — et son absence est écrite au rapport, comme l'est
-celle du plan du bureau d'études.
+patron que `_enregistrer_photos`.
+
+Elle est **obligatoire pour un dossier déposable**. C'est un écart assumé à la
+décision D4 du brief, qui la disait facultative : le chef de projet a tranché
+l'inverse le 14/09/2026, un dossier amputé de sa notice n'étant pas un dossier.
+`generer_dossier` refuse donc de produire un dossier complet sans elle, et le
+refus tombe **avant la première requête au WMS-R** — le découvrir après la
+génération coûte le temps de la refaire.
+
+La seule exception est le **dossier d'étude amont**, réduit aux pièces DP 1 et
+produit sans plan du bureau d'études : il est déjà annoncé comme non déposable,
+et sa notice n'est pas encore écrite. C'est la présence du contrat d'entrée qui
+fait la différence, et `assemblage` est le seul à la connaître.
+
+### Le format déposé, en pratique
+
+La notice est fournie en **A4 paysage**. Elle est donc *agrandie* au facteur
+1,238 pour remplir le cadre : 367,7 × 260 mm, 26 mm de blanc de chaque côté, et
+un corps de 10 pt qui s'imprime à 12,4 pt. C'est la règle D1 appliquée telle
+quelle — « au plus grand facteur qui la fasse tenir » — et le chef de projet l'a
+confirmée le 14/09/2026, contre la variante qui aurait plafonné le facteur à 1
+et laissé 61,5 mm de blanc de chaque côté.
+
+À noter, pour qui reprendrait la question : la règle D1 a été écrite en
+supposant de l'A4 portrait, où le facteur est toujours inférieur à 1. Le cas de
+l'agrandissement n'y avait pas été envisagé. Et la mesure de l'étendue de
+l'encre des pages 16 et 17 de Massay **n'a pas permis de vérifier** que le
+dossier de référence remplit la feuille : les trois pages testées, plan de
+situation compris, rendent la même étendue bord à bord.
 
 ## Hors périmètre de ces lots
 

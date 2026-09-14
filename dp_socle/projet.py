@@ -85,9 +85,11 @@ class Projet:
     helioscope: str | None = None
     #: Notice DP 11, fournie en PDF par le chef de projet (lot 5).
     #:
-    #: Facultative : un dossier d'étude amont n'en a pas, et il se produit
-    #: quand même — le rapport dit alors qu'elle manque, comme il le fait pour
-    #: le plan du bureau d'études.
+    #: **Obligatoire pour un dossier déposable** — tranché le 14/09/2026, la
+    #: décision D4 du brief la disant facultative. Elle reste `None` pour le
+    #: seul dossier d'étude amont, réduit aux pièces DP 1 : sans plan du bureau
+    #: d'études, la notice n'est pas encore écrite. C'est `assemblage` qui fait
+    #: la différence, parce que lui seul sait si le plan a été importé.
     notice: str | None = None
     #: Longitude de l'origine du repère DXF, en degrés, retenue au calage et
     #: validée par l'utilisateur. La latitude, elle, se déduit du fichier : elle

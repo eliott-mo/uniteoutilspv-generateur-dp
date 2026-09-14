@@ -93,15 +93,18 @@ ouvrages techniques, c'est-à-dire l'essentiel du dossier
 - **Tableau bilan** — le `.xlsx` du bureau d'études, **au même indice que le
   plan**. C'est lui qui engage les surfaces et les puissances déclarées.
 
+**Obligatoire pour un dossier déposable**
+- **Notice DP 11** — le PDF que vous avez rédigé. L'outil ne l'écrit pas : il
+  l'habille du cadre et du cartouche du dossier, et la pagine avec les autres
+  pièces. Seul un dossier d'étude amont, réduit aux pièces DP 1, se produit
+  sans elle.
+
 **Facultatif**
 - **Relevé altimétrique** — `.txt` ou `.csv`, trois colonnes « X Y Z » en
   Lambert 93. Il remplace le RGE ALTI, plus précis qu'un relevé national.
 - **Plan du BE en PDF** — pour comparer l'aperçu à ce que le BE a dessiné.
 - **Photographies** — DP 6 insertion paysagère (en JPG ou PNG si elle doit
   monter en page de garde), DP 7 environnement proche, DP 8 paysage lointain.
-- **Notice DP 11** — le PDF que vous avez rédigé. L'outil ne l'écrit pas : il
-  l'habille du cadre et du cartouche du dossier, et la pagine avec les autres
-  pièces. Sans elle, le dossier est produit quand même et le rapport le dit.
 """,
     icon="🗂️",
 )
@@ -1193,9 +1196,37 @@ PIECES_PHOTOS = ("DP 6", "DP 7", "DP 8")
 st.divider()
 st.subheader("3. Pièces fournies")
 st.caption(
-    "Ce que l'outil ne dessine pas : les photographies et photomontages, et la "
-    "notice DP 11. Une ligne par pièce."
+    "Ce que l'outil ne dessine pas : la notice DP 11, qu'il intègre au dossier, "
+    "puis les photographies et photomontages, qu'il conserve sans les assembler."
 )
+
+# La notice ouvre la section : c'est la seule pièce obligatoire qu'on y dépose,
+# et la seule que l'outil intègre au dossier assemblé — chacune de ses pages
+# devient une planche, sous le cadre et le cartouche communs. C'est le lot 5.
+st.markdown("**Notice — obligatoire**")
+st.caption(
+    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
+    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
+    "texte y reste du texte. Le format est lu dans le fichier, rien n'est "
+    "supposé : une A4 paysage, le cas courant, est agrandie au facteur 124 % "
+    "pour remplir le cadre A3 ; une A4 portrait y est réduite à 88 %. Sous "
+    f"{dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par mégarde — "
+    "la notice est refusée plutôt que rendue illisible."
+)
+fichier_notice = st.file_uploader(
+    f"DP 11 — {piece('DP 11').titre}",
+    type=["pdf"],
+    accept_multiple_files=False,
+    key="notice_dp11",
+    help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
+)
+if fichier_notice is None and contrat_present:
+    st.warning(
+        "La notice DP 11 est obligatoire : un dossier déposable en porte une, "
+        "et la génération est refusée sans elle. Seul un dossier d'étude "
+        "amont, réduit aux pièces DP 1, s'en passe.",
+        icon="⚠️",
+    )
 
 st.markdown("**Photographies et photomontages**")
 st.caption(
@@ -1283,31 +1314,6 @@ for code, doubles in photos_en_double.items():
     )
 
 
-# La notice, elle, est intégrée : chacune de ses pages devient une planche du
-# dossier, sous le cadre et le cartouche communs. C'est le lot 5.
-st.markdown("**Notice**")
-st.caption(
-    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
-    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
-    "texte y reste du texte. Le format est lu dans le fichier et chaque page "
-    "est ajustée au cadre A3 : une A4 portrait passe au facteur 88 %, une A2 à "
-    f"44 %. Sous {dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par "
-    "mégarde — la notice est refusée plutôt que rendue illisible."
-)
-fichier_notice = st.file_uploader(
-    f"DP 11 — {piece('DP 11').titre}",
-    type=["pdf"],
-    accept_multiple_files=False,
-    key="notice_dp11",
-    help="Le PDF de la notice, dans le format où vous l'avez rédigée. Le "
-    "format est lu dans le fichier, rien n'est supposé.",
-)
-if fichier_notice is None:
-    st.caption(
-        "Sans notice, le dossier est produit quand même et le rapport le dit : "
-        "c'est le cas d'un dossier d'étude amont."
-    )
-
 st.divider()
 st.subheader("4. Génération")
 
@@ -1383,6 +1389,19 @@ def _construire_projet() -> Projet | None:
             "Deux photographies portent le même nom dans "
             f"{', '.join(photos_en_double)} : l'une écraserait l'autre. "
             "Renommez-en une en section 3."
+        )
+        return None
+    # La notice n'est obligatoire que pour un dossier déposable : un dossier
+    # d'étude amont, produit sans le plan du bureau d'études, est annoncé comme
+    # non déposable et sa notice n'est pas encore écrite. `generer_dossier`
+    # refuse de la même façon — le contrôle est ici en plus, pour dire lequel
+    # des deux dépôts manque avant d'écrire quoi que ce soit sur le disque.
+    if contrat_present and fichier_notice is None:
+        st.error(
+            "La notice DP 11 est obligatoire : déposez-la en section 3. Elle "
+            "est habillée du cadre et du cartouche du dossier et paginée avec "
+            "les autres pièces. Seul un dossier d'étude amont, réduit aux "
+            "pièces DP 1, se produit sans elle."
         )
         return None
     if not fichiers_emprise:
