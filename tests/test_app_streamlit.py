@@ -423,6 +423,205 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     assert "CATEGORIES_HORS_CARTE" in bloc
 
 
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_le_bouton_arme_le_clic_et_s_annule(tmp_path, monkeypatch):
+    """« Déplacer la coupe » arme la carte, annonce ce qu'elle attend, et se défait.
+
+    Le clic lui-même n'est pas jouable ici — `AppTest` ne rend pas le contenu
+    d'un composant `st_folium`, et la valeur qu'il renvoie est celle de ses
+    défauts. Ce qui se mesure est l'armement : sans lui, aucun clic ne sera
+    destiné à la coupe.
+    """
+    application = _plan_importe(tmp_path, monkeypatch)
+    assert "geste_carte" not in application.session_state
+    assert _bouton_present(application, "Déplacer la coupe")
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert application.session_state["geste_carte"] == "translation_coupe"
+    consignes = [info.value for info in application.info]
+    assert any("Cliquez sur la carte" in consigne for consigne in consignes), consignes
+    # La coupe proposée reste en place tant que rien n'a été cliqué.
+    assert application.session_state["coupe_be"] is not None
+
+    _cliquer(application, "Annuler le déplacement")
+    application = application.run()
+
+    assert application.session_state["geste_carte"] is None
+    assert _bouton_present(application, "Déplacer la coupe")
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_clic_qui_ne_vient_pas_ne_deplace_rien(tmp_path, monkeypatch):
+    """La carte armée sans clic laisse la coupe et le profil intacts.
+
+    `last_clicked` persiste d'une exécution à la suivante : lu sans mémoire, il
+    ferait rejouer le même clic à chaque interaction. Ici il vaut None, et la
+    case du contournement se coche sans que la coupe bouge.
+    """
+    application = _plan_importe(tmp_path, monkeypatch)
+    coupe_avant = application.session_state["coupe_be"].geometrie.wkt
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+    for _ in range(2):
+        application.checkbox[0].set_value(True)
+        application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert application.session_state["coupe_be"].geometrie.wkt == coupe_avant
+    assert application.session_state["origine_coupe"] == "defaut"
+
+
+def _carte_cliquable(monkeypatch):
+    """Remplace le composant de carte, seule pièce de l'écran qu'`AppTest` ne joue pas.
+
+    `st_folium` renvoie ses valeurs par défaut sous `AppTest`, `last_clicked` à
+    None : aucun clic n'y arrive jamais. Le remplacer par un composant qui rend le
+    clic qu'on lui dicte laisse jouer tout le reste du chemin réel — l'armement,
+    la consommation du clic, la translation, le relevé du profil et les contrôles.
+
+    Rend un dictionnaire sur lequel poser `point`, en (x, y) Lambert 93 ; None
+    pour une carte sur laquelle personne n'a cliqué.
+    """
+    import streamlit_folium
+    from pyproj import Transformer
+
+    vers_wgs84 = Transformer.from_crs(2154, 4326, always_xy=True)
+    dicte = {"point": None}
+
+    def _composant(*_args, **_kwargs):
+        valeurs = {
+            "last_clicked": None,
+            "all_drawings": None,
+            "last_active_drawing": None,
+        }
+        if dicte["point"] is not None:
+            longitude, latitude = vers_wgs84.transform(*dicte["point"])
+            valeurs["last_clicked"] = {"lat": latitude, "lng": longitude}
+        return valeurs
+
+    monkeypatch.setattr(streamlit_folium, "st_folium", _composant)
+    return dicte
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_clic_deplace_la_coupe_et_releve_le_profil(tmp_path, monkeypatch):
+    """Le geste entier, de l'armement au profil : la coupe passe par le clic.
+
+    Les rangées de Saint-Cyr sont est-ouest, donc la coupe est nord-sud et la
+    déplacer la fait glisser en x. Le clic est posé 60 m à l'ouest de la coupe
+    proposée, dans l'emprise du relevé altimétrique déposé.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
+    avant = application.session_state["coupe_be"].geometrie
+    profil_avant = application.session_state["profil_be"]
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+
+    milieu = avant.interpolate(0.5, normalized=True)
+    carte["point"] = (milieu.x - 60.0, milieu.y)
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    coupe = application.session_state["coupe_be"]
+    from shapely.geometry import Point
+
+    assert coupe.geometrie.distance(Point(*carte["point"])) == pytest.approx(
+        0.0, abs=1e-6
+    )
+    # Direction inchangée, position déplacée de 60 m : le geste qui manquait.
+    # Rangées est-ouest, donc coupe strictement nord-sud, avant comme après.
+    depart, arrivee = coupe.geometrie.coords[0], coupe.geometrie.coords[-1]
+    assert depart[0] == pytest.approx(arrivee[0], abs=1e-6)
+    assert coupe.geometrie.distance(milieu) == pytest.approx(60.0, abs=0.01)
+    assert coupe.position_choisie
+    assert application.session_state["origine_coupe"] == "deplacee"
+
+    # Le geste est désarmé, le profil relevé sur la nouvelle ligne.
+    assert application.session_state["geste_carte"] is None
+    profil = application.session_state["profil_be"]
+    assert profil is not None and profil is not profil_avant
+    assert len(profil.abscisses_m) >= 2
+    annonces = [succes.value for succes in application.success]
+    assert any("Coupe déplacée" in annonce for annonce in annonces), annonces
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_clic_hors_du_site_refuse_et_garde_la_coupe(tmp_path, monkeypatch):
+    """Aucun repli silencieux, et aucune perte : la coupe d'avant reste en place.
+
+    Le tracé, lui, efface la coupe retenue quand il échoue. Un clic mal placé ne
+    doit pas coûter la coupe qui était bonne.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
+    avant = application.session_state["coupe_be"].geometrie.wkt
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+
+    milieu = application.session_state["coupe_be"].geometrie.interpolate(
+        0.5, normalized=True
+    )
+    carte["point"] = (milieu.x + 4_000.0, milieu.y)
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    erreurs = [erreur.value for erreur in application.error]
+    assert any("ne traverse pas l'emprise clôturée" in e for e in erreurs), erreurs
+    assert application.session_state["coupe_be"].geometrie.wkt == avant
+    assert application.session_state["origine_coupe"] == "defaut"
+
+
+def test_le_clic_ne_remonte_pas_la_carte():
+    """La carte garde sa clé après une translation, donc son zoom.
+
+    Ce que les deux tests du clic ne peuvent pas voir : le composant y est
+    remplacé, et il ignore la clé qu'on lui passe. La clé porte un compteur qui
+    change à chaque coupe retenue par un *tracé*, pour chasser le trait Leaflet
+    résiduel qui se superposait sinon à la coupe redressée. Un clic ne laisse
+    aucun trait résiduel : la remonter ferait perdre son zoom au chef de projet
+    pour rien.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("if _geste_arme() is None:")
+    fin = source.index('if trace is not None and st.button("Corriger')
+    bloc = source[debut:fin]
+
+    assert "translater_ligne_coupe(" in bloc
+    assert "_retenir_clic(clic)" in bloc
+    assert "_desarmer_geste()" in bloc
+    # La coupe retenue n'est pas effacée par un clic refusé, contrairement au
+    # tracé : c'est le seul endroit où les deux chemins diffèrent.
+    assert "coupe_be = None" not in bloc
+    assert "tour_carte" not in bloc
+
+
+def test_la_carte_ne_relance_plus_le_script_pour_un_zoom():
+    """`returned_objects` restreint la carte à ce que cet écran lit vraiment.
+
+    Vérifié le 15/09/2026 dans le bundle de `streamlit-folium` 0.27.2 : la charge
+    renvoyée est filtrée sur cette liste, puis comparée à la précédente, et
+    `setComponentValue` n'est appelé que si elle a changé. Laisser passer le
+    cadrage et le zoom relançait le script au moindre déplacement de la carte.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("resultat_carte = st_folium(")
+    fin = source.index("trace = trace_l93(resultat_carte)")
+    appel = source[debut:fin]
+
+    assert "returned_objects=" in appel
+    for lu in ("last_clicked", "all_drawings", "last_active_drawing"):
+        assert f'"{lu}"' in appel, lu
+    for inutile in ("bounds", "zoom", "last_object_clicked", "selected_layers"):
+        assert f'"{inutile}"' not in appel, inutile
+
+
 def test_seule_la_coupe_redressee_est_montree():
     """Le tracé d'origine ne s'affiche plus à côté de la coupe corrigée.
 

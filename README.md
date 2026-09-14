@@ -1106,16 +1106,51 @@ Le lot 2 (HelioScope) n'en bénéficie pas : ses tables sont en repère DXF loca
 quand le tracé et l'emprise sont en Lambert 93, et les confronter demanderait un
 travail de calage. Sa coupe garde le point milieu du tracé, et sa façade le dit.
 
-Elle n'existe ni dans le DXF ni dans le tableau : le chef de projet la trace sur
-une carte interactive, sur fond d'ortho IGN, avec les tables et la clôture en
+Elle n'existe ni dans le DXF ni dans le tableau : elle se pose sur une carte
+interactive, sur fond d'ortho IGN, avec les tables et la clôture en
 surimpression.
 
-**Seul le point milieu du tracé est conservé** : c'est lui qui exprime
-l'intention, l'endroit où l'on veut couper. La direction vient de l'azimut
-mesuré sur les tables, perpendiculairement aux rangées — une coupe de terrain
-n'a de sens que dans cette direction, et quelques degrés d'oblique allongent
-toutes les distances lues sur la planche du facteur 1/cos θ, sans que rien ne le
-signale.
+La direction vient de l'azimut mesuré sur les tables, perpendiculairement aux
+rangées — une coupe de terrain n'a de sens que dans cette direction, et quelques
+degrés d'oblique allongent toutes les distances lues sur la planche du facteur
+1/cos θ, sans que rien ne le signale.
+
+#### Déplacer la coupe : « Déplacer la coupe », puis un clic
+
+Le bouton **« Déplacer la coupe »** arme la carte, une bannière annonce ce qu'on
+attend, et le clic suivant fait glisser la coupe pour qu'elle passe par ce point,
+**en gardant la perpendiculaire aux rangées**. Un rechargement par clic, celui du
+bouton « Corriger » d'à côté. Pas de curseur d'angle ni de glissement continu :
+dans Streamlit, chaque cran relancerait le script.
+
+**Ce geste a été ajouté parce qu'il n'existait pas.** La coupe proposée à
+l'import annonçait que le chef de projet « la déplace seulement si elle lui
+déplaît », et rien ne permettait de la déplacer — mesuré dans le code le
+14/09/2026. Retracer un segment appelait la correction avec les tables, qui
+**recalcule entièrement la position** et repose la coupe exactement où elle
+était : le tracé ne servait que de déclencheur, le geste était vide. Le seul
+contournement, « Conserver la direction tracée », conservait aussi la direction —
+donc l'oblique d'un tracé à main levée. La combinaison qui manquait est celle-ci :
+
+| | direction | position |
+|---|---|---|
+| automatique | imposée ✔ | recalculée, le tracé est ignoré |
+| manuel | tracée ✘ | tracée ✔ |
+| **déplacer la coupe** | **imposée ✔** | **choisie ✔** |
+
+Côté géométrie, rien de neuf à calculer : `translater_ligne_coupe` reçoit un
+point au lieu d'un tracé, impose la perpendiculaire et étend à l'emprise. L'écart
+de la coupe déplacée à la perpendiculaire aux rangées vaut **zéro** — c'est ce qui
+la distingue du mode manuel, et c'est mesuré.
+
+**Un clic hors de portée du site lève**, avec la distance du point au bord de
+l'emprise, et la coupe précédente reste en place — contrairement au tracé, dont
+l'échec l'effaçait. Le profil du terrain est effacé avant d'être redemandé : un
+RGE ALTI muet laisse ainsi un trou visible, et non le relevé de la coupe d'avant
+sous une ligne qui a bougé.
+
+Le tracé polyligne **reste**, replié sous « Tracer la coupe à la main » : le mode
+manuel en dépend.
 
 La ligne est étendue à toute l'emprise clôturée avec 10 m de marge de chaque
 côté. L'étendue se calcule en projetant les sommets de l'emprise sur la
@@ -1139,6 +1174,22 @@ fournit un nouvel indice. Rejouer la correction sur le tracé d'origine redonne
 une coupe juste ; recharger la ligne corrigée telle quelle la figerait sur un
 plan qui n'existe plus, et elle ne serait plus perpendiculaire aux rangées.
 
+**Ce qui se rejoue est le geste qui avait été fait, et non toujours le même.** La
+sortie garde un champ `position_choisie` : une coupe déplacée à la main se rejoue
+par une translation, pas par une correction. Rejouée comme un tracé, elle voyait
+sa position recalculée sur le nombre de rangées traversées et reposée à
+l'automatique — le choix du chef de projet perdu à la régénération suivante, et
+annoncé de surcroît comme un déplacement dû au plan. La direction, elle, est bien
+reprise du plan d'aujourd'hui : c'est la position seule qui est conservée.
+
+Le point rejoué est le milieu de la ligne enregistrée, faute d'avoir gardé le
+point cliqué lui-même. Les deux sont équivalents tant que le plan n'a pas tourné,
+l'étendue se calculant à l'identique pour n'importe quel point de la ligne ; si
+l'azimut a tourné de θ, la coupe glisse en plus de la demi-longueur fois sin θ, et
+l'écart mesuré le dit. Les sorties écrites avant le 15/09/2026 n'ont pas ce champ
+et rejouent la correction, comme avant — elles n'avaient pas de position choisie
+à conserver.
+
 **Une coupe qui ne rencontre pas le site est refusée.** Deux projets enregistrés
 sous le même identifiant de dossier partagent leur dossier de sortie : rejouer
 le tracé de l'un sur le plan de l'autre donnait une ligne à 185 km de là, avec
@@ -1157,6 +1208,44 @@ Le `projet.json` du lot 1, qui porte le même nom dans `projets/`, est refusé �
 relecture sur son champ `origine` : y chercher une ligne de coupe ne rendrait
 rien de bon. Une version de contrat plus récente que celle que l'outil sait lire
 est refusée aussi, plutôt que reprise à moitié.
+
+### Le clic armé sur la carte
+
+Le mécanisme est écrit une fois pour tous les gestes de la carte : le lot 6 y
+ajoutera le placement d'un point de vue et sa visée, en le reprenant plutôt qu'en
+en écrivant un second. Un bouton arme un geste, une bannière annonce ce qu'on
+attend, le clic suivant est consommé par ce geste, et l'armement s'annule.
+
+Armer et désarmer relancent le script, sans quoi l'écran reste d'un tour en
+retard sur lui-même : la bannière s'affichait sous un bouton qui proposait encore
+de déplacer la coupe, sans moyen d'annuler, et l'inverse à l'annulation — une
+bannière réclamant un clic que plus rien n'attendait.
+
+**Le clic se consomme explicitement.** Vérifié le 15/09/2026 dans
+`streamlit-folium` 0.27.2 : `last_clicked` est alimenté par l'événement `click` de
+Leaflet, et **persiste** d'une exécution du script à la suivante tant que le
+composant n'est pas remonté. Il dit où a eu lieu le dernier clic, pas qu'un clic
+vient d'avoir lieu ; le lire sans mémoire ferait rejouer le même clic à chaque
+interaction — un déplacement de coupe à chaque case cochée. Le dernier point vu
+est donc retenu, **y compris quand aucun geste n'est armé** : sans cela, un clic
+fait pour regarder le plan restait en réserve et armer un geste plus tard le
+consommait aussitôt, la coupe sautant à un endroit cliqué bien avant.
+
+Limite assumée : recliquer au pixel exact du clic précédent ne produit rien, le
+composant n'envoyant pas de valeur inchangée. Le geste reste armé et le clic
+suivant passe ; la coupe aurait de toute façon été la même.
+
+**La carte ne remonte pas après une translation.** La clé porte un compteur qui
+change à chaque coupe retenue par un *tracé*, pour chasser le trait Leaflet
+résiduel qui se superposait sinon à la coupe redressée. Un clic ne laisse aucun
+tracé résiduel : le compteur ne bouge pas, et le chef de projet garde son zoom.
+
+**La carte ne relance plus le script pour un zoom.** `returned_objects` la
+restreint aux trois valeurs que cet écran lit — `last_clicked`, `all_drawings`,
+`last_active_drawing`. Sans cette restriction, le composant renvoyait aussi le
+cadrage et le niveau de zoom, et déplacer la carte relançait tout. Mesuré dans son
+bundle : la charge est filtrée sur cette liste, puis comparée à la précédente, et
+`setComponentValue` n'est appelé que si elle a changé.
 
 ### Profil altimétrique
 

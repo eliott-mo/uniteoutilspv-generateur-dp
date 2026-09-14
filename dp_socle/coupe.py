@@ -130,6 +130,11 @@ class LigneCoupe:
     #: aux rangées. Conservé pour montrer à l'écran ce qui a été redressé.
     ecart_initial_deg: float
     corrigee: bool
+    #: Vrai quand la position vient d'un point désigné par le chef de projet, et
+    #: non du calcul sur le nombre de rangées traversées. Ce qui se rejoue à
+    #: l'import suivant n'est alors pas la même chose : une correction
+    #: recalculerait la position et jetterait son choix. Voir `reprendre_coupe`.
+    position_choisie: bool = False
     avertissements: list[str] = field(default_factory=list)
 
     @property
@@ -333,19 +338,12 @@ def corriger_ligne_coupe(
             )
 
     geometrie = _etendre(milieu, direction, emprise_cloturee, marge_m)
-    # Une coupe qui ne rencontre pas le site n'est pas une coupe de ce site.
-    # Le cas se produit à la reprise d'un import précédent : le dossier de
-    # sortie garde le tracé du projet d'avant, et le rejouer sur un autre plan
-    # donnait une ligne à 185 km de là — avec un profil du terrain d'apparence
-    # parfaitement normale, relevé quelque part entre les deux sites.
-    if not geometrie.intersects(emprise_cloturee):
-        raise ErreurCoupe(
-            f"La ligne de coupe obtenue ne traverse pas l'emprise clôturée : son "
-            f"point milieu en est distant de "
-            f"{milieu.distance(emprise_cloturee):,.0f} m. Ce tracé décrit un "
-            "autre site — tracez la coupe sur ce plan-ci."
-            .replace(",", " ")
-        )
+    _verifier_traverse(
+        geometrie,
+        milieu,
+        emprise_cloturee,
+        "Ce tracé décrit un autre site — tracez la coupe sur ce plan-ci.",
+    )
     return LigneCoupe(
         geometrie=geometrie,
         trace_initial=LineString([depart, arrivee]),
@@ -353,6 +351,90 @@ def corriger_ligne_coupe(
         ecart_initial_deg=ecart,
         corrigee=not manuel,
         avertissements=avertissements,
+    )
+
+
+def translater_ligne_coupe(
+    point: Point,
+    azimut_tables_deg: float,
+    emprise_cloturee: BaseGeometry,
+    marge_m: float = MARGE_COUPE_M,
+) -> LigneCoupe:
+    """Fait passer la coupe par `point`, en gardant la perpendiculaire aux rangées.
+
+    C'est la combinaison qui manquait, et sans laquelle la coupe proposée n'était
+    pas déplaçable. `corriger_ligne_coupe` impose bien la direction, mais dès
+    qu'on lui donne les tables elle **recalcule** la position par
+    `position_de_coupe()` et repose la ligne là où elle était : le tracé ne sert
+    que de déclencheur. Son mode manuel, seul moyen d'imposer une position,
+    conserve du même coup la direction tracée — donc une oblique, qui allonge
+    toutes les distances lues sur la planche de 1/cos θ.
+
+    Ici la direction vient des rangées et la position du chef de projet, et rien
+    ne recalcule ni l'une ni l'autre. Il n'y a pas de tracé d'origine à
+    redresser : `trace_initial` est la ligne elle-même et l'écart est nul, comme
+    pour `coupe_par_defaut`.
+    """
+    if point is None or point.is_empty:
+        raise ErreurCoupe(
+            "Aucun point désigné : la coupe ne peut pas être déplacée sans "
+            "savoir par où la faire passer."
+        )
+    if emprise_cloturee is None or emprise_cloturee.is_empty:
+        raise ErreurCoupe(
+            "Emprise clôturée absente : la ligne de coupe ne peut pas être "
+            "étendue à la largeur du site."
+        )
+
+    geometrie = _etendre(point, azimut_tables_deg + 90.0, emprise_cloturee, marge_m)
+    _verifier_traverse(
+        geometrie,
+        point,
+        emprise_cloturee,
+        "Ce point est trop loin du site pour qu'une coupe y passe — cliquez "
+        "sur le plan, là où elle doit traverser les rangées.",
+    )
+    return LigneCoupe(
+        geometrie=geometrie,
+        trace_initial=geometrie,
+        azimut_tables_deg=azimut_tables_deg,
+        ecart_initial_deg=0.0,
+        corrigee=True,
+        position_choisie=True,
+        avertissements=[
+            "Coupe déplacée au point désigné, perpendiculairement aux rangées "
+            f"(azimut des tables {azimut_tables_deg:.2f}° plus 90°). La "
+            "direction n'a pas changé : c'est la position, et elle seule, que "
+            "vous venez de choisir."
+        ],
+    )
+
+
+def _verifier_traverse(
+    geometrie: LineString,
+    passage: Point,
+    emprise_cloturee: BaseGeometry,
+    consigne: str,
+) -> None:
+    """Refuse une coupe qui ne rencontre pas le site, en disant de combien.
+
+    Une coupe qui ne rencontre pas le site n'est pas une coupe de ce site. Le cas
+    se produit à la reprise d'un import précédent : le dossier de sortie garde le
+    tracé du projet d'avant, et le rejouer sur un autre plan donnait une ligne à
+    185 km de là — avec un profil du terrain d'apparence parfaitement normale,
+    relevé quelque part entre les deux sites. Un clic hors du site tombe sur le
+    même refus.
+
+    La distance seule est reformatée : le séparateur de milliers du format `,.0f`
+    est une virgule, et l'appliquer à la phrase entière mangeait les virgules de
+    la consigne.
+    """
+    if geometrie.intersects(emprise_cloturee):
+        return
+    distance = f"{passage.distance(emprise_cloturee):,.0f}".replace(",", " ")
+    raise ErreurCoupe(
+        "La ligne de coupe obtenue ne traverse pas l'emprise clôturée : son "
+        f"point de passage en est distant de {distance} m. {consigne}"
     )
 
 
@@ -765,6 +847,9 @@ class CoupeEnregistree:
     geometrie_enregistree: LineString
     azimut_tables_deg: float
     manuel: bool
+    #: Vrai si la coupe enregistrée passait par un point désigné à la main. Ce
+    #: qu'on rejoue alors est une translation, pas une correction.
+    position_choisie: bool
     profil: ProfilTerrain | None
 
 
@@ -790,6 +875,9 @@ def coupe_enregistree(donnees: dict | None) -> CoupeEnregistree | None:
         geometrie_enregistree=enregistree,
         azimut_tables_deg=float(brut.get("azimut_tables_deg", 0.0)),
         manuel=not bool(brut.get("corrigee", True)),
+        # Absente des sorties écrites avant le 15/09/2026 : elles n'avaient pas
+        # de position choisie à conserver, la coupe n'étant pas déplaçable.
+        position_choisie=bool(brut.get("position_choisie", False)),
         profil=profil_enregistre(donnees),
     )
 
@@ -845,26 +933,48 @@ def reprendre_coupe(
     et le profil doit alors être relevé à nouveau plutôt que réutilisé sous une
     ligne qui a bougé.
     """
-    coupe = corriger_ligne_coupe(
-        enregistree.trace_initial,
-        azimut_tables_deg,
-        emprise_cloturee,
-        marge_m=marge_m,
-        manuel=enregistree.manuel,
-        tables=tables,
-    )
+    if enregistree.position_choisie:
+        # Le chef de projet avait déplacé la coupe lui-même. La rejouer par
+        # `corriger_ligne_coupe` la recalculerait sur le nombre de rangées
+        # traversées et reposerait la coupe automatique : son choix serait perdu,
+        # et annoncé de surcroît comme un déplacement dû au plan. Ce qui se
+        # rejoue est donc la translation — direction reprise du plan
+        # d'aujourd'hui, position conservée.
+        #
+        # Le point rejoué est le milieu de la ligne enregistrée, faute d'avoir
+        # gardé le point cliqué lui-même. Les deux sont équivalents tant que le
+        # plan n'a pas tourné : `_etendre` rend la même ligne pour n'importe quel
+        # point de cette ligne. Si l'azimut a tourné de θ, la coupe glisse en
+        # plus de la demi-longueur fois sin θ — quelques mètres pour un degré, et
+        # l'écart mesuré plus bas le dit.
+        coupe = translater_ligne_coupe(
+            enregistree.trace_initial.interpolate(0.5, normalized=True),
+            azimut_tables_deg,
+            emprise_cloturee,
+            marge_m=marge_m,
+        )
+        geste = "Position de coupe reprise de l'import précédent"
+    else:
+        coupe = corriger_ligne_coupe(
+            enregistree.trace_initial,
+            azimut_tables_deg,
+            emprise_cloturee,
+            marge_m=marge_m,
+            manuel=enregistree.manuel,
+            tables=tables,
+        )
+        geste = "Tracé de coupe repris de l'import précédent"
     ecart = float(
         coupe.geometrie.hausdorff_distance(enregistree.geometrie_enregistree)
     )
     inchangee = ecart <= TOLERANCE_REPRISE_M
     coupe.avertissements.insert(
         0,
-        "Tracé de coupe repris de l'import précédent."
+        f"{geste}."
         if inchangee
-        else f"Tracé de coupe repris de l'import précédent, mais la ligne "
-        f"corrigée s'est déplacée de {ecart:.1f} m : l'azimut des tables ou "
-        "l'emprise clôturée ont changé depuis. Le profil du terrain est relevé "
-        "à nouveau.",
+        else f"{geste}, mais la ligne s'est déplacée de {ecart:.1f} m : l'azimut "
+        "des tables ou l'emprise clôturée ont changé depuis. Le profil du "
+        "terrain est relevé à nouveau.",
     )
     return coupe, inchangee
 

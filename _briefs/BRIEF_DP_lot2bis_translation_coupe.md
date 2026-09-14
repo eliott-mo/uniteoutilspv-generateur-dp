@@ -122,3 +122,87 @@ Mesurer le résultat, pas l'exécution :
 - Les points de vue des photographies : c'est le lot 6.
 - Le déplacement de la carte dans la page : le lot 6, après.
 - La refonte de la navigation en étapes validées : ni l'un ni l'autre.
+
+---
+
+## Ce que la mesure a montré — écrit le 15/09/2026, chantier livré
+
+Le brief tenait sur l'essentiel : `last_clicked` suffit, la géométrie n'avait
+rien de neuf à calculer, et la carte n'a pas besoin d'être remontée. Quatre
+choses lui manquaient.
+
+### Le brief a manqué la reprise : une coupe déplacée était perdue à la régénération
+
+Le brief écrit que « la proposition automatique reste la valeur par défaut, et
+garde la priorité d'une coupe reprise d'un import précédent ». Il n'a pas vu que
+la coupe **déplacée** n'était pas reprise du tout. La sortie ne garde que le
+`trace_initial`, et `reprendre_coupe` le repassait par `corriger_ligne_coupe` avec
+les tables — donc par `position_de_coupe`, qui recalcule la position et repose la
+coupe automatique. Le chef de projet déplaçait sa coupe, validait, et la
+retrouvait au milieu à la régénération suivante ; l'écran annonçait de surcroît le
+déplacement comme un effet du plan (« l'azimut des tables ou l'emprise clôturée
+ont changé depuis »), ce qui était faux et détournait le diagnostic.
+
+Sans ce correctif, le geste ne marchait que jusqu'au premier réimport : c'est le
+chantier, pas un supplément. La sortie porte donc `position_choisie`, écrit des
+**deux côtés** du contrat commun, et `reprendre_coupe` rejoue une translation
+quand le champ est vrai. Les sorties écrites avant cette date ne l'ont pas et
+rejouent la correction, comme avant — elles n'avaient pas de position choisie à
+conserver.
+
+Le point rejoué est le milieu de la ligne enregistrée, faute d'avoir gardé le
+point cliqué. C'est exact tant que le plan n'a pas tourné, parce que `_etendre`
+rend la **même ligne pour n'importe quel point de cette ligne** : les projections
+des sommets de l'emprise se décalent de la même quantité que l'origine. Cette
+propriété, non énoncée au brief, est ce qui a permis de ne pas ajouter un second
+champ au contrat.
+
+### Un clic d'avant l'armement était consommé par le geste
+
+`last_clicked` persiste d'une exécution du script à la suivante. Le brief note
+qu'il faut consommer le clic ; il ne dit pas qu'il faut aussi le retenir **quand
+aucun geste n'est armé**. Sans cela, un clic fait pour regarder le plan restait en
+réserve, et le bouton « Déplacer la coupe » le consommait aussitôt : la coupe
+sautait à un endroit cliqué bien avant, sans que personne ait cliqué depuis.
+
+### Armer coûte aussi un rechargement
+
+Le brief compte « un rechargement par clic ». Il en faut un de plus à l'armement
+et un à l'annulation : sans eux l'écran reste d'un tour en retard sur lui-même —
+la bannière s'affiche sous un bouton qui propose encore de déplacer la coupe et
+sans moyen d'annuler, et à l'inverse la bannière réclame un clic que plus rien
+n'attend. Coût négligeable, mais le brief ne l'avait pas vu.
+
+### Le message de refus était presque celui qu'il fallait
+
+Le brief dit que `corriger_ligne_coupe` « porte déjà le message qu'il faut ». La
+distance, oui. Mais sa consigne de sortie parlait de tracer, et son
+`.replace(",", " ")` — qui corrige le séparateur de milliers du format `,.0f` —
+s'appliquait à la phrase entière : toute virgule d'une nouvelle consigne aurait
+été mangée. Le contrôle est devenu commun (`_verifier_traverse`), la consigne est
+passée en paramètre, et seul le nombre est reformaté.
+
+### Ce qui s'est vérifié comme annoncé
+
+- `st_folium` 0.27.2 expose bien `last_clicked`, alimenté par l'événement `click`
+  de Leaflet. Un clic simple suffit, aucun outil de dessin n'est nécessaire.
+- `returned_objects` supprime bien les rechargements parasites : son bundle filtre
+  la charge sur cette liste, la compare à la précédente, et n'appelle
+  `setComponentValue` que si elle a changé. Déplacer la carte ou zoomer ne relance
+  donc plus le script.
+- La carte n'a pas à être remontée pour une translation : le compteur de clé reste
+  celui du tracé, et le zoom est conservé.
+
+Limite assumée, non prévue au brief : recliquer au **pixel exact** du clic
+précédent ne produit rien, le composant n'envoyant pas de valeur inchangée. Le
+geste reste armé, le clic suivant passe, et la coupe aurait de toute façon été la
+même.
+
+### Comment le geste est mesuré
+
+`AppTest` ne joue pas le contenu d'un composant `st_folium` : il en rend les
+valeurs par défaut, `last_clicked` à None. Le composant est donc remplacé le temps
+de deux tests, et **tout le reste du chemin est celui de l'application** —
+armement, consommation du clic, translation, relevé du profil, contrôles. C'est ce
+qui mesure les points 2, 3 et 4 de la validation au niveau de l'écran, et non
+seulement au niveau de la géométrie.

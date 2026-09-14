@@ -10,15 +10,19 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from shapely.geometry import LineString, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 
 from dp_socle.coupe import (
     ECART_SUSPECT_DEG,
     ProfilTerrain,
     controler_coherence,
     corriger_ligne_coupe,
+    coupe_enregistree,
     echantillonner,
+    position_de_coupe,
     profil_terrain,
+    reprendre_coupe,
+    translater_ligne_coupe,
 )
 from dp_socle.erreurs import ErreurControleCroise, ErreurCoupe
 from dp_socle.import_be import (
@@ -222,6 +226,234 @@ def test_emprise_allongee_en_biais_ne_donne_pas_une_coupe_deux_fois_trop_longue(
 def test_trace_reduit_a_un_point_refuse(emprise):
     with pytest.raises(ErreurCoupe):
         corriger_ligne_coupe(LineString([(0, 0), (0, 0)]), 0.0, emprise)
+
+
+# ---------------------------------------------------------------------------
+# Étape D bis — déplacer la coupe au lieu de la retracer
+# ---------------------------------------------------------------------------
+#
+# La coupe proposée à l'import annonçait que le chef de projet « la déplace
+# seulement si elle lui déplaît », et il n'existait aucun moyen de la déplacer :
+# retracer un segment appelait `corriger_ligne_coupe(..., tables=…)`, qui
+# recalcule la position et repose la coupe exactement où elle était. Ces tests
+# mesurent la combinaison qui manquait — direction imposée, position choisie.
+
+
+def _perpendiculaire(plan) -> float:
+    return plan.azimut_tables_deg + 90.0
+
+
+def _ecart_a_la_perpendiculaire(coupe, plan) -> float:
+    """Écart absolu, en degrés, entre la coupe et la perpendiculaire aux rangées."""
+    from dp_socle.coupe import _dans_demi_tour
+
+    return abs(_dans_demi_tour(coupe.azimut_coupe_deg - _perpendiculaire(plan)))
+
+
+def test_la_coupe_deplacee_passe_par_le_point_designe(plan, emprise):
+    """Le point cliqué est sur la ligne, à la tolérance de reprojection près."""
+    auto, _, _ = position_de_coupe(plan.azimut_tables_deg, emprise, plan.tables)
+    # Franchement à l'ouest de la position automatique : 80 m, quand la reprise
+    # d'une coupe se juge identique en deçà de 10 cm.
+    point = Point(auto.x - 80.0, auto.y + 25.0)
+
+    coupe = translater_ligne_coupe(point, plan.azimut_tables_deg, emprise)
+
+    assert coupe.geometrie.distance(point) == pytest.approx(0.0, abs=1e-6)
+    assert coupe.position_choisie
+
+
+def test_la_coupe_deplacee_ne_fait_aucun_angle_avec_la_perpendiculaire(plan, emprise):
+    """Écart nul : c'est ce qui distingue ce geste du mode manuel.
+
+    Le seul contournement qui imposait une position — « Conserver la direction
+    tracée » — conservait aussi la direction, donc l'oblique du tracé à main
+    levée, qui allonge toutes les distances lues sur la planche de 1/cos θ.
+    """
+    centre = emprise.centroid
+    point = Point(centre.x - 60.0, centre.y - 40.0)
+
+    deplacee = translater_ligne_coupe(point, plan.azimut_tables_deg, emprise)
+    assert _ecart_a_la_perpendiculaire(deplacee, plan) == pytest.approx(0.0, abs=1e-9)
+    assert deplacee.ecart_initial_deg == 0.0
+    assert deplacee.corrigee
+
+    # Le même point atteint par le seul moyen qui existait avant : de travers.
+    trace = LineString([(point.x - 40, point.y - 28), (point.x + 40, point.y + 28)])
+    manuelle = corriger_ligne_coupe(
+        trace, plan.azimut_tables_deg, emprise, manuel=True
+    )
+    assert _ecart_a_la_perpendiculaire(manuelle, plan) > 30.0
+
+
+def test_deplacer_la_coupe_la_deplace_vraiment(plan, emprise):
+    """Le geste vide d'avant, et celui qui le remplace, mesurés côte à côte."""
+    auto, _, _ = position_de_coupe(plan.azimut_tables_deg, emprise, plan.tables)
+    point = Point(auto.x - 80.0, auto.y)
+    trace = LineString([(point.x, point.y - 30), (point.x, point.y + 30)])
+
+    # Retracer : le tracé n'est qu'un déclencheur, la coupe repose où elle était.
+    retracee = corriger_ligne_coupe(
+        trace, plan.azimut_tables_deg, emprise, tables=plan.tables
+    )
+    assert retracee.geometrie.distance(point) == pytest.approx(80.0, abs=1.0)
+
+    # Cliquer : elle y va.
+    deplacee = translater_ligne_coupe(point, plan.azimut_tables_deg, emprise)
+    assert deplacee.geometrie.distance(point) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_la_coupe_deplacee_traverse_toute_l_emprise_avec_la_marge(plan, emprise):
+    centre = emprise.centroid
+    coupe = translater_ligne_coupe(
+        Point(centre.x + 45.0, centre.y), plan.azimut_tables_deg, emprise
+    )
+
+    _, ymin, _, ymax = emprise.bounds
+    ys = sorted(c[1] for c in coupe.geometrie.coords)
+    assert ymin - ys[0] == pytest.approx(10.0, abs=0.01)
+    assert ys[-1] - ymax == pytest.approx(10.0, abs=0.01)
+    assert coupe.geometrie.intersects(emprise)
+
+
+def test_clic_trop_loin_du_site_refuse_en_disant_de_combien(plan, emprise):
+    """Aucun repli silencieux : un clic hors de portée lève, avec la distance."""
+    loin = Point(emprise.centroid.x + 4_000.0, emprise.centroid.y)
+    with pytest.raises(ErreurCoupe) as leve:
+        translater_ligne_coupe(loin, plan.azimut_tables_deg, emprise)
+
+    message = str(leve.value)
+    assert "ne traverse pas l'emprise clôturée" in message
+    # La distance annoncée est celle du point au bord de l'emprise, et non au
+    # centre : c'est la portée qui manque. Son séparateur de milliers doit être
+    # l'espace — celui du format `,.0f` de Python est une virgule, qui se lirait
+    # ici comme une décimale.
+    entiers = round(loin.distance(emprise))
+    assert f"{entiers // 1000} {entiers % 1000:03d} m" in message
+    assert "," not in message.split(" m.")[0]
+
+
+def test_deplacer_sans_point_refuse(plan, emprise):
+    with pytest.raises(ErreurCoupe):
+        translater_ligne_coupe(None, plan.azimut_tables_deg, emprise)
+    with pytest.raises(ErreurCoupe):
+        translater_ligne_coupe(Point(), plan.azimut_tables_deg, emprise)
+
+
+def test_la_position_choisie_se_rejoue_et_ne_se_recalcule_pas(plan, tableau, emprise):
+    """Une régénération conserve la position déplacée à la main.
+
+    C'est le piège de ce chantier, mesuré le 15/09/2026 : la sortie ne gardait
+    que le tracé, et la reprise le repassait par `corriger_ligne_coupe` avec les
+    tables — ce qui recalculait la position et reposait la coupe automatique. Le
+    choix du chef de projet était perdu, et l'écran l'annonçait comme un
+    déplacement dû au plan.
+    """
+    from dp_socle.import_be import parametres_json
+
+    auto, _, _ = position_de_coupe(plan.azimut_tables_deg, emprise, plan.tables)
+    point = Point(auto.x - 80.0, auto.y)
+    deplacee = translater_ligne_coupe(point, plan.azimut_tables_deg, emprise)
+
+    donnees = parametres_json(
+        plan, tableau, controler(plan, tableau), ligne_coupe=deplacee
+    )
+    assert donnees["ligne_coupe"]["position_choisie"] is True
+
+    enregistree = coupe_enregistree(donnees)
+    assert enregistree.position_choisie
+    rejouee, profil_reutilisable = reprendre_coupe(
+        enregistree, plan.azimut_tables_deg, emprise, tables=plan.tables
+    )
+
+    assert rejouee.geometrie.distance(point) == pytest.approx(0.0, abs=1e-6)
+    assert profil_reutilisable
+    assert _ecart_a_la_perpendiculaire(rejouee, plan) == pytest.approx(0.0, abs=1e-9)
+    assert any("Position de coupe reprise" in m for m in rejouee.avertissements)
+
+    # Et sans cette distinction, la reprise aurait ramené la coupe automatique.
+    recalculee = corriger_ligne_coupe(
+        enregistree.trace_initial,
+        plan.azimut_tables_deg,
+        emprise,
+        tables=plan.tables,
+    )
+    assert recalculee.geometrie.distance(point) == pytest.approx(80.0, abs=1.0)
+
+
+def _releve_en_pente_vers_l_est(emprise, chemin: Path, pente: float = 0.05) -> Path:
+    """Un relevé de synthèse dont l'altitude ne dépend que de l'abscisse est.
+
+    Les rangées de Saint-Cyr sont est-ouest, donc la coupe est nord-sud et
+    déplacer la coupe la fait glisser en x. Un terrain qui ne penche qu'en x rend
+    un profil plat, à une altitude qui dit **où** la coupe est passée : c'est ce
+    qui permet de mesurer que le profil suit la coupe, et non l'inverse.
+    """
+    minx, miny, maxx, maxy = emprise.bounds
+    lignes = []
+    x = minx - 15.0
+    while x <= maxx + 15.0:
+        y = miny - 15.0
+        while y <= maxy + 15.0:
+            lignes.append(f"{x:.2f} {y:.2f} {100.0 + pente * (x - minx):.3f}")
+            y += 5.0
+        x += 1.0
+    chemin.write_text("\n".join(lignes), encoding="utf-8")
+    return chemin
+
+
+def test_le_profil_et_les_controles_suivent_la_coupe_deplacee(tmp_path, plan, emprise):
+    """Déplacer la coupe relève le terrain ailleurs, et rejoue la cohérence.
+
+    Une coupe déplacée sous le profil de la précédente donnerait une planche DP 3
+    fausse et d'apparence parfaitement normale : les altitudes seraient celles
+    d'une autre ligne, à quelques mètres près, sans que rien ne le signale.
+    """
+    releve = _releve_en_pente_vers_l_est(emprise, tmp_path / "releve.txt")
+    minx = emprise.bounds[0]
+    auto, _, _ = position_de_coupe(plan.azimut_tables_deg, emprise, plan.tables)
+
+    altitudes_par_position = {}
+    for decalage in (-80.0, 0.0, 60.0):
+        coupe = translater_ligne_coupe(
+            Point(auto.x + decalage, auto.y), plan.azimut_tables_deg, emprise
+        )
+        profil = profil_terrain(coupe, fichier_altimetrie=releve)
+        # Terrain qui ne penche qu'en x, coupe à x constant : le profil est plat,
+        # à l'altitude du x où la coupe est passée.
+        attendue = 100.0 + 0.05 * (auto.x + decalage - minx)
+        assert min(profil.altitudes_m) == pytest.approx(attendue, abs=0.15)
+        assert max(profil.altitudes_m) == pytest.approx(attendue, abs=0.15)
+        altitudes_par_position[decalage] = attendue
+
+        # Et les contrôles de cohérence se rejouent sur cette ligne-là.
+        coherence = controler_coherence(profil, coupe, plan.tables)
+        assert coherence.nb_tables_comparees > 0
+
+    # Les trois positions ne rendent pas le même profil : la mesure discrimine.
+    assert len(set(round(a, 1) for a in altitudes_par_position.values())) == 3
+
+
+def test_une_sortie_ecrite_avant_le_geste_rejoue_la_correction(plan, emprise):
+    """Les sorties d'avant n'ont pas de position choisie : rien ne la suppose."""
+    trace = LineString(
+        [(emprise.centroid.x, emprise.centroid.y - 30),
+         (emprise.centroid.x, emprise.centroid.y + 30)]
+    )
+    ancienne = corriger_ligne_coupe(trace, plan.azimut_tables_deg, emprise)
+    donnees = {
+        "ligne_coupe": {
+            "corrigee": True,
+            "azimut_tables_deg": plan.azimut_tables_deg,
+            "coordonnees_l93": [list(c) for c in ancienne.geometrie.coords],
+            "trace_initial_l93": [list(c) for c in ancienne.trace_initial.coords],
+        }
+    }
+    enregistree = coupe_enregistree(donnees)
+    assert enregistree.position_choisie is False
+
+    rejouee, _ = reprendre_coupe(enregistree, plan.azimut_tables_deg, emprise)
+    assert any("Tracé de coupe repris" in m for m in rejouee.avertissements)
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +690,29 @@ def test_carte_sans_trace_ne_renvoie_rien():
         )
         is None
     )
+
+
+def test_clic_de_la_carte_revient_en_lambert_93(plan):
+    """Le clic arrive en WGS84 ; tout ce qui est mesuré reste en L93."""
+    from dp_socle.apercu_be import bornes_wgs84, clic_l93
+
+    sud, ouest, nord, est = bornes_wgs84(plan.polygone_cloture)
+    clic = clic_l93({"last_clicked": {"lat": sud, "lng": ouest}})
+
+    assert clic is not None
+    minx, miny, _, _ = plan.polygone_cloture.bounds
+    assert (clic.x, clic.y) == pytest.approx((minx, miny), abs=0.5)
+
+
+def test_carte_sans_clic_ne_renvoie_rien():
+    """La carte rend `last_clicked` à None tant que personne n'a cliqué."""
+    from dp_socle.apercu_be import clic_l93
+
+    assert clic_l93(None) is None
+    assert clic_l93({}) is None
+    assert clic_l93({"last_clicked": None}) is None
+    # Et une charge tronquée ne passe pas pour un clic à l'équateur.
+    assert clic_l93({"last_clicked": {"lat": 47.86}}) is None
 
 
 def test_apercu_du_plan_sur_fond_ortho(plan, emprise):

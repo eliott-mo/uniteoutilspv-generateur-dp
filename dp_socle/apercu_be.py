@@ -468,6 +468,34 @@ def bornes_wgs84(geometrie: BaseGeometry) -> tuple[float, float, float, float]:
     return sud, ouest, nord, est
 
 
+def clic_l93(resultat_carte: dict | None):
+    """Dernier point cliqué sur la carte, ramené en Lambert 93, ou None.
+
+    Vérifié le 15/09/2026 dans `streamlit_folium` 0.27.2 : le composant expose
+    `last_clicked` (`__init__.py:347`), alimenté par `onMapClick` que son bundle
+    accroche à l'événement `click` de la carte Leaflet. C'est l'objet `LatLng` de
+    Leaflet tel quel, soit `{"lat": …, "lng": …}` : aucun outil de dessin n'est
+    nécessaire pour recueillir un clic simple.
+
+    Attention à l'usage : la valeur **persiste** d'une exécution du script à la
+    suivante tant que le composant n'est pas remonté. Elle dit où a eu lieu le
+    dernier clic, pas qu'un clic vient d'avoir lieu — c'est à l'appelant de
+    retenir celui qu'il a déjà consommé.
+    """
+    from shapely.geometry import Point
+
+    if not resultat_carte:
+        return None
+    clic = resultat_carte.get("last_clicked")
+    if not isinstance(clic, dict):
+        return None
+    latitude, longitude = clic.get("lat"), clic.get("lng")
+    if latitude is None or longitude is None:
+        return None
+    _, vers_l93 = _transformateurs()
+    return Point(vers_l93.transform(float(longitude), float(latitude)))
+
+
 def trace_l93(resultat_carte: dict | None):
     """Dernière polyligne tracée sur la carte, ramenée en Lambert 93.
 

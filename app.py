@@ -29,6 +29,7 @@ from dp_socle.apercu_be import (
     STYLES,
     URL_TUILES_ORTHO,
     bornes_wgs84,
+    clic_l93,
     en_wgs84,
     legende_presente,
     trace_l93,
@@ -42,6 +43,7 @@ from dp_socle.coupe import (
     coupe_par_defaut,
     profil_terrain,
     reprendre_coupe,
+    translater_ligne_coupe,
 )
 from dp_socle.contrat import NOM_GEOPACKAGE, VOIRIES_ADMISES, decrire_voiries
 from dp_socle.erreurs import ErreurCoupe, ErreurDP
@@ -515,6 +517,101 @@ def _calques_caches(chemin: str, taille: int, charte: str):
     return calques_du_dxf(chemin)
 
 
+#: Les gestes qui se font en cliquant sur la carte : le libellé du bouton qui
+#: arme le geste, et ce que la bannière annonce une fois armé.
+#:
+#: Un seul aujourd'hui. Le lot 6 en ajoutera deux sur la même carte — placer un
+#: point de vue, viser ce qu'il regarde — en reprenant ce mécanisme plutôt que
+#: d'en réécrire un second.
+GESTES_CARTE = {
+    "translation_coupe": (
+        "Déplacer la coupe",
+        "**Cliquez sur la carte** à l'endroit où la coupe doit passer. Elle "
+        "restera perpendiculaire aux rangées : vous choisissez sa position, "
+        "jamais sa direction.",
+    ),
+}
+
+
+def _armer_geste(geste: str) -> None:
+    """Arme un geste : le prochain clic sur la carte lui sera destiné."""
+    st.session_state["geste_carte"] = geste
+
+
+def _desarmer_geste() -> None:
+    st.session_state["geste_carte"] = None
+
+
+def _geste_arme() -> str | None:
+    return st.session_state.get("geste_carte")
+
+
+def _repere_clic(clic) -> tuple[float, float] | None:
+    """Le clic réduit au millimètre, de quoi le reconnaître d'une exécution à l'autre."""
+    return None if clic is None else (round(clic.x, 3), round(clic.y, 3))
+
+
+def _clic_neuf(resultat_carte):
+    """Le point cliqué depuis le dernier retenu, ou None. Lecture sans effet.
+
+    `last_clicked` **persiste** d'une exécution du script à la suivante tant que
+    le composant n'est pas remonté : il dit où a eu lieu le dernier clic, pas
+    qu'un clic vient d'avoir lieu. Le lire sans mémoire ferait rejouer le même
+    clic à chaque interaction — un déplacement de coupe à chaque case cochée.
+    D'où la lecture pure ici et la mise à jour explicite par `_retenir_clic` :
+    trois gestes armés côte à côte pourront la partager sans se voler le clic.
+
+    Limite assumée : recliquer au pixel exact du clic précédent ne produit rien.
+    Le composant n'envoie pas une valeur inchangée, donc Streamlit ne relance pas
+    le script. Le geste reste armé et le clic suivant passe ; la coupe aurait de
+    toute façon été la même.
+    """
+    clic = clic_l93(resultat_carte)
+    if clic is None or _repere_clic(clic) == st.session_state.get("dernier_clic_carte"):
+        return None
+    return clic
+
+
+def _retenir_clic(clic) -> None:
+    """Retient ce clic comme vu : il ne déclenchera plus rien.
+
+    Appelé aussi quand aucun geste n'est armé. Sans cela, un clic fait pour
+    regarder le plan restait en réserve, et armer un geste plus tard le
+    consommait aussitôt : la coupe sautait à un endroit cliqué cinq minutes
+    avant, sans que le chef de projet ait cliqué.
+    """
+    st.session_state["dernier_clic_carte"] = _repere_clic(clic)
+
+
+def _relever_et_controler(coupe, import_be, plan, origine: str) -> None:
+    """Retient la coupe, relève son profil et rejoue les contrôles de cohérence.
+
+    Les deux gestes qui décident de la coupe — tracer puis corriger, ou cliquer
+    pour la déplacer — enchaînent exactement la même suite. Une coupe retenue
+    sous le profil de la précédente donnerait une planche DP 3 fausse et
+    d'apparence normale : le profil est donc effacé avant d'être redemandé, pour
+    qu'un RGE ALTI muet laisse un trou visible et non l'ancien relevé.
+    """
+    st.session_state.coupe_be = coupe
+    st.session_state["origine_coupe"] = origine
+    import_be.ligne_coupe = coupe
+    st.session_state.profil_be = None
+    import_be.profil = None
+    import_be.coherence = None
+    import_be.terrain_be = []
+    with st.spinner("Interrogation du RGE ALTI…"):
+        st.session_state.profil_be = profil_terrain(
+            coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+        )
+    import_be.profil = st.session_state.profil_be
+    import_be.coherence = controler_coherence(
+        st.session_state.profil_be, coupe, plan.tables
+    )
+    import_be.terrain_be = controler_terrain_embarque(
+        st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
+    )
+
+
 def _proposer_la_coupe(import_be) -> None:
     """Place la coupe par défaut et relève son profil, dès l'import.
 
@@ -907,34 +1004,65 @@ if import_be_courant is not None and commune.strip():
             )
 
     # -----------------------------------------------------------------------
-    # Le plan importé, et la coupe qui se trace dessus
+    # Le plan importé, et la coupe qui se pose dessus
     # -----------------------------------------------------------------------
     #
     # Une seule carte, et non un aperçu statique suivi d'une carte à tracer :
-    # les deux montraient presque la même chose, et le chef de projet traçait sa
+    # les deux montraient presque la même chose, et le chef de projet plaçait sa
     # coupe sur des tables et une clôture sans voir ce qu'elle allait couper. Il
     # procédait par essai-erreur — tracer, corriger, descendre lire l'aperçu,
-    # remonter. Ici il trace sur le plan lui-même, aux couleurs de la planche.
+    # remonter. Ici il la pose sur le plan lui-même, aux couleurs de la planche.
     st.markdown("### Le plan importé, et la ligne de coupe A-A'")
     st.caption(
         "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
         "et posée là où elle traverse le plus de tables. Si elle vous convient, "
         "il n'y a rien à faire.\n\n"
-        "Pour la déplacer, tracez un segment **globalement perpendiculaire aux "
-        "rangées** — un geste approximatif suffit, l'outil le réajuste : il "
-        "impose la direction exacte (azimut des tables mesuré à "
-        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°), ne retient de "
-        "votre tracé que sa **position**, et étend la ligne à toute l'emprise "
-        "clôturée avec 10 m de marge."
+        "Pour la déplacer, cliquez sur **« Déplacer la coupe »** puis sur la "
+        "carte : elle glissera pour passer par ce point, en gardant la direction "
+        "imposée par les rangées (azimut des tables mesuré à "
+        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°) et son étendue à "
+        "toute l'emprise clôturée avec 10 m de marge."
     )
 
-    manuel = st.checkbox(
-        "Conserver la direction tracée (contournement)",
-        value=False,
-        key="manuel_be",
-        help="À n'utiliser que si la perpendiculaire aux rangées ne convient "
-        "pas. Une coupe oblique allonge toutes les distances qu'on y lit.",
-    )
+    # Le clic armé, et le tracé replié dessous en contournement. Tracer ne
+    # déplaçait rien : en automatique la position est recalculée par
+    # `position_de_coupe` et la coupe repose là où elle était, le tracé ne servant
+    # que de déclencheur. Le seul moyen d'imposer une position était de conserver
+    # la direction tracée — donc une oblique, qui allonge toutes les distances
+    # lues sur la planche.
+    #
+    # Armer et désarmer relancent le script. Sans cela l'écran restait d'un tour
+    # en retard sur lui-même : la bannière s'affichait sous un bouton qui
+    # proposait encore de déplacer la coupe, sans moyen d'annuler, et l'inverse à
+    # l'annulation — la bannière réclamait un clic que plus rien n'attendait.
+    if _geste_arme() == "translation_coupe":
+        st.info(GESTES_CARTE["translation_coupe"][1], icon="🖱️")
+        if st.button("Annuler le déplacement", key="annuler_translation_coupe"):
+            _desarmer_geste()
+            st.rerun()
+    elif st.button(
+        GESTES_CARTE["translation_coupe"][0],
+        key="armer_translation_coupe",
+        width="stretch",
+    ):
+        _armer_geste("translation_coupe")
+        st.rerun()
+
+    with st.expander("Tracer la coupe à la main (contournement)"):
+        st.caption(
+            "L'outil polyligne, à gauche de la carte, reste disponible. En "
+            "automatique il ne sert qu'à demander une coupe : sa position est "
+            "recalculée sur le nombre de rangées traversées, et le tracé n'est "
+            "pas conservé. Cochez la case pour qu'il soit pris tel quel, "
+            "direction comprise."
+        )
+        manuel = st.checkbox(
+            "Conserver la direction tracée (contournement)",
+            value=False,
+            key="manuel_be",
+            help="À n'utiliser que si la perpendiculaire aux rangées ne convient "
+            "pas. Une coupe oblique allonge toutes les distances qu'on y lit.",
+        )
 
     carte = folium.Map(tiles=None, control_scale=True)
     folium.TileLayer(
@@ -1008,8 +1136,15 @@ if import_be_courant is not None and commune.strip():
         width=None,
         height=560,
         key=f"carte_coupe_be_{st.session_state.get('tour_carte', 0)}",
+        # Les trois seules valeurs que cet écran lise. Sans cette restriction le
+        # composant renvoyait aussi le cadrage et le niveau de zoom, et déplacer
+        # la carte ou zoomer relançait le script. Mesuré le 15/09/2026 dans son
+        # bundle : la charge est filtrée sur cette liste, puis comparée à la
+        # précédente, et `setComponentValue` n'est appelé que si elle a changé.
+        returned_objects=["last_clicked", "all_drawings", "last_active_drawing"],
     )
     trace = trace_l93(resultat_carte)
+    clic = _clic_neuf(resultat_carte)
 
     st.caption(
         "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier de "
@@ -1024,26 +1159,46 @@ if import_be_courant is not None and commune.strip():
         "reprises, les codes ACI y sont des couleurs de travail."
     )
 
+    if _geste_arme() is None:
+        # Aucun geste attendu : ce clic-là ne l'était pas non plus. Le retenir
+        # l'empêche d'être consommé par le prochain geste armé, ce qui faisait
+        # sauter la coupe à un endroit cliqué bien avant, sans nouveau clic.
+        _retenir_clic(clic)
+    elif _geste_arme() == "translation_coupe" and clic is not None:
+        _retenir_clic(clic)
+        _desarmer_geste()
+        try:
+            _relever_et_controler(
+                translater_ligne_coupe(
+                    clic, plan.azimut_tables_deg, emprise_cloturee
+                ),
+                import_be_courant,
+                plan,
+                "deplacee",
+            )
+        except ErreurDP as erreur:
+            # La coupe précédente reste en place, contrairement au tracé qui
+            # l'efface : un clic tombé trop loin du site ne doit pas faire perdre
+            # la coupe qui était retenue.
+            st.error(f"{type(erreur).__name__} : {erreur}")
+        else:
+            # La carte a déjà été dessinée avec l'ancienne coupe : il faut
+            # rejouer le script pour la voir bouger. Un rechargement par clic,
+            # celui du bouton « Corriger » d'à côté. La clé de la carte, elle,
+            # ne change pas — un clic ne laisse aucun tracé Leaflet résiduel à
+            # chasser, et la remonter ferait perdre son zoom au chef de projet.
+            st.rerun()
+
     if trace is not None and st.button("Corriger et relever le profil", width="stretch"):
         try:
-            coupe = corriger_ligne_coupe(
-                trace, plan.azimut_tables_deg, emprise_cloturee, manuel=manuel,
-                tables=plan.tables,
-            )
-            st.session_state.coupe_be = coupe
-            st.session_state["origine_coupe"] = "tracee"
-            with st.spinner("Interrogation du RGE ALTI…"):
-                st.session_state.profil_be = profil_terrain(
-                    coupe,
-                    fichier_altimetrie=st.session_state.get("chemin_altimetrie_be"),
-                )
-            import_be_courant.ligne_coupe = coupe
-            import_be_courant.profil = st.session_state.profil_be
-            import_be_courant.coherence = controler_coherence(
-                st.session_state.profil_be, coupe, plan.tables
-            )
-            import_be_courant.terrain_be = controler_terrain_embarque(
-                st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
+            _relever_et_controler(
+                corriger_ligne_coupe(
+                    trace, plan.azimut_tables_deg, emprise_cloturee, manuel=manuel,
+                    tables=plan.tables,
+                ),
+                import_be_courant,
+                plan,
+                "tracee",
             )
             st.session_state["tour_carte"] = st.session_state.get("tour_carte", 0) + 1
             st.rerun()
@@ -1052,8 +1207,8 @@ if import_be_courant is not None and commune.strip():
             st.error(f"{type(erreur).__name__} : {erreur}")
     elif trace is None and st.session_state.coupe_be is None:
         st.info(
-            "Aucune coupe retenue : tracez-la avec l'outil ligne (icône "
-            "polyligne) à gauche de la carte."
+            "Aucune coupe retenue : cliquez sur « Déplacer la coupe » puis sur "
+            "la carte, à l'endroit où elle doit traverser les rangées."
         )
 
     with emplacement_avertissements:
@@ -1077,6 +1232,12 @@ if import_be_courant is not None and commune.strip():
                 "**Coupe par défaut** : perpendiculaire aux rangées, posée là "
                 f"où elle traverse le plus de tables{origine_profil}. Tracez sur "
                 "la carte si vous voulez la déplacer."
+            ),
+            "deplacee": (
+                "**Coupe déplacée** : elle passe par le point que vous avez "
+                "cliqué, perpendiculairement aux rangées"
+                f"{origine_profil}. Recliquez sur « Déplacer la coupe » pour la "
+                "reposer ailleurs."
             ),
             "tracee": (
                 "**Coupe personnalisée** : redressée perpendiculairement aux "
@@ -1111,8 +1272,8 @@ if import_be_courant is not None and commune.strip():
         )
     elif coupe is None:
         st.info(
-            "Tracez et corrigez la ligne de coupe avant de valider : le lot 4 en "
-            "a besoin pour la coupe DP 3."
+            "Placez la ligne de coupe avant de valider : le lot 4 en a besoin "
+            "pour la coupe DP 3."
         )
     elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
         try:

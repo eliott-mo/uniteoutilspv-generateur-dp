@@ -1391,6 +1391,10 @@ def parametres_contrat(
     if ligne_coupe is not None:
         donnees["ligne_coupe"] = {
             "corrigee": ligne_coupe.corrigee,
+            # Le geste, et non seulement son résultat : une position choisie à la
+            # main se rejoue par une translation, pas par une correction, qui la
+            # recalculerait. Voir `coupe.reprendre_coupe`.
+            "position_choisie": ligne_coupe.position_choisie,
             "azimut_tables_deg": ligne_coupe.azimut_tables_deg,
             "azimut_coupe_deg": ligne_coupe.azimut_coupe_deg,
             "ecart_initial_deg": ligne_coupe.ecart_initial_deg,
