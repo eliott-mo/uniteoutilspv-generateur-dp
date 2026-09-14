@@ -1,0 +1,124 @@
+# BRIEF — Déplacer la ligne de coupe A-A' au lieu de la retracer
+
+> Modification du **lot 2bis** (import du plan BE, coupe A-A'), postérieure à sa
+> livraison. La coupe appartient au lot 2bis et non au lot 4, même si les deux
+> se rejoignent sur la planche DP 3.
+>
+> Lire `README.md` et `CLAUDE.md` avant de commencer. Écrit le 14/09/2026 depuis
+> la conversation du lot 6, qui touche à la même carte — voir la coordination en
+> fin de brief, elle n'est pas facultative.
+
+---
+
+## Le constat, mesuré dans le code le 14/09/2026
+
+`_proposer_la_coupe` (`app.py:518`) pose déjà une coupe par défaut dès l'import,
+perpendiculaire aux rangées et posée là où elle traverse le plus de tables. Sa
+docstring annonce que le chef de projet « la déplace seulement si elle lui
+déplaît ».
+
+**Or il n'existe aucun moyen de la déplacer.** Retracer un segment appelle
+`corriger_ligne_coupe(..., tables=plan.tables)`, qui en mode automatique
+**recalcule entièrement la position** par `position_de_coupe()`
+(`dp_socle/coupe.py:310-315`) et repose la coupe exactement où elle était. Le
+tracé ne sert que de déclencheur : le geste est vide.
+
+Le seul contournement est la case « Conserver la direction tracée », qui
+conserve **aussi** la direction — donc une coupe oblique, dont les
+avertissements du module disent eux-mêmes qu'elle allonge toutes les distances
+qu'on y lit.
+
+Ce qui manque est une combinaison qui n'existe pas :
+
+| | direction | position |
+|---|---|---|
+| `manuel=False` | imposée ✔ | recalculée, le tracé est ignoré |
+| `manuel=True` | tracée ✘ | tracée ✔ |
+| **ce qui manque** | **imposée ✔** | **choisie par le chef de projet ✔** |
+
+---
+
+## Ce qu'il faut produire
+
+Un **clic armé** sur la carte de la section 2, sur l'idiome de `photos-geoloc`
+que les chefs de projet connaissent déjà : un bouton « Déplacer la coupe » arme
+la carte, une bannière annonce ce qu'on attend, et le clic suivant translate la
+coupe pour qu'elle passe par ce point, **en gardant la perpendiculaire aux
+rangées**.
+
+Vérifié le 14/09/2026 : `st_folium` renvoie `last_clicked`
+(`streamlit_folium/__init__.py:347`, version 0.27.2 épinglée). Un clic simple
+suffit, aucun outil de dessin n'est nécessaire.
+
+Côté géométrie, tout existe : il s'agit d'une variante de `corriger_ligne_coupe`
+qui reçoit un `Point` au lieu d'une `LineString`, impose la perpendiculaire et
+étend par `_etendre()`. Rien de neuf à calculer.
+
+Coût : **un rechargement par clic**, soit exactement celui du bouton « Corriger
+et relever le profil » d'aujourd'hui. Pas de curseur d'angle ni de glissement
+continu — dans Streamlit, chaque cran relancerait le script.
+
+## Ce que ce chantier ne change pas
+
+- Le tracé polyligne **reste**, comme contournement : le mode manuel en dépend.
+- La proposition automatique reste la valeur par défaut, et garde la priorité
+  d'une coupe reprise d'un import précédent.
+- `position_de_coupe()` n'est pas touchée.
+- Le profil du terrain se relève après translation, comme il le fait
+  aujourd'hui après un tracé.
+
+---
+
+## Coordination avec le lot 6 — à lire avant d'écrire une ligne
+
+Le lot 6 (photographies DP 6/7/8 et plans de repérage), en cours dans une autre
+conversation, ajoute sur **la même carte** deux clics armés : placer un point de
+vue, et viser ce qu'il regarde. Même mécanisme, même zone d'`app.py`. Sans
+partage explicite, les deux chantiers écrivent deux fois la même chose et
+entrent en conflit.
+
+Le partage retenu :
+
+1. **Ce chantier pose le mécanisme de clic armé** — l'armement en session, la
+   bannière qui dit ce qu'on attend, la consommation du clic, l'annulation. Il a
+   le périmètre le plus petit : un seul usage, un seul bouton.
+2. Le lot 6 le **reprend tel quel** pour ses deux gestes, sans le réécrire.
+3. Le lot 6 ne touche pas à `app.py` tant que ce chantier n'a pas abouti. Il
+   travaille en attendant sur son module de points de vue, qui n'en dépend pas.
+4. Le lot 6 envisage de **déplacer la carte** plus bas dans la page, après le
+   dépôt des pièces. À faire après ce chantier, jamais pendant.
+
+## Deux gains gratuits, et un piège
+
+- `returned_objects` n'est pas passé à `st_folium` aujourd'hui : la carte
+  relance le script sur **toute** interaction, y compris un simple déplacement
+  ou un zoom. Le restreindre à ce qui sert vraiment supprime ces rechargements
+  parasites. À mesurer, pas à supposer.
+- La clé `carte_coupe_be_{tour_carte}` remonte la carte à neuf à chaque coupe
+  retenue, et le chef de projet y perd son zoom. Elle existe parce qu'un tracé
+  Leaflet résiduel se superposait à la coupe redressée — un clic ne laisse aucun
+  tracé résiduel, donc cette remontée n'a pas lieu d'être pour une translation.
+  Vérifier plutôt que supposer.
+- Règle du dépôt, aucun repli silencieux : un clic hors du site doit lever.
+  `corriger_ligne_coupe` porte déjà le message qu'il faut — la coupe obtenue ne
+  traverse pas l'emprise clôturée, et elle le dit avec la distance.
+
+## Validation
+
+Mesurer le résultat, pas l'exécution :
+
+1. Après translation, l'écart de la coupe à la perpendiculaire aux rangées vaut
+   **zéro** — c'est ce qui distingue ce geste du mode manuel.
+2. La coupe passe bien par le point cliqué, à la tolérance de reprojection près.
+3. Un clic hors du site est refusé avec le message existant, et la coupe
+   précédente reste en place.
+4. Le profil du terrain est relevé sur la nouvelle position, et les contrôles de
+   cohérence rejoués.
+5. `tests/test_coupe.py`, `tests/test_ordre_app.py` et
+   `tests/test_app_streamlit.py` passent.
+
+## Hors périmètre
+
+- Les points de vue des photographies : c'est le lot 6.
+- Le déplacement de la carte dans la page : le lot 6, après.
+- La refonte de la navigation en étapes validées : ni l'un ni l'autre.
