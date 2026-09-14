@@ -88,3 +88,15 @@ class ErreurNotice(ErreurDP):
 
 class ErreurComposition(ErreurDP):
     """Un dessin ne tient pas dans la place que la planche lui laisse."""
+
+
+class ErreurPointDeVue(ErreurDP):
+    """Un point de vue de photographie est inexploitable (lot 6)."""
+
+
+class ErreurCartePhotos(ErreurPointDeVue):
+    """La carte « photos-geoloc » déposée est illisible ou d'une version non lue."""
+
+
+class ErreurPhotoIllisible(ErreurPointDeVue):
+    """La photographie déposée ne s'ouvre pas, ou son format n'est pas pris en charge."""
