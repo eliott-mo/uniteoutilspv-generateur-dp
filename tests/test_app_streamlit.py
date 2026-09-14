@@ -58,6 +58,34 @@ def _image_png(couleur=(120, 140, 160)) -> bytes:
     return tampon.getvalue()
 
 
+def _notice_pdf(pages: int = 1) -> bytes:
+    """Une notice de synthèse en A4 portrait, au texte vectoriel.
+
+    Composée par cairo comme les planches : rien n'est déposé dans le dépôt, et
+    le texte reste extractible du dossier assemblé — c'est ce qui distingue la
+    fusion d'une rastérisation.
+    """
+    import io
+
+    import cairosvg
+    from pypdf import PdfReader, PdfWriter
+
+    ecrivain = PdfWriter()
+    for numero in range(1, pages + 1):
+        svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="210mm" '
+            'height="297mm" viewBox="0 0 210 297">'
+            '<rect x="0" y="0" width="210" height="297" fill="#ffffff"/>'
+            '<text x="20" y="40" font-family="sans-serif" font-size="4">'
+            f"NOTICE DE SYNTHESE — page {numero}</text></svg>"
+        ).encode("utf-8")
+        ecrivain.add_page(PdfReader(io.BytesIO(cairosvg.svg2pdf(bytestring=svg))).pages[0])
+    tampon = io.BytesIO()
+    ecrivain.write(tampon)
+    return tampon.getvalue()
+
+
 def _releve_altimetrique() -> bytes:
     """Un relevé « X Y Z » de synthèse couvrant le site, en pente douce.
 
@@ -218,7 +246,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     assert _titres(application) == [
         "1. Métadonnées du projet",
         "2. Plan du bureau d'études",
-        "3. Photographies et photomontages",
+        "3. Pièces fournies",
         "4. Génération",
     ]
     assert _bouton_present(application, "Générer le dossier")
@@ -230,7 +258,12 @@ def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
 
     annonce = "\n".join(information.value for information in application.info)
     assert "À rassembler avant de commencer" in annonce
-    for attendu in ("Emprise cadastrale", "Plan du bureau d'études", "Tableau bilan"):
+    for attendu in (
+        "Emprise cadastrale",
+        "Plan du bureau d'études",
+        "Tableau bilan",
+        "Notice DP 11",
+    ):
         assert attendu in annonce, attendu
     assert ".prj" in annonce, "le fichier qui manque le plus souvent"
 
@@ -552,6 +585,62 @@ def test_la_couverture_se_reconnait_a_l_objet_et_non_au_nom():
     corps = source[debut:fin]
     assert "if fichier is retenu:" in corps
     assert "retenu.name" not in corps
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_notice_se_depose_en_section_3(tmp_path, monkeypatch):
+    """La section 3 est devenue l'endroit où l'on dépose ce que l'outil ne dessine pas.
+
+    Déposer la notice n'y lève pas : la génération, elle, est mesurée par le
+    test réseau qui suit, parce qu'elle télécharge les fonds IGN.
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 11", ("notice.pdf", _notice_pdf(), "application/pdf")
+    )
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert _televersement(application, "DP 11").label.startswith("DP 11 — Notice")
+
+
+@pytest.mark.reseau
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_notice_deposee_se_retrouve_dans_l_archive(tmp_path, monkeypatch):
+    """Critère de validation n°8 du lot 5, sur le parcours complet.
+
+    Déposer la notice, générer, et la retrouver dans le ZIP téléchargé : c'est
+    ce que fait le chef de projet, et rien d'autre ne le vérifie.
+    """
+    import io
+    import zipfile
+
+    from pypdf import PdfReader
+
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 11", ("notice.pdf", _notice_pdf(pages=2), "application/pdf")
+    )
+    application = application.run()
+    _cliquer(application, "Générer le dossier")
+    application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    genere = application.session_state["dossier_genere"]
+    noms = zipfile.ZipFile(io.BytesIO(genere["archive"])).namelist()
+    assert "planches/DP_11_notice.pdf" in noms, noms
+
+    # La notice ferme le dossier, sur ses deux pages, et le sommaire les
+    # annonce ensemble.
+    rapport = genere["rapport"]
+    assert rapport.notice["pages"] == 2
+    assert rapport.sommaire[-1]["numero"] == "DP 11"
+    assemble = PdfReader(str(rapport.assemblage))
+    assert len(assemble.pages) == rapport.sommaire[-1]["page"] + 1
+
+    # Le texte de la notice est encore du texte dans le dossier assemblé.
+    derniere = assemble.pages[-1].extract_text()
+    assert "NOTICE DE SYNTHESE" in derniere, derniere
 
 
 @pytest.mark.reseau

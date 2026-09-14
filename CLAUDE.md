@@ -13,7 +13,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 2bis | Import du plan du BE interne, contrôles croisés, coupe A-A' | livré |
 | 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
 | 4 | DP 2, DP 3, DP 4 | livré |
-| 5 | Notice DP 11, fournie en PDF par le chef de projet | à venir, brief écrit |
+| 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
 | 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | à venir, brief écrit |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne

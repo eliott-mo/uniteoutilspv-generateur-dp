@@ -7,6 +7,7 @@ from . import (
     dp2_plan_masse,
     dp3_coupes,
     dp4_ouvrages,
+    dp11_notice,
     page_garde,
 )
 
@@ -18,4 +19,5 @@ __all__ = [
     "dp2_plan_masse",
     "dp3_coupes",
     "dp4_ouvrages",
+    "dp11_notice",
 ]

@@ -58,6 +58,7 @@ from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
 from dp_socle.import_be import SEUIL_DP_MWC
+from dp_socle.planches import dp11_notice
 from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
 from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
@@ -98,6 +99,9 @@ ouvrages techniques, c'est-à-dire l'essentiel du dossier
 - **Plan du BE en PDF** — pour comparer l'aperçu à ce que le BE a dessiné.
 - **Photographies** — DP 6 insertion paysagère (en JPG ou PNG si elle doit
   monter en page de garde), DP 7 environnement proche, DP 8 paysage lointain.
+- **Notice DP 11** — le PDF que vous avez rédigé. L'outil ne l'écrit pas : il
+  l'habille du cadre et du cartouche du dossier, et la pagine avec les autres
+  pièces. Sans elle, le dossier est produit quand même et le rapport le dit.
 """,
     icon="🗂️",
 )
@@ -230,6 +234,22 @@ def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
             if fichier is retenu:
                 couverture = cible
     return str(couverture) if couverture else None
+
+
+def _enregistrer_notice(nom_projet: str, fichier) -> str | None:
+    """Écrit la notice déposée dans `projets/{nom}/DP_11/`, et rend son chemin.
+
+    Même patron que `_enregistrer_photos` : une pièce fournie, un sous-dossier
+    à son code. La notice n'est pas une métadonnée du projet, c'est une pièce
+    du dossier, et elle se range avec les autres pièces fournies.
+    """
+    if fichier is None:
+        return None
+    dossier = DOSSIER_PROJETS / nom_projet / "DP_11"
+    dossier.mkdir(parents=True, exist_ok=True)
+    cible = dossier / Path(fichier.name).name
+    cible.write_bytes(fichier.getbuffer())
+    return str(cible)
 
 
 def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
@@ -1171,12 +1191,18 @@ if not contrat_present:
 PIECES_PHOTOS = ("DP 6", "DP 7", "DP 8")
 
 st.divider()
-st.subheader("3. Photographies et photomontages")
+st.subheader("3. Pièces fournies")
 st.caption(
-    "Une ligne par pièce. Elles sont conservées dans le dossier du projet ; leur "
-    "assemblage au dossier et le **report de la position de prise de vue sur un "
-    "plan de repérage** restent à construire — le dossier de référence en met un "
-    "par vue, au 1/1 500 et au 1/2 500."
+    "Ce que l'outil ne dessine pas : les photographies et photomontages, et la "
+    "notice DP 11. Une ligne par pièce."
+)
+
+st.markdown("**Photographies et photomontages**")
+st.caption(
+    "Elles sont conservées dans le dossier du projet ; leur assemblage au "
+    "dossier et le **report de la position de prise de vue sur un plan de "
+    "repérage** restent à construire — le dossier de référence en met un par "
+    "vue, au 1/1 500 et au 1/2 500."
 )
 
 photos = {}
@@ -1256,6 +1282,31 @@ for code, doubles in photos_en_double.items():
         icon="🚫",
     )
 
+
+# La notice, elle, est intégrée : chacune de ses pages devient une planche du
+# dossier, sous le cadre et le cartouche communs. C'est le lot 5.
+st.markdown("**Notice**")
+st.caption(
+    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
+    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
+    "texte y reste du texte. Le format est lu dans le fichier et chaque page "
+    "est ajustée au cadre A3 : une A4 portrait passe au facteur 88 %, une A2 à "
+    f"44 %. Sous {dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par "
+    "mégarde — la notice est refusée plutôt que rendue illisible."
+)
+fichier_notice = st.file_uploader(
+    f"DP 11 — {piece('DP 11').titre}",
+    type=["pdf"],
+    accept_multiple_files=False,
+    key="notice_dp11",
+    help="Le PDF de la notice, dans le format où vous l'avez rédigée. Le "
+    "format est lu dans le fichier, rien n'est supposé.",
+)
+if fichier_notice is None:
+    st.caption(
+        "Sans notice, le dossier est produit quand même et le rapport le dit : "
+        "c'est le cas d'un dossier d'étude amont."
+    )
 
 st.divider()
 st.subheader("4. Génération")
@@ -1348,6 +1399,7 @@ def _construire_projet() -> Projet | None:
         return None
 
     chemin_image = _enregistrer_photos(nom, photos, image_garde)
+    chemin_notice = _enregistrer_notice(nom, fichier_notice)
 
     return Projet(
         nom=nom,
@@ -1358,6 +1410,7 @@ def _construire_projet() -> Projet | None:
         image_garde=chemin_image,
         libelle=libelle or None,
         voirie=voirie,
+        notice=chemin_notice,
     )
 
 
@@ -1438,6 +1491,22 @@ if _genere is not None and _genere["nom"] == nom:
 
     for message in rapport.avertissements:
         st.warning(message, icon="⚠️")
+
+    # Annoncé même quand tout va bien (décision D2 du lot 5) : une notice
+    # réduite de moitié parce qu'elle arrivait en A2 doit se voir avant
+    # l'instruction, et un rapport qui ne parle que des ennuis ne le dirait pas.
+    if rapport.notice:
+        _notice = rapport.notice
+        st.caption(
+            f"Notice DP 11 : {_notice['source']}, {_notice['pages']} page(s) en "
+            f"{', '.join(_notice['formats'])}, ajustée au facteur "
+            f"{_notice['facteur_min']:.0%}"
+            + (
+                f" à {_notice['facteur_max']:.0%}."
+                if _notice["facteur_max"] != _notice["facteur_min"]
+                else "."
+            )
+        )
     st.caption(
         f"Emprise : {polygones} polygone(s), {hectares:.2f} ha, CRS source {crs}."
         + (

@@ -82,5 +82,9 @@ class ErreurCoteOuvrage(ErreurContrat):
     """Un ouvrage à dessiner n'a pas de cote normalisée exploitable."""
 
 
+class ErreurNotice(ErreurDP):
+    """La notice DP 11 fournie est illisible, vide ou inexploitable à l'échelle."""
+
+
 class ErreurComposition(ErreurDP):
     """Un dessin ne tient pas dans la place que la planche lui laisse."""

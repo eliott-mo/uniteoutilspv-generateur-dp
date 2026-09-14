@@ -4,8 +4,9 @@ Production interne des dossiers de déclaration préalable pour les centrales
 photovoltaïques au sol de moins de 3 MWc.
 
 Lots livrés : le **socle** (lot 1, moteur de planche et planches DP 1), le
-**calepinage HelioScope** (lot 2, en réserve) et l'**import du plan du bureau
-d'études** (lot 2bis).
+**calepinage HelioScope** (lot 2, en réserve), l'**import du plan du bureau
+d'études** (lot 2bis), les **planches du projet** (lot 4, DP 2 à DP 4) et la
+**notice fournie** (lot 5, DP 11).
 
 Le lot 1 couvre le moteur de planche et les trois planches cartographiques :
 
@@ -69,11 +70,15 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    et un plan en compte des milliers. Seule la coupe **retenue** est dessinée,
    jamais le tracé d'origine — le voir persister donnait à croire que rien
    n'avait été redressé.
-3. **Photographies et photomontages** — une ligne par pièce, DP 6, DP 7 et DP 8.
-   Ce sont trois pièces distinctes, qui ne montrent pas la même chose et ne se
-   rangent pas au même endroit du dossier : les mélanger obligerait à les
-   retrier à la main. L'insertion paysagère de DP 6 monte en page de garde ;
-   quand il y en a plusieurs, un bouton radio désigne laquelle.
+3. **Pièces fournies** — ce que l'outil ne dessine pas. Les photographies et
+   photomontages d'abord, une ligne par pièce, DP 6, DP 7 et DP 8 : ce sont
+   trois pièces distinctes, qui ne montrent pas la même chose et ne se rangent
+   pas au même endroit du dossier, et les mélanger obligerait à les retrier à
+   la main. L'insertion paysagère de DP 6 monte en page de garde ; quand il y en
+   a plusieurs, un bouton radio désigne laquelle. Puis la **notice DP 11**, en
+   PDF : contrairement aux photographies, elle est intégrée au dossier assemblé
+   — voir « Notice DP 11 » plus bas. Elle est facultative ; sans elle le dossier
+   est produit quand même, et le rapport le dit.
 4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
    bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
    lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
@@ -215,7 +220,9 @@ régénérant.
 CADASTRE » — et la case NUMÉRO le rang de la planche dans le dossier assemblé,
 page de garde comprise : le plan de cadastre est la planche 4. `assemblage.py`
 vérifie ce rang sur le PDF produit ; un cartouche qui annoncerait une planche 3
-en page 4 lève une erreur. La flèche nord est
+en page 4 lève une erreur. Une pièce de plusieurs pages déclare les numéros de
+ses cartouches et le contrôle les compare un à un à la pagination réelle — une
+pièce qui s'étendrait sans le déclarer est refusée. La flèche nord est
 un contour vide au bleu des titres : elle indique le nord de la **grille**
 Lambert 93, d'où la mention « NORD (L93) », et n'affirme rien sur le nord
 géographique (la convergence des méridiens atteint 3° en métropole).
@@ -223,9 +230,10 @@ géographique (la convergence des méridiens atteint 3° en métropole).
 **Sommaire.** Tableau à trois colonnes — code, intitulé, page — reprenant la
 forme du sommaire des dossiers HOCH. Il liste les douze pièces du dossier, la
 page de garde ne s'y listant pas elle-même, y compris les insertions paysagères
-fournies et la notice du lot 5 : le dossier s'annonce complet dès maintenant. Les
-pièces produites portent leur numéro de page réel, les autres un tiret. Une pièce
-tenant sur plusieurs planches s'affiche en plage, « 9-10 ».
+fournies : le dossier s'annonce complet dès maintenant. Les pièces produites
+portent leur numéro de page réel, les autres un tiret. Une pièce tenant sur
+plusieurs planches s'affiche en plage, « 9-10 » — c'est le cas de la notice
+DP 11, seule pièce à pouvoir couvrir plusieurs pages.
 
 Depuis le lot 4, les pièces produites ne sont plus toujours les mêmes : un projet
 sans poste n'a pas de DP 4-1, un projet sans BESS ni local technique n'a pas de
@@ -354,6 +362,15 @@ python -m pytest -q
   longueur, et sur un profil à 2 % qui doit se retrouver à 2 % dans le fichier.
   Ces deux-là ne demandent aucun service en ligne : ce sont ceux qui comptent le
   plus, et un `-m "not reseau"` ne doit pas les sauter.
+- `tests/test_notice_lot5.py` — **critères de validation n°1 à n°7 du lot 5**,
+  mesurés dans le PDF produit : trois pages fournies donnent trois planches de
+  420 × 297 mm, le texte de la notice reste du texte après fusion, rien ne
+  descend sous `Y_CARTOUCHE`, chaque page porte son propre numéro, le cartouche
+  n'a ni nord ni échelle — et une planche composée sans rien préciser garde les
+  deux, ce qui est la garantie que le paramètre est additif. Les refus y sont
+  mesurés aussi : fichier qui n'est pas un PDF, PDF sans page, plan A1 déposé à
+  la place de la notice. La notice de synthèse est composée par cairo : aucun
+  service en ligne n'est demandé.
 - `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
   par `AppTest`, qui suit le parcours du chef de projet : cadrer le projet,
   déposer le plan, importer, valider, générer. Il contrôle l'ouverture des
@@ -363,8 +380,10 @@ python -m pytest -q
   qui exécute `app.py` ; les tests des modules ne le touchent pas, et une
   `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
   rencontre. Un relevé altimétrique de synthèse y est déposé à chaque fois,
-  pour que le profil se lise dans un fichier plutôt que sur le RGE ALTI : seul
-  le test de téléchargement, qui produit un vrai dossier, est marqué `reseau`.
+  pour que le profil se lise dans un fichier plutôt que sur le RGE ALTI : seuls
+  les tests qui produisent un vrai dossier — le téléchargement, et le **critère
+  n°8 du lot 5**, qui dépose la notice, génère et la retrouve dans l'archive
+  ZIP — sont marqués `reseau`.
 - `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
   syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
   qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle
@@ -1879,9 +1898,106 @@ contrat refuse plutôt que de décaler. L'interface donne à chaque objet sa sur
 sa longueur et sa largeur moyenne : une voie lourde fait cinq à six mètres de
 large, une piste légère trois à quatre.
 
+## Notice DP 11 (lot 5)
+
+L'outil **n'écrit pas** la notice : le chef de projet la rédige et la dépose en
+PDF, l'outil l'habille. Chaque page du fichier déposé devient une planche A3
+paysage portant le cadre et le cartouche du dossier, et la pièce se feuillette
+comme les autres. La mise en forme automatique de la notice reste à faire un
+jour ; elle n'est pas dans ce lot.
+
+**Posée, pas rastérisée.** La page fournie est fusionnée telle quelle
+(`pypdf.PageObject.merge_transformed_page`) : son texte reste du texte dans le
+dossier assemblé, sélectionnable et indexable par le service instructeur.
+`tests/test_notice_lot5.py` le mesure par extraction sur le PDF produit — le
+corps lu dans la planche vaut celui de la notice multiplié par le facteur
+d'ajustement, ce qu'une image n'aurait pas donné.
+
+### Une page fournie, une page de dossier
+
+Chaque page est ajustée au plus grand facteur qui la fasse tenir, centrée. Deux
+A4 côte à côte tiendraient (2 × 184 mm pour 402 disponibles), mais la pagination
+de la notice cesserait de correspondre à celle du dossier, et le sommaire pointe
+une page. Le blanc latéral est le prix d'un dossier homogène en A3 paysage.
+
+Le format ne se suppose pas, il **se lit** : `mediabox` de chaque page, rotation
+déclarée comprise. Le rapport de génération annonce le format détecté, le
+nombre de pages et le facteur appliqué, même quand tout va bien — une notice
+réduite de moitié parce qu'elle arrivait en A2 doit se voir avant l'instruction,
+et un rapport qui ne parle que des ennuis ne le dirait pas.
+
+### Ce que la mesure a corrigé au brief
+
+La zone de dessin d'une planche à cartouche vaut 410 × 268 mm à (5, 5), mais la
+notice n'y est pas posée à fleur : elle garde le **blanc tournant de 4 mm** des
+planches du lot 4, soit 402 × 260 mm utiles. Posée à fleur, une page qui peint
+son propre fond blanc — ce que font les exports d'Illustrator et les pages
+scannées — recouvrait la moitié du filet du cadre sur sa largeur, le filet étant
+centré sur la limite de la zone.
+
+Les facteurs mesurés le 14/09/2026, qui fixent aussi les seuils :
+
+| Format déposé | Facteur | Sort |
+|---|---|---|
+| A4 portrait | 0,875 | intégrée, 113 mm de blanc de chaque côté |
+| A3 paysage | 0,875 | intégrée — et non au facteur 1 : 420 × 297 ne tient pas dans 402 × 260 |
+| A3 portrait | 0,619 | intégrée |
+| A2 portrait | 0,438 | intégrée, **signalée au rapport** |
+| A1 portrait | 0,309 | **refusée** |
+| A0 portrait | 0,219 | **refusée** |
+
+Le seuil de refus est à 0,40 : il laisse passer tout ce qui est une notice,
+jusqu'au A2 réduit de plus de moitié mais encore lisible, et arrête ce qui n'en
+est pas — un plan A1 ou A0 déposé par mégarde dans la case de la notice, dont le
+corps de texte tomberait sous 3,5 pt. Le seuil d'alerte est à 0,60, le facteur
+sous lequel un corps de 10 pt descend sous 6 pt. Sont également refusés, par
+`ErreurNotice` : un fichier qui n'est pas un PDF lisible, un PDF chiffré, un PDF
+sans page.
+
+### Un cartouche sans nord ni échelle
+
+Sur une notice, la flèche nord et la case ÉCHELLE ne veulent rien dire, et le
+dossier de référence n'en porte aucune : les pages 16 et 17 de Massay portent
+`Massay`, `PHASE: DPC`, `NUMERO`, `DATE:` et `DPC 4 Notice`, là où la page 2 du
+même dossier porte `ECHELLE 1 : 10 000`.
+
+D'où un paramètre **additif** sur `Planche`, `reperes_cartographiques`, autorisé
+par exception à la règle qui interdit aux lots suivants de toucher au moteur du
+lot 1. Il nomme ce qu'il retire — des repères cartographiques — et non le lot
+qui le demande : la page de garde pourrait en avoir l'usage. À faux, ni la
+flèche, ni la case, ni les filets qui la délimitent, la case du titre s'étendant
+à leur place : deux compartiments vides se liraient comme une échelle qu'on a
+oublié de renseigner. Vrai par défaut, et aucune planche existante ne change
+d'aspect.
+
+### Chaque page porte son propre numéro
+
+Le cartouche annonce le numéro de **page**, pas celui de la pièce : Massay porte
+sa notice sur deux pages, dont les cartouches annoncent NUMERO 16 puis
+NUMERO 17. Le contrôle de rang de `assemblage.py` a donc appris qu'une pièce
+peut couvrir plusieurs pages : une pièce qui s'étend déclare les numéros de ses
+cartouches (`Sortie.numeros`) et ils sont comparés un à un à la pagination
+réelle du dossier assemblé. Une pièce d'une seule page garde le contrôle du
+lot 4 ; une pièce qui produirait deux pages sans déclarer ses numéros est
+refusée.
+
+Le rang de la première page de la notice se **compte** sur les PDF déjà
+produits, et ne se déduit pas du nombre de pièces : le jour où une autre pièce
+s'étendra, la notice suivra sans qu'on ait à y penser. La notice étant la
+dernière pièce, aucune n'est décalée par son épaisseur.
+
+### Où elle se dépose
+
+En section 3, avec les photographies : `projets/{nom}/DP_11/`, par le même
+patron que `_enregistrer_photos`. Elle est **facultative** — un dossier d'étude
+amont n'a pas de notice — et son absence est écrite au rapport, comme l'est
+celle du plan du bureau d'études.
+
 ## Hors périmètre de ces lots
 
-La notice DP 11 (lot 5). Les insertions paysagères DP 6, DP 7 et DP 8 sont
+La **composition** de la notice DP 11 — l'écriture du texte par l'outil, la
+reprise des valeurs du tableau bilan, le recoupement avec les planches. Le lot 5
+n'intègre que le PDF fourni. Les insertions paysagères DP 6, DP 7 et DP 8 sont
 fournies en PDF et simplement assemblées. L'import HelioScope et le calage
 géographique (lot 2) restent en réserve pour les projets sans plan BE ; la saisie
 manuelle des éléments techniques (lot 3) est remplacée par le lot 2bis.

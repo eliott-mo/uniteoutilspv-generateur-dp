@@ -57,7 +57,10 @@ PIECES = (
     Piece("DP 6", "Insertions paysagères", mention="fournie"),
     Piece("DP 7", "Photographie environnement proche", mention="fournie"),
     Piece("DP 8", "Photographie paysage lointain", mention="fournie"),
-    Piece("DP 11", "Notice", mention="lot 5"),
+    # Produite depuis le lot 5, mais pas composée : le chef de projet fournit
+    # la notice en PDF et l'outil l'habille du cadre et du cartouche du
+    # dossier. Elle est la seule pièce à pouvoir couvrir plusieurs pages.
+    Piece("DP 11", "Notice", produite=True),
 )
 
 PAR_CODE = {piece.code: piece for piece in PIECES if piece.code}
@@ -77,9 +80,12 @@ def numero_planche(code: str, codes_produits=None) -> int:
     """Rang de la planche dans le dossier assemblé.
 
     La page de garde compte comme la planche 1 : le plan de cadastre est donc
-    la planche 4, comme dans les dossiers de l'agence. Chaque pièce tenant sur
-    une page, ce rang est aussi son numéro de page ; `dp_socle.assemblage` le
-    vérifie sur le PDF produit plutôt que de s'en remettre à cette hypothèse.
+    la planche 4, comme dans les dossiers de l'agence. Ce rang n'est le numéro
+    de page de la pièce que si toutes celles qui la précèdent tiennent sur une
+    page — ce qui est le cas de toutes sauf la notice DP 11, dernière du
+    dossier. `dp_socle.assemblage` ne s'en remet pas à cette hypothèse : il
+    compte les pages des PDF produits, et une pièce qui en couvre plusieurs
+    déclare les numéros de ses cartouches (`Sortie.numeros`).
 
     `codes_produits` est la liste des pièces réellement produites pour **ce**
     dossier. Depuis le lot 4, elle ne se déduit plus de `PIECES` : un projet

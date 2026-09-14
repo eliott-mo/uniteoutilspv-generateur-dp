@@ -25,6 +25,7 @@ from .planches import (
     dp2_plan_masse,
     dp3_coupes,
     dp4_ouvrages,
+    dp11_notice,
     page_garde,
 )
 from .polices import EtatPolices, avertir_si_indisponible
@@ -67,6 +68,14 @@ class Rapport:
     #: Origine du contrat d'entrée employé, ou None si le dossier s'arrête au
     #: socle faute d'import.
     origine_contrat: str | None = None
+    #: Ce que la notice DP 11 fournie a donné : nom du fichier, nombre de
+    #: pages, formats lus et facteurs d'ajustement appliqués. None si aucune
+    #: notice n'a été déposée.
+    #:
+    #: Annoncé même quand tout s'est bien passé (décision D2 du lot 5) : une
+    #: notice réduite à 44 % parce qu'elle arrivait en A2 doit se voir avant
+    #: l'instruction, et un rapport qui ne parle que des ennuis ne le dit pas.
+    notice: dict | None = None
 
 
 def generer_dossier(
@@ -77,6 +86,13 @@ def generer_dossier(
     """Produit les planches du socle, la page de garde et le PDF assemblé."""
     projet.valider()
     etat = avertir_si_indisponible()
+
+    # La notice est contrôlée avant de dessiner quoi que ce soit, alors qu'elle
+    # ne sera habillée qu'en fin de dossier : découvrir qu'elle est illisible
+    # après le téléchargement de tous les fonds IGN coûte la génération
+    # entière. Le dépôt a déjà payé un diagnostic tardif de ce genre sur cairo.
+    if projet.chemin_notice is not None:
+        dp11_notice.examiner(projet.chemin_notice)
 
     dossier = Path(dossier_sortie) / projet.nom
     dossier.mkdir(parents=True, exist_ok=True)
@@ -122,6 +138,15 @@ def generer_dossier(
             sorties.extend(
                 _planches_lot4(projet, contrat, emprise, dossier, avertissements)
             )
+        # La notice ferme le dossier : c'est la dernière pièce, et la seule qui
+        # puisse couvrir plusieurs pages. Aucune pièce ne la suit, donc aucune
+        # n'est décalée par son épaisseur.
+        notice, message = _notice_eventuelle(projet, sorties, dossier)
+        if message:
+            avertissements.append(message)
+        if notice is not None:
+            sorties.append(notice)
+            avertissements.extend(notice.details.get("avertissements", []))
     avertissements.extend(
         str(c.message) for c in captees if issubclass(c.category, RuntimeWarning)
     )
@@ -136,21 +161,12 @@ def generer_dossier(
     page_courante = 2
     produites = codes_produits([s.numero for s in sorties])
     for sortie in sorties:
-        # La case NUMÉRO du cartouche a été composée à partir de
-        # dossier.numero_planche(), qui suppose une page par pièce. On le
-        # vérifie sur les PDF produits : un cartouche qui annonce une planche 3
-        # sur une page 4 est le genre d'erreur que personne ne rattrape.
-        #
-        # Le rang est calculé sur les pièces réellement produites : depuis le
-        # lot 4 elles ne sont plus toujours les mêmes, un projet sans poste
-        # n'ayant pas de DP 4-1.
-        attendu = numero_planche(sortie.numero, produites)
-        if attendu != page_courante:
-            raise ErreurRendu(
-                f"{sortie.numero} : le cartouche annonce la planche {attendu} "
-                f"mais la pièce tombe en page {page_courante} du dossier assemblé."
-            )
+        # La case NUMÉRO du cartouche se vérifie sur les PDF produits : un
+        # cartouche qui annonce une planche 3 sur une page 4 est le genre
+        # d'erreur que personne ne rattrape. Le nombre de pages se compte donc
+        # avant le contrôle, et non après.
         nb = _nb_pages(sortie.chemin)
+        _verifier_numerotation(sortie, nb, page_courante, produites)
         pages[sortie.numero] = (page_courante, page_courante + nb - 1)
         sommaire.append(
             {"numero": sortie.numero, "titre": sortie.titre, "page": page_courante}
@@ -179,6 +195,69 @@ def generer_dossier(
         etat_polices=etat,
         avertissements=avertissements,
         origine_contrat=contrat.origine if contrat is not None else None,
+        notice=notice.details.get("notice") if notice is not None else None,
+    )
+
+
+def _verifier_numerotation(sortie, nb_pages: int, premiere_page: int, produites) -> None:
+    """Le cartouche de chaque page annonce-t-il la page où elle tombe ?
+
+    Depuis le lot 5, une pièce peut couvrir plusieurs pages : comparer un
+    numéro unique ne suffit plus. Une pièce qui s'étend déclare les numéros de
+    ses cartouches dans `Sortie.numeros`, et ils doivent suivre la pagination
+    page par page — c'est la décision D3, tranchée par le dossier de référence
+    où la notice de Massay porte NUMERO 16 puis NUMERO 17.
+    """
+    if sortie.numeros:
+        attendus = tuple(range(premiere_page, premiere_page + nb_pages))
+        if tuple(sortie.numeros) != attendus:
+            raise ErreurRendu(
+                f"{sortie.numero} : les cartouches annoncent les planches "
+                f"{', '.join(str(n) for n in sortie.numeros)} mais la pièce "
+                f"occupe les pages {', '.join(str(n) for n in attendus)} du "
+                "dossier assemblé."
+            )
+        return
+    if nb_pages != 1:
+        raise ErreurRendu(
+            f"{sortie.numero} : {nb_pages} pages produites pour une pièce qui "
+            "n'annonce qu'un numéro de cartouche. Une pièce qui s'étend sur "
+            "plusieurs pages doit déclarer les numéros de ses cartouches."
+        )
+    attendu = numero_planche(sortie.numero, produites)
+    if attendu != premiere_page:
+        raise ErreurRendu(
+            f"{sortie.numero} : le cartouche annonce la planche {attendu} "
+            f"mais la pièce tombe en page {premiere_page} du dossier assemblé."
+        )
+
+
+def _notice_eventuelle(projet: Projet, sorties, dossier: Path):
+    """La pièce DP 11, si une notice a été déposée, et ce qu'il faut en dire.
+
+    Son absence est un cas normal — un dossier d'étude amont n'a pas de notice
+    — et le dossier se produit sans elle, en le disant. C'est le comportement
+    de `_charger_contrat_eventuel` pour le plan, et il vaut ici pour la même
+    raison.
+
+    Le rang de sa première page se **compte** sur les PDF déjà produits plutôt
+    que de se déduire du nombre de pièces : le jour où l'une d'elles s'étendra
+    à son tour, la notice suivra sans qu'on ait à y penser.
+    """
+    chemin = projet.chemin_notice
+    if chemin is None:
+        return None, (
+            "Aucune notice DP 11 fournie : le dossier est produit sans elle. "
+            "Déposez-la en PDF pour qu'elle soit habillée du cadre et du "
+            "cartouche du dossier, et paginée avec les autres pièces."
+        )
+    # La page de garde occupe la page 1, les pièces déjà produites la suivent,
+    # et la notice commence à la page d'après.
+    deja_paginees = 1 + sum(_nb_pages(Path(s.chemin)) for s in sorties)
+    premiere_page = deja_paginees + 1
+    return (
+        dp11_notice.generer(projet, chemin, dossier, premier_numero=premiere_page),
+        None,
     )
 
 

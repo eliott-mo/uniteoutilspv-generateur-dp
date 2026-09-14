@@ -168,6 +168,20 @@ class Planche:
     date: str
     echelle: int | None = None
     avec_cartouche: bool = True
+    #: Repères cartographiques du cartouche : flèche nord et case ÉCHELLE.
+    #:
+    #: À faux, le cartouche n'en porte aucun — ni la flèche, ni la case, ni les
+    #: filets qui la délimitent, la case du titre s'étendant à leur place. C'est
+    #: ce qu'il faut pour une planche qui ne montre pas de terrain : une notice
+    #: reprise d'un PDF fourni n'a ni échelle ni orientation, et un nord qui ne
+    #: désigne rien est un repère faux. Le dossier de référence le confirme :
+    #: les pages 16 et 17 de Massay portent « NUMERO » et « DATE » sans échelle
+    #: ni nord, là où sa page 2 porte « ECHELLE 1 : 10 000 » (mesuré le
+    #: 14/09/2026 dans le flux de contenu du PDF de l'agence).
+    #:
+    #: Vrai par défaut : les huit planches du dossier sont cartographiques, et
+    #: aucune ne change d'aspect.
+    reperes_cartographiques: bool = True
 
     transformation: TransformationL93 | None = field(default=None, init=False)
     _fond: list[str] = field(default_factory=list, init=False)
@@ -667,7 +681,14 @@ class Planche:
         )
 
         cases = dict((nom, (x, largeur)) for nom, x, largeur in CASES_CARTOUCHE)
-        for _, x, _largeur in CASES_CARTOUCHE[1:]:
+        # Sans repères cartographiques, les filets de « nord » et « échelle »
+        # ne se tracent pas non plus : deux compartiments vides se liraient
+        # comme une échelle qu'on a oublié de renseigner, ce qui est justement
+        # l'aveu qu'on ne veut pas au dossier.
+        sautees = () if self.reperes_cartographiques else ("nord", "echelle")
+        for nom, x, _largeur in CASES_CARTOUCHE[1:]:
+            if nom in sautees:
+                continue
             self.ajouter_ligne(x, Y_CARTOUCHE, x, Y_CARTOUCHE + CARTOUCHE_MM, fin)
 
         # 1. Logo UNITe
@@ -698,8 +719,9 @@ class Planche:
         )
 
         # 4. Flèche nord (nord de la grille Lambert 93)
-        x_nord, largeur_nord = cases["nord"]
-        self._fleche_nord(x_nord, largeur_nord)
+        if self.reperes_cartographiques:
+            x_nord, largeur_nord = cases["nord"]
+            self._fleche_nord(x_nord, largeur_nord)
 
         # 5. Échelle, date, numéro
         valeurs = (
@@ -707,6 +729,8 @@ class Planche:
             ("date", "DATE", self.date),
             ("numero", "NUMÉRO", self.numero),
         )
+        if not self.reperes_cartographiques:
+            valeurs = tuple(v for v in valeurs if v[0] != "echelle")
         for nom, intitule, valeur in valeurs:
             x_case, largeur_case = cases[nom]
             centre = x_case + largeur_case / 2.0

@@ -48,10 +48,23 @@ def test_les_planches_du_lot_4_sont_produites():
         assert piece(code).produite
 
 
-def test_les_pieces_fournies_et_le_lot_5_restent_non_produites():
-    """Les insertions paysagères sont fournies en PDF, la notice vient au lot 5."""
-    for code in ("DP 6", "DP 7", "DP 8", "DP 11"):
+def test_les_pieces_photographiques_restent_non_produites():
+    """Les insertions paysagères et les photographies sont jointes à la main.
+
+    Elles attendent le lot 6 et ses plans de repérage.
+    """
+    for code in ("DP 6", "DP 7", "DP 8"):
         assert not piece(code).produite
+
+
+def test_la_notice_est_produite_depuis_le_lot_5():
+    """Fournie en PDF par le chef de projet, mais habillée par l'outil.
+
+    « Produite » ne dit pas qu'elle est composée : elle l'est au sens du
+    dossier, c'est-à-dire que le générateur écrit ses planches, les numérote et
+    les pagine au sommaire — c'est tout ce que `produite` décide.
+    """
+    assert piece("DP 11").produite
 
 
 # ---------------------------------------------------------------------------
