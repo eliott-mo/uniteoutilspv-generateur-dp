@@ -198,6 +198,37 @@ précédent ne produit rien, le composant n'envoyant pas de valeur inchangée. L
 geste reste armé, le clic suivant passe, et la coupe aurait de toute façon été la
 même.
 
+### Le brief écartait le retour au survol ; il ne coûtait rien
+
+« Pas de curseur d'angle ni de glissement continu — dans Streamlit, chaque cran
+relancerait le script. » Le raisonnement est juste, mais il ne vaut que côté
+Python. Un trait dessiné par Leaflet dans le navigateur ne relance rien du tout :
+rien ne remonte à Streamlit tant que le chef de projet n'a pas cliqué.
+
+Le trait d'aperçu qui suit la souris a donc été ajouté après coup, à la demande du
+chef de projet, et il repose sur une propriété que le brief n'énonçait pas :
+déplacer la coupe la **translate en bloc**, exactement. L'aperçu est la coupe
+affichée translatée jusqu'au curseur, pas une coupe recalculée à chaque
+mouvement. Écart au tracé réel mesuré à 1,3 cm, contre 45 cm pour un pixel de
+carte au zoom 18.
+
+Deux choses relevées seulement à l'usage, et qu'aucun test ne voyait :
+
+- **Le trait devait se figer au clic.** Streamlit met une à deux secondes à
+  rejouer le script, et pendant ce temps la carte affichée est encore l'ancienne.
+  Un trait qui continuait d'y suivre la souris faisait croire que le clic n'avait
+  pas pris — et recliquer n'arrangeait rien, le second point étant ignoré puisque
+  le geste est désarmé dès le premier. Leaflet voit le clic tout de suite : le
+  trait s'y fige, devient plein, et un bandeau annonce le relevé en cours.
+- **La coupe n'est pas verticale à l'écran**, ce qui se lit comme un glissement
+  parasite du trait quand on survole de haut en bas. C'est la convergence des
+  méridiens : 0,745° à Saint-Cyr, le nord de grille du Lambert 93 n'étant pas le
+  nord vrai auquel le Web Mercator s'aligne.
+
+Ce qui manquait aux tests, ici, c'est qu'aucun n'exécute de JavaScript. La carte a
+donc été rendue en page autonome et pilotée dans un navigateur — c'est là, et là
+seulement, que ces deux points se sont vus.
+
 ### Comment le geste est mesuré
 
 `AppTest` ne joue pas le contenu d'un composant `st_folium` : il en rend les
