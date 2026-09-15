@@ -28,6 +28,7 @@ from dp_socle.apercu_be import (
     ORDRE_DESSIN,
     STYLES,
     URL_TUILES_ORTHO,
+    apercu_au_survol,
     bornes_wgs84,
     clic_l93,
     en_wgs84,
@@ -526,9 +527,10 @@ def _calques_caches(chemin: str, taille: int, charte: str):
 GESTES_CARTE = {
     "translation_coupe": (
         "Déplacer la coupe",
-        "**Cliquez sur la carte** à l'endroit où la coupe doit passer. Elle "
-        "restera perpendiculaire aux rangées : vous choisissez sa position, "
-        "jamais sa direction.",
+        "**Cliquez sur la carte** à l'endroit où la coupe doit passer. Le trait "
+        "pointillé qui suit votre souris montre où elle se posera — elle reste "
+        "perpendiculaire aux rangées, vous choisissez sa position et jamais sa "
+        "direction.",
     ),
 }
 
@@ -1149,6 +1151,26 @@ if import_be_courant is not None and commune.strip():
             en_wgs84([st.session_state.coupe_be.geometrie]),
             style_function=lambda _trait: {"color": "#000000", "weight": 4},
             name="Coupe A-A'",
+        ).add_to(carte)
+
+    # Le trait d'aperçu, et seulement quand le geste est armé : une ligne qui
+    # suivrait la souris en permanence serait du bruit. Tout se passe dans le
+    # navigateur — aucun rechargement, contrairement à `return_on_hover` qui
+    # relancerait le script à chaque mouvement de souris. Voir `apercu_au_survol`.
+    if _geste_arme() == "translation_coupe":
+        # `representative_point` plutôt que le centroïde : shapely le garantit
+        # **dans** le polygone, quand le centroïde d'une emprise concave peut en
+        # sortir — et une coupe qui n'y passe pas est refusée. Le cas ne se
+        # présente qu'avant toute coupe retenue ; d'ordinaire c'est celle de
+        # l'écran qui sert de référence, et l'aperçu lui est exactement parallèle.
+        apercu_au_survol(
+            st.session_state.coupe_be.geometrie
+            if st.session_state.coupe_be is not None
+            else translater_ligne_coupe(
+                emprise_cloturee.representative_point(),
+                plan.azimut_tables_deg,
+                emprise_cloturee,
+            ).geometrie
         ).add_to(carte)
 
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)

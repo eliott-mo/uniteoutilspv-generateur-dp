@@ -496,6 +496,125 @@ def clic_l93(resultat_carte: dict | None):
     return Point(vers_l93.transform(float(longitude), float(latitude)))
 
 
+#: Longueur des tirets du trait d'aperçu, en pixels. Assez longs pour se lire au
+#: milieu des rangées, assez espacés pour ne pas se confondre avec la coupe
+#: retenue, qui est pleine.
+TIRETS_APERCU = "10 8"
+
+
+def apercu_au_survol(
+    reference,
+    couleur: str = "#000000",
+    epaisseur: int = 3,
+    opacite: float = 0.75,
+):
+    """Trait montrant où la coupe se posera, qui suit la souris sans rechargement.
+
+    **Tout se passe dans le navigateur.** Faire suivre la souris côté Python
+    demanderait `return_on_hover`, qui relance le script Streamlit à chaque
+    mouvement — la carte se redessine, le plan se recompose, et l'écran pédale.
+    Ici Leaflet déplace une polyligne qu'il a déjà : rien ne remonte à Streamlit
+    tant que le chef de projet n'a pas cliqué.
+
+    Le calcul tient en une propriété mesurée le 15/09/2026 : déplacer la coupe la
+    **translate en bloc**. `_etendre` projette les sommets de l'emprise sur la
+    direction de coupe *relativement au point de passage* ; déplacer ce point
+    perpendiculairement à la coupe ne change aucune de ces projections, et le
+    segment glisse sans tourner ni changer de longueur — vérifié exact au bit
+    près. L'aperçu est donc le segment de référence translaté jusqu'au curseur,
+    et non une coupe recalculée.
+
+    La translation se fait dans le plan de la carte, en pixels, et non en
+    Lambert 93 : c'est ce dont Leaflet dispose. Le Web Mercator étant conforme, le
+    trait reste parallèle à la coupe ; l'écart au tracé réel a été mesuré sur
+    Saint-Cyr à **1,3 cm au pire**, soit trente-six fois moins qu'un pixel de
+    carte au zoom 18. L'aperçu ne ment pas sur l'endroit où la coupe ira.
+
+    `reference` est n'importe quelle ligne de coupe du plan, en Lambert 93 : elles
+    sont toutes parallèles, et seule sa direction sert.
+
+    À savoir avant de le prendre pour un défaut : **la coupe n'est pas verticale à
+    l'écran**, et le trait se décale donc un peu latéralement quand on survole de
+    haut en bas à abscisse constante. Ce n'est pas un glissement parasite, c'est
+    la convergence des méridiens — le nord de grille du Lambert 93 n'est pas le
+    nord vrai auquel le Web Mercator s'aligne. Mesurée à Saint-Cyr le 15/09/2026 :
+    0,745°, soit 8,5 px de décalage pour 650 px de survol vertical, relevés à 7 px
+    dans le navigateur, l'écart étant l'arrondi au pixel entier de Leaflet. Une
+    coupe perpendiculaire aux rangées l'est aux rangées, pas au bord de l'écran.
+    """
+    from branca.element import MacroElement, Template
+
+    vers_wgs84, _ = _transformateurs()
+    (x1, y1), (x2, y2) = reference.coords[0][:2], reference.coords[-1][:2]
+    depart = vers_wgs84.transform(x1, y1)
+    arrivee = vers_wgs84.transform(x2, y2)
+
+    class _ApercuAuSurvol(MacroElement):
+        _template = Template(
+            """
+            {% macro script(this, kwargs) %}
+            (function () {
+                var carte = {{ this._parent.get_name() }};
+                var ancre = [
+                    [{{ this.depart_lat }}, {{ this.depart_lon }}],
+                    [{{ this.arrivee_lat }}, {{ this.arrivee_lon }}]
+                ];
+                var apercu = L.polyline(ancre, {
+                    color: "{{ this.couleur }}",
+                    weight: {{ this.epaisseur }},
+                    opacity: 0,
+                    dashArray: "{{ this.tirets }}",
+                    interactive: false
+                }).addTo(carte);
+
+                function placer(curseur) {
+                    var a = carte.latLngToLayerPoint(L.latLng(ancre[0][0], ancre[0][1]));
+                    var b = carte.latLngToLayerPoint(L.latLng(ancre[1][0], ancre[1][1]));
+                    var c = carte.latLngToLayerPoint(curseur);
+                    var dx = b.x - a.x, dy = b.y - a.y;
+                    var norme = Math.sqrt(dx * dx + dy * dy);
+                    if (!norme) { return; }
+                    var ux = dx / norme, uy = dy / norme;
+                    var vx = c.x - a.x, vy = c.y - a.y;
+                    // Composante du curseur perpendiculaire a la coupe : c'est
+                    // de cela, et de cela seulement, que le segment se decale.
+                    var t = vx * ux + vy * uy;
+                    var wx = vx - t * ux, wy = vy - t * uy;
+                    apercu.setLatLngs([
+                        carte.layerPointToLatLng(L.point(a.x + wx, a.y + wy)),
+                        carte.layerPointToLatLng(L.point(b.x + wx, b.y + wy))
+                    ]);
+                    apercu.setStyle({opacity: {{ this.opacite }}});
+                }
+
+                carte.on("mousemove", function (e) { placer(e.latlng); });
+                // Souris sortie de la carte : le trait n'a plus de sens, et le
+                // laisser fige un aperçu la ou la souris a quitte l'ecran.
+                carte.on("mouseout", function () {
+                    apercu.setStyle({opacity: 0});
+                });
+            })();
+            {% endmacro %}
+            """
+        )
+
+        def __init__(self):
+            super().__init__()
+            # Après `super().__init__()`, et non en attribut de classe :
+            # `MacroElement.__init__` pose `self._name = "MacroElement"` sur
+            # l'instance et écraserait le nôtre. C'est ce nom qui permet de
+            # retrouver le calque sur la carte, et donc de le tester.
+            self._name = "ApercuCoupeAuSurvol"
+            self.depart_lat, self.depart_lon = depart[1], depart[0]
+            self.arrivee_lat, self.arrivee_lon = arrivee[1], arrivee[0]
+            self.couleur = couleur
+            self.epaisseur = epaisseur
+            self.opacite = opacite
+            self.tirets = TIRETS_APERCU
+
+    return _ApercuAuSurvol()
+
+
 def trace_l93(resultat_carte: dict | None):
     """Dernière polyligne tracée sur la carte, ramenée en Lambert 93.
 

@@ -175,6 +175,22 @@ pourtant installée.
 Sur la cible de déploiement (Linux), tout ceci est inutile : `packages.txt`
 fournit `libcairo2`.
 
+### Photos HEIC
+
+Le HEIC est le format par défaut des iPhone : un chef de projet qui dépose une
+photo de visite en dépose un sans le savoir. `pillow-heif` est donc épinglé dans
+`requirements.txt`, et `dp_socle/lecture_exif.py` enregistre son décodeur auprès
+de Pillow à l'import. Rien à installer sur le poste : la roue embarque libheif,
+et `packages.txt` reste inchangé — contrairement à `tesseract-ocr`, que le dépôt
+voisin `photos-geoloc` doit y déclarer.
+
+Son indisponibilité est un état d'environnement, annoncé au démarrage comme
+celui de cairo. Le piège est mesuré : le 15/09/2026, `pillow-heif` était installé
+sur le poste de développement **sans figurer dans `requirements.txt`**. Les HEIC
+s'y lisaient donc, et auraient été refusés en production sans que rien ne
+l'explique. Une dépendance qui marche par accident en développement est une
+panne qui attend le déploiement.
+
 ## Utilisation
 
 Interface :
@@ -1220,6 +1236,39 @@ Armer et désarmer relancent le script, sans quoi l'écran reste d'un tour en
 retard sur lui-même : la bannière s'affichait sous un bouton qui proposait encore
 de déplacer la coupe, sans moyen d'annuler, et l'inverse à l'annulation — une
 bannière réclamant un clic que plus rien n'attendait.
+
+**Un trait pointillé suit la souris tant que le geste est armé**, et montre où
+la coupe se posera avant qu'on clique. Il est entièrement dessiné par Leaflet
+dans le navigateur : rien ne remonte à Streamlit tant que le chef de projet n'a
+pas cliqué. Le faire côté Python demanderait `return_on_hover`, qui relance le
+script à chaque mouvement de souris — la carte se redessine, le plan se
+recompose, et l'écran pédale.
+
+Il repose sur une propriété mesurée le 15/09/2026 : **déplacer la coupe la
+translate en bloc**. L'étendue se calcule en projetant les sommets de l'emprise
+sur la direction de coupe *relativement au point de passage* ; déplacer ce point
+perpendiculairement à la coupe ne change aucune de ces projections, et le segment
+glisse sans tourner ni changer de longueur — vérifié exact au bit près. L'aperçu
+est donc la coupe affichée, translatée jusqu'au curseur, et non une coupe
+recalculée à chaque mouvement.
+
+La translation se fait en pixels de carte, Web Mercator, quand la coupe se calcule
+en Lambert 93. Le Web Mercator est conforme, donc le trait reste parallèle ;
+l'écart au tracé réel a été mesuré sur Saint-Cyr à **1,3 cm au pire**, contre
+45 cm pour un pixel de carte au zoom 18. L'aperçu ne ment pas sur l'endroit où la
+coupe ira.
+
+Ce qui se lirait comme un défaut et n'en est pas : **la coupe n'est pas verticale
+à l'écran**, et le trait se décale donc un peu latéralement quand on survole de
+haut en bas. C'est la convergence des méridiens — le nord de grille du Lambert 93
+n'est pas le nord vrai auquel le Web Mercator s'aligne. Mesurée à Saint-Cyr :
+0,745°, soit 8,5 px pour 650 px de survol vertical, relevés à 7 px dans le
+navigateur (Leaflet arrondit au pixel entier). Une coupe perpendiculaire aux
+rangées l'est aux rangées, pas au bord de l'écran.
+
+Le trait part invisible, apparaît au premier mouvement, disparaît quand la souris
+quitte la carte, et porte `interactive: false` — sans quoi il intercepterait le
+clic qu'il annonce.
 
 **Le clic se consomme explicitement.** Vérifié le 15/09/2026 dans
 `streamlit-folium` 0.27.2 : `last_clicked` est alimenté par l'événement `click` de

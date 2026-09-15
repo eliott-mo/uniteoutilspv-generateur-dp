@@ -519,15 +519,17 @@ def _carte_cliquable(monkeypatch):
     la consommation du clic, la translation, le relevé du profil et les contrôles.
 
     Rend un dictionnaire sur lequel poser `point`, en (x, y) Lambert 93 ; None
-    pour une carte sur laquelle personne n'a cliqué.
+    pour une carte sur laquelle personne n'a cliqué. La carte reçue est retenue
+    sous `carte` : c'est le seul endroit d'où lire ce qui a été posé dessus.
     """
     import streamlit_folium
     from pyproj import Transformer
 
     vers_wgs84 = Transformer.from_crs(2154, 4326, always_xy=True)
-    dicte = {"point": None}
+    dicte = {"point": None, "carte": None}
 
-    def _composant(*_args, **_kwargs):
+    def _composant(carte=None, *_args, **_kwargs):
+        dicte["carte"] = carte
         valeurs = {
             "last_clicked": None,
             "all_drawings": None,
@@ -611,6 +613,42 @@ def test_un_clic_hors_du_site_refuse_et_garde_la_coupe(tmp_path, monkeypatch):
     assert any("ne traverse pas l'emprise clôturée" in e for e in erreurs), erreurs
     assert application.session_state["coupe_be"].geometrie.wkt == avant
     assert application.session_state["origine_coupe"] == "defaut"
+
+
+def _calques(carte, nom: str) -> list:
+    """Les enfants de la carte folium portant ce nom d'élément."""
+    if carte is None:
+        return []
+    return [
+        enfant
+        for enfant in carte._children.values()
+        if getattr(enfant, "_name", None) == nom
+    ]
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_le_trait_d_apercu_n_apparait_qu_une_fois_le_geste_arme(tmp_path, monkeypatch):
+    """Un trait qui suivrait la souris en permanence serait du bruit.
+
+    Il est posé sur la carte à l'armement et retiré à l'annulation, puisque la
+    carte est recomposée à chaque exécution du script. Ce qui se passe ensuite —
+    le trait qui suit la souris — est du JavaScript Leaflet, et ne remonte jamais
+    à Streamlit : c'est tout l'intérêt, et c'est mesuré côté module.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
+    assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert len(_calques(carte["carte"], "ApercuCoupeAuSurvol")) == 1
+
+    _cliquer(application, "Annuler le déplacement")
+    application = application.run()
+
+    assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
 
 
 def test_le_clic_ne_remonte_pas_la_carte():

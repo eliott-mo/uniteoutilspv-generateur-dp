@@ -692,6 +692,111 @@ def test_carte_sans_trace_ne_renvoie_rien():
     )
 
 
+def test_deplacer_la_coupe_la_translate_en_bloc(plan, emprise):
+    """Le segment glisse sans tourner ni changer de longueur.
+
+    C'est la propriété sur laquelle repose le trait d'aperçu qui suit la souris :
+    il peut être le segment de référence translaté, plutôt qu'une coupe
+    recalculée à chaque mouvement. `_etendre` projette les sommets de l'emprise
+    sur la direction de coupe *relativement au point de passage* ; déplacer ce
+    point perpendiculairement à la coupe ne change aucune de ces projections.
+    """
+    base = translater_ligne_coupe(
+        emprise.centroid, plan.azimut_tables_deg, emprise
+    ).geometrie
+    depart, arrivee = base.coords[0], base.coords[-1]
+
+    for decalage in (-90.0, -30.0, 45.0, 95.0):
+        # Le décalage porte sur l'axe des rangées (est-ouest à Saint-Cyr), plus
+        # un déplacement le long de la coupe, qui ne doit rien changer du tout.
+        glissee = translater_ligne_coupe(
+            Point(emprise.centroid.x + decalage, emprise.centroid.y + 40.0),
+            plan.azimut_tables_deg,
+            emprise,
+        ).geometrie
+        a2, b2 = glissee.coords[0], glissee.coords[-1]
+        # Les deux extrémités subissent la même translation, au bit près.
+        assert a2[0] - depart[0] == pytest.approx(b2[0] - arrivee[0], abs=1e-9)
+        assert a2[1] - depart[1] == pytest.approx(b2[1] - arrivee[1], abs=1e-9)
+        assert glissee.length == pytest.approx(base.length, abs=1e-9)
+
+
+def test_le_trait_d_apercu_ne_ment_pas_sur_l_endroit_de_la_coupe(plan, emprise):
+    """L'aperçu dessiné dans le navigateur tombe sur la coupe que Python calculera.
+
+    Leaflet translate le segment dans le plan de la carte, en pixels Web Mercator,
+    quand la coupe est calculée en Lambert 93. Le Web Mercator est conforme, donc
+    le trait reste parallèle ; reste à mesurer ce que coûte le changement de
+    projection. Ce test refait le calcul du navigateur et le compare au tracé
+    réel : un aperçu qui mentirait d'un mètre ferait cliquer à côté.
+    """
+    from pyproj import Transformer
+
+    vers_merc = Transformer.from_crs(2154, 3857, always_xy=True)
+    vers_l93 = Transformer.from_crs(3857, 2154, always_xy=True)
+    base = translater_ligne_coupe(
+        emprise.centroid, plan.azimut_tables_deg, emprise
+    ).geometrie
+    depart, arrivee = base.coords[0][:2], base.coords[-1][:2]
+
+    pire = 0.0
+    for dx in (-100.0, -40.0, 0.0, 55.0, 100.0):
+        for dy in (-180.0, 0.0, 180.0):
+            curseur = (emprise.centroid.x + dx, emprise.centroid.y + dy)
+            vraie = translater_ligne_coupe(
+                Point(*curseur), plan.azimut_tables_deg, emprise
+            ).geometrie
+
+            # Le calcul que fait le navigateur, à l'identique.
+            a, b, c = (vers_merc.transform(*p) for p in (depart, arrivee, curseur))
+            ux, uy = b[0] - a[0], b[1] - a[1]
+            norme = (ux * ux + uy * uy) ** 0.5
+            ux, uy = ux / norme, uy / norme
+            vx, vy = c[0] - a[0], c[1] - a[1]
+            projete = vx * ux + vy * uy
+            wx, wy = vx - projete * ux, vy - projete * uy
+            apercu = [
+                Point(*vers_l93.transform(a[0] + wx, a[1] + wy)),
+                Point(*vers_l93.transform(b[0] + wx, b[1] + wy)),
+            ]
+            pire = max(pire, max(vraie.distance(bout) for bout in apercu))
+
+    # Mesuré à 1,3 cm sur Saint-Cyr le 15/09/2026. Le seuil est à 10 cm : bien
+    # au-dessus de la mesure, et bien en dessous du pixel de carte au zoom 18,
+    # qui vaut 45 cm. Le chef de projet ne peut pas cliquer plus fin que ça.
+    assert pire < 0.10, f"le trait d'aperçu s'écarte de {pire * 100:.1f} cm"
+
+
+def test_le_trait_d_apercu_part_dans_le_script_de_la_carte(plan, emprise):
+    """Sans ce JS dans le script envoyé au navigateur, le trait n'existe pas.
+
+    Vérifié le 15/09/2026 dans `streamlit-folium` 0.27.2 : son
+    `generate_leaflet_string` appelle `_template.module.script` sur chaque enfant
+    de la carte (`__init__.py:517`), donc un `MacroElement` est bien exécuté.
+    """
+    import folium
+    from streamlit_folium import _get_map_string
+
+    from dp_socle.apercu_be import apercu_au_survol
+
+    coupe = translater_ligne_coupe(
+        emprise.centroid, plan.azimut_tables_deg, emprise
+    ).geometrie
+    carte = folium.Map(tiles=None)
+    apercu_au_survol(coupe).add_to(carte)
+    script = _get_map_string(carte)
+
+    assert 'carte.on("mousemove"' in script
+    assert 'carte.on("mouseout"' in script
+    # La carte est renommée `map_div` par le composant : sans cette substitution
+    # le JS s'accrocherait à une variable qui n'existe pas côté navigateur.
+    assert "var carte = map_div;" in script
+    # Le trait ne doit pas intercepter le clic qui suit, sinon il n'arrive jamais.
+    assert "interactive: false" in script
+    # Et il part invisible : il n'apparaît qu'au premier mouvement de souris.
+    assert "opacity: 0," in script
+
+
 def test_clic_de_la_carte_revient_en_lambert_93(plan):
     """Le clic arrive en WGS84 ; tout ce qui est mesuré reste en L93."""
     from dp_socle.apercu_be import bornes_wgs84, clic_l93
