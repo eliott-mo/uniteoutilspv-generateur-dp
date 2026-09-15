@@ -507,6 +507,7 @@ def apercu_au_survol(
     couleur: str = "#000000",
     epaisseur: int = 3,
     opacite: float = 0.75,
+    message_attente: str = "Coupe prise — relevé du profil du terrain…",
 ):
     """Trait montrant où la coupe se posera, qui suit la souris sans rechargement.
 
@@ -567,6 +568,27 @@ def apercu_au_survol(
                     interactive: false
                 }).addTo(carte);
 
+                // Vrai des que le clic est donne : le trait ne suit plus rien.
+                var fige = false;
+
+                var attente = L.DomUtil.create("div", "", carte.getContainer());
+                attente.textContent = "{{ this.message_attente }}";
+                attente.style.cssText = [
+                    "display:none",
+                    "position:absolute",
+                    "top:10px",
+                    "left:50%",
+                    "transform:translateX(-50%)",
+                    "z-index:1000",
+                    "padding:6px 12px",
+                    "border-radius:4px",
+                    "background:rgba(17,17,17,0.88)",
+                    "color:#ffffff",
+                    "font:13px system-ui, sans-serif",
+                    "pointer-events:none",
+                    "white-space:nowrap"
+                ].join(";");
+
                 function placer(curseur) {
                     var a = carte.latLngToLayerPoint(L.latLng(ancre[0][0], ancre[0][1]));
                     var b = carte.latLngToLayerPoint(L.latLng(ancre[1][0], ancre[1][1]));
@@ -587,11 +609,35 @@ def apercu_au_survol(
                     apercu.setStyle({opacity: {{ this.opacite }}});
                 }
 
-                carte.on("mousemove", function (e) { placer(e.latlng); });
+                carte.on("mousemove", function (e) {
+                    if (!fige) { placer(e.latlng); }
+                });
                 // Souris sortie de la carte : le trait n'a plus de sens, et le
-                // laisser fige un aperçu la ou la souris a quitte l'ecran.
+                // laisser fige un aperçu la ou la souris a quitte l'ecran. Une
+                // fois le clic donne, en revanche, il doit rester ou il est.
                 carte.on("mouseout", function () {
-                    apercu.setStyle({opacity: 0});
+                    if (!fige) { apercu.setStyle({opacity: 0}); }
+                });
+
+                // Le clic Leaflet arrive tout de suite ; Streamlit, lui, met une
+                // a deux secondes a rejouer le script — releve du profil et
+                // controles de coherence compris. Pendant ce temps la carte
+                // affichee est encore l'ancienne, et un trait qui continuerait de
+                // suivre la souris donne a croire que le clic n'a pas pris : le
+                // chef de projet reclique, et son second point est ignore parce
+                // que le geste est deja desarme. Le trait se fige donc ici, prend
+                // l'aspect d'une coupe retenue, et le dit.
+                carte.on("click", function (e) {
+                    if (fige) { return; }
+                    placer(e.latlng);
+                    fige = true;
+                    apercu.setStyle({
+                        dashArray: null,
+                        opacity: 1,
+                        weight: {{ this.epaisseur_fige }}
+                    });
+                    attente.style.display = "block";
+                    carte.getContainer().style.cursor = "progress";
                 });
             })();
             {% endmacro %}
@@ -611,6 +657,11 @@ def apercu_au_survol(
             self.epaisseur = epaisseur
             self.opacite = opacite
             self.tirets = TIRETS_APERCU
+            self.message_attente = message_attente
+            # Une fois le clic donne, le trait prend l'epaisseur de la coupe
+            # retenue : ce n'est plus un apercu, c'est la coupe, que Streamlit
+            # n'a pas encore fini de redessiner.
+            self.epaisseur_fige = epaisseur + 1
 
     return _ApercuAuSurvol()
 

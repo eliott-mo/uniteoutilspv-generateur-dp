@@ -797,6 +797,44 @@ def test_le_trait_d_apercu_part_dans_le_script_de_la_carte(plan, emprise):
     assert "opacity: 0," in script
 
 
+def test_le_trait_se_fige_au_clic_et_annonce_le_travail(plan, emprise):
+    """Sans cela, le clic semblait ne pas avoir pris.
+
+    Relevé le 15/09/2026 par le chef de projet : Streamlit met une à deux
+    secondes à rejouer le script — relevé du profil et contrôles de cohérence
+    compris — et pendant ce temps le trait continuait de suivre la souris sur la
+    carte encore affichée. Le geste paraissait perdu, et recliquer n'arrangeait
+    rien : le second point était ignoré, le geste étant déjà désarmé.
+
+    Leaflet, lui, voit le clic tout de suite. Le trait se fige donc à l'instant
+    du clic, prend l'aspect d'une coupe retenue, et un bandeau dit ce qui se
+    passe. Vérifié dans un navigateur le même jour : après le clic, ni un survol
+    lointain ni un second clic ne le déplacent.
+    """
+    import folium
+    from streamlit_folium import _get_map_string
+
+    from dp_socle.apercu_be import apercu_au_survol
+
+    coupe = translater_ligne_coupe(
+        emprise.centroid, plan.azimut_tables_deg, emprise
+    ).geometrie
+    carte = folium.Map(tiles=None)
+    apercu_au_survol(coupe).add_to(carte)
+    script = _get_map_string(carte)
+
+    assert 'carte.on("click"' in script
+    assert "var fige = false;" in script
+    # Le survol et la sortie de carte cessent tous deux d'agir une fois figé.
+    assert "if (!fige) { placer(e.latlng); }" in script
+    assert "if (!fige) { apercu.setStyle({opacity: 0}); }" in script
+    # Le trait figé n'est plus un aperçu : plein, opaque, épaisseur de la coupe.
+    assert "dashArray: null" in script
+    # Et l'écran dit pourquoi il attend.
+    assert "relevé du profil du terrain" in script
+    assert 'cursor = "progress"' in script
+
+
 def test_clic_de_la_carte_revient_en_lambert_93(plan):
     """Le clic arrive en WGS84 ; tout ce qui est mesuré reste en L93."""
     from dp_socle.apercu_be import bornes_wgs84, clic_l93

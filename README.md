@@ -1270,6 +1270,20 @@ Le trait part invisible, apparaît au premier mouvement, disparaît quand la sou
 quitte la carte, et porte `interactive: false` — sans quoi il intercepterait le
 clic qu'il annonce.
 
+**Au clic, il se fige.** Streamlit met une à deux secondes à rejouer le script —
+relevé du profil et contrôles de cohérence compris — et pendant ce temps la carte
+affichée est encore l'ancienne. Un trait qui continuait d'y suivre la souris
+donnait à croire que le clic n'avait pas pris ; le chef de projet recliquait, et
+son second point était ignoré puisque le geste était déjà désarmé. Relevé à
+l'usage le 15/09/2026.
+
+Leaflet, lui, voit le clic tout de suite. Le trait se fige donc à cet instant,
+devient plein et prend l'épaisseur d'une coupe retenue — ce n'est plus un aperçu,
+c'est la coupe, que Streamlit n'a pas fini de redessiner — un bandeau annonce
+« Coupe prise — relevé du profil du terrain… » et le curseur passe en `progress`.
+Ni un survol ultérieur ni un second clic ne le déplacent. Vérifié dans un
+navigateur sur la carte de Saint-Cyr.
+
 **Le clic se consomme explicitement.** Vérifié le 15/09/2026 dans
 `streamlit-folium` 0.27.2 : `last_clicked` est alimenté par l'événement `click` de
 Leaflet, et **persiste** d'une exécution du script à la suivante tant que le
