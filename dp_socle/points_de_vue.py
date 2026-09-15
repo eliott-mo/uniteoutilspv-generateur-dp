@@ -87,6 +87,49 @@ ORIGINE_EXIF = "exif"
 ORIGINE_CARTE = "carte"
 ORIGINE_MAIN = "main"
 
+#: Demi-côté long du film 35 mm, en millimètres : 36 / 2. C'est la référence de
+#: `FocalLengthIn35mmFilm`, et donc du champ de vue qu'on en déduit.
+_DEMI_COTE_LONG_MM = 18.0
+
+
+def demi_angle_vue_deg(
+    focale_35mm: float | None, largeur_px: int | None, hauteur_px: int | None
+) -> float | None:
+    """Demi-champ horizontal d'une photo, en degrés, ou `None` s'il est inconnu.
+
+    C'est l'ouverture du cône de visée porté par le plan de repérage. Elle se
+    calcule sur le **côté long** de l'image, tenu pour les 36 mm du film 35 mm,
+    l'autre côté s'en déduisant par le rapport d'image.
+
+    PIÈGE — LE ROGNAGE (D6), mesuré le 15/09/2026 sur les photos de validation
+    -------------------------------------------------------------------------
+    GPS Map Camera peut rendre une photo en 9:16 quand le capteur sort du 3:4 :
+    `20260618_083511660_iOS.jpg` fait 2247 x 4032, soit un rapport de 0,557. La
+    règle courante « le côté court vaut 24 mm » y donnerait un champ trop large
+    d'un cinquième, puisque c'est justement ce côté-là qui a été rogné. Calculer
+    sur le côté long, qui n'est jamais celui que ces rognages retirent, traite
+    le cas sans avoir à le détecter.
+
+    L'incertitude qui reste — la convention exacte de `FocalLengthIn35mmFilm`
+    varie d'un fabricant à l'autre, largeur ou diagonale — est de l'ordre de
+    10 %. C'est petit devant les 10 à 20° d'erreur d'une boussole de téléphone,
+    et le cône est un repère de lecture, pas une mesure.
+
+    Toutes les photos ne portent pas la focale : `20231004_172552.jpg` n'en a
+    aucune. On ne l'invente pas, et la planche porte alors l'axe de visée seul.
+    """
+    if not focale_35mm or focale_35mm <= 0:
+        return None
+    if not largeur_px or not hauteur_px or largeur_px <= 0 or hauteur_px <= 0:
+        return None
+    from math import atan, degrees
+
+    if largeur_px >= hauteur_px:
+        demi_mm = _DEMI_COTE_LONG_MM
+    else:
+        demi_mm = _DEMI_COTE_LONG_MM * largeur_px / hauteur_px
+    return degrees(atan(demi_mm / float(focale_35mm)))
+
 
 # ---------------------------------------------------------------------------
 # Le point de vue, et ce qui le décrit
@@ -113,6 +156,9 @@ class PointDeVue:
     origine_cap: str | None = None
     cap_confirme: bool = False
     precision_m: float | None = None
+    #: Demi-champ horizontal de la photo, en degrés, ou `None` s'il est inconnu.
+    #: Voir `demi_angle_vue_deg` : il ne s'invente pas.
+    demi_angle_deg: float | None = None
     #: Rang du point sur la carte du rapport, quand il en vient. Sert à parler la
     #: même langue que le chef de projet, qui a ce numéro sous les yeux — jamais
     #: à numéroter la pièce, qui repart de 1 par pièce.
@@ -126,9 +172,26 @@ class PointDeVue:
         return Point(self.x, self.y)
 
     @property
-    def dessine_un_cone(self) -> bool:
-        """Vrai si la planche doit porter un cône de visée pour ce point."""
+    def dessine_une_visee(self) -> bool:
+        """Vrai si la planche doit montrer ce que ce point regarde.
+
+        Direction connue **et** confirmée : c'est la seule condition. Sans elle,
+        le repère est posé seul, ce qui est le cas normal d'une vue de drone.
+        """
         return self.cap_deg is not None and self.cap_confirme
+
+    @property
+    def dessine_un_cone(self) -> bool:
+        """Vrai si cette visée peut s'ouvrir en cône, et pas seulement en axe.
+
+        Il y faut le champ de vue, que toutes les photos ne portent pas — un
+        photomontage n'a aucun EXIF, et une photo sur cinq du jeu de validation
+        n'annonce pas sa focale. On ne l'invente pas : la planche porte alors
+        l'axe de visée seul, ce qui dit la direction sans prétendre à une
+        ouverture. Lecture de D6, qui interdit d'inventer un champ de vue et non
+        de montrer une direction vérifiée.
+        """
+        return self.dessine_une_visee and self.demi_angle_deg is not None
 
     @property
     def cap_trigonometrique_deg(self) -> float | None:
@@ -166,7 +229,16 @@ class MetadonneesPhoto:
     cap_deg: float | None = None
     precision_m: float | None = None
     date: datetime | None = None
+    #: Équivalent 35 mm de la focale (`FocalLengthIn35mmFilm`), et dimensions de
+    #: l'image : ensemble, ils donnent le champ de vue. Voir `demi_angle_vue_deg`.
+    focale_35mm: float | None = None
+    largeur_px: int | None = None
+    hauteur_px: int | None = None
     avertissements: tuple[str, ...] = ()
+
+    @property
+    def demi_angle_deg(self) -> float | None:
+        return demi_angle_vue_deg(self.focale_35mm, self.largeur_px, self.hauteur_px)
 
     @property
     def geolocalisee(self) -> bool:
@@ -203,11 +275,16 @@ def depuis_exif(metadonnees: MetadonneesPhoto) -> PointDeVue:
         origine_cap=ORIGINE_EXIF if metadonnees.cap_deg is not None else None,
         cap_confirme=False,
         precision_m=metadonnees.precision_m,
+        demi_angle_deg=metadonnees.demi_angle_deg,
     )
 
 
 def place_a_la_main(
-    nom: str, x: float, y: float, cap_deg: float | None = None
+    nom: str,
+    x: float,
+    y: float,
+    cap_deg: float | None = None,
+    demi_angle_deg: float | None = None,
 ) -> PointDeVue:
     """Point de vue posé sur la carte de l'application, et visé s'il y a lieu.
 
@@ -223,6 +300,7 @@ def place_a_la_main(
         origine_position=ORIGINE_MAIN,
         origine_cap=None if cap_deg is None else ORIGINE_MAIN,
         cap_confirme=cap_deg is not None,
+        demi_angle_deg=demi_angle_deg,
     )
 
 
