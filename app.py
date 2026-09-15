@@ -747,6 +747,45 @@ if not commune.strip() and (fichier_dxf is not None or fichier_tableau is not No
         icon="🚫",
     )
 
+# Ce qui bloque se dit ici, et non trois écrans plus bas. Un tableau bilan déposé
+# sans le DXF ne faisait apparaître ni la liste des indices, ni le bouton
+# d'import, ni la carte : la section restait vide et la page enchaînait sur
+# « Validez l'import ci-dessus pour continuer », qui désigne un import qui
+# n'existe pas et un écran où il n'y a rien à cliquer. Relevé le 15/09/2026 par
+# le chef de projet, qui s'est trouvé sans rien à valider ni rien pour le dire.
+_requis_manquants = [
+    libelle
+    for libelle, fichier in (
+        ("le **plan BE (DXF)**", fichier_dxf),
+        ("le **tableau bilan (.xlsx)**", fichier_tableau),
+    )
+    if fichier is None
+]
+if (
+    commune.strip()
+    and _requis_manquants
+    # Seulement une fois qu'un premier fichier est là : réclamer les deux à
+    # l'ouverture de la section, alors que la liste des prérequis est encore à
+    # l'écran, serait du bruit.
+    and any(
+        depose is not None
+        for depose in (
+            fichier_dxf,
+            fichier_tableau,
+            fichier_pdf_be,
+            fichier_altimetrie,
+        )
+    )
+):
+    st.warning(
+        f"Il manque {' et '.join(_requis_manquants)} : le bouton "
+        "« Importer et contrôler » n'apparaît qu'une fois les deux déposés. Ils "
+        "sont obligatoires tous les deux et doivent porter le même indice — "
+        "c'est leur recoupement qui engage les surfaces et les puissances "
+        "déclarées.",
+        icon="⚠️",
+    )
+
 if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf, commune)
     chemin_tableau = _deposer(fichier_tableau, commune)

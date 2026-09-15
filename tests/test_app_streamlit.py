@@ -268,6 +268,41 @@ def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
     assert ".prj" in annonce, "le fichier qui manque le plus souvent"
 
 
+@pytest.mark.skipif(not TABLEAU.exists(), reason="jeu de référence absent")
+def test_le_tableau_sans_le_dxf_dit_ce_qui_manque(tmp_path, monkeypatch):
+    """La section vide disait « validez l'import » et ne montrait rien à valider.
+
+    Relevé le 15/09/2026 : tableau bilan et PDF déposés, DXF oublié. Tout le bloc
+    d'import vit derrière « commune et DXF et tableau » — ni liste des indices, ni
+    bouton, ni carte. L'écran enchaînait sur « Validez l'import ci-dessus pour
+    continuer », qui désigne un import qui n'existe pas, et le chef de projet
+    cherchait un bouton absent au lieu de déposer son plan.
+    """
+    application = _projet_cadre(tmp_path, monkeypatch)
+    _televerser(
+        application, "Tableau bilan", (TABLEAU.name, TABLEAU.read_bytes(), MIME_XLSX)
+    )
+    application = application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert not _bouton_present(application, "Importer et contrôler")
+    manques = [avertissement.value for avertissement in application.warning]
+    assert any("plan BE (DXF)" in manque for manque in manques), manques
+    # Et il ne réclame que ce qui manque vraiment : le tableau est là.
+    assert not any("tableau bilan" in manque.lower() for manque in manques), manques
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_section_du_plan_ne_reclame_rien_avant_le_premier_depot(
+    tmp_path, monkeypatch
+):
+    """Réclamer les deux fichiers à l'ouverture, sous la liste des prérequis, est du bruit."""
+    application = _projet_cadre(tmp_path, monkeypatch)
+
+    manques = [avertissement.value for avertissement in application.warning]
+    assert not any("Importer et contrôler" in manque for manque in manques), manques
+
+
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_le_depot_du_plan_ne_leve_pas(tmp_path, monkeypatch):
     """Déposer le DXF et le tableau bilan ne lève plus de `NameError`.
