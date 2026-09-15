@@ -34,3 +34,11 @@ folium==0.20.0
 streamlit-folium==0.27.2
 # Tracé du profil altimétrique de la coupe.
 matplotlib==3.10.9
+# Lecture des photos HEIC (lot 6). C'est le format par défaut des iPhone, et un
+# chef de projet qui dépose une photo de visite dépose un HEIC sans le savoir.
+# Roue autonome de 5,6 Mo, disponible pour cp312 à cp314 : elle embarque libheif
+# et n'ajoute rien à `packages.txt`, contrairement à tesseract. Sa seule
+# dépendance est Pillow, déjà là. Enregistrement du décodeur dans
+# `dp_socle/lecture_exif.py` ; mesuré le 15/09/2026, il ajoute cinq extensions
+# et ne touche à aucun format existant.
+pillow-heif==1.7.0

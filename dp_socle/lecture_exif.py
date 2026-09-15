@@ -12,14 +12,22 @@ part à l'instruction, où une direction manquante et une direction perdue ne se
 distinguent plus. Chaque champ illisible laisse donc ici une phrase dans
 `avertissements`.
 
-ÉCART 2 — PAS DE HEIC
----------------------
-L'original enregistre le décodeur `pillow-heif` avant tout `Image.open` et lit
-donc les photos d'iPhone telles quelles. Cette dépendance n'est pas dans ce
-dépôt, et un HEIC déposé ici lèverait une erreur Pillow qui ne dirait pas la
-vraie cause. Le format est donc reconnu à l'extension et refusé avec ce qu'il
-faut faire — le chemin normal d'une photo d'iPhone passant de toute façon par
-`photos-geoloc`, qui la convertit en JPEG.
+ÉCART 2 — LE HEIC SE DIT, IL NE SE DEVINE PAS
+---------------------------------------------
+Comme l'original, ce module enregistre le décodeur `pillow-heif` avant tout
+`Image.open` : le HEIC est le format par défaut des iPhone, et un chef de projet
+qui dépose une photo de visite en dépose un sans le savoir.
+
+Mais l'original avale l'échec d'import dans un `except Exception` et laisse
+l'application tourner sans le dire à l'utilisateur. Ici l'indisponibilité est un
+**état d'environnement**, sur le patron de `environnement.etat_cairo()` : elle
+s'annonce au démarrage, et un HEIC déposé lève un message qui désigne la vraie
+cause. Sans cela, Pillow dirait seulement qu'il ne reconnaît pas le fichier —
+exactement le diagnostic qui a fait accuser la police alors que cairo manquait.
+
+Le piège est réel et mesuré le 15/09/2026 : `pillow-heif` était installé sur le
+poste de développement sans figurer dans `requirements.txt`. Un HEIC s'y lisait
+donc, et aurait été refusé en production sans que rien ne l'explique.
 
 Le cap `GPSImgDirection` n'est pas écrit par GPS Map Camera : il ne se lit que si
 le chef de projet a utilisé une autre application (iPhone, Open Camera,
@@ -28,6 +36,7 @@ Solocator). Son absence est le cas courant, pas une anomalie.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -46,8 +55,55 @@ _GPS_PRECISION = 31  # GPSHPositioningError : incertitude horizontale, en mètre
 _DATE_ORIGINALE = 36867  # DateTimeOriginal, préféré à DateTime (306)
 _DATE_FICHIER = 306
 
-#: Extensions que Pillow ne sait pas ouvrir sans `pillow-heif`, absent d'ici.
-EXTENSIONS_HEIC = (".heic", ".heif")
+#: Extensions que Pillow ne sait ouvrir qu'avec `pillow-heif` enregistré.
+EXTENSIONS_HEIC = (".heic", ".heif", ".heics", ".heifs", ".hif")
+
+
+@dataclass(frozen=True)
+class EtatHeic:
+    """Disponibilité du décodeur HEIC, à annoncer au démarrage."""
+
+    disponible: bool
+    message: str
+
+
+def _enregistrer_heic() -> EtatHeic:
+    """Enregistre le décodeur HEIC auprès de Pillow, une fois, à l'import.
+
+    Mesuré le 15/09/2026 : l'enregistrement ajoute les cinq extensions HEIF et ne
+    retire ni ne remplace aucun format existant — un JPEG et un PNG restent lus
+    par leur décodeur habituel.
+    """
+    try:
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+    except ImportError as erreur:
+        return EtatHeic(
+            False,
+            "Le module « pillow-heif » n'est pas installé : les photos HEIC "
+            "(format par défaut des iPhone) ne pourront pas être lues. Installez "
+            f"les dépendances de requirements.txt. ({erreur})",
+        )
+    except OSError as erreur:
+        # La roue embarque libheif : un échec ici est un binaire inutilisable,
+        # pas une absence. Le distinguer évite de renvoyer vers une installation
+        # qui a déjà eu lieu.
+        return EtatHeic(
+            False,
+            "Le module « pillow-heif » est installé mais son décodeur ne "
+            f"s'initialise pas ({erreur}). Réinstallez-le : « pip install "
+            "--force-reinstall pillow-heif ».",
+        )
+    return EtatHeic(True, "Photos HEIC (iPhone) lisibles.")
+
+
+ETAT_HEIC = _enregistrer_heic()
+
+
+def etat_heic() -> EtatHeic:
+    """L'état du décodeur HEIC, pour l'annoncer au démarrage de l'application."""
+    return ETAT_HEIC
 
 
 def _dms_vers_degres(dms, reference: str) -> float:
@@ -74,11 +130,12 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
     nom = nom or chemin.name
     avertissements: list[str] = []
 
-    if chemin.suffix.lower() in EXTENSIONS_HEIC:
+    if chemin.suffix.lower() in EXTENSIONS_HEIC and not ETAT_HEIC.disponible:
+        # Sans cette vérification, Pillow dirait seulement qu'il ne reconnaît pas
+        # le fichier, et le chef de projet croirait sa photo abîmée.
         raise ErreurPhotoIllisible(
-            f"« {nom} » est au format HEIC, que cet outil ne sait pas ouvrir. "
-            "Passez la photo par le rapport photos-geoloc, qui la convertit, ou "
-            "exportez-la en JPEG depuis le téléphone."
+            f"« {nom} » est au format HEIC, que cette installation ne sait pas "
+            f"ouvrir. {ETAT_HEIC.message}"
         )
 
     try:

@@ -399,12 +399,42 @@ def test_un_cap_magnetique_est_repris_tel_quel_mais_annonce(tmp_path):
     assert any("magnétique" in message for message in metadonnees.avertissements)
 
 
-def test_le_heic_est_refuse_en_disant_quoi_faire(tmp_path):
-    """Sans `pillow-heif`, une erreur Pillow n'aurait pas désigné la vraie cause."""
+def test_un_heic_d_iphone_se_lit_comme_les_autres(tmp_path):
+    """C'est le format par défaut des iPhone : un CDP en dépose sans le savoir."""
+    assert lecture_exif.etat_heic().disponible, lecture_exif.etat_heic().message
+    chemin = tmp_path / "IMG_0420.HEIC"
+    image = Image.new("RGB", (16, 16), "white")
+    exif = image.getexif()
+    exif.get_ifd(0x8825).update(_gps(48.5, 6.5, cap=340.0))
+    image.save(chemin, "HEIF", exif=exif)
+
+    metadonnees = lecture_exif.lire_metadonnees(chemin)
+    assert metadonnees.lat == pytest.approx(48.5, abs=1e-4)
+    assert metadonnees.cap_deg == pytest.approx(340.0)
+    assert metadonnees.avertissements == ()
+
+
+def test_sans_decodeur_heic_le_message_designe_la_vraie_cause(monkeypatch, tmp_path):
+    """Pillow dirait seulement qu'il ne reconnaît pas le fichier.
+
+    C'est le diagnostic qui a fait accuser la police alors que cairo manquait :
+    ce qui bloque doit se nommer, et se nommer au démarrage.
+    """
+    monkeypatch.setattr(
+        lecture_exif, "ETAT_HEIC", lecture_exif.EtatHeic(False, "Module absent.")
+    )
     chemin = tmp_path / "IMG_0001.HEIC"
-    chemin.write_bytes(b"pas vraiment un heic")
-    with pytest.raises(ErreurPhotoIllisible, match="photos-geoloc"):
+    chemin.write_bytes(b"peu importe le contenu")
+    with pytest.raises(ErreurPhotoIllisible, match="Module absent"):
         lecture_exif.lire_metadonnees(chemin)
+
+
+def test_l_enregistrement_heic_ne_touche_a_aucun_format_existant(tmp_path):
+    """Le décodeur s'ajoute, il ne remplace rien — JPEG et PNG restent intacts."""
+    extensions = Image.registered_extensions()
+    for attendu in (".heic", ".heif"):
+        assert attendu in extensions
+    assert extensions[".jpg"] == "JPEG" and extensions[".png"] == "PNG"
 
 
 def test_un_fichier_qui_n_est_pas_une_image_le_dit(tmp_path):
