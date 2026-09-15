@@ -58,9 +58,9 @@ def _gps(lat=48.0, lon=6.0, cap=None, precision=None, reference_cap="T") -> dict
 def _carte(points: list[dict], *, version: int = 5, offset: float = 0.0, emprise=None):
     """Une carte photos-geoloc minimale, en octets, comme un fichier déposé.
 
-    Leaflet est représenté par un remplissage avant le bloc de données : le
-    module doit chercher son marqueur par la fin, et le test le vérifie en
-    plaçant un leurre du même nom dans ce remplissage.
+    Le remplissage avant le bloc tient la place de Leaflet inliné, qui occupe la
+    première moitié d'une carte réelle. Les tests de découpage y insèrent leurs
+    leurres, avant ou après le bloc.
     """
     import json
 
@@ -163,13 +163,45 @@ def test_un_cap_exif_ne_suffit_pas_a_dessiner_un_cone():
     assert not vue.dessine_un_cone
 
 
-def test_un_cap_venu_de_la_carte_est_confirme_d_office():
-    """La confirmation a déjà eu lieu, sur fond satellite, dans le rapport."""
-    carte = lire_carte(_carte([_point(cap=340.0)]))
-    vue = depuis_carte(carte.points[0])
+def test_une_direction_corrigee_dans_le_rapport_est_confirmee():
+    """Réglée sur fond satellite : c'est la bonne façon, et elle fait autorité."""
+    point = _point(cap=10.0, cap_manuel=125.0)
+    point["cap"] = 125.0
+    vue = depuis_carte(lire_carte(_carte([point])).points[0])
     assert vue.origine_cap == ORIGINE_CARTE
-    assert vue.cap_confirme
-    assert vue.dessine_un_cone
+    assert vue.cap_confirme and vue.dessine_un_cone
+
+
+def test_une_direction_jamais_touchee_dans_le_rapport_reste_une_proposition():
+    """Écart à D0, imposé par le premier rapport réel.
+
+    « Rapport Photo SARNOIS », 15/09/2026 : 25 points, calibration nulle, aucune
+    direction figée. Le chef de projet avait produit son rapport sans toucher aux
+    caps. Les croire aurait dessiné 25 cônes sortis d'une boussole de téléphone,
+    dont l'un que `photomontage` a mesuré faux de 15°.
+    """
+    carte = lire_carte(_carte([_point(cap=321.6)], offset=0.0))
+    vue = depuis_carte(carte.points[0])
+    assert vue.cap_deg == pytest.approx(321.6)
+    assert not vue.cap_confirme
+    assert not vue.dessine_un_cone
+    assert any("boussole du téléphone" in m for m in carte.avertissements)
+
+
+def test_une_calibration_globale_vaut_confirmation():
+    """Elle se règle en voyant les cônes pointer les bons éléments du paysage.
+
+    Et un téléphone mal calibré décale toutes les directions du même angle : la
+    corriger une fois les regarde toutes.
+    """
+    # Le cache porte la valeur calibrée, comme la carte l'écrit : 10 - 30 = 340.
+    point = _point(cap=10.0)
+    point["cap"] = 340.0
+    carte = lire_carte(_carte([point], offset=-30.0))
+    vue = depuis_carte(carte.points[0])
+    assert vue.cap_deg == pytest.approx(340.0)
+    assert vue.cap_confirme and vue.dessine_un_cone
+    assert carte.avertissements == ()
 
 
 def test_un_point_sans_cap_ne_dessine_pas_de_cone_et_ce_n_est_pas_une_erreur():
@@ -259,12 +291,6 @@ def test_le_numero_est_le_rang_des_visibles_tries_par_ordre():
     ]
 
 
-def test_la_calibration_de_la_boussole_est_appliquee():
-    """L'offset global corrige un téléphone mal calibré, et suit la carte."""
-    carte = lire_carte(_carte([_point(cap=10.0)], offset=-30.0))
-    assert carte.points[0].cap_deg == pytest.approx(340.0)
-
-
 def test_une_direction_figee_a_la_main_ignore_la_calibration():
     point = _point(cap=10.0, cap_manuel=125.0)
     point["cap"] = 125.0
@@ -333,16 +359,32 @@ def test_une_carte_sans_image_elaguable_se_lit_quand_meme_en_le_disant():
     assert any("en entier en mémoire" in message for message in carte.avertissements)
 
 
-def test_le_bloc_se_cherche_par_la_fin():
-    """Le bloc est écrit après Leaflet inliné : un scan avant le traverserait.
+def test_la_mention_du_marqueur_dans_le_script_ne_trompe_pas_la_lecture():
+    """Le marqueur apparaît deux fois : le bloc, et la chaîne qui le réécrit.
 
-    Le leurre placé avant vérifie que c'est bien la dernière occurrence qui est
-    retenue, et pas la première.
+    Mesuré le 15/09/2026 sur un rapport réel de 17,8 Mo : le bloc est à 49 % du
+    fichier, et le script de réenregistrement — qui vient après — porte le
+    marqueur en toutes lettres. Chercher par la fin attrapait donc cette mention.
+    Ce qui distingue les deux est ce qui suit : du JSON, ou une concaténation.
     """
-    document = _carte([_point(nom="vraie.jpg")])
-    leurre = b'<script id="donnees-carte" type="application/json">{"version":5,"points":[]}</script>'
-    carte = lire_carte(document.replace(b"<body>", b"<body>" + leurre, 1))
+    mention = (
+        b"'<script id=\"donnees-carte\" type=\"application/json\">' + json + "
+        b"'</script>'"
+    )
+    document = _carte([_point(nom="vraie.jpg")]).replace(
+        b"</body>", b"<script>" + mention + b"</script></body>", 1
+    )
+    carte = lire_carte(document)
     assert [point.nom for point in carte.points] == ["vraie.jpg"]
+
+
+def test_un_bloc_place_apres_un_leurre_vide_est_quand_meme_trouve():
+    """Le contrôle vaut dans les deux sens : c'est le contenu qui décide."""
+    leurre = b'<script id="donnees-carte" type="application/json">pas du json</script>'
+    document = _carte([_point(nom="vraie.jpg")]).replace(
+        b"<body>", b"<body>" + leurre, 1
+    )
+    assert [point.nom for point in lire_carte(document).points] == ["vraie.jpg"]
 
 
 # ---------------------------------------------------------------------------

@@ -48,10 +48,15 @@ Trois précautions, dans cet ordre :
    chaîne Python a une largeur uniforme dictée par son caractère le plus large :
    un seul emoji dans un commentaire fait stocker tout le base64 sur 4 octets
    par caractère ;
-2. chercher le marqueur par la **fin** (`rfind`) — le bloc est écrit quasiment
-   en fin de document, après Leaflet inliné, qu'un scan avant traverserait pour
-   rien ;
-3. **élaguer les images avant de parser**, par substitution sur les octets.
+2. **élaguer les images avant de parser**, par substitution sur les octets.
+
+Une troisième précaution était prévue et s'est révélée fausse : chercher le
+marqueur par la fin (`rfind`), au motif que le bloc serait écrit quasiment en fin
+de document. Mesuré le 15/09/2026 sur un rapport réel de 17,8 Mo : le bloc est à
+49 % du fichier, et le **script de réenregistrement de la page**, qui vient
+après, porte le marqueur en toutes lettres dans une de ses chaînes. Un `rfind`
+attrape donc cette mention et non le bloc. Le scan que l'optimisation voulait
+éviter coûte 0,76 ms sur ce même fichier — rien qui vaille un piège pareil.
 
 L'élagage est une optimisation, pas une condition de justesse : nous ne gardons
 de toute façon que les métadonnées. S'il ne rend rien — format changé, base64
@@ -108,6 +113,10 @@ class PointDeCarte:
     lat: float
     lon: float
     cap_deg: float | None = None
+    #: Vrai si cette direction a été **touchée** dans le rapport : figée à la
+    #: main, ou reprise par la calibration globale de la boussole. Un cap sorti
+    #: brut de l'EXIF et jamais regardé ne l'est pas. Voir `lire_carte`.
+    cap_confirme: bool = False
     precision_m: float | None = None
     commentaire: str = ""
 
@@ -182,10 +191,18 @@ def lire_carte(document: bytes | str) -> CartePhotos:
 def depuis_carte(point: PointDeCarte) -> PointDeVue:
     """Point de vue issu d'une carte `photos-geoloc`, en Lambert 93.
 
-    Le cap est **confirmé d'office** : la carte ne porte que des directions que
-    le chef de projet a vues sur fond satellite, et corrigées s'il le fallait.
-    Lui redemander cette confirmation serait lui faire refaire, sur un fond moins
-    lisible, un travail déjà fait au bon endroit.
+    Une direction **corrigée dans le rapport** part confirmée : le chef de projet
+    l'a réglée sur fond satellite, ce qui est la bonne façon de le faire, et le
+    lui redemander ici serait lui faire refaire sur un fond moins lisible un
+    travail déjà fait au bon endroit.
+
+    Une direction **jamais touchée**, non. Écart à la décision D0 du brief, qui
+    tenait le dépôt d'un rapport pour une validation de ses directions. Mesuré le
+    15/09/2026 sur « Rapport Photo SARNOIS » : 25 points, calibration nulle,
+    aucune direction figée — le chef de projet avait produit son rapport sans
+    toucher aux caps. Les traiter comme confirmés aurait dessiné 25 cônes issus
+    d'une boussole de téléphone, dont l'un que le dépôt `photomontage` a mesuré
+    faux de 15°. C'est la règle du dépôt qui tranche : le cap ne se croit pas.
 
     Une position replacée à la main dans le rapport vaut une position mesurée :
     le choix est assumé (décision du 10/09/2026), et rien ne la distingue ici.
@@ -198,7 +215,7 @@ def depuis_carte(point: PointDeCarte) -> PointDeVue:
         cap_deg=point.cap_deg,
         origine_position=ORIGINE_CARTE,
         origine_cap=ORIGINE_CARTE if point.cap_deg is not None else None,
-        cap_confirme=point.cap_deg is not None,
+        cap_confirme=point.cap_deg is not None and point.cap_confirme,
         precision_m=point.precision_m,
         ordre_rapport=point.numero,
     )
@@ -229,19 +246,7 @@ def _bloc_de_donnees(document: bytes | str) -> dict:
         if isinstance(document, bytes)
         else (_OUVERTURE, _FERMETURE)
     )
-    debut = document.rfind(ouverture)
-    if debut == -1:
-        raise ErreurCartePhotos(
-            "Ce fichier n'est pas une carte produite par photos-geoloc : son bloc "
-            "de données est introuvable. Déposez le fichier HTML produit par "
-            "l'outil, ou réenregistré depuis la carte."
-        )
-    debut += len(ouverture)
-    fin = document.find(fermeture, debut)
-    if fin == -1:
-        raise ErreurCartePhotos(
-            "Carte abîmée : son bloc de données n'est pas refermé."
-        )
+    debut, fin = _bornes(document, ouverture, fermeture)
 
     try:
         donnees = json.loads(document[debut:fin])
@@ -261,6 +266,40 @@ def _bloc_de_donnees(document: bytes | str) -> dict:
             "Carte abîmée : son bloc de données ne décrit pas une carte."
         )
     return donnees
+
+
+def _bornes(document, ouverture, fermeture) -> tuple[int, int]:
+    """Bornes du premier bloc de données qui en soit vraiment un.
+
+    Le marqueur apparaît deux fois dans une carte : le bloc lui-même, et la
+    chaîne du script qui réécrit la page à l'enregistrement. On retient donc la
+    première occurrence dont le contenu **commence par une accolade** — la
+    mention du script est suivie d'une concaténation, jamais de JSON.
+
+    Ce contrôle rend le découpage insensible à l'ordre des deux, et donc à une
+    réorganisation du gabarit chez le voisin.
+    """
+    accolade = b"{" if isinstance(document, bytes) else "{"
+    depart = 0
+    while True:
+        debut = document.find(ouverture, depart)
+        if debut == -1:
+            break
+        debut += len(ouverture)
+        fin = document.find(fermeture, debut)
+        if fin == -1:
+            raise ErreurCartePhotos(
+                "Carte abîmée : son bloc de données n'est pas refermé."
+            )
+        if document[debut:fin].lstrip()[:1] == accolade:
+            return debut, fin
+        depart = fin
+
+    raise ErreurCartePhotos(
+        "Ce fichier n'est pas une carte produite par photos-geoloc : son bloc de "
+        "données est introuvable. Déposez le fichier HTML produit par l'outil, ou "
+        "réenregistré depuis la carte."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +330,7 @@ def _points(bruts: list, offset: float) -> tuple[tuple[PointDeCarte, ...], int, 
                 "position : il est ignoré."
             )
             continue
+        cap_deg, cap_confirme = _cap_effectif(brut, offset, avertissements)
         points.append(
             PointDeCarte(
                 identifiant=brut.get("id", rang),
@@ -298,30 +338,57 @@ def _points(bruts: list, offset: float) -> tuple[tuple[PointDeCarte, ...], int, 
                 numero=rang,
                 lat=lat,
                 lon=lon,
-                cap_deg=_cap_effectif(brut, offset, avertissements),
+                cap_deg=cap_deg,
+                cap_confirme=cap_confirme,
                 precision_m=_nombre(brut.get("precision_m")),
                 commentaire=str(brut.get("commentaire") or ""),
             )
         )
+
+    bruts_non_regardes = sum(
+        1 for point in points if point.cap_deg is not None and not point.cap_confirme
+    )
+    if bruts_non_regardes:
+        avertissements.append(
+            f"{bruts_non_regardes} direction(s) de ce rapport sortent de la "
+            "boussole du téléphone sans avoir été corrigées : ni calibration "
+            "globale, ni visée point par point. Elles sont reprises comme des "
+            "propositions — visez-les sur la carte pour qu'un cône soit dessiné."
+        )
     return tuple(points), masques, avertissements
 
 
-def _cap_effectif(point: dict, offset: float, avertissements: list) -> float | None:
-    """La règle du cap, jumelle de `capEffectif()` dans la page.
+def _cap_effectif(
+    point: dict, offset: float, avertissements: list
+) -> tuple[float | None, bool]:
+    """La règle du cap, jumelle de `capEffectif()` dans la page, et sa confiance.
 
     Une direction figée à la main l'emporte et ne suit pas la calibration ; sinon
     la direction d'origine reçoit l'offset ; sinon il n'y a pas de cône.
+
+    Le second terme dit si cette direction a été **regardée**. Une direction
+    figée à la main l'a été, une par une ; une calibration globale non nulle l'a
+    été aussi, puisqu'elle se règle en voyant les cônes pointer les bons éléments
+    du paysage, et qu'un téléphone mal calibré décale tout du même angle. Un cap
+    sorti brut de l'EXIF, sur un rapport où rien n'a été touché, ne l'a pas été.
     """
     cache = _nombre(point.get("cap"))
+    calibre = abs(offset) > 1e-9
     if point.get("cap_manuel") is not None:
-        valeur = _nombre(point["cap_manuel"])
-    elif point.get("cap_brut") is None:
+        return _confronter(point, _nombre(point["cap_manuel"]), cache, avertissements), True
+    if point.get("cap_brut") is None:
         # Carte antérieure à la v3 : pas de `cap_brut`, le cache est la seule
         # valeur, et c'est ce que la migration en ferait.
-        return cache
-    else:
-        brut = _nombre(point["cap_brut"])
-        valeur = None if brut is None else (brut + offset) % 360.0
+        return cache, calibre
+    brut = _nombre(point["cap_brut"])
+    valeur = None if brut is None else (brut + offset) % 360.0
+    return _confronter(point, valeur, cache, avertissements), calibre
+
+
+def _confronter(
+    point: dict, valeur: float | None, cache: float | None, avertissements: list
+) -> float | None:
+    """Retient la valeur recalculée, et signale un cache qui ne la suit plus."""
 
     if (
         valeur is not None
