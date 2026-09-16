@@ -24,7 +24,11 @@ preparer_cairo()
 # Le lot 2 (HelioScope) et le lot 2bis (plan BE) ont chacun leur aperçu, avec
 # les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
 # dans leur module, pour ne pas toucher au lot 2.
+from dp_socle.planches.reperage_vues import OUVERTURE_CONE_DEG
+from dp_socle.lecture_exif import etat_heic
+from dp_socle.points_de_vue import ORIGINE_MAIN, cap_vers
 from dp_socle.apercu_be import (
+    en_wgs84_point,
     ORDRE_DESSIN,
     STYLES,
     URL_TUILES_ORTHO,
@@ -123,6 +127,11 @@ def _etat_polices():
     return etat_polices()
 
 
+@st.cache_resource
+def _etat_heic():
+    return etat_heic()
+
+
 # La bibliothèque de rendu se contrôle avant la police : sans cairo, aucune
 # mesure de police n'est possible et le diagnostic typographique n'a plus de
 # sens. Contrôlé ici plutôt qu'au rendu, pour ne pas échouer après le
@@ -130,6 +139,14 @@ def _etat_polices():
 cairo = _etat_cairo()
 if not cairo.disponible:
     st.error(cairo.message, icon="🚫")
+
+# Le HEIC est le format par défaut des iPhone : une photographie de visite en
+# est un sans que le chef de projet le sache. Son absence se dit ici, et non au
+# dépôt — la règle du dépôt veut qu'une erreur d'environnement se signale avant
+# de travailler, et désigne sa vraie cause.
+heic = _etat_heic()
+if not heic.disponible:
+    st.warning(f"Photos HEIC : {heic.message}", icon="⚠️")
 
 etat = _etat_polices()
 if etat.disponible:
@@ -521,9 +538,13 @@ def _calques_caches(chemin: str, taille: int, charte: str):
 #: Les gestes qui se font en cliquant sur la carte : le libellé du bouton qui
 #: arme le geste, et ce que la bannière annonce une fois armé.
 #:
-#: Un seul aujourd'hui. Le lot 6 en ajoutera deux sur la même carte — placer un
-#: point de vue, viser ce qu'il regarde — en reprenant ce mécanisme plutôt que
-#: d'en réécrire un second.
+#: Trois depuis le lot 6, qui a repris le mécanisme plutôt que d'en écrire un
+#: second. Les deux derniers nomment la photographie visée : leur bannière est
+#: un gabarit, complété par `_bandeau_geste`.
+#:
+#: « Placer » et « viser » sont les deux gestes de `photos-geoloc`, au même sens
+#: et dans les mêmes termes — l'un désigne où est la photo, l'autre ce qu'elle
+#: regarde. Le chef de projet les connaît déjà.
 GESTES_CARTE = {
     "translation_coupe": (
         "Déplacer la coupe",
@@ -531,6 +552,15 @@ GESTES_CARTE = {
         "pointillé qui suit votre souris montre où elle se posera — elle reste "
         "perpendiculaire aux rangées, vous choisissez sa position et jamais sa "
         "direction.",
+    ),
+    "placer_vue": (
+        "📍 Placer",
+        "📍 **Cliquez sur la carte** à l'emplacement réel de « {nom} ».",
+    ),
+    "viser_vue": (
+        "🎯 Viser",
+        "🎯 **Cliquez sur la carte** vers ce que regarde « {nom} ». La direction "
+        "s'en déduit, et c'est elle qui fera dessiner le cône.",
     ),
 }
 
@@ -546,6 +576,87 @@ def _desarmer_geste() -> None:
 
 def _geste_arme() -> str | None:
     return st.session_state.get("geste_carte")
+
+
+def _vues_photo() -> dict:
+    """Les prises de vue en cours de saisie, par pièce puis par nom de fichier.
+
+    En session et non dans les widgets : un point placé doit survivre au
+    redéploiement de la page, et le nom du fichier est le seul identifiant qui
+    traverse les exécutions — l'objet déposé, lui, est reconstruit à chaque fois.
+    """
+    return st.session_state.setdefault("vues_photo", {})
+
+
+def _vue_photo(code: str, nom: str) -> dict:
+    return _vues_photo().setdefault(code, {}).setdefault(nom, {})
+
+
+def _cible_du_geste() -> tuple:
+    """(code de pièce, nom de fichier) que le geste armé concerne."""
+    return st.session_state.get("cible_vue") or (None, None)
+
+
+def _armer_sur_photo(geste: str, code: str, nom: str) -> None:
+    st.session_state["cible_vue"] = (code, nom)
+    _armer_geste(geste)
+
+
+def _bandeau_geste(geste: str) -> str:
+    """Le texte de la bannière, complété du nom de la photographie visée."""
+    return GESTES_CARTE[geste][1].format(nom=_cible_du_geste()[1] or "")
+
+
+#: Portée du cône sur la carte de saisie, en mètres. Sur la planche le symbole a
+#: une taille en millimètres ; ici la carte se zoome librement, et une taille
+#: terrain est le seul repère stable.
+RAYON_VISEE_CARTE_M = 60.0
+TEINTE_VISEE = "#d81b8c"
+
+
+def _secteur_de_visee(x: float, y: float, cap_deg: float):
+    """Le cône de visée en Lambert 93, à une taille lisible sur la carte."""
+    from math import cos, radians, sin
+
+    from shapely.geometry import Polygon
+
+    axe = (90.0 - cap_deg) % 360.0
+    demi = OUVERTURE_CONE_DEG / 2.0
+    sommets = [(x, y)]
+    pas = int(OUVERTURE_CONE_DEG)
+    for i in range(pas + 1):
+        angle = radians(axe - demi + OUVERTURE_CONE_DEG * i / pas)
+        sommets.append(
+            (x + RAYON_VISEE_CARTE_M * cos(angle), y + RAYON_VISEE_CARTE_M * sin(angle))
+        )
+    return Polygon(sommets)
+
+
+def _poser_prise_sur_la_carte(carte, code: str, nom: str, vue: dict) -> None:
+    """Marqueur d'une prise de vue placée, et son cône si la direction est sûre.
+
+    Le cône est un secteur de 50°, comme sur la planche et comme sur les
+    marqueurs de `photos-geoloc` : le chef de projet doit reconnaître d'un coup
+    d'œil ce qu'il retrouvera sur le dossier.
+    """
+    from shapely.geometry import Point, Polygon
+
+    lat, lon = en_wgs84_point(vue["x"], vue["y"])
+    cap = vue.get("cap_deg")
+    if cap is not None and vue.get("cap_confirme"):
+        folium.GeoJson(
+            en_wgs84([_secteur_de_visee(vue["x"], vue["y"], cap)]),
+            style_function=lambda _t: {
+                "color": TEINTE_VISEE, "weight": 1, "fillColor": TEINTE_VISEE,
+                "fillOpacity": 0.55,
+            },
+            name=f"{code} — {nom}",
+        ).add_to(carte)
+    folium.CircleMarker(
+        location=(lat, lon), radius=5, color="#1a1a1a", weight=2,
+        fill=True, fillColor="#ffffff", fillOpacity=1.0,
+        tooltip=f"{code} — {nom}",
+    ).add_to(carte)
 
 
 def _repere_clic(clic) -> tuple[float, float] | None:
@@ -947,6 +1058,11 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
 import_be_courant = st.session_state.import_be
 # La commune conditionne tout ce qui suit : les contrôles s'affichent, mais la
 # validation écrit, et sans commune elle n'a pas de dossier où écrire.
+#: Rempli par la section 2 quand la carte existe, lu par la section 3. À `None`,
+#: il n'y a pas de plan du bureau d'études — donc pas de carte, pas d'emprise
+#: clôturée, et pas de pièce photographique qui ait un sens.
+emplacement_prises_de_vue = None
+
 if import_be_courant is not None and commune.strip():
     plan = import_be_courant.plan
     tableau = import_be_courant.tableau
@@ -1076,7 +1192,15 @@ if import_be_courant is not None and commune.strip():
     # en retard sur lui-même : la bannière s'affichait sous un bouton qui
     # proposait encore de déplacer la coupe, sans moyen d'annuler, et l'inverse à
     # l'annulation — la bannière réclamait un clic que plus rien n'attendait.
-    if _geste_arme() == "translation_coupe":
+    if _geste_arme() in ("placer_vue", "viser_vue"):
+        # La bannière des prises de vue s'affiche ici, au-dessus de la carte, et
+        # non près du bouton qui l'a armée : c'est la carte qui attend le clic,
+        # et le bouton vit plus bas, dans la section des pièces fournies.
+        st.info(_bandeau_geste(_geste_arme()), icon="🖱️")
+        if st.button("Annuler", key="annuler_geste_vue"):
+            _desarmer_geste()
+            st.rerun()
+    elif _geste_arme() == "translation_coupe":
         st.info(GESTES_CARTE["translation_coupe"][1], icon="🖱️")
         if st.button("Annuler le déplacement", key="annuler_translation_coupe"):
             _desarmer_geste()
@@ -1173,6 +1297,15 @@ if import_be_courant is not None and commune.strip():
             ).geometrie
         ).add_to(carte)
 
+    # Les prises de vue déjà placées, pour que le chef de projet voie ce qu'il a
+    # posé — et les corrige au besoin. Même symbole que sur la planche : un
+    # repère, et un cône seulement quand la direction est confirmée.
+    for code_piece, par_nom in _vues_photo().items():
+        for nom_photo, vue in par_nom.items():
+            if vue.get("x") is None:
+                continue
+            _poser_prise_sur_la_carte(carte, code_piece, nom_photo, vue)
+
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
     carte.fit_bounds([[sud, ouest], [nord, est]])
     Draw(
@@ -1220,11 +1353,37 @@ if import_be_courant is not None and commune.strip():
         "reprises, les codes ACI y sont des couleurs de travail."
     )
 
+    # Réservé ici, rempli par la section 3 : les photographies se déposent plus
+    # bas, mais c'est sur cette carte qu'elles se placent. Un aller-retour au
+    # lieu d'un par photographie.
+    emplacement_prises_de_vue = st.container()
+
     if _geste_arme() is None:
         # Aucun geste attendu : ce clic-là ne l'était pas non plus. Le retenir
         # l'empêche d'être consommé par le prochain geste armé, ce qui faisait
         # sauter la coupe à un endroit cliqué bien avant, sans nouveau clic.
         _retenir_clic(clic)
+    elif _geste_arme() in ("placer_vue", "viser_vue") and clic is not None:
+        _retenir_clic(clic)
+        code, nom = _cible_du_geste()
+        vue = _vue_photo(code, nom)
+        if _geste_arme() == "placer_vue":
+            vue["x"], vue["y"] = clic.x, clic.y
+            vue["origine_position"] = ORIGINE_MAIN
+        elif vue.get("x") is None:
+            # Viser avant d'avoir placé ne veut rien dire : le cap se mesure
+            # depuis la position de la photographie, pas depuis rien.
+            st.warning(
+                f"« {nom} » n'a pas encore de position : placez-la avant de "
+                "viser ce qu'elle regarde.",
+                icon="⚠️",
+            )
+        else:
+            vue["cap_deg"] = cap_vers(vue["x"], vue["y"], clic.x, clic.y)
+            vue["origine_cap"] = ORIGINE_MAIN
+            vue["cap_confirme"] = True
+        _desarmer_geste()
+        st.rerun()
     elif _geste_arme() == "translation_coupe" and clic is not None:
         _retenir_clic(clic)
         _desarmer_geste()
@@ -1519,6 +1678,104 @@ else:
         "garde et la nomme."
     )
 
+# ---------------------------------------------------------------------------
+# Les prises de vue, saisies sur la carte de la section 2
+# ---------------------------------------------------------------------------
+#
+# Le bloc se remplit ici, où les photographies viennent d'être déposées, mais
+# s'affiche là-haut, sous la carte : c'est elle qui reçoit les clics. Un seul
+# aller-retour, et toutes les prises se placent d'affilée.
+
+
+def _etat_de_la_prise(vue: dict) -> str:
+    """Ce qui manque à une prise de vue, dit en clair."""
+    if vue.get("x") is None:
+        return "à placer"
+    if vue.get("cap_confirme"):
+        return f"placée, visée {vue['cap_deg']:.0f}°"
+    return "placée, sans direction"
+
+
+def _oublier_les_photos_retirees(photos_par_piece: dict) -> None:
+    """Écarte les prises dont la photographie n'est plus déposée.
+
+    Sans cela, une photographie retirée puis regénérée laissait son point de vue
+    en session, et la planche portait un repère pour une image absente.
+    """
+    for code, par_nom in list(_vues_photo().items()):
+        deposes = {f.name for f in photos_par_piece.get(code) or []}
+        for nom in list(par_nom):
+            if nom not in deposes:
+                del par_nom[nom]
+
+
+def _ligne_de_prise(code: str, fichier) -> None:
+    """Une photographie : sa vignette, son état, et ses deux boutons."""
+    vue = _vue_photo(code, fichier.name)
+    vignette, libelle, bouton_placer, bouton_viser = st.columns([1, 3, 1, 1])
+    with vignette:
+        if not fichier.name.lower().endswith(".pdf"):
+            st.image(fichier, width=90)
+    with libelle:
+        st.write(f"{fichier.name}")
+        st.caption(_etat_de_la_prise(vue))
+        if code == "DP 6":
+            # Les volets d'une même vue partagent un point de vue : c'est la
+            # même prise (D3). Le sélecteur dit lesquels vont ensemble, et
+            # l'ordre de dépôt donne l'ordre des volets.
+            vue["vue"] = st.selectbox(
+                "Vue",
+                options=[chr(ord("A") + i) for i in range(4)],
+                index=[chr(ord("A") + i) for i in range(4)].index(
+                    vue.get("vue", "A")
+                ),
+                key=f"vue_de_{code}_{fichier.name}",
+                label_visibility="collapsed",
+            )
+    with bouton_placer:
+        if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}"):
+            _armer_sur_photo("placer_vue", code, fichier.name)
+            st.rerun()
+    with bouton_viser:
+        if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
+                     disabled=vue.get("x") is None):
+            _armer_sur_photo("viser_vue", code, fichier.name)
+            st.rerun()
+
+
+def _saisir_les_prises_de_vue(emplacement, photos_par_piece: dict) -> None:
+    """Liste les photographies déposées, leur état, et les deux gestes."""
+    _oublier_les_photos_retirees(photos_par_piece)
+    if emplacement is None:
+        return
+    with emplacement:
+        st.markdown("### Les prises de vue des pièces photographiques")
+        total = sum(len(f or []) for f in photos_par_piece.values())
+        if not total:
+            st.caption(
+                "Aucune photographie déposée. Déposez-les en section 3, puis "
+                "revenez ici pour placer chaque prise de vue sur la carte."
+            )
+            return
+        st.caption(
+            "**📍 Placer** dit où est la photographie, **🎯 Viser** ce qu'elle "
+            "regarde — les deux gestes de photos-geoloc, au même sens. Une "
+            "direction non visée ne fait dessiner aucun cône : la boussole d'un "
+            "téléphone se trompe de 10 à 20°, et le dossier ne porte que ce qui "
+            "a été vérifié."
+        )
+        for code in PIECES_PHOTOS:
+            fichiers = photos_par_piece.get(code) or []
+            if not fichiers:
+                continue
+            st.markdown(f"**{code}** — {piece(code).titre}")
+            for fichier in fichiers:
+                _ligne_de_prise(code, fichier)
+
+
+_saisir_les_prises_de_vue(emplacement_prises_de_vue, photos)
+
+
 #: Les pièces où deux fichiers portent le même nom, avec les noms en cause.
 #:
 #: Ils s'écrasent sur le disque — la cible est nommée par le nom du fichier — et
@@ -1605,6 +1862,58 @@ if _voiries:
 
 
 
+def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
+    """Les prises de vue au format de `projet.json`, prêtes à être écrites.
+
+    Les chemins sont ceux où `_enregistrer_photos` vient d'écrire les fichiers :
+    le dossier du projet, une pièce par sous-dossier. Une photographie sans point
+    de vue placé n'entre pas — la pièce le dira au rapport de génération plutôt
+    que de porter un repère posé nulle part.
+
+    Pour DP 6, les volets d'une même vue sont regroupés : ils partagent le point
+    de vue de leur première image, puisque c'est la même prise.
+    """
+    from dp_socle.points_de_vue import PriseDeVue, place_a_la_main, prise_en_json
+
+    photographies = {}
+    for code in PIECES_PHOTOS:
+        fichiers = [
+            f for f in (photos_par_piece.get(code) or [])
+            if not f.name.lower().endswith(".pdf")
+        ]
+        if not fichiers:
+            continue
+        dossier = DOSSIER_PROJETS / nom_projet / code.replace(" ", "_")
+        groupes = {}
+        for fichier in fichiers:
+            vue = _vue_photo(code, fichier.name)
+            if vue.get("x") is None:
+                continue
+            cle = vue.get("vue", "A") if code == "DP 6" else fichier.name
+            groupes.setdefault(cle, []).append((fichier, vue))
+
+        prises = []
+        for _, membres in sorted(groupes.items()):
+            premier = membres[0][1]
+            prises.append(
+                prise_en_json(
+                    PriseDeVue(
+                        point_de_vue=place_a_la_main(
+                            membres[0][0].name, premier["x"], premier["y"],
+                            premier.get("cap_deg")
+                            if premier.get("cap_confirme") else None,
+                        ),
+                        images=tuple(
+                            str(dossier / Path(f.name).name) for f, _ in membres
+                        ),
+                    )
+                )
+            )
+        if prises:
+            photographies[code] = prises
+    return photographies
+
+
 def _construire_projet() -> Projet | None:
     if not commune.strip():
         st.error("La commune est obligatoire : c'est elle qui nomme le projet.")
@@ -1630,6 +1939,7 @@ def _construire_projet() -> Projet | None:
         return None
 
     chemin_image = _enregistrer_photos(nom, photos, image_garde)
+    photographies = _photographies_du_projet(nom, photos)
     chemin_notice = _enregistrer_notice(nom, fichier_notice)
 
     return Projet(
@@ -1642,6 +1952,7 @@ def _construire_projet() -> Projet | None:
         libelle=libelle or None,
         voirie=voirie,
         notice=chemin_notice,
+        photographies=photographies or None,
     )
 
 

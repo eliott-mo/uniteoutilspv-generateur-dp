@@ -459,6 +459,18 @@ def en_wgs84(geometries: list[BaseGeometry]) -> dict:
     return {"type": "FeatureCollection", "features": traits}
 
 
+def en_wgs84_point(x: float, y: float) -> tuple[float, float]:
+    """Un point Lambert 93 en (latitude, longitude), pour un marqueur folium.
+
+    Folium attend l'ordre (lat, lon), l'inverse de celui des transformateurs :
+    l'intervertir place le marqueur au milieu de l'océan Indien, ce qui se
+    remarque, ou à quelques kilomètres, ce qui ne se remarque pas.
+    """
+    vers_wgs84, _ = _transformateurs()
+    lon, lat = vers_wgs84.transform(x, y)
+    return lat, lon
+
+
 def bornes_wgs84(geometrie: BaseGeometry) -> tuple[float, float, float, float]:
     """(sud, ouest, nord, est) en degrés, pour cadrer la carte."""
     vers_wgs84, _ = _transformateurs()
