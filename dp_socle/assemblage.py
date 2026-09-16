@@ -16,6 +16,7 @@ from pypdf import PdfReader, PdfWriter
 from .contrat import Contrat, charger_contrat
 from .erreurs import ErreurContrat, ErreurDP, ErreurRendu
 from .dossier import codes_produits, numero_planche
+from .planches.primitives import union_valide
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
 from .planches import (
@@ -25,6 +26,9 @@ from .planches import (
     dp2_plan_masse,
     dp3_coupes,
     dp4_ouvrages,
+    dp6_insertions,
+    dp7_environnement_proche,
+    dp8_paysage_lointain,
     dp11_notice,
     page_garde,
 )
@@ -137,6 +141,16 @@ def generer_dossier(
         if contrat is not None:
             sorties.extend(
                 _planches_lot4(projet, contrat, emprise, dossier, avertissements)
+            )
+            # Les pièces photographiques suivent les DP 4, dans l'ordre du
+            # dossier. Elles vivent dans ce bloc parce qu'elles n'ont pas de sens
+            # sans plan du bureau d'études : sans lui il n'y a pas d'emprise
+            # clôturée à repérer, et pas de dossier non plus.
+            sorties.extend(
+                _planches_photographies(
+                    projet, contrat, dossier, avertissements,
+                    rang_depart=len(sorties) + 2,
+                )
             )
         # La notice ferme le dossier : c'est la dernière pièce, et la seule qui
         # puisse couvrir plusieurs pages. Aucune pièce ne la suit, donc aucune
@@ -334,6 +348,84 @@ def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements):
         avertissements.extend(sortie.details.get("avertissements", []))
         rang += 1
     return sorties
+
+
+#: Les pièces photographiques, dans l'ordre du dossier, et ce qui les produit.
+#:
+#: DP 6 rend **une planche par prise de vue** — un point de vue, ses deux ou
+#: trois volets — là où DP 7 et DP 8 rassemblent leurs prises sur une planche
+#: unique. C'est la seule différence entre les trois, et elle tient dans ce
+#: tableau.
+_PIECES_PHOTO = (
+    ("DP 6", dp6_insertions, True),
+    ("DP 7", dp7_environnement_proche, False),
+    ("DP 8", dp8_paysage_lointain, False),
+)
+
+
+def _planches_photographies(projet, contrat, dossier, avertissements, rang_depart):
+    """DP 6, DP 7 et DP 8, pour les prises de vue enregistrées au projet.
+
+    Une pièce sans prise de vue n'est pas produite, et le rapport le dit : c'est
+    une pièce du dossier déposable, et son absence doit se voir avant
+    l'instruction, pas pendant.
+    """
+    emprise_cloturee = union_valide(contrat.geometries("cloture"))
+    if emprise_cloturee is None or emprise_cloturee.is_empty:
+        avertissements.append(
+            "Aucune clôture au contrat : les plans de repérage des pièces "
+            "photographiques n'ont pas d'emprise à montrer, et DP 6, DP 7 et "
+            "DP 8 ne sont pas produites."
+        )
+        return []
+
+    sorties = []
+    rang = rang_depart
+    for code, module, une_planche_par_prise in _PIECES_PHOTO:
+        prises = projet.prises_de(code)
+        if not prises:
+            avertissements.append(
+                f"{code} n'est pas produite : aucune prise de vue enregistrée. "
+                "Déposez les photographies et placez leur point de vue — la "
+                "pièce est attendue de tout dossier déposable."
+            )
+            continue
+        lots = (
+            [([prise], rang_prise) for rang_prise, prise in enumerate(prises, 1)]
+            if une_planche_par_prise
+            else [(prises, 1)]
+        )
+        for lot, rang_prise in lots:
+            try:
+                sortie = _generer_piece_photo(
+                    module, projet, lot, emprise_cloturee, dossier, code,
+                    rang_prise, str(rang),
+                )
+            except ErreurDP as exc:
+                avertissements.append(f"{code} n'est pas produite : {exc}")
+                continue
+            sorties.append(sortie)
+            avertissements.extend(sortie.details.get("avertissements", []))
+            rang += 1
+    return sorties
+
+
+def _generer_piece_photo(module, projet, prises, emprise, dossier, code,
+                         rang_prise, numero):
+    """Appelle la pièce avec la forme d'arguments qu'elle attend."""
+    if code == "DP 6":
+        prise = prises[0]
+        return module.generer(
+            projet, prise.point_de_vue, prise.images, emprise, dossier,
+            rang=rang_prise, numero=numero,
+            cadrages=[prise.cadrage_de(i) for i in range(len(prise.images))],
+        )
+    return module.generer(
+        projet,
+        [(prise.point_de_vue, prise.images[0]) for prise in prises],
+        emprise, dossier, numero=numero,
+        cadrages=[prise.cadrage_de(0) for prise in prises],
+    )
 
 
 def _nb_pages(chemin: Path) -> int:

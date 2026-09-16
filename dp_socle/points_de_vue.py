@@ -59,7 +59,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from dp_socle.erreurs import ErreurPhotoIllisible
+from dp_socle.erreurs import ErreurPhotoIllisible, ErreurPointDeVue
 
 #: Version du format de carte `photos-geoloc` que ce module sait lire.
 #:
@@ -270,3 +270,107 @@ def vers_l93(lat: float, lon: float) -> tuple[float, float]:
 
     transformateur = Transformer.from_crs(4326, 2154, always_xy=True)
     return transformateur.transform(float(lon), float(lat))
+
+
+# ---------------------------------------------------------------------------
+# Ce qui survit à un rechargement de page
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PriseDeVue:
+    """Un point de vue et les images qu'il donne, pour une pièce du dossier.
+
+    Une prise de DP 7 ou DP 8 porte une photographie ; une prise de DP 6 en
+    porte deux ou trois — les volets d'une même vue, qui partagent forcément le
+    même point de vue puisque c'est la même prise (D3 du brief : un photomontage
+    est un rendu, sa position est celle de la photographie d'origine).
+    """
+
+    point_de_vue: PointDeVue
+    images: tuple[str, ...]
+    #: Décalage de rognage de chaque image, dans l'ordre. Voir
+    #: `planches.photographies.ImagePlanche.cadrage`.
+    cadrages: tuple[tuple[float, float], ...] = ()
+
+    def cadrage_de(self, rang: int) -> tuple[float, float]:
+        """Le cadrage de l'image de ce rang, centré par défaut."""
+        if rang < len(self.cadrages):
+            return tuple(self.cadrages[rang])
+        return (0.0, 0.0)
+
+
+def point_de_vue_en_json(vue: PointDeVue) -> dict:
+    """Le point de vue tel qu'il s'écrit dans `projet.json`.
+
+    Les champs déduits ne sont pas écrits : `dessine_un_cone` se recalcule, et
+    l'écrire permettrait à un fichier retouché de faire dessiner un cône que la
+    règle refuse. Le fichier ne porte que ce qui a été décidé.
+    """
+    return {
+        "nom": vue.nom,
+        "x": vue.x,
+        "y": vue.y,
+        "cap_deg": vue.cap_deg,
+        "origine_position": vue.origine_position,
+        "origine_cap": vue.origine_cap,
+        "cap_confirme": vue.cap_confirme,
+        "precision_m": vue.precision_m,
+        "ordre_rapport": vue.ordre_rapport,
+    }
+
+
+def point_de_vue_depuis_json(donnees: dict) -> PointDeVue:
+    """Relit un point de vue écrit par `point_de_vue_en_json`.
+
+    Les champs absents prennent leur valeur par défaut, sauf la position, sans
+    laquelle il n'y a pas de point de vue du tout.
+    """
+    for champ in ("x", "y"):
+        if donnees.get(champ) is None:
+            raise ErreurPointDeVue(
+                f"Point de vue sans « {champ} » dans projet.json : une prise de "
+                "vue sans position ne se reporte sur aucun plan."
+            )
+    return PointDeVue(
+        nom=str(donnees.get("nom") or "prise de vue"),
+        x=float(donnees["x"]),
+        y=float(donnees["y"]),
+        cap_deg=None if donnees.get("cap_deg") is None else float(donnees["cap_deg"]),
+        origine_position=str(donnees.get("origine_position") or ORIGINE_MAIN),
+        origine_cap=donnees.get("origine_cap"),
+        cap_confirme=bool(donnees.get("cap_confirme", False)),
+        precision_m=(
+            None if donnees.get("precision_m") is None
+            else float(donnees["precision_m"])
+        ),
+        ordre_rapport=(
+            None if donnees.get("ordre_rapport") is None
+            else int(donnees["ordre_rapport"])
+        ),
+    )
+
+
+def prise_en_json(prise: PriseDeVue) -> dict:
+    return {
+        "point_de_vue": point_de_vue_en_json(prise.point_de_vue),
+        "images": list(prise.images),
+        "cadrages": [list(cadrage) for cadrage in prise.cadrages],
+    }
+
+
+def prise_depuis_json(donnees: dict) -> PriseDeVue:
+    images = donnees.get("images") or []
+    if not images:
+        raise ErreurPointDeVue(
+            "Prise de vue sans image dans projet.json : il n'y a rien à poser "
+            "sur la planche."
+        )
+    return PriseDeVue(
+        point_de_vue=point_de_vue_depuis_json(donnees.get("point_de_vue") or {}),
+        images=tuple(str(image) for image in images),
+        cadrages=tuple(
+            (float(cadrage[0]), float(cadrage[1]))
+            for cadrage in donnees.get("cadrages") or []
+        ),
+    )

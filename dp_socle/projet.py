@@ -114,6 +114,18 @@ class Projet:
     #: la latitude déduite du fichier. Stockée en écart plutôt qu'en latitude
     #: corrigée : la valeur du fichier reste lisible et la retouche se voit.
     correction_nord_sud_m: float | None = None
+    #: Prises de vue des pièces photographiques (lot 6), par code de pièce :
+    #: `{"DP 6": [prise, ...], "DP 7": [...], "DP 8": [...]}`.
+    #:
+    #: Elles vivent ici plutôt que dans le contrat d'entrée du lot 4, qui décrit
+    #: le plan du bureau d'études et rien d'autre. C'est ce qui les fait survivre
+    #: à un rechargement de page : placer un point de vue est un geste qu'on ne
+    #: refait pas volontiers.
+    #:
+    #: Conservées en JSON pur, et converties à l'usage par `prises_de()` : un
+    #: `Projet` doit rester sérialisable sans traitement particulier, et une
+    #: dataclass imbriquée s'y serait invitée dans `asdict`.
+    photographies: dict | None = None
 
     @property
     def libelle_affiche(self) -> str:
@@ -168,6 +180,7 @@ class Projet:
             raise ErreurDP(
                 f"Export HelioScope déclaré mais introuvable : {self.helioscope}."
             )
+        self.valider_photographies()
         chemin_notice = self.chemin_notice
         if chemin_notice is not None and not chemin_notice.exists():
             raise ErreurDP(
@@ -218,6 +231,18 @@ class Projet:
                     "un calage faux, pas une retouche."
                 )
 
+    def prises_de(self, code: str) -> list:
+        """Les prises de vue d'une pièce photographique, converties depuis le JSON.
+
+        Lève si le fichier décrit une prise inexploitable — sans position ou sans
+        image : mieux vaut refuser que produire une planche muette sur ce qu'elle
+        ignore.
+        """
+        from .points_de_vue import prise_depuis_json
+
+        brutes = (self.photographies or {}).get(code) or []
+        return [prise_depuis_json(brute) for brute in brutes]
+
     def date_francaise(self) -> str:
         return _date.fromisoformat(self.date).strftime("%d/%m/%Y")
 
@@ -250,10 +275,33 @@ class Projet:
                 candidat = (base / valeur).resolve()
                 if candidat.exists():
                     donnees[champ] = str(candidat)
+        _resoudre_photographies(donnees.get("photographies"), base)
 
         projet = cls(**donnees)
         projet.valider()
         return projet
+
+    def valider_photographies(self) -> None:
+        """Contrôle que chaque prise de vue est exploitable, et le dit sinon.
+
+        Appelée par `valider()`. Les images sont contrôlées ici plutôt qu'à la
+        composition : une planche qui échoue après le téléchargement des fonds
+        IGN fait perdre la génération entière, et la règle du dépôt veut qu'un
+        manque se signale au plus tôt.
+        """
+        for code, brutes in (self.photographies or {}).items():
+            if not isinstance(brutes, list):
+                raise ErreurDP(
+                    f"projet.json : « {code} » ne décrit pas une liste de prises "
+                    "de vue."
+                )
+            for rang, prise in enumerate(self.prises_de(code), start=1):
+                for image in prise.images:
+                    if not Path(image).exists():
+                        raise ErreurDP(
+                            f"{code}, prise {rang} : image introuvable "
+                            f"({image}). Redéposez-la, ou retirez la prise."
+                        )
 
     def ecrire(self, chemin: str | Path) -> Path:
         chemin = Path(chemin)
@@ -263,3 +311,26 @@ class Projet:
             json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         return chemin
+
+
+def _resoudre_photographies(photographies, base: Path) -> None:
+    """Rend absolus les chemins d'images, relatifs au dossier du projet.json.
+
+    Sur place : `charger` construit le `Projet` depuis ce même dictionnaire.
+    """
+    if not isinstance(photographies, dict):
+        return
+    for prises in photographies.values():
+        if not isinstance(prises, list):
+            continue
+        for prise in prises:
+            images = prise.get("images") if isinstance(prise, dict) else None
+            if not images:
+                continue
+            prise["images"] = [
+                str((base / image).resolve())
+                if image and not Path(image).is_absolute()
+                and (base / image).exists()
+                else image
+                for image in images
+            ]

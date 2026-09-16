@@ -133,9 +133,9 @@ Chacun de ces cas affiche ce qui manque et pourquoi. C'est la règle du dépôt 
 une planche fausse qui s'affiche correctement est pire qu'un refus, parce que
 personne ne la détecte avant l'instruction du dossier.
 
-L'assemblage des pièces DP 6 à DP 8 au dossier, et le **report de la position de
-prise de vue sur un plan de repérage**, restent à construire — le dossier de
-référence en met un par vue, au 1/1 500 et au 1/2 500.
+Les pièces photographiques DP 6, DP 7 et DP 8 sont assemblées au dossier depuis
+le lot 6, avec le **report de la position de prise de vue sur un plan de
+repérage** — voir « Les pièces photographiques » plus bas.
 
 ## Installation
 
@@ -2192,6 +2192,91 @@ l'agrandissement n'y avait pas été envisagé. Et la mesure de l'étendue de
 l'encre des pages 16 et 17 de Massay **n'a pas permis de vérifier** que le
 dossier de référence remplit la feuille : les trois pages testées, plan de
 situation compris, rendent la même étendue bord à bord.
+
+## Les pièces photographiques (lot 6)
+
+DP 6, DP 7 et DP 8 portent chacune des photographies à droite et un **plan de
+repérage** à gauche, qui dit d'où chaque vue a été prise et — quand la direction
+est vérifiée — ce qu'elle regarde. L'outil ne fabrique pas les images : il les
+assemble, les repère et les pagine.
+
+| Pièce | Ce qu'elle porte | Planches |
+|---|---|---|
+| DP 6 | un point de vue, 2 ou 3 volets | une par vue, « Vue A », « Vue B » |
+| DP 7 | 1 ou 2 photographies proches | une seule, « PC7-1 », « PC7-2 » |
+| DP 8 | 1 ou 2 photographies lointaines | une seule, « PC8-1 », « PC8-2 » |
+
+Relevé le 15/09/2026 sur le dossier de référence : DP 6 nomme ses vues par
+lettres, DP 7 et DP 8 numérotent leurs points. La numérotation repart de 1 à
+chaque pièce.
+
+### Le cap ne se croit pas, la position se lit
+
+La position GPS d'une photographie n'a jamais été prise en défaut. Le cap, si :
+la boussole d'un téléphone donne ±10 à 20°, et mal calibrée elle décale toutes
+les directions du même angle. Une validation du dépôt `photomontage` a relevé
+15° d'erreur sur un cap annoncé, par recoupement sur deux éoliennes
+identifiées.
+
+Un cap EXIF **propose** donc une orientation ; il ne fait autorité qu'une fois
+vérifié sur fond satellite. Sans direction confirmée, la planche porte le repère
+numéroté **sans cône** — ce n'est pas un manque, c'est le cas normal d'une vue
+de drone.
+
+Un rapport `photos-geoloc` déposé fait gagner ce travail, mais **seulement pour
+ce qui y a été corrigé**. Mesuré le 15/09/2026 sur « Rapport Photo SARNOIS » :
+25 points, calibration nulle, aucune direction figée — le chef de projet avait
+produit son rapport sans toucher aux caps. Une direction figée à la main ou
+reprise par une calibration globale part confirmée ; une direction jamais
+regardée reste une proposition.
+
+### Le cône est un symbole, pas un champ de vue
+
+Secteur de 50° et taille fixe, repris du marqueur de `photos-geoloc` pour que le
+chef de projet voie le même symbole des deux côtés. Il dit d'où l'on regarde et
+vers où, pas jusqu'où ni sur quelle largeur.
+
+Le dossier de référence, lui, n'en porte aucun : mesuré dans le flux vectoriel
+de sa DP 7, il n'y a autour de « PC7-1 » que trois points de tracé formant un
+segment de 8 pt. Le cône est donc un ajout volontaire, qui dit ce qu'une
+étiquette seule ne dit pas.
+
+### Des emplacements identiques, et la photo qui s'y ajuste
+
+Chaque pièce fixe son nombre d'emplacements — trois pour DP 6, deux pour DP 7 et
+DP 8 — tous de mêmes dimensions, et la photographie est **rognée** pour remplir
+le sien, jamais déformée ni bordée de blanc. Un emplacement vide ne redistribue
+rien : une DP 6 sans mesures paysagères garde la géométrie d'une DP 6 complète,
+et deux dossiers voisins se comparent.
+
+Le format n'est pas absolu, et c'est une mesure qui l'a décidé : trois
+emplacements sur une A3 paysage imposeraient du 3,11:1, où une photographie
+d'iPhone perdrait 57 % de sa hauteur — le ciel et le premier plan, c'est-à-dire
+ce que la pièce doit montrer. Le format retenu est le **rapport médian des
+images de la planche** : les emplacements restent identiques entre eux, et des
+photographies qui partagent déjà un rapport ne sont pas rognées du tout. Au-delà
+de 12 %, le rapport de génération nomme la photographie et ce qui lui a été
+retiré.
+
+### L'échelle du repérage
+
+| Contenu à faire tenir | Liste |
+|---|---|
+| toutes les prises de vue + le centre du site | 1/1 000 à 1/10 000 |
+
+L'emprise complète est visée d'abord ; quand elle ne tient pas, c'est elle qui
+cède et non l'échelle — le lecteur qui veut voir le site entier a DP 2. Ce qui
+reste impératif est que toutes les prises de vue tiennent, sans quoi la planche
+ne repère rien.
+
+La liste s'arrête au 1/10 000, qui couvre 1,68 km dans la colonne de gauche.
+Elle avait été prolongée au 1/20 000 sur la foi du brief, qui annonçait des
+points de vue « à plusieurs kilomètres » pour DP 8 ; l'usage réel le dément
+(16/09/2026) — quelques centaines de mètres, un gros kilomètre au plus.
+
+`tests/test_echelle_reperage_pdf.py` mesure l'échelle dans le flux de contenu du
+PDF produit, sur la largeur de l'emprise et sur la distance entre deux repères,
+à 0,5 % près.
 
 ## Hors périmètre de ces lots
 

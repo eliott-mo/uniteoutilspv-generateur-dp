@@ -40,6 +40,7 @@ def generer(
     emprise,
     dossier: str | Path,
     numero: str | None = None,
+    cadrages=None,
     fond_ign: bool = True,
 ) -> Sortie:
     """La planche de la pièce, pour une ou deux prises de vue.
@@ -67,8 +68,10 @@ def generer(
     retenu = composer(
         planche,
         [
-            ImagePlanche(Path(prise[1]), f"{repere} : {INTITULE}")
-            for prise, repere in zip(prises, reperes)
+            ImagePlanche(Path(prise[1]), f"{repere} : {INTITULE}", cadrage)
+            for prise, repere, cadrage in zip(
+                prises, reperes, _cadrages(cadrages, len(prises))
+            )
         ],
         points_de_vue,
         reperes,
@@ -86,3 +89,12 @@ def generer(
         echelle=retenu["echelle_reperage"],
         details={"reperes": reperes, **retenu},
     )
+
+
+def _cadrages(cadrages, nombre: int) -> list:
+    """Un décalage de rognage par photographie, centré à défaut."""
+    cadrages = list(cadrages or [])
+    return [
+        tuple(cadrages[rang]) if rang < len(cadrages) else (0.0, 0.0)
+        for rang in range(nombre)
+    ]

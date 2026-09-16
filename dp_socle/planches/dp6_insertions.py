@@ -54,6 +54,7 @@ def generer(
     dossier: str | Path,
     rang: int = 1,
     numero: str | None = None,
+    cadrages=None,
     fond_ign: bool = True,
 ) -> Sortie:
     """Une planche d'insertion paysagère, pour un point de vue et ses volets.
@@ -81,8 +82,10 @@ def generer(
     retenu = composer(
         planche,
         [
-            ImagePlanche(chemin, f"{repere} : {intitule}")
-            for chemin, intitule in zip(images, INTITULES)
+            ImagePlanche(chemin, f"{repere} : {intitule}", cadrage)
+            for chemin, intitule, cadrage in zip(
+                images, INTITULES, _cadrages(cadrages, len(images))
+            )
         ],
         [point_de_vue],
         [repere],
@@ -111,3 +114,12 @@ def generer(
         echelle=retenu["echelle_reperage"],
         details={"repere": repere, "volets": len(images), **retenu},
     )
+
+
+def _cadrages(cadrages, nombre: int) -> list:
+    """Un décalage de rognage par image, centré à défaut."""
+    cadrages = list(cadrages or [])
+    return [
+        tuple(cadrages[rang]) if rang < len(cadrages) else (0.0, 0.0)
+        for rang in range(nombre)
+    ]
