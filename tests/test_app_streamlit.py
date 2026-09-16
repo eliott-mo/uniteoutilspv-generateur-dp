@@ -1311,3 +1311,75 @@ def test_une_carte_illisible_est_refusee_sans_bloquer_l_ecran(tmp_path, monkeypa
     assert any(
         "n'est pas une carte" in erreur.value for erreur in application.error
     ), [e.value for e in application.error]
+
+
+# ---------------------------------------------------------------------------
+# Le dépôt des fichiers, qui se rejoue à chaque interaction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_fichier_inchange_n_est_pas_reecrit_a_chaque_interaction(
+    tmp_path, monkeypatch
+):
+    """Signalé en usage réel le 16/09/2026, sur un PermissionError de OneDrive.
+
+    `_deposer` vit dans le flux principal : il se rejouait donc à chaque clic, et
+    réécrivait le DXF et le classeur — plusieurs dizaines de mégaoctets — pour
+    rien. Dans un dossier synchronisé, le service tenait le fichier ouvert
+    pendant son téléversement et l'écriture échouait.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
+    assert depose.exists(), "le DXF déposé est introuvable"
+
+    ecrit_le = depose.stat().st_mtime_ns
+    # Une interaction quelconque : le script se rejoue en entier.
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert depose.stat().st_mtime_ns == ecrit_le, (
+        "le DXF a été réécrit alors qu'il n'avait pas changé"
+    )
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_fichier_efface_du_disque_est_reecrit(tmp_path, monkeypatch):
+    """L'existence se vérifie, et pas seulement la mémoire de session.
+
+    Sans cela, un fichier effacé entre deux exécutions n'était jamais réécrit, et
+    la génération échouait plus tard sur un chemin qui ne mène nulle part.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
+    depose.unlink()
+
+    _cliquer(application, "Déplacer la coupe")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert depose.exists(), "le DXF effacé n'a pas été réécrit"
+
+
+def test_un_fichier_verrouille_designe_la_vraie_cause(tmp_path, monkeypatch):
+    """Un PermissionError brut est une trace que le chef de projet ne lit pas.
+
+    Sous Windows la cause est presque toujours un autre programme qui tient le
+    fichier — OneDrive, un antivirus, ou le logiciel qui l'a produit.
+    """
+    import sys
+
+    sys.path.insert(0, str(RACINE)) if str(RACINE) not in sys.path else None
+    from dp_socle.erreurs import ErreurDepot
+
+    import app as application_module
+
+    cible = tmp_path / "verrouille.dxf"
+
+    def _refuser(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "write_bytes", _refuser)
+    with pytest.raises(ErreurDepot, match="tient ouvert"):
+        application_module._ecrire_depose(cible, b"peu importe")

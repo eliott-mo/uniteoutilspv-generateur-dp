@@ -100,3 +100,7 @@ class ErreurCartePhotos(ErreurPointDeVue):
 
 class ErreurPhotoIllisible(ErreurPointDeVue):
     """La photographie déposée ne s'ouvre pas, ou son format n'est pas pris en charge."""
+
+
+class ErreurDepot(ErreurDP):
+    """Un fichier déposé n'a pas pu être écrit dans le dossier du projet."""

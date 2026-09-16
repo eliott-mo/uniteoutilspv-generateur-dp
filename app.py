@@ -60,7 +60,7 @@ from dp_socle.coupe import (
     translater_ligne_coupe,
 )
 from dp_socle.contrat import NOM_GEOPACKAGE, VOIRIES_ADMISES, decrire_voiries
-from dp_socle.erreurs import ErreurCoupe, ErreurDP
+from dp_socle.erreurs import ErreurCoupe, ErreurDepot, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
     CATEGORIES,
@@ -241,6 +241,59 @@ def _archive_du_dossier(rapport) -> bytes:
     return tampon.getvalue()
 
 
+def _empreinte(fichier) -> tuple:
+    """Ce qui distingue ce dépôt d'un autre, sans relire les octets.
+
+    `file_id` est attribué par Streamlit à chaque fichier reçu : il change dès
+    que le chef de projet en dépose un autre, même sous le même nom. La taille
+    l'accompagne comme garde-fou, pour les versions qui n'en donneraient pas.
+    """
+    return (getattr(fichier, "file_id", None), getattr(fichier, "size", None))
+
+
+def _deja_ecrit(cible: Path, fichier) -> bool:
+    """Vrai si ce fichier exact est déjà sur le disque, à cet endroit.
+
+    L'existence est vérifiée à chaque fois, et non seulement la mémoire de
+    session : un fichier effacé entre deux exécutions doit être réécrit, sans
+    quoi la génération échouerait plus tard sur un chemin qui ne mène nulle part.
+    """
+    ecrits = st.session_state.setdefault("fichiers_deposes", {})
+    return ecrits.get(str(cible)) == _empreinte(fichier) and cible.exists()
+
+
+def _retenir_ecriture(cible: Path, fichier) -> None:
+    st.session_state.setdefault("fichiers_deposes", {})[str(cible)] = _empreinte(
+        fichier
+    )
+
+
+def _ecrire_depose(cible: Path, donnees) -> None:
+    """Écrit un fichier déposé, en nommant la cause quand c'est impossible.
+
+    Un `PermissionError` brut est une trace Python que le chef de projet ne peut
+    pas interpréter : sous Windows, la cause est presque toujours un autre
+    programme qui tient le fichier ouvert — OneDrive en cours de
+    synchronisation, un antivirus, ou le logiciel qui a servi à produire le
+    fichier.
+    """
+    try:
+        cible.write_bytes(donnees)
+    except PermissionError as erreur:
+        raise ErreurDepot(
+            f"Impossible d'écrire « {cible.name} » dans le dossier du projet : "
+            "un autre programme le tient ouvert. Sous Windows, c'est le plus "
+            "souvent OneDrive en cours de synchronisation, un antivirus, ou le "
+            "logiciel qui a produit le fichier (AutoCAD, Excel). Fermez-le, "
+            f"attendez la fin de la synchronisation, et redéposez. ({erreur})"
+        ) from erreur
+    except OSError as erreur:
+        raise ErreurDepot(
+            f"Impossible d'écrire « {cible.name} » dans le dossier du projet "
+            f"({erreur})."
+        ) from erreur
+
+
 def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
     """Écrit les photographies du projet, une pièce par sous-dossier.
 
@@ -262,7 +315,7 @@ def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
         dossier.mkdir(parents=True, exist_ok=True)
         for fichier in fichiers:
             cible = dossier / Path(fichier.name).name
-            cible.write_bytes(fichier.getbuffer())
+            _ecrire_depose(cible, fichier.getbuffer())
             if fichier is retenu:
                 couverture = cible
     return str(couverture) if couverture else None
@@ -280,7 +333,7 @@ def _enregistrer_notice(nom_projet: str, fichier) -> str | None:
     dossier = DOSSIER_PROJETS / nom_projet / "DP_11"
     dossier.mkdir(parents=True, exist_ok=True)
     cible = dossier / Path(fichier.name).name
-    cible.write_bytes(fichier.getbuffer())
+    _ecrire_depose(cible, fichier.getbuffer())
     return str(cible)
 
 
@@ -294,7 +347,7 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
     chemins = []
     for fichier in fichiers:
         cible = dossier / Path(fichier.name).name
-        cible.write_bytes(fichier.getbuffer())
+        _ecrire_depose(cible, fichier.getbuffer())
         chemins.append(cible)
 
     zips = [c for c in chemins if c.suffix.lower() == ".zip"]
@@ -523,13 +576,29 @@ with colonne_alti:
 
 
 def _deposer(fichier, commune: str) -> Path | None:
-    """Écrit un fichier téléversé dans le dépôt du projet et rend son chemin."""
+    """Écrit un fichier téléversé dans le dépôt du projet et rend son chemin.
+
+    **Seulement s'il a changé.** Cette fonction est appelée dans le flux
+    principal, donc à chaque exécution du script — c'est-à-dire à chaque clic,
+    chaque case cochée, chaque déplacement de coupe. Elle réécrivait jusqu'ici
+    le DXF et le classeur à chaque fois, soit plusieurs dizaines de mégaoctets
+    pour rien.
+
+    Le coût n'était pas le pire : signalé le 16/09/2026 en usage réel, un dossier
+    de projets synchronisé par OneDrive faisait échouer l'écriture sur un
+    `PermissionError`, le service tenant le fichier ouvert pendant qu'il le
+    téléversait. Un fichier qui n'a pas changé ne se réécrit donc plus, et la
+    fenêtre pendant laquelle la collision est possible se referme.
+    """
     if fichier is None:
         return None
     dossier = DOSSIER_PROJETS / _nom_depot(commune)
     dossier.mkdir(parents=True, exist_ok=True)
     cible = dossier / Path(fichier.name).name
-    cible.write_bytes(fichier.getbuffer())
+    if _deja_ecrit(cible, fichier):
+        return cible
+    _ecrire_depose(cible, fichier.getbuffer())
+    _retenir_ecriture(cible, fichier)
     return cible
 
 
