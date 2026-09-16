@@ -1696,14 +1696,24 @@ def _etat_de_la_prise(vue: dict) -> str:
     return "placée, sans direction"
 
 
-def _oublier_les_photos_retirees(photos_par_piece: dict) -> None:
-    """Écarte les prises dont la photographie n'est plus déposée.
+def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
+    """Écarte les prises dont la photographie a été remplacée par une autre.
 
-    Sans cela, une photographie retirée puis regénérée laissait son point de vue
-    en session, et la planche portait un repère pour une image absente.
+    Une pièce **dont le dépôt est vide** n'est pas nettoyée, et c'est délibéré :
+    on ne peut pas distinguer un retrait volontaire d'un dépôt momentanément
+    vide. Mesuré le 16/09/2026 sous `AppTest` : un `file_uploader` alimenté par
+    le harnais perd sa valeur après un `st.rerun()` programmatique, et le
+    nettoyage effaçait alors le point de vue qui venait d'être placé — deux
+    lignes plus haut dans le même script.
+
+    Rien ne se perd à cette prudence : `_photographies_du_projet` part des
+    fichiers déposés, pas des points de vue. Une prise sans photographie
+    n'entre dans aucune pièce, et ne peut donc pas y poser de repère fantôme.
     """
     for code, par_nom in list(_vues_photo().items()):
         deposes = {f.name for f in photos_par_piece.get(code) or []}
+        if not deposes:
+            continue
         for nom in list(par_nom):
             if nom not in deposes:
                 del par_nom[nom]
@@ -1745,7 +1755,7 @@ def _ligne_de_prise(code: str, fichier) -> None:
 
 def _saisir_les_prises_de_vue(emplacement, photos_par_piece: dict) -> None:
     """Liste les photographies déposées, leur état, et les deux gestes."""
-    _oublier_les_photos_retirees(photos_par_piece)
+    _oublier_les_photos_remplacees(photos_par_piece)
     if emplacement is None:
         return
     with emplacement:

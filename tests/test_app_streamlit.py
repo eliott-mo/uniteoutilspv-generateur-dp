@@ -996,3 +996,123 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     survivants = [bouton.label for bouton in application.get("download_button")]
     assert any("dossier complet" in intitule for intitule in survivants), survivants
     assert any("PDF assemblé" in intitule for intitule in survivants), survivants
+
+
+# ---------------------------------------------------------------------------
+# Les prises de vue des pièces photographiques (lot 6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypatch):
+    """Critère de validation n°6 du lot 6, sur le parcours complet.
+
+    Déposer la photographie, la placer sur la carte, viser ce qu'elle regarde,
+    générer, et retrouver la pièce dans le ZIP téléchargé : c'est ce que fait le
+    chef de projet, et rien d'autre ne le vérifie de bout en bout.
+    """
+    import io as _io
+    import zipfile
+
+    carte = _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+    )
+    application = application.run()
+
+    emprise = application.session_state["import_be"].plan.polygone_cloture
+    centre = emprise.centroid
+
+    # 📍 Placer : le clic dit où est la photographie.
+    _cliquer(application, "📍 Placer")
+    application = application.run()
+    carte["point"] = (centre.x - 300.0, centre.y)
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    vue = application.session_state["vues_photo"]["DP 7"]["vue-proche.jpg"]
+    assert vue["x"] == pytest.approx(centre.x - 300.0, abs=1.0)
+    assert vue.get("cap_confirme") is not True
+
+    # Le dépôt est réalimenté entre chaque geste : mesuré le 16/09/2026, un
+    # `file_uploader` alimenté par `AppTest` perd sa valeur après un
+    # `st.rerun()` programmatique, alors qu'un fichier déposé dans un navigateur
+    # y survit. C'est une limite du harnais, pas du parcours — le même nom de
+    # fichier conserve le point de vue déjà placé.
+    carte["point"] = None
+    _televerser(
+        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+    )
+    application = application.run()
+
+    # 🎯 Viser : le second clic dit ce qu'elle regarde, et le cap s'en déduit.
+    _cliquer(application, "🎯 Viser")
+    application = application.run()
+    carte["point"] = (centre.x, centre.y)
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    vue = application.session_state["vues_photo"]["DP 7"]["vue-proche.jpg"]
+    assert vue["cap_confirme"] is True
+    # La cible est plein est de la prise de vue : cap de 90°.
+    assert vue["cap_deg"] == pytest.approx(90.0, abs=1.0)
+
+    carte["point"] = None
+    _televerser(
+        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+    )
+    application = application.run()
+    _cliquer(application, "Générer le dossier")
+    application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    genere = application.session_state["dossier_genere"]
+    noms = zipfile.ZipFile(_io.BytesIO(genere["archive"])).namelist()
+    assert "planches/DP_7_environnement_proche.pdf" in noms, noms
+    assert any(entree["numero"] == "DP 7" for entree in genere["rapport"].sommaire)
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_viser_avant_de_placer_est_refuse(tmp_path, monkeypatch):
+    """Le cap se mesure depuis une position, pas depuis rien.
+
+    Le bouton est désactivé tant que la photographie n'est pas placée : le test
+    vérifie qu'il l'est, plutôt que d'éprouver un garde-fou que l'écran ne
+    laisse pas atteindre.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(application, "DP 7", [("vue.jpg", _image_png(), "image/png")])
+    application = application.run()
+
+    viser = [b for b in application.button if "Viser" in b.label]
+    assert viser, "le bouton de visée manque"
+    assert viser[0].disabled
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photo_remplacee_par_une_autre_oublie_son_point_de_vue(
+    tmp_path, monkeypatch
+):
+    """Sinon la planche portait un repère pour une image qui n'est plus là.
+
+    Le dépôt vide, lui, ne nettoie rien : il ne se distingue pas d'un dépôt
+    momentanément vide, et `_photographies_du_projet` part de toute façon des
+    fichiers déposés.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(application, "DP 7", [("vue.jpg", _image_png(), "image/png")])
+    application = application.run()
+    _cliquer(application, "📍 Placer")
+    application = application.run()
+    emprise = application.session_state["import_be"].plan.polygone_cloture
+    carte["point"] = (emprise.centroid.x, emprise.centroid.y)
+    application = application.run()
+    assert "vue.jpg" in application.session_state["vues_photo"]["DP 7"]
+
+    carte["point"] = None
+    _televerser(application, "DP 7", [("autre.jpg", _image_png(), "image/png")])
+    application = application.run()
+    assert "vue.jpg" not in application.session_state["vues_photo"]["DP 7"]
