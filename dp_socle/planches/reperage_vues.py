@@ -28,17 +28,16 @@ l'étiquette « PC7-1 », il n'y a que trois points de tracé formant un segment
 vertical de 8 pt. HOCH ne dessine donc **ni cône ni triangle** — une étiquette,
 un trait de rappel, rien d'autre. Le flux ne porte aucun pointillé.
 
-Le cône vient du prototype `photomontage`, et c'est un ajout volontaire : il dit
-ce que la photo regarde, ce qu'une étiquette seule ne dit pas. Il n'apparaît
-qu'à deux conditions cumulées — direction **confirmée** et champ de vue connu —
-qui font qu'en pratique la planche ressemble le plus souvent à celle de HOCH.
-Les trois états sont donc :
+Le cône est donc un ajout volontaire. Il reprend le marqueur de
+`photos-geoloc` — secteur de 50°, taille fixe — que le chef de projet a déjà
+sous les yeux dans l'outil voisin : il dit d'où l'on regarde et vers où, ce
+qu'une étiquette seule ne dit pas, sans prétendre à une portée ni à un champ de
+vue mesuré. Deux états, et deux seulement :
 
-| Ce qu'on sait                         | Ce qui est dessiné          |
-|---------------------------------------|-----------------------------|
-| la position seule                     | repère et étiquette         |
-| position et direction confirmée       | + axe de visée              |
-| et le champ de vue de la photo        | + cône ouvert autour de l'axe|
+| Ce qu'on sait                    | Ce qui est dessiné           |
+|----------------------------------|------------------------------|
+| la position seule                | repère et étiquette          |
+| position et direction confirmée  | + cône orienté               |
 """
 
 from __future__ import annotations
@@ -56,20 +55,17 @@ from .primitives import echelle_du_dessin
 #: Relevées sur le dossier de référence le 10/09/2026 : 1/1 500 pour les deux
 #: DP 6, 1/2 500 pour la DP 7, 1/6 500 pour la DP 8. HOCH cadre sur son contenu
 #: sans liste ; nous restons sur une liste, comme au lot 4, et le 1/6 500 tombe
-#: alors sur le 1/7 500. Les deux plus grandes ne serviront que sur de petits
-#: sites — une emprise de 5 ha ne tient pas dans la colonne au 1/1 500 — mais
-#: elles ne coûtent rien et évitent un cadre inutilement large sur un site
-#: compact.
+#: alors sur le 1/7 500.
 #:
-#: **Prolongée au-delà du 1/10 000**, comme celle du plan de repérage de DP 4 l'a
-#: été au lot 4, et pour la même raison mesurée le 15/09/2026 : la colonne de
-#: gauche d'une A3 mesure environ 168 mm de large, ce qui plafonne le 1/10 000 à
-#: 1,7 km de portée. Or DP 8 est la pièce du paysage **lointain** — le brief
-#: parle de points de vue « à plusieurs kilomètres », et une prise de vue à 3 km
-#: demanderait 300 mm. Sans ces deux crans, la pièce que le lot doit produire
-#: serait refusée dans son cas le plus normal. Au 1/20 000 le site n'occupe plus
-#: que 16 mm ; c'est assez pour le repérer, et c'est DP 2 qui le montre.
-ECHELLES_REPERAGE_VUES = (1000, 1500, 2000, 2500, 5000, 7500, 10000, 15000, 20000)
+#: La liste s'arrête au 1/10 000, qui couvre 1,68 km dans la colonne de gauche.
+#: Elle avait été prolongée au 1/20 000 le 15/09/2026, sur la foi du brief qui
+#: annonçait des points de vue « à plusieurs kilomètres » pour DP 8 ; la mesure
+#: de l'usage le dément (16/09/2026) : ces prises de vue se font à quelques
+#: centaines de mètres du site, un gros kilomètre au plus. Deux crans de plus
+#: n'auraient donc jamais servi qu'à sortir en silence une planche où le site
+#: n'occupe plus que seize millimètres, au lieu de signaler une position
+#: douteuse.
+ECHELLES_REPERAGE_VUES = (1000, 1500, 2000, 2500, 5000, 7500, 10000)
 
 #: Marge autour du contenu utile, en part de sa plus grande dimension. Le cadre
 #: **tracé** est ce qu'on mesure, marge comprise : c'est la leçon du lot 4, où
@@ -79,24 +75,19 @@ MARGE_REPERAGE = 0.08
 #: Rayon du disque de repère, en millimètres sur la planche.
 RAYON_REPERE_MM = 2.4
 
-#: Longueur d'une visée, en part de la distance qui sépare la prise de vue du
-#: centre du site : elle atteint le site et s'arrête juste après.
+#: Ouverture du cône de visée, en degrés, et son rayon rapporté à celui du
+#: repère. Repris tels quels du marqueur de `photos-geoloc`
+#: (`generation_html.py:1379`, secteur de 50° et rayon de 30 px pour une pastille
+#: de 9) : le chef de projet voit le même symbole des deux côtés.
 #:
-#: Mesuré sur un aperçu du 15/09/2026 : une portée calculée en part de la
-#: diagonale du cadre, qui semblait raisonnable, donnait un cône occupant la
-#: planche entière et réduisant le site à une tache. Le cône doit montrer qu'une
-#: photographie regarde le site, pas remplir le papier. Une longueur relative à
-#: la distance au site tient les deux bouts : un point de vue proche a un petit
-#: cône, un point de vue lointain un grand, et le site reste lisible dans les
-#: deux cas.
-#:
-#: Aucune portée réelle n'est prétendue : une photographie de paysage lointain
-#: ne s'arrête nulle part, et la visée n'est qu'une direction montrée.
-PART_VISEE = 1.12
-
-#: Plancher de cette longueur, en part de la diagonale terrain visible : une
-#: prise de vue posée au centre du site donnerait sinon une visée nulle.
-PLANCHER_VISEE = 0.10
+#: C'est un **symbole d'orientation**, pas un champ de vue mesuré : il dit d'où
+#: l'on regarde et vers où, ce qui est tout ce que la pièce demande. La décision
+#: du 16/09/2026 écarte le calcul de focale que D6 prescrivait — avec lui
+#: partent la question du rognage 9:16, l'ambiguïté de la convention
+#: `FocalLengthIn35mmFilm`, et le cas des photographies qui n'annoncent aucune
+#: focale, soit une sur cinq du jeu de validation.
+OUVERTURE_CONE_DEG = 50.0
+RAYON_CONE_MM = 8.0
 
 _NOIR = "#1a1a1a"
 _BLANC = "#ffffff"
@@ -277,22 +268,16 @@ def _echelle_ou_rien(largeur_m, hauteur_m, zone_mm, libelle) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def dessiner_points_de_vue(
-    planche: Planche, points_de_vue, reperes, centre_site: tuple
-) -> list:
-    """Pose les repères, leurs étiquettes et leurs visées sur la planche.
+def dessiner_points_de_vue(planche: Planche, points_de_vue, reperes) -> list:
+    """Pose les repères, leurs étiquettes et leurs cônes d'orientation.
 
     `reperes` porte l'étiquette de chaque point de vue, dans le même ordre.
-    `centre_site` commande la longueur des visées, chacune étant mesurée sur sa
-    propre distance au site — voir `PART_VISEE`.
 
-    L'ordre du dessin compte : toutes les visées d'abord, tous les repères
-    ensuite. Un cône passant par-dessus un repère voisin le masquerait, et deux
-    prises de vue depuis le même endroit sont le cas courant — cinq points du
-    rapport de Sarnois tiennent dans un mouchoir de poche.
+    L'ordre du dessin compte : tous les cônes d'abord, tous les repères ensuite.
+    Un cône passant par-dessus un repère voisin le masquerait, et deux prises de
+    vue depuis le même endroit sont le cas courant — cinq points du rapport de
+    Sarnois tiennent dans un mouchoir de poche.
     """
-    from math import hypot
-
     vues = list(points_de_vue)
     reperes = list(reperes)
     if len(vues) != len(reperes):
@@ -302,74 +287,53 @@ def dessiner_points_de_vue(
         )
 
     messages = []
-    plancher_m = PLANCHER_VISEE * _diagonale_terrain(planche)
     for vue, repere in zip(vues, reperes):
-        portee_m = max(
-            PART_VISEE * hypot(centre_site[0] - vue.x, centre_site[1] - vue.y),
-            plancher_m,
-        )
         if vue.dessine_un_cone:
-            _tracer_cone(planche, vue, portee_m)
-        elif vue.dessine_une_visee:
-            _tracer_axe(planche, vue, portee_m)
-            messages.append(
-                f"{repere} : direction confirmée mais champ de vue inconnu — la "
-                "planche porte l'axe de visée, sans ouverture."
-            )
+            _tracer_cone(planche, vue)
         else:
             messages.append(
                 f"{repere} : aucune direction confirmée — le repère est posé "
-                "seul, sans visée."
+                "seul, sans cône d'orientation."
             )
     for vue, repere in zip(vues, reperes):
         _tracer_repere(planche, vue, repere)
     return messages
 
 
-def _diagonale_terrain(planche: Planche) -> float:
-    """Diagonale de la fenêtre terrain visible, en mètres."""
-    from math import hypot
+def _rayon_terrain(planche: Planche, rayon_mm: float) -> float:
+    """Convertit un rayon voulu sur le papier en rayon terrain.
 
-    minx, miny, maxx, maxy = planche.emprise_terrain()
-    return hypot(maxx - minx, maxy - miny)
+    Repères et cônes se dessinent en unités terrain pour suivre la
+    transformation de la planche, mais leur taille est voulue **en
+    millimètres** : ce sont des symboles de lecture, pas des objets du site. Ils
+    gardent donc le même encombrement du 1/1 000 au 1/10 000.
+    """
+    return rayon_mm * planche.echelle / 1000.0
 
 
-def _tracer_cone(planche: Planche, vue: PointDeVue, portee_m: float) -> None:
-    """Secteur d'ouverture du champ, et son axe."""
+def _tracer_cone(planche: Planche, vue: PointDeVue) -> None:
+    """Le secteur d'orientation, à l'ouverture et à la taille du marqueur voisin.
+
+    Il ne prétend ni à une portée ni à un champ de vue : c'est le symbole que le
+    chef de projet voit déjà sur la carte de `photos-geoloc`, transposé sur la
+    planche. Voir `OUVERTURE_CONE_DEG`.
+    """
     from shapely.geometry import Polygon
 
     axe = vue.cap_trigonometrique_deg
-    demi = vue.demi_angle_deg
+    demi = OUVERTURE_CONE_DEG / 2.0
+    rayon_m = _rayon_terrain(planche, RAYON_CONE_MM)
     sommets = [(vue.x, vue.y)]
-    # Assez de pas pour que l'arc ne se lise pas comme un triangle, sans
-    # alourdir le SVG : un degré de corde suffit à l'œil.
-    pas = max(3, int(2 * demi))
+    # Un pas par degré de corde : assez pour que l'arc ne se lise pas comme un
+    # triangle, sans alourdir le SVG.
+    pas = max(3, int(OUVERTURE_CONE_DEG))
     for i in range(pas + 1):
-        angle = radians(axe - demi + 2 * demi * i / pas)
-        sommets.append(
-            (vue.x + portee_m * cos(angle), vue.y + portee_m * sin(angle))
-        )
+        angle = radians(axe - demi + OUVERTURE_CONE_DEG * i / pas)
+        sommets.append((vue.x + rayon_m * cos(angle), vue.y + rayon_m * sin(angle)))
     planche.ajouter_geometrie(
         Polygon(sommets),
-        Style(trait=_VISEE, epaisseur_mm=0.25, remplissage=_VISEE,
-              opacite_remplissage=0.14),
-    )
-    _tracer_axe(planche, vue, portee_m)
-
-
-def _tracer_axe(planche: Planche, vue: PointDeVue, portee_m: float) -> None:
-    """Axe de visée : la direction, sans rien dire de l'ouverture."""
-    from shapely.geometry import LineString
-
-    angle = radians(vue.cap_trigonometrique_deg)
-    planche.ajouter_geometrie(
-        LineString(
-            [
-                (vue.x, vue.y),
-                (vue.x + portee_m * cos(angle), vue.y + portee_m * sin(angle)),
-            ]
-        ),
-        Style(trait=_VISEE, epaisseur_mm=0.35, tirets="2.2 1.4"),
+        Style(trait=_VISEE, epaisseur_mm=0.3, remplissage=_VISEE,
+              opacite_remplissage=0.55),
     )
 
 
@@ -383,7 +347,7 @@ def _tracer_repere(planche: Planche, vue: PointDeVue, repere: str) -> None:
     """
     from shapely.geometry import Point
 
-    rayon_m = RAYON_REPERE_MM * vue_denominateur(planche) / 1000.0
+    rayon_m = _rayon_terrain(planche, RAYON_REPERE_MM)
     planche.ajouter_geometrie(
         Point(vue.x, vue.y).buffer(rayon_m, quad_segs=16),
         Style(trait=_NOIR, epaisseur_mm=0.4, remplissage=_BLANC),
@@ -405,11 +369,3 @@ def _tracer_repere(planche: Planche, vue: PointDeVue, repere: str) -> None:
     )
 
 
-def vue_denominateur(planche: Planche) -> int:
-    """Dénominateur d'échelle en vigueur sur la planche.
-
-    Passer par la planche plutôt que par un paramètre évite qu'un appelant
-    dessine un symbole calibré pour une échelle sur une planche qui en porte une
-    autre — le genre d'écart qui ne se voit qu'à l'impression.
-    """
-    return planche.echelle

@@ -17,7 +17,7 @@ from dp_socle.planches.reperage_vues import (
     repere_de_vue,
     zone_de_reperage,
 )
-from dp_socle.points_de_vue import demi_angle_vue_deg, place_a_la_main
+from dp_socle.points_de_vue import place_a_la_main
 
 #: Emprise d'essai : 330 x 260 m, la taille d'un site de 5 ha, posée en Oise.
 X0, Y0 = 622_000.0, 6_954_000.0
@@ -29,8 +29,8 @@ CENTRE = (X0 + 165.0, Y0 + 130.0)
 COLONNE_MM = (12.0, 12.0, 168.0, 210.0)
 
 
-def _vue(dx, dy, cap=None, demi_angle=None, nom="vue"):
-    return place_a_la_main(nom, CENTRE[0] + dx, CENTRE[1] + dy, cap, demi_angle)
+def _vue(dx, dy, cap=None, nom="vue"):
+    return place_a_la_main(nom, CENTRE[0] + dx, CENTRE[1] + dy, cap)
 
 
 # ---------------------------------------------------------------------------
@@ -85,30 +85,30 @@ def test_le_cadre_garde_le_site_entier_quand_il_le_peut():
     assert reperage.avertissements == ()
 
 
-def test_un_paysage_lointain_a_3_km_tient_encore_avec_tout_le_site():
-    """C'est le cas normal de DP 8, et ce qui a imposé de prolonger la liste.
+def test_un_paysage_lointain_a_un_gros_kilometre_tient_avec_tout_le_site():
+    """La distance réelle d'une prise de vue de DP 8, relevée le 16/09/2026.
 
-    Mesuré le 15/09/2026 : la colonne de gauche plafonne le 1/10 000 à 1,7 km de
-    portée. Sans les crans 1/15 000 et 1/20 000, la pièce du paysage **lointain**
-    aurait été refusée dans son cas le plus ordinaire.
+    Quelques centaines de mètres du site, un gros kilomètre au plus — et non les
+    « plusieurs kilomètres » qu'annonçait le brief. La liste s'arrête donc au
+    1/10 000, qui couvre 1,68 km dans la colonne.
     """
-    vues = [_vue(0.0, 3_000.0), _vue(-2_600.0, 0.0)]
+    vues = [_vue(0.0, 1_100.0), _vue(-900.0, 0.0)]
     reperage = plan_de_reperage(vues, EMPRISE, COLONNE_MM)
     assert reperage.site_entier
-    assert reperage.denominateur == 20000
+    assert reperage.denominateur <= 10000
+    assert reperage.avertissements == ()
 
 
-def test_une_emprise_tres_etendue_cede_avant_l_echelle():
+def test_une_emprise_etendue_cede_avant_l_echelle():
     """Décision du 14/09/2026 : DP 2 montre le site, cette planche le repérage.
 
-    Le cas est limite — il demande une emprise de 2,4 km, bien au-delà des 3 MWc
-    de nos dossiers — mais c'est lui qui vérifie l'ordre des renoncements : le
-    cadre lâche le site avant de lâcher les prises de vue ou de sortir de la
-    liste d'échelles.
+    Le cas demande une emprise d'un kilomètre, au-delà des 3 MWc de nos
+    dossiers, mais c'est lui qui vérifie l'ordre des renoncements : le cadre
+    lâche le site avant de lâcher les prises de vue ou de sortir de la liste.
     """
-    large = box(X0, Y0, X0 + 2_400.0, Y0 + 300.0)
-    centre_large = (X0 + 1_200.0, Y0 + 150.0)
-    vues = [place_a_la_main("loin", X0 - 1_200.0, Y0 + 150.0)]
+    large = box(X0, Y0, X0 + 1_000.0, Y0 + 300.0)
+    centre_large = (X0 + 500.0, Y0 + 150.0)
+    vues = [place_a_la_main("loin", X0 - 800.0, Y0 + 150.0)]
     reperage = plan_de_reperage(vues, large, COLONNE_MM)
     assert not reperage.site_entier
     assert reperage.denominateur in ECHELLES_REPERAGE_VUES
@@ -166,34 +166,6 @@ def test_sans_emprise_le_plan_de_reperage_refuse():
 
 
 # ---------------------------------------------------------------------------
-# Le champ de vue, et le rognage qui le fausse
-# ---------------------------------------------------------------------------
-
-
-def test_le_champ_se_calcule_sur_le_cote_long_en_paysage():
-    """4:3 paysage, f35 = 28 : l'iPhone d'IMG_0420.HEIC, environ 65° de champ."""
-    assert demi_angle_vue_deg(28.0, 4032, 3024) == pytest.approx(32.7, abs=0.2)
-
-
-def test_une_photo_rognee_en_9_16_ne_donne_pas_un_champ_trop_large():
-    """Piège D6, mesuré sur `20260618_083511660_iOS.jpg` : 2247 x 4032.
-
-    La règle « le côté court vaut 24 mm » donnerait ici atan(12/32) = 20,6°,
-    soit un cinquième de trop, puisque c'est ce côté-là qui a été rogné.
-    """
-    demi = demi_angle_vue_deg(32.0, 2247, 4032)
-    assert demi == pytest.approx(17.4, abs=0.2)
-    assert demi < 20.6
-
-
-def test_sans_focale_aucun_champ_n_est_invente():
-    """Une photo sur cinq du jeu de validation n'annonce pas sa focale."""
-    assert demi_angle_vue_deg(None, 1986, 1489) is None
-    assert demi_angle_vue_deg(0.0, 1986, 1489) is None
-    assert demi_angle_vue_deg(28.0, None, None) is None
-
-
-# ---------------------------------------------------------------------------
 # Ce qui est dessiné, mesuré sur le SVG de la planche
 # ---------------------------------------------------------------------------
 
@@ -206,53 +178,62 @@ def _planche_avec(vues, reperes, denominateur=2500):
         echelle=denominateur,
     )
     planche.centrer_sur(CENTRE)
-    messages = reperage_vues.dessiner_points_de_vue(planche, vues, reperes, CENTRE)
+    messages = reperage_vues.dessiner_points_de_vue(planche, vues, reperes)
     return planche.svg(), messages
 
 
-def test_un_point_sans_direction_confirmee_ne_porte_aucune_visee():
+def test_un_point_sans_direction_confirmee_ne_porte_aucun_cone():
     """Critère de validation 3 : aucun cap inventé, et le rapport le dit."""
     svg, messages = _planche_avec([_vue(0.0, 0.0, nom="a")], ["PC7-1"])
     assert reperage_vues._VISEE not in svg
-    assert any("sans visée" in m for m in messages)
+    assert any("sans cône" in m for m in messages)
     assert "PC7-1" in svg
 
 
-def test_une_direction_confirmee_sans_focale_porte_l_axe_mais_pas_le_cone():
-    """« Ne pas inventer un champ de vue » n'interdit pas de montrer la direction."""
+def test_une_direction_confirmee_ouvre_un_cone_sans_rien_demander_de_plus():
+    """Décision du 16/09/2026 : position et orientation suffisent.
+
+    Plus de focale à lire, donc plus de photographie écartée faute d'en
+    annoncer une — une sur cinq du jeu de validation était dans ce cas.
+    """
     svg, messages = _planche_avec([_vue(0.0, 0.0, cap=90.0)], ["PC7-1"])
-    assert reperage_vues._VISEE in svg
-    assert "stroke-dasharray" in svg
-    assert any("champ de vue inconnu" in m for m in messages)
-    # Le cône est une surface remplie ; l'axe seul n'en pose aucune.
-    assert f'fill="{reperage_vues._VISEE}"' not in svg
-
-
-def test_une_direction_confirmee_avec_focale_ouvre_un_cone():
-    svg, messages = _planche_avec(
-        [_vue(0.0, 0.0, cap=90.0, demi_angle=32.7)], ["PC7-1"]
-    )
     assert f'fill="{reperage_vues._VISEE}"' in svg
     assert messages == []
+
+
+def test_le_cone_garde_sa_taille_quelle_que_soit_l_echelle():
+    """C'est un symbole de lecture, comme le repère, pas un objet du site."""
+    import re
+
+    largeurs = []
+    for denominateur in (1000, 10000):
+        svg, _ = _planche_avec([_vue(0.0, 0.0, cap=90.0)], ["PC7-1"], denominateur)
+        chemins = re.findall(rf'd="([^"]+)"[^>]*fill="{reperage_vues._VISEE}"', svg)
+        assert chemins, f"cône introuvable au 1/{denominateur}"
+        points = [float(v) for v in re.findall(r"(-?[\d.]+)", chemins[0])]
+        xs = points[0::2]
+        largeurs.append(max(xs) - min(xs))
+    assert largeurs[0] == pytest.approx(largeurs[1], rel=0.02)
 
 
 def test_le_cone_pointe_bien_vers_l_est_pour_un_cap_de_90():
     """La conversion azimut vers angle mathématique est le piège du lot.
 
-    Un cap de 90° regarde l'est : sur la planche, l'axe doit donc partir vers
-    la droite, à la même ordonnée. Inverser les conventions l'enverrait au nord.
+    Un cap de 90° regarde l'est : le cône doit donc s'étendre à droite du
+    repère, et rester centré sur son ordonnée. Inverser les conventions
+    l'enverrait au nord.
     """
     import re
 
-    vue = _vue(0.0, 0.0, cap=90.0)
-    svg, _ = _planche_avec([vue], ["PC7-1"])
-    traces = re.findall(r'stroke-dasharray[^/]*d="M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)', svg)
-    if not traces:
-        traces = re.findall(r'd="M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)"[^/]*dasharray', svg)
-    assert traces, f"axe de visée introuvable dans le SVG"
-    x1, y1, x2, y2 = (float(v) for v in traces[0])
-    assert x2 > x1 + 10.0, "l'axe ne part pas vers l'est"
-    assert abs(y2 - y1) < 1.0, "l'axe dérive en latitude"
+    svg, _ = _planche_avec([_vue(0.0, 0.0, cap=90.0)], ["PC7-1"])
+    chemins = re.findall(rf'd="([^"]+)"[^>]*fill="{reperage_vues._VISEE}"', svg)
+    assert chemins, "cône introuvable"
+    points = [float(v) for v in re.findall(r"(-?[\d.]+)", chemins[0])]
+    xs, ys = points[0::2], points[1::2]
+    sommet_x, sommet_y = xs[0], ys[0]  # le premier point est la prise de vue
+    assert max(xs) > sommet_x + 5.0, "le cône ne s'ouvre pas vers l'est"
+    assert max(xs) - sommet_x > abs(max(ys) - sommet_y), "le cône penche vers le nord"
+    assert abs((max(ys) + min(ys)) / 2 - sommet_y) < 1.0, "le cône n'est pas centré"
 
 
 def test_le_repere_garde_sa_taille_quelle_que_soit_l_echelle():
@@ -268,9 +249,7 @@ def test_le_repere_garde_sa_taille_quelle_que_soit_l_echelle():
     for denominateur in (1000, 10000):
         svg, _ = _planche_avec([_vue(0.0, 0.0)], ["PC7-1"], denominateur)
         # Le disque est le seul contour blanc rempli de la planche.
-        chemins = re.findall(r'fill="#ffffff"[^/]*d="([^"]+)"', svg) or re.findall(
-            r'd="([^"]+)"[^/]*fill="#ffffff"', svg
-        )
+        chemins = re.findall(r'd="([^"]+)"[^>]*fill="#ffffff"', svg)
         assert chemins, f"repère introuvable au 1/{denominateur}"
         points = [float(v) for v in re.findall(r'(-?[\d.]+)', chemins[0])]
         xs = points[0::2]

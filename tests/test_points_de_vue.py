@@ -160,7 +160,7 @@ def test_un_cap_exif_ne_suffit_pas_a_dessiner_un_cone():
     assert vue.cap_deg == 340.0
     assert vue.origine_cap == ORIGINE_EXIF
     assert not vue.cap_confirme
-    assert not vue.dessine_une_visee
+    assert not vue.dessine_un_cone
 
 
 def test_une_direction_corrigee_dans_le_rapport_est_confirmee():
@@ -169,7 +169,7 @@ def test_une_direction_corrigee_dans_le_rapport_est_confirmee():
     point["cap"] = 125.0
     vue = depuis_carte(lire_carte(_carte([point])).points[0])
     assert vue.origine_cap == ORIGINE_CARTE
-    assert vue.cap_confirme and vue.dessine_une_visee
+    assert vue.cap_confirme and vue.dessine_un_cone
 
 
 def test_une_direction_jamais_touchee_dans_le_rapport_reste_une_proposition():
@@ -184,7 +184,7 @@ def test_une_direction_jamais_touchee_dans_le_rapport_reste_une_proposition():
     vue = depuis_carte(carte.points[0])
     assert vue.cap_deg == pytest.approx(321.6)
     assert not vue.cap_confirme
-    assert not vue.dessine_une_visee
+    assert not vue.dessine_un_cone
     assert any("boussole du téléphone" in m for m in carte.avertissements)
 
 
@@ -200,23 +200,23 @@ def test_une_calibration_globale_vaut_confirmation():
     carte = lire_carte(_carte([point], offset=-30.0))
     vue = depuis_carte(carte.points[0])
     assert vue.cap_deg == pytest.approx(340.0)
-    assert vue.cap_confirme and vue.dessine_une_visee
+    assert vue.cap_confirme and vue.dessine_un_cone
     assert carte.avertissements == ()
 
 
-def test_un_point_sans_cap_ne_dessine_aucune_visee_et_ce_n_est_pas_une_erreur():
+def test_un_point_sans_cap_ne_dessine_aucun_cone_et_ce_n_est_pas_une_erreur():
     """Le cas normal d'un drone : la position sans la direction."""
     vue = place_a_la_main("drone.jpg", 700000.0, 6800000.0)
     assert vue.cap_deg is None
-    assert not vue.dessine_une_visee
+    assert not vue.dessine_un_cone
 
     carte = lire_carte(_carte([_point(cap=None)]))
-    assert depuis_carte(carte.points[0]).dessine_une_visee is False
+    assert depuis_carte(carte.points[0]).dessine_un_cone is False
 
 
 def test_viser_sur_la_carte_de_l_application_confirme_le_cap():
     vue = place_a_la_main("vue.jpg", 700000.0, 6800000.0, 340.0)
-    assert vue.cap_confirme and vue.dessine_une_visee
+    assert vue.cap_confirme and vue.dessine_un_cone
 
 
 def test_une_photo_sans_position_ne_donne_pas_un_point_de_vue_invente():

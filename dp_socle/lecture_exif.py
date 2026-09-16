@@ -53,7 +53,6 @@ _GPS_LON_REF, _GPS_LON = 3, 4
 _GPS_DIR_REF, _GPS_DIR = 16, 17
 _GPS_PRECISION = 31  # GPSHPositioningError : incertitude horizontale, en mètres
 _DATE_ORIGINALE = 36867  # DateTimeOriginal, préféré à DateTime (306)
-_FOCALE_35MM = 41989  # FocalLengthIn35mmFilm : absente d'une photo sur cinq
 _DATE_FICHIER = 306
 
 #: Extensions que Pillow ne sait ouvrir qu'avec `pillow-heif` enregistré.
@@ -144,11 +143,6 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
             exif = image.getexif()
             gps = exif.get_ifd(_IFD_GPS)
             bloc_exif = exif.get_ifd(_IFD_EXIF)
-            # Les dimensions se relèvent sur l'image, pas dans l'EXIF : une photo
-            # rognée porte souvent encore les dimensions du capteur dans ses
-            # champs, et c'est le rapport de l'image **rendue** qui commande le
-            # champ de vue.
-            largeur_px, hauteur_px = image.size
     except OSError as erreur:
         raise ErreurPhotoIllisible(
             f"« {nom} » ne s'ouvre pas comme une image ({erreur})."
@@ -186,24 +180,6 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
                     "France, sous la précision d'une boussole de téléphone."
                 )
 
-    focale_35mm = None
-    if bloc_exif and bloc_exif.get(_FOCALE_35MM) is not None:
-        try:
-            focale_35mm = float(bloc_exif[_FOCALE_35MM])
-        except (TypeError, ValueError):
-            avertissements.append(
-                f"« {nom} » : la focale annoncée est illisible "
-                f"({bloc_exif[_FOCALE_35MM]!r}). Le point de vue se place sans "
-                "champ de vue ; la planche portera l'axe de visée seul."
-            )
-        else:
-            if focale_35mm <= 0:
-                avertissements.append(
-                    f"« {nom} » : focale annoncée nulle ou négative "
-                    f"({focale_35mm}). Aucun champ de vue n'en est déduit."
-                )
-                focale_35mm = None
-
     date = None
     brut = bloc_exif.get(_DATE_ORIGINALE) if bloc_exif else None
     brut = brut or exif.get(_DATE_FICHIER)
@@ -225,9 +201,6 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
             cap_deg=cap_deg,
             precision_m=precision_m,
             date=date,
-            focale_35mm=focale_35mm,
-            largeur_px=largeur_px,
-            hauteur_px=hauteur_px,
             avertissements=tuple(avertissements),
         )
 
@@ -244,9 +217,6 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
             cap_deg=cap_deg,
             precision_m=precision_m,
             date=date,
-            focale_35mm=focale_35mm,
-            largeur_px=largeur_px,
-            hauteur_px=hauteur_px,
             avertissements=tuple(avertissements),
         )
 
@@ -257,8 +227,5 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
         cap_deg=cap_deg,
         precision_m=precision_m,
         date=date,
-        focale_35mm=focale_35mm,
-        largeur_px=largeur_px,
-        hauteur_px=hauteur_px,
         avertissements=tuple(avertissements),
     )
