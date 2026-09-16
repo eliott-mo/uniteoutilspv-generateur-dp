@@ -1213,6 +1213,11 @@ def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatc
 # ---------------------------------------------------------------------------
 
 
+def _affectations(application):
+    """Les listes déroulantes de la galerie du rapport, dans l'ordre."""
+    return [b for b in application.selectbox if b.label == "Affectation"]
+
+
 def _carte_photos(points) -> bytes:
     """Une carte photos-geoloc minimale, avec de vraies images en base64."""
     import base64
@@ -1267,6 +1272,18 @@ def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkey
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
+    # Rien n'est retenu tant que le chef de projet n'a pas choisi : le bouton
+    # reste hors d'atteinte, et c'est tout l'objet du défaut « Ne pas retenir ».
+    reprendre = [b for b in application.button if "Reprendre" in b.label]
+    assert reprendre and reprendre[0].disabled
+
+    # Les widgets sont reconstruits à chaque exécution : la liste se relit à
+    # chaque tour, sinon la seconde référence pointe sur un objet périmé et son
+    # choix se perd en silence.
+    for rang, piece_voulue in enumerate(("DP 7", "DP 8")):
+        _affectations(application)[rang].set_value(piece_voulue)
+        application = application.run()
+
     _cliquer(application, "Reprendre les photographies")
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
@@ -1287,7 +1304,9 @@ def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkey
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
-    """DP 7 est l'environnement proche, DP 8 le paysage lointain.
+    """La pièce est suggérée, jamais choisie d'office.
+
+    DP 7 est l'environnement proche, DP 8 le paysage lointain.
 
     Chaque point se range donc seul, et le chef de projet ne corrige que ce qui
     n'est pas évident. Positions calculées le 16/09/2026 sur les bornes réelles
@@ -1302,11 +1321,16 @@ def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
     _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
     application = application.run()
 
-    affectations = [
-        boite.value for boite in application.selectbox
-        if boite.label == "Affectation"
+    # Rien n'est choisi d'avance : une visite de vingt-cinq photographies ne
+    # doit pas en verser vingt-cinq au dossier parce que personne n'a rien dit.
+    assert [boite.value for boite in _affectations(application)] == [
+        "Ne pas retenir",
+        "Ne pas retenir",
     ]
-    assert affectations == ["DP 7", "DP 8"], affectations
+    # La distance au site est en revanche affichée, pour n'avoir à corriger que
+    # ce qui n'est pas évident.
+    suggestions = [c.value for c in application.caption if "suggère" in c.value]
+    assert "**DP 7**" in suggestions[0] and "**DP 8**" in suggestions[1], suggestions
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")

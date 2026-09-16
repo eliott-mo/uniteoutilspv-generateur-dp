@@ -1463,7 +1463,14 @@ if fichier_notice is None and contrat_present:
 DISTANCE_PAYSAGE_LOINTAIN_M = 500.0
 
 #: Ce qu'une photographie du rapport peut devenir, dans l'ordre de la liste.
-AFFECTATIONS = ("(ignorer)", "DP 7", "DP 8", "DP 6 — image brute")
+#:
+#: « Ne pas retenir » vient en tête **et fait le défaut**. Une pièce proposée
+#: d'emblée retenait toutes les photographies du rapport : sur une visite qui en
+#: compte vingt-cinq, les vingt-cinq partaient au dossier, et « choisir »
+#: consistait à écarter les autres une par une — l'inverse du geste attendu
+#: (retour d'usage du 17/09/2026). La pièce que la distance suggère est
+#: maintenant affichée à côté de la liste, sans rien décider.
+AFFECTATIONS = ("Ne pas retenir", "DP 6 — image brute", "DP 7", "DP 8")
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -1571,7 +1578,9 @@ st.markdown("**Rapport de visite photos-geoloc** — la voie courte")
 st.caption(
     "Déposez la carte HTML de votre rapport de visite : les prises de vue y "
     "sont déjà placées, et les directions que vous y avez corrigées sur fond "
-    "satellite sont reprises telles quelles. Les photographies retenues sont "
+    "satellite sont reprises telles quelles. **Choisissez sous chaque vignette "
+    "la pièce à laquelle elle appartient** ; celles que vous laissez sur « Ne "
+    "pas retenir » ne partent pas au dossier. Les photographies retenues sont "
     "écrites dans le dossier du projet ; le rapport, lui, n'est pas conservé."
 )
 fichier_carte = st.file_uploader(
@@ -1615,12 +1624,36 @@ if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
                     choix_affectation[point.identifiant] = st.selectbox(
                         "Affectation",
                         options=AFFECTATIONS,
-                        index=AFFECTATIONS.index(propose),
+                        index=0,
                         key=f"affectation_{point.identifiant}",
                         label_visibility="collapsed",
                     )
+                    st.caption(f"↳ sa distance au site suggère **{propose}**")
 
-        if st.button("Reprendre les photographies retenues", width="stretch"):
+        retenues = [
+            code for code in choix_affectation.values()
+            if code and code != AFFECTATIONS[0]
+        ]
+        if retenues:
+            st.caption(
+                f"**{len(retenues)} photographie(s) retenue(s)** : "
+                + ", ".join(
+                    f"{code} ({retenues.count(code)})"
+                    for code in sorted(set(retenues))
+                )
+            )
+        else:
+            st.caption(
+                "Aucune photographie retenue pour l'instant. Choisissez une "
+                "pièce sous celles qui doivent partir au dossier — les autres "
+                "restent sur « Ne pas retenir »."
+            )
+
+        if st.button(
+            "Reprendre les photographies retenues",
+            width="stretch",
+            disabled=not retenues,
+        ):
             reprises = _reprendre_du_rapport(
                 _nom_dossier(commune), octets_carte, carte_rapport,
                 choix_affectation,
