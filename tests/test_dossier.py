@@ -48,13 +48,15 @@ def test_les_planches_du_lot_4_sont_produites():
         assert piece(code).produite
 
 
-def test_les_pieces_photographiques_restent_non_produites():
-    """Les insertions paysagères et les photographies sont jointes à la main.
+def test_les_pieces_photographiques_sont_produites_depuis_le_lot_6():
+    """Insertions paysagères et photographies, avec leur plan de repérage.
 
-    Elles attendent le lot 6 et ses plans de repérage.
+    Le générateur compose la planche autour des images déposées : il ne les
+    fabrique pas, mais il les assemble, les numérote et les pagine au sommaire —
+    c'est tout ce que `produite` décide.
     """
     for code in ("DP 6", "DP 7", "DP 8"):
-        assert not piece(code).produite
+        assert piece(code).produite
 
 
 def test_la_notice_est_produite_depuis_le_lot_5():

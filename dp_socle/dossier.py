@@ -3,9 +3,9 @@
 Référentiel unique des pièces : le sommaire de la page de garde et les titres
 de cartouche en sortent tous les deux, de sorte qu'ils ne puissent pas diverger.
 
-Les pièces des lots suivants y figurent dès maintenant, sans numéro de page :
-le sommaire annonce le dossier complet, et il suffira de basculer `produite` à
-vrai au fur et à mesure.
+Depuis le lot 6, toutes les pièces du dossier sont produites. `produite` reste
+le drapeau qui décide de la pagination au sommaire : une pièce qui n'a pas de
+page s'y affiche « — », en gris.
 """
 
 from __future__ import annotations
@@ -21,8 +21,6 @@ class Piece:
     titre: str
     #: Produite par le générateur, ou fournie / à venir dans un lot ultérieur.
     produite: bool = False
-    #: Précision affichée au sommaire pour les pièces non produites.
-    mention: str = ""
 
     @property
     def intitule(self) -> str:
@@ -54,9 +52,12 @@ PIECES = (
     # ouvrages existent — d'où la numérotation calculée sur les pièces
     # réellement produites et non sur cette liste.
     Piece("DP 4-3", "Autres ouvrages techniques", produite=True),
-    Piece("DP 6", "Insertions paysagères", mention="fournie"),
-    Piece("DP 7", "Photographie environnement proche", mention="fournie"),
-    Piece("DP 8", "Photographie paysage lointain", mention="fournie"),
+    # Produites depuis le lot 6. DP 6 peut couvrir **plusieurs planches**, une
+    # par point de vue : son rang se compte donc sur les planches réellement
+    # produites, comme celui des DP 4, et jamais sur cette liste.
+    Piece("DP 6", "Insertions paysagères", produite=True),
+    Piece("DP 7", "Photographie environnement proche", produite=True),
+    Piece("DP 8", "Photographie paysage lointain", produite=True),
     # Produite depuis le lot 5, mais pas composée : le chef de projet fournit
     # la notice en PDF et l'outil l'habille du cadre et du cartouche du
     # dossier. Elle est la seule pièce à pouvoir couvrir plusieurs pages.

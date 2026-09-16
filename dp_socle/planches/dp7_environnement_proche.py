@@ -1,0 +1,88 @@
+"""DP 7 — Photographies de l'environnement proche (lot 6).
+
+Une planche unique, portant **une ou deux** photographies et leur plan de
+repérage. Les prises de vue y sont numérotées `PC7-1` et `PC7-2`, forme
+relevée le 10/09/2026 sur la page 14 du dossier de référence : les services
+instructeurs y sont habitués, et c'est la raison qui a présidé au choix des
+intitulés dans `dp_socle/dossier.py`.
+
+C'est la pièce du **proche** : les prises de vue y sont aux abords du site,
+et le plan de repérage se cadre en conséquence. Massay la porte au 1/2 500.
+
+La numérotation repart de 1 pour cette pièce. Celle d'un rapport de visite
+compte tous les points de la visite et n'aurait pas le même sens ici.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from ..dossier import piece
+from ..erreurs import ErreurComposition
+from ..projet import Projet
+from .commun import Sortie, nouvelle_planche
+from .photographies import ImagePlanche, composer
+from .reperage_vues import repere_de_vue
+
+CODE = "DP 7"
+
+#: Intitulé porté par chaque cadre d'image, préfixé du repère de la prise de vue.
+INTITULE = "Photographie de l'environnement proche"
+
+#: Au-delà, la planche ne les logerait plus à une taille lisible — et la pièce
+#: n'en demande pas davantage.
+PRISES_MAXIMALES = 2
+
+
+def generer(
+    projet: Projet,
+    prises,
+    emprise,
+    dossier: str | Path,
+    numero: str | None = None,
+    fond_ign: bool = True,
+) -> Sortie:
+    """La planche de la pièce, pour une ou deux prises de vue.
+
+    `prises` porte des couples `(point_de_vue, chemin_image)`, dans l'ordre où
+    les repères doivent être numérotés.
+    """
+    prises = list(prises)
+    if not prises:
+        raise ErreurComposition(
+            "DP 7 : aucune photographie déposée. La pièce ne se produit pas vide."
+        )
+    if len(prises) > PRISES_MAXIMALES:
+        raise ErreurComposition(
+            f"{CODE} : {len(prises)} photographies déposées, pour "
+            f"{PRISES_MAXIMALES} "
+            "au plus sur une planche. Retirez-en, ou traitez le surplus dans une "
+            "pièce jointe libre."
+        )
+
+    points_de_vue = [prise[0] for prise in prises]
+    reperes = [repere_de_vue(CODE, rang) for rang in range(1, len(prises) + 1)]
+
+    planche = nouvelle_planche(projet, CODE, numero=numero)
+    retenu = composer(
+        planche,
+        [
+            ImagePlanche(Path(prise[1]), f"{repere} : {INTITULE}")
+            for prise, repere in zip(prises, reperes)
+        ],
+        points_de_vue,
+        reperes,
+        emprise,
+        "DP 7 — plan de repérage",
+        emplacements=PRISES_MAXIMALES,
+        fond_ign=fond_ign,
+    )
+
+    chemin = planche.rendre_pdf(Path(dossier) / "DP_7_environnement_proche.pdf")
+    return Sortie(
+        numero=CODE,
+        titre=piece(CODE).titre,
+        chemin=chemin,
+        echelle=retenu["echelle_reperage"],
+        details={"reperes": reperes, **retenu},
+    )
