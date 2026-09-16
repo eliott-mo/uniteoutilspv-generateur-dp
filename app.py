@@ -25,8 +25,14 @@ preparer_cairo()
 # les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
 # dans leur module, pour ne pas toucher au lot 2.
 from dp_socle.planches.reperage_vues import OUVERTURE_CONE_DEG
-from dp_socle.lecture_exif import etat_heic
-from dp_socle.points_de_vue import ORIGINE_MAIN, cap_vers
+from dp_socle.lecture_exif import etat_heic, lire_metadonnees
+from dp_socle.points_de_vue import (
+    ORIGINE_EXIF,
+    ORIGINE_MAIN,
+    SEUIL_PRECISION_M,
+    cap_vers,
+    vers_l93,
+)
 from dp_socle.apercu_be import (
     en_wgs84_point,
     ORDRE_DESSIN,
@@ -1687,13 +1693,64 @@ else:
 # aller-retour, et toutes les prises se placent d'affilée.
 
 
+def _lire_exif_une_fois(code: str, fichier) -> None:
+    """Pré-remplit la prise de vue avec ce que la photographie sait d'elle-même.
+
+    Une photographie de visite porte souvent sa position : la redemander au chef
+    de projet serait lui faire saisir ce que le fichier contient déjà. Le cap,
+    lui, n'est qu'une **proposition** — la boussole d'un téléphone se trompe de
+    10 à 20°, et il ne fera dessiner aucun cône tant qu'il n'aura pas été visé.
+
+    Lu une seule fois par photographie, et non à chaque exécution du script :
+    Streamlit en relance une à chaque interaction, et l'EXIF d'une photo de
+    12 Mpx n'est pas gratuit. Le drapeau reste posé même quand la lecture échoue,
+    sans quoi une photographie illisible serait rouverte indéfiniment.
+    """
+    vue = _vue_photo(code, fichier.name)
+    if vue.get("exif_lu"):
+        return
+    vue["exif_lu"] = True
+    try:
+        metadonnees = lire_metadonnees(fichier, nom=fichier.name)
+    except ErreurDP as erreur:
+        vue["exif_message"] = str(erreur)
+        return
+    finally:
+        # Le flux du dépôt est partagé avec le reste de la page : le rembobiner
+        # évite que la vignette ou l'écriture sur disque ne lisent zéro octet.
+        fichier.seek(0)
+
+    if metadonnees.geolocalisee:
+        vue["x"], vue["y"] = vers_l93(metadonnees.lat, metadonnees.lon)
+        vue["origine_position"] = ORIGINE_EXIF
+        vue["precision_m"] = metadonnees.precision_m
+    if metadonnees.cap_deg is not None:
+        vue["cap_deg"] = metadonnees.cap_deg
+        vue["origine_cap"] = ORIGINE_EXIF
+        vue["cap_confirme"] = False
+    if metadonnees.avertissements:
+        vue["exif_message"] = " ".join(metadonnees.avertissements)
+
+
 def _etat_de_la_prise(vue: dict) -> str:
-    """Ce qui manque à une prise de vue, dit en clair."""
+    """Ce qui manque à une prise de vue, dit en clair — et d'où vient ce qu'on a."""
     if vue.get("x") is None:
-        return "à placer"
+        return "à placer sur la carte"
+    origine = (
+        "placée d'après l'EXIF"
+        if vue.get("origine_position") == ORIGINE_EXIF
+        else "placée sur la carte"
+    )
+    if vue.get("precision_m") and vue["precision_m"] > SEUIL_PRECISION_M:
+        origine += f" — incertitude annoncée {vue['precision_m']:.0f} m"
     if vue.get("cap_confirme"):
-        return f"placée, visée {vue['cap_deg']:.0f}°"
-    return "placée, sans direction"
+        return f"{origine}, visée {vue['cap_deg']:.0f}°"
+    if vue.get("cap_deg") is not None:
+        return (
+            f"{origine} — direction EXIF de {vue['cap_deg']:.0f}° **proposée**, "
+            "à confirmer en visant : aucun cône sans cela"
+        )
+    return f"{origine}, sans direction"
 
 
 def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
@@ -1729,6 +1786,8 @@ def _ligne_de_prise(code: str, fichier) -> None:
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
+        if vue.get("exif_message"):
+            st.caption(f"⚠️ {vue['exif_message']}")
         if code == "DP 6":
             # Les volets d'une même vue partagent un point de vue : c'est la
             # même prise (D3). Le sélecteur dit lesquels vont ensemble, et
@@ -1742,6 +1801,23 @@ def _ligne_de_prise(code: str, fichier) -> None:
                 key=f"vue_de_{code}_{fichier.name}",
                 label_visibility="collapsed",
             )
+        # Un seul curseur pour les deux axes : le rognage n'en touche qu'un —
+        # la largeur d'une photographie plus panoramique que son emplacement, sa
+        # hauteur sinon — et donner la même valeur aux deux laisse le réglage
+        # agir sur celui qui compte, sans demander au chef de projet de deviner
+        # lequel c'est.
+        cadrage = st.slider(
+            "Recadrage",
+            min_value=-50, max_value=50, value=int(vue.get("cadrage", 0.0) * 100),
+            step=5, format="%d %%",
+            key=f"cadrage_{code}_{fichier.name}",
+            help="La photographie est rognée pour remplir son emplacement. "
+            "Déplacez ce curseur si le rognage retire ce qu'il fallait montrer : "
+            "vers la gauche pour garder le haut ou la gauche de l'image, vers la "
+            "droite pour l'inverse.",
+        )
+        vue["cadrage"] = cadrage / 100.0
+
     with bouton_placer:
         if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}"):
             _armer_sur_photo("placer_vue", code, fichier.name)
@@ -1780,6 +1856,8 @@ def _saisir_les_prises_de_vue(emplacement, photos_par_piece: dict) -> None:
                 continue
             st.markdown(f"**{code}** — {piece(code).titre}")
             for fichier in fichiers:
+                if not fichier.name.lower().endswith(".pdf"):
+                    _lire_exif_une_fois(code, fichier)
                 _ligne_de_prise(code, fichier)
 
 
@@ -1915,6 +1993,10 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
                         ),
                         images=tuple(
                             str(dossier / Path(f.name).name) for f, _ in membres
+                        ),
+                        cadrages=tuple(
+                            (v.get("cadrage", 0.0), v.get("cadrage", 0.0))
+                            for _, v in membres
                         ),
                     )
                 )

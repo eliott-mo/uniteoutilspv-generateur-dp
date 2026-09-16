@@ -518,3 +518,28 @@ def test_deux_points_de_vue_gardent_leur_distance_terrain():
     )
     premier, second = (depuis_carte(point) for point in carte.points)
     assert premier.point.distance(second.point) == pytest.approx(111.0, abs=2.0)
+
+
+def test_l_exif_se_lit_sur_un_fichier_ouvert_comme_sur_un_chemin(tmp_path):
+    """Une photographie déposée dans Streamlit n'a jamais touché le disque.
+
+    Écrire un fichier temporaire pour la lire recopierait plusieurs mégaoctets à
+    chaque exécution du script, et Streamlit en relance une à chaque
+    interaction.
+    """
+    import io as _io
+
+    chemin = _photo(tmp_path / "vue.jpg", gps=_gps(48.5, 6.5, cap=340.0))
+    par_chemin = lecture_exif.lire_metadonnees(chemin)
+    par_flux = lecture_exif.lire_metadonnees(
+        _io.BytesIO(open(chemin, "rb").read()), nom="vue.jpg"
+    )
+    assert par_flux == par_chemin
+
+
+def test_un_fichier_ouvert_sans_nom_est_refuse():
+    """L'extension est le seul moyen de reconnaître un HEIC."""
+    import io as _io
+
+    with pytest.raises(ErreurPhotoIllisible, match="sans nom"):
+        lecture_exif.lire_metadonnees(_io.BytesIO(b"peu importe"))

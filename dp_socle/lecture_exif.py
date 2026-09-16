@@ -113,12 +113,18 @@ def _dms_vers_degres(dms, reference: str) -> float:
     return -decimal if reference in ("S", "W") else decimal
 
 
-def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesPhoto:
+def lire_metadonnees(source, nom: str | None = None) -> MetadonneesPhoto:
     """Ce que l'EXIF de la photographie livre, et ce qu'il n'a pas livré.
 
+    `source` est un chemin, ou un fichier déjà ouvert — celui que Streamlit rend
+    d'un dépôt, qui n'a jamais touché le disque. Lire l'EXIF sans écrire un
+    fichier temporaire évite de recopier plusieurs mégaoctets à chaque exécution
+    du script, et Streamlit en relance une à chaque interaction.
+
     `nom` prend le pas sur le nom du fichier quand l'appelant en a un meilleur —
-    une photo déposée par Streamlit vit sous un nom temporaire qui ne dirait rien
-    au chef de projet dans le rapport de génération.
+    une photo déposée vit sous un nom temporaire qui ne dirait rien au chef de
+    projet dans le rapport de génération. Il est **obligatoire** pour un fichier
+    ouvert, dont l'extension est le seul moyen de reconnaître un HEIC.
 
     Une photo sans position n'est pas une erreur ici : elle rend des
     métadonnées sans `lat`/`lon`, et c'est à l'appelant d'en faire un placement
@@ -126,11 +132,16 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
     """
     from PIL import Image
 
-    chemin = Path(chemin)
-    nom = nom or chemin.name
+    chemin = Path(source) if isinstance(source, (str, Path)) else None
+    nom = nom or (chemin.name if chemin is not None else None)
+    if nom is None:
+        raise ErreurPhotoIllisible(
+            "Photographie ouverte sans nom : son extension est le seul moyen de "
+            "reconnaître un HEIC, et son nom le seul repère du rapport."
+        )
     avertissements: list[str] = []
 
-    if chemin.suffix.lower() in EXTENSIONS_HEIC and not ETAT_HEIC.disponible:
+    if Path(nom).suffix.lower() in EXTENSIONS_HEIC and not ETAT_HEIC.disponible:
         # Sans cette vérification, Pillow dirait seulement qu'il ne reconnaît pas
         # le fichier, et le chef de projet croirait sa photo abîmée.
         raise ErreurPhotoIllisible(
@@ -139,7 +150,7 @@ def lire_metadonnees(chemin: str | Path, nom: str | None = None) -> MetadonneesP
         )
 
     try:
-        with Image.open(chemin) as image:
+        with Image.open(chemin if chemin is not None else source) as image:
             exif = image.getexif()
             gps = exif.get_ifd(_IFD_GPS)
             bloc_exif = exif.get_ifd(_IFD_EXIF)

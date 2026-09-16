@@ -47,6 +47,26 @@ BORNES = (622_800.0, 6_750_550.0, 623_120.0, 6_750_970.0)
 # ---------------------------------------------------------------------------
 
 
+def _image_geolocalisee(lat=47.9, lon=1.94, cap=None) -> bytes:
+    """Un JPEG minuscule portant une position GPS, comme une photo de visite."""
+    import io
+
+    from PIL import Image
+
+    image = Image.new("RGB", (240, 160), (150, 180, 150))
+    exif = image.getexif()
+    gps = exif.get_ifd(0x8825)
+    gps.update({
+        1: "N", 2: (float(int(lat)), (lat % 1) * 60.0, 0.0),
+        3: "E", 4: (float(int(lon)), (lon % 1) * 60.0, 0.0),
+    })
+    if cap is not None:
+        gps.update({16: "T", 17: float(cap)})
+    tampon = io.BytesIO()
+    image.save(tampon, format="JPEG", exif=exif)
+    return tampon.getvalue()
+
+
 def _image_png(couleur=(120, 140, 160)) -> bytes:
     """Une image minuscule mais valide : `st.image` refuse des octets factices."""
     import io
@@ -1116,3 +1136,61 @@ def test_une_photo_remplacee_par_une_autre_oublie_son_point_de_vue(
     _televerser(application, "DP 7", [("autre.jpg", _image_png(), "image/png")])
     application = application.run()
     assert "vue.jpg" not in application.session_state["vues_photo"]["DP 7"]
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photo_geolocalisee_se_place_seule(tmp_path, monkeypatch):
+    """L'EXIF d'une photographie de visite porte déjà sa position.
+
+    La redemander au chef de projet serait lui faire saisir ce que le fichier
+    contient. Le cap, lui, reste une proposition : aucun cône tant qu'il n'a pas
+    été visé sur fond satellite.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application,
+        "DP 8",
+        [("visite.jpg", _image_geolocalisee(cap=212.0), "image/jpeg")],
+    )
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    vue = application.session_state["vues_photo"]["DP 8"]["visite.jpg"]
+    assert vue["x"] is not None and vue["y"] is not None
+    assert vue["origine_position"] == "exif"
+    # Le cap est lu et proposé, mais il ne fait autorité pour personne.
+    assert vue["cap_deg"] == pytest.approx(212.0, abs=0.5)
+    assert vue["cap_confirme"] is False
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photo_sans_exif_reste_a_placer(tmp_path, monkeypatch):
+    """Un photomontage est un rendu : il n'a aucune position à livrer."""
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(application, "DP 8", [("montage.png", _image_png(), "image/png")])
+    application = application.run()
+
+    vue = application.session_state["vues_photo"]["DP 8"]["montage.png"]
+    assert vue.get("x") is None
+    assert vue["exif_lu"] is True
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
+    """Ce que le chef de projet règle à l'écran doit atteindre la planche."""
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+
+    curseurs = [c for c in application.slider if "Recadrage" in c.label]
+    assert curseurs, "le curseur de recadrage manque"
+    curseurs[0].set_value(-30)
+    application = application.run()
+    assert application.session_state["vues_photo"]["DP 8"]["visite.jpg"][
+        "cadrage"
+    ] == pytest.approx(-0.30)
