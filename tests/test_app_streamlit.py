@@ -1194,3 +1194,120 @@ def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatc
     assert application.session_state["vues_photo"]["DP 8"]["visite.jpg"][
         "cadrage"
     ] == pytest.approx(-0.30)
+
+
+# ---------------------------------------------------------------------------
+# Reprendre un rapport de visite photos-geoloc
+# ---------------------------------------------------------------------------
+
+
+def _carte_photos(points) -> bytes:
+    """Une carte photos-geoloc minimale, avec de vraies images en base64."""
+    import base64
+    import io
+    import json
+
+    from PIL import Image
+
+    def _image_base64(teinte):
+        tampon = io.BytesIO()
+        Image.new("RGB", (120, 80), teinte).save(tampon, format="JPEG")
+        return base64.b64encode(tampon.getvalue()).decode("ascii")
+
+    ecrits = []
+    for rang, (nom, lat, lon, cap, manuel) in enumerate(points):
+        point = {
+            "id": rang, "nom": nom, "ordre": rang,
+            "lat_brut": lat, "lon_brut": lon,
+            "lat_manuel": None, "lon_manuel": None, "lat": lat, "lon": lon,
+            "cap_brut": cap, "cap_manuel": cap if manuel else None,
+            "cap": cap, "precision_m": None, "masque": False, "commentaire": "",
+            "image": _image_base64((160 + 20 * rang, 180, 150)),
+        }
+        ecrits.append(point)
+    donnees = {
+        "version": 5, "titre": "Visite de site", "offset": 0.0,
+        "emprise": None, "points": ecrits,
+    }
+    return (
+        "<html><body>"
+        + '<script id="donnees-carte" type="application/json">'
+        + json.dumps(donnees, ensure_ascii=False)
+        + "</script></body></html>"
+    ).encode("utf-8")
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkeypatch):
+    """L'entrée de premier choix du lot : le travail déjà fait ne se refait pas.
+
+    Une direction **figée à la main** dans le rapport part confirmée ; elle fera
+    donc dessiner un cône sans qu'on ait à viser de nouveau.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    # Saint-Cyr : un point tout près du site, un autre à plus d'un kilomètre.
+    carte = _carte_photos([
+        ("proche.jpeg", 47.85268, 1.96650, 212.0, True),
+        ("lointaine.jpeg", 47.85793, 1.94968, None, False),
+    ])
+    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    _cliquer(application, "Reprendre les photographies")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    reprises = application.session_state["photos_reprises"]
+    retenues = {nom for par_nom in reprises.values() for nom in par_nom}
+    assert retenues == {"proche.jpg", "lointaine.jpg"}, reprises
+
+    # La direction figée dans le rapport fait autorité, et rien d'autre.
+    vues = application.session_state["vues_photo"]
+    confirmes = [
+        vue for par_nom in vues.values() for vue in par_nom.values()
+        if vue.get("cap_confirme")
+    ]
+    assert len(confirmes) == 1
+    assert confirmes[0]["cap_deg"] == pytest.approx(212.0, abs=0.5)
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
+    """DP 7 est l'environnement proche, DP 8 le paysage lointain.
+
+    Chaque point se range donc seul, et le chef de projet ne corrige que ce qui
+    n'est pas évident. Positions calculées le 16/09/2026 sur les bornes réelles
+    de Saint-Cyr : 90 m du site pour la première, 1 396 m pour la seconde.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    carte = _carte_photos([
+        ("proche.jpeg", 47.85268, 1.96650, None, False),
+        ("lointaine.jpeg", 47.85793, 1.94968, None, False),
+    ])
+    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
+    application = application.run()
+
+    affectations = [
+        boite.value for boite in application.selectbox
+        if boite.label == "Affectation"
+    ]
+    assert affectations == ["DP 7", "DP 8"], affectations
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_carte_illisible_est_refusee_sans_bloquer_l_ecran(tmp_path, monkeypatch):
+    """Le chef de projet doit pouvoir corriger, pas se retrouver devant un mur."""
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "Carte du rapport",
+        ("pas-une-carte.htm", b"<html><body>bonjour</body></html>", "text/html"),
+    )
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+    assert any(
+        "n'est pas une carte" in erreur.value for erreur in application.error
+    ), [e.value for e in application.error]

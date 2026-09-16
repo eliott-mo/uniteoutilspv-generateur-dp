@@ -112,6 +112,10 @@ class PointDeCarte:
     numero: int
     lat: float
     lon: float
+    #: Rang du point dans le fichier, dans l'ordre où il y est écrit — et non
+    #: dans l'ordre d'affichage. C'est par lui que `image_de` retrouve la
+    #: photographie sans parser le bloc entier.
+    rang_fichier: int = 0
     cap_deg: float | None = None
     #: Vrai si cette direction a été **touchée** dans le rapport : figée à la
     #: main, ou reprise par la calibration globale de la boussole. Un cap sorti
@@ -317,12 +321,18 @@ def _points(bruts: list, offset: float) -> tuple[tuple[PointDeCarte, ...], int, 
     calculé sur la liste complète : la corbeille décale bien la numérotation.
     """
     avertissements: list[str] = []
-    visibles = [point for point in bruts if isinstance(point, dict) and not point.get("masque")]
+    # Le rang dans le fichier est relevé avant tout tri : c'est lui qui sert à
+    # retrouver l'image, et l'ordre d'affichage n'est pas celui de l'écriture.
+    visibles = [
+        (rang, point)
+        for rang, point in enumerate(bruts)
+        if isinstance(point, dict) and not point.get("masque")
+    ]
     masques = len(bruts) - len(visibles)
-    visibles.sort(key=lambda point: point.get("ordre", 0))
+    visibles.sort(key=lambda paire: paire[1].get("ordre", 0))
 
     points: list[PointDeCarte] = []
-    for rang, brut in enumerate(visibles, start=1):
+    for rang, (rang_fichier, brut) in enumerate(visibles, start=1):
         lat, lon = _position_effective(brut, avertissements)
         if lat is None or lon is None:
             avertissements.append(
@@ -336,6 +346,7 @@ def _points(bruts: list, offset: float) -> tuple[tuple[PointDeCarte, ...], int, 
                 identifiant=brut.get("id", rang),
                 nom=str(brut.get("nom") or f"Photo {rang}"),
                 numero=rang,
+                rang_fichier=rang_fichier,
                 lat=lat,
                 lon=lon,
                 cap_deg=cap_deg,
@@ -453,3 +464,43 @@ def _nombre(valeur) -> float | None:
         return float(valeur)
     except (TypeError, ValueError):
         return None
+
+
+def image_de(document: bytes | str, rang_fichier: int, largeur_max: int = 320):
+    """La photographie d'un point, en vignette, sans parser le bloc entier.
+
+    Les images sont écrites dans l'ordre des points : la `rang_fichier`-ième
+    occurrence du motif est celle qu'on cherche. On s'arrête dès qu'on l'a
+    trouvée, et une seule image est décodée — là où `json.loads` sur le bloc
+    complet mettrait en mémoire les quarante photographies d'une visite, soit une
+    vingtaine de mégaoctets de base64.
+
+    Rend une image Pillow réduite à `largeur_max`, ou `None` si le point n'a pas
+    d'image. La réduction se fait ici : une vignette de galerie n'a pas besoin
+    des 4 000 pixels du capteur, et Streamlit garderait l'image décodée en cache.
+    """
+    import base64
+    import io as _io
+
+    from PIL import Image
+
+    motif = (
+        _MOTIF_IMAGE if isinstance(document, bytes)
+        else _MOTIF_IMAGE.decode("ascii")
+    )
+    for rang, trouve in enumerate(re.finditer(motif, document)):
+        if rang != rang_fichier:
+            continue
+        brut = trouve.group(0)
+        if isinstance(brut, bytes):
+            brut = brut.decode("ascii")
+        base64_image = brut.split('"')[3]
+        if not base64_image:
+            return None
+        image = Image.open(_io.BytesIO(base64.b64decode(base64_image)))
+        image.load()
+        if image.width > largeur_max:
+            hauteur = max(1, round(image.height * largeur_max / image.width))
+            image = image.resize((largeur_max, hauteur), Image.LANCZOS)
+        return image.convert("RGB")
+    return None

@@ -10,6 +10,7 @@ import io
 import json
 import zipfile
 from datetime import date as _date
+from dataclasses import dataclass
 from pathlib import Path
 
 import folium
@@ -25,8 +26,10 @@ preparer_cairo()
 # les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
 # dans leur module, pour ne pas toucher au lot 2.
 from dp_socle.planches.reperage_vues import OUVERTURE_CONE_DEG
+from dp_socle.carte_photos import depuis_carte, image_de, lire_carte
 from dp_socle.lecture_exif import etat_heic, lire_metadonnees
 from dp_socle.points_de_vue import (
+    ORIGINE_CARTE,
     ORIGINE_EXIF,
     ORIGINE_MAIN,
     SEUIL_PRECISION_M,
@@ -1618,6 +1621,212 @@ if fichier_notice is None and contrat_present:
         icon="⚠️",
     )
 
+# ---------------------------------------------------------------------------
+# Reprendre un rapport de visite photos-geoloc
+# ---------------------------------------------------------------------------
+#
+# C'est l'entrée de premier choix : le chef de projet qui a visité le site en a
+# fait un rapport, et il y a déjà placé chaque prise de vue — parfois corrigé sa
+# direction sur fond satellite, ce qui est la bonne façon de le faire. Reprendre
+# ce travail vaut mieux que de le lui faire refaire ici, sur un fond moins
+# lisible.
+#
+# Le rapport est une **importation, pas un stockage** : il est lu une fois, on
+# n'en garde que les métadonnées, les vignettes ne sont décodées qu'à la
+# demande, et seules les photographies retenues sont écrites sur le disque du
+# projet. Après quoi le dossier ne voit que des chemins de fichiers, comme pour
+# n'importe quelle photo déposée — pas de second chemin de traitement.
+
+#: Distance à l'emprise au-delà de laquelle une prise de vue est proposée en
+#: DP 8 plutôt qu'en DP 7. DP 7 est « l'environnement proche », DP 8 « le
+#: paysage lointain » : c'est une distance, et nous avons l'emprise.
+#:
+#: 500 m est cohérent avec le dossier de référence, dont la DP 7 est au 1/2 500
+#: et la DP 8 au 1/6 500. Ce n'est qu'une **proposition** : le chef de projet
+#: corrige d'une liste déroulante ce qui ne lui convient pas, comme il le fait
+#: pour la correspondance des calques en section 2.
+DISTANCE_PAYSAGE_LOINTAIN_M = 500.0
+
+#: Ce qu'une photographie du rapport peut devenir, dans l'ordre de la liste.
+AFFECTATIONS = ("(ignorer)", "DP 7", "DP 8", "DP 6 — image brute")
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _carte_photos_lue(octets: bytes):
+    """La carte déposée, lue une fois plutôt qu'à chaque interaction.
+
+    Streamlit relit un fichier déposé à chaque exécution du script : sans ce
+    cache, les 18 Mo d'un rapport seraient réanalysés à chaque case cochée. Le
+    cache est **borné à deux entrées** — il est global à toutes les sessions, et
+    un cache non borné de cartes entières est exactement ce qui a fait couper le
+    dépôt voisin par son hébergeur.
+    """
+    return lire_carte(octets)
+
+
+@st.cache_data(show_spinner=False, max_entries=40)
+def _vignette_du_rapport(octets: bytes, rang_fichier: int):
+    """Une vignette de la galerie, décodée seule et réduite.
+
+    Bornée elle aussi : une image décodée pèse quelques mégaoctets, et le cache
+    de Streamlit ne redescend qu'au redémarrage.
+    """
+    return image_de(octets, rang_fichier)
+
+
+def _piece_proposee(point, emprise_cloturee) -> str:
+    """DP 7 ou DP 8, selon la distance de la prise de vue au site.
+
+    Chaque point se range donc seul, et le chef de projet ne corrige que ce qui
+    n'est pas évident.
+    """
+    from shapely.geometry import Point
+
+    x, y = vers_l93(point.lat, point.lon)
+    distance = Point(x, y).distance(emprise_cloturee)
+    return "DP 8" if distance > DISTANCE_PAYSAGE_LOINTAIN_M else "DP 7"
+
+
+def _photos_reprises() -> dict:
+    """Les photographies tirées d'un rapport, par pièce puis par nom de fichier.
+
+    Elles vivent en session parce qu'elles n'ont pas de dépôt à l'écran : ce
+    sont des fichiers déjà écrits, que la génération retrouvera par leur chemin.
+    """
+    return st.session_state.setdefault("photos_reprises", {})
+
+
+def _reprendre_du_rapport(nom_projet: str, octets: bytes, carte, choix: dict) -> int:
+    """Écrit les photographies retenues et pose leur point de vue. Rend le compte.
+
+    C'est ici que le rapport cesse d'exister pour le dossier : ses images
+    deviennent des fichiers du projet, et leurs points de vue rejoignent ceux
+    qu'on place à la main. Rien ne distingue ensuite les deux provenances, sauf
+    le rapport de génération qui peut le dire.
+    """
+    reprises = 0
+    for point in carte.points:
+        code = choix.get(point.identifiant)
+        if not code or code == AFFECTATIONS[0]:
+            continue
+        piece_cible = "DP 6" if code.startswith("DP 6") else code
+        image = _vignette_du_rapport(octets, point.rang_fichier)
+        if image is None:
+            st.warning(
+                f"Le point {point.numero} « {point.nom} » n'a pas d'image dans "
+                "le rapport : il est ignoré.",
+                icon="⚠️",
+            )
+            continue
+        dossier = DOSSIER_PROJETS / nom_projet / piece_cible.replace(" ", "_")
+        dossier.mkdir(parents=True, exist_ok=True)
+        cible = dossier / f"{Path(point.nom).stem}.jpg"
+        image.save(cible, "JPEG", quality=90, optimize=True)
+
+        vue_depuis_carte = depuis_carte(point)
+        vue = _vue_photo(piece_cible, cible.name)
+        vue.update({
+            "x": vue_depuis_carte.x,
+            "y": vue_depuis_carte.y,
+            "origine_position": ORIGINE_CARTE,
+            "cap_deg": vue_depuis_carte.cap_deg,
+            "origine_cap": vue_depuis_carte.origine_cap,
+            "cap_confirme": vue_depuis_carte.cap_confirme,
+            "precision_m": vue_depuis_carte.precision_m,
+            "exif_lu": True,
+        })
+        _photos_reprises().setdefault(piece_cible, {})[cible.name] = str(cible)
+        reprises += 1
+    return reprises
+
+
+def emprise_cloturee_du_projet():
+    """L'emprise clôturée du plan importé, ou `None` s'il n'y en a pas.
+
+    La section 3 en a besoin pour proposer une pièce à chaque prise de vue, et
+    elle vit dans l'import du bureau d'études, deux sections plus haut.
+    """
+    import_be = st.session_state.get("import_be")
+    if import_be is None or import_be.plan is None:
+        return None
+    return import_be.plan.polygone_cloture
+
+
+st.markdown("**Rapport de visite photos-geoloc** — la voie courte")
+st.caption(
+    "Déposez la carte HTML de votre rapport de visite : les prises de vue y "
+    "sont déjà placées, et les directions que vous y avez corrigées sur fond "
+    "satellite sont reprises telles quelles. Les photographies retenues sont "
+    "écrites dans le dossier du projet ; le rapport, lui, n'est pas conservé."
+)
+fichier_carte = st.file_uploader(
+    "Carte du rapport de visite (.htm ou .html)",
+    type=["htm", "html"],
+    accept_multiple_files=False,
+    key="carte_photos_geoloc",
+)
+
+if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
+    octets_carte = fichier_carte.getvalue()
+    try:
+        carte_rapport = _carte_photos_lue(octets_carte)
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}", icon="🚫")
+    else:
+        st.caption(
+            f"« {carte_rapport.titre} » — {len(carte_rapport.points)} prise(s) de "
+            f"vue, format v{carte_rapport.version}"
+            + (f", {carte_rapport.masques} en corbeille" if carte_rapport.masques else "")
+        )
+        for message in carte_rapport.avertissements:
+            st.warning(message, icon="⚠️")
+
+        emprise_site = emprise_cloturee_du_projet()
+        choix_affectation = {}
+        # Une galerie de vignettes, et non une liste de numéros : un numéro seul
+        # ne dit pas ce qu'une photographie montre. Chacune porte le numéro
+        # qu'elle a sur les marqueurs du rapport — le seul repère commun entre
+        # les deux écrans, et il est stable.
+        for depart in range(0, len(carte_rapport.points), 4):
+            for colonne, point in zip(
+                st.columns(4), carte_rapport.points[depart : depart + 4]
+            ):
+                with colonne:
+                    vignette = _vignette_du_rapport(octets_carte, point.rang_fichier)
+                    if vignette is not None:
+                        st.image(vignette, width="stretch")
+                    st.caption(f"**{point.numero}.** {point.nom}")
+                    propose = _piece_proposee(point, emprise_site)
+                    choix_affectation[point.identifiant] = st.selectbox(
+                        "Affectation",
+                        options=AFFECTATIONS,
+                        index=AFFECTATIONS.index(propose),
+                        key=f"affectation_{point.identifiant}",
+                        label_visibility="collapsed",
+                    )
+
+        if st.button("Reprendre les photographies retenues", width="stretch"):
+            reprises = _reprendre_du_rapport(
+                _nom_dossier(commune), octets_carte, carte_rapport,
+                choix_affectation,
+            )
+            if reprises:
+                st.success(
+                    f"{reprises} photographie(s) reprises du rapport, avec leur "
+                    "point de vue. Vérifiez-les sur la carte de la section 2."
+                )
+                st.rerun()
+            else:
+                st.info("Aucune photographie retenue : rien n'a été repris.")
+elif fichier_carte is not None:
+    st.warning(
+        "Le plan du bureau d'études doit être importé avant de reprendre un "
+        "rapport : sans emprise clôturée, rien ne distingue l'environnement "
+        "proche du paysage lointain.",
+        icon="⚠️",
+    )
+
+st.divider()
 st.markdown("**Photographies et photomontages**")
 st.caption(
     "Elles sont conservées dans le dossier du projet ; leur assemblage au "
@@ -1732,6 +1941,22 @@ def _lire_exif_une_fois(code: str, fichier) -> None:
         vue["exif_message"] = " ".join(metadonnees.avertissements)
 
 
+@dataclass(frozen=True)
+class _PhotoReprise:
+    """Une photographie déjà écrite sur le disque, tirée d'un rapport.
+
+    Elle se présente comme un fichier déposé — `name` et de quoi l'afficher —
+    pour que la galerie des prises de vue n'ait pas à distinguer les deux
+    provenances. Le reste du dossier ne les distingue pas non plus.
+    """
+
+    name: str
+    chemin: str
+
+    def __str__(self) -> str:
+        return self.chemin
+
+
 def _etat_de_la_prise(vue: dict) -> str:
     """Ce qui manque à une prise de vue, dit en clair — et d'où vient ce qu'on a."""
     if vue.get("x") is None:
@@ -1769,6 +1994,9 @@ def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
     """
     for code, par_nom in list(_vues_photo().items()):
         deposes = {f.name for f in photos_par_piece.get(code) or []}
+        # Une photographie reprise d'un rapport n'a pas de dépôt à l'écran : son
+        # fichier est déjà écrit, et elle ne doit pas être prise pour retirée.
+        deposes |= set(_photos_reprises().get(code) or {})
         if not deposes:
             continue
         for nom in list(par_nom):
@@ -1782,7 +2010,10 @@ def _ligne_de_prise(code: str, fichier) -> None:
     vignette, libelle, bouton_placer, bouton_viser = st.columns([1, 3, 1, 1])
     with vignette:
         if not fichier.name.lower().endswith(".pdf"):
-            st.image(fichier, width=90)
+            st.image(
+                fichier.chemin if isinstance(fichier, _PhotoReprise) else fichier,
+                width=90,
+            )
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
@@ -1852,13 +2083,16 @@ def _saisir_les_prises_de_vue(emplacement, photos_par_piece: dict) -> None:
         )
         for code in PIECES_PHOTOS:
             fichiers = photos_par_piece.get(code) or []
-            if not fichiers:
+            reprises = _photos_reprises().get(code) or {}
+            if not fichiers and not reprises:
                 continue
             st.markdown(f"**{code}** — {piece(code).titre}")
             for fichier in fichiers:
                 if not fichier.name.lower().endswith(".pdf"):
                     _lire_exif_une_fois(code, fichier)
                 _ligne_de_prise(code, fichier)
+            for nom, chemin in sorted(reprises.items()):
+                _ligne_de_prise(code, _PhotoReprise(nom, chemin))
 
 
 _saisir_les_prises_de_vue(emplacement_prises_de_vue, photos)
@@ -1968,6 +2202,10 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
         fichiers = [
             f for f in (photos_par_piece.get(code) or [])
             if not f.name.lower().endswith(".pdf")
+        ]
+        fichiers += [
+            _PhotoReprise(nom, chemin)
+            for nom, chemin in sorted((_photos_reprises().get(code) or {}).items())
         ]
         if not fichiers:
             continue

@@ -2258,6 +2258,36 @@ photographies qui partagent déjà un rapport ne sont pas rognées du tout. Au-d
 de 12 %, le rapport de génération nomme la photographie et ce qui lui a été
 retiré.
 
+### Reprendre un rapport de visite
+
+Le chemin court, et le meilleur : le chef de projet dépose la carte HTML de son
+rapport `photos-geoloc`, et une galerie de vignettes s'ouvre. Chacune porte le
+numéro qu'elle a sur les marqueurs du rapport — le seul repère commun entre les
+deux écrans — et une affectation déjà proposée : DP 7 en deçà de 500 m du site,
+DP 8 au-delà, cohérent avec le dossier de référence dont la DP 7 est au 1/2 500
+et la DP 8 au 1/6 500. Le chef de projet ne corrige que ce qui n'est pas évident.
+
+Les photographies retenues sont écrites dans le dossier du projet avec leur
+point de vue. Après quoi le rapport n'existe plus pour le dossier : rien ne
+distingue une photographie qui en vient d'une photographie déposée à la main.
+
+**Le rapport est une importation, pas un stockage.** Une carte de quarante photos
+pèse une vingtaine de mégaoctets de base64, et Streamlit relit un fichier déposé
+à chaque exécution du script. La carte n'est donc lue qu'une fois, dans un cache
+**borné à deux entrées** — il est global à toutes les sessions, et un cache non
+borné de cartes entières est ce qui a fait couper le dépôt voisin par son
+hébergeur. Les vignettes se décodent une par une, sans parser le bloc : mesuré le
+16/09/2026 sur un rapport réel de 17,8 Mo, une vignette coûte 4,4 Mo de pic.
+
+### L'EXIF, lu au dépôt
+
+Une photographie déposée seule est lue une fois : si elle porte sa position, elle
+se place seule sur la carte. Son cap, lui, n'est qu'une **proposition** annoncée
+comme telle, et ne fera dessiner aucun cône tant qu'il n'aura pas été visé.
+
+La lecture accepte le fichier déposé sans écrire de fichier temporaire : recopier
+plusieurs mégaoctets à chaque interaction aurait coûté cher pour rien.
+
 ### L'échelle du repérage
 
 | Contenu à faire tenir | Liste |
