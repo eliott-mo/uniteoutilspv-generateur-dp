@@ -144,3 +144,94 @@ def etat_cairo() -> EtatCairo:
         dossier=dossier,
         message=f"Bibliothèque cairo chargée{origine}.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Où l'outil écrit ses fichiers de travail
+# ---------------------------------------------------------------------------
+
+VARIABLE_TRAVAIL = "DP_DOSSIER_TRAVAIL"
+
+#: Noms des deux dossiers que l'outil écrit : les fichiers déposés par pièce, et
+#: les dossiers assemblés.
+NOMS_TRAVAIL = ("projets", "sortie")
+
+
+@dataclass(frozen=True)
+class EtatTravail:
+    """Où les fichiers de travail sont écrits, et ce qu'il faut en penser."""
+
+    projets: Path
+    sortie: Path
+    #: Vrai si ces dossiers sont sous un dossier synchronisé par OneDrive.
+    synchronise: bool
+    message: str
+
+
+def _racine_travail() -> Path:
+    """Le dossier qui contient `projets/` et `sortie/`.
+
+    `DP_DOSSIER_TRAVAIL` le déplace ; à défaut, ils restent où ils ont toujours
+    été, à côté du script. La cible de déploiement n'a donc rien à changer, et
+    un poste Windows peut les sortir d'un dossier synchronisé.
+    """
+    demande = os.environ.get(VARIABLE_TRAVAIL, "").strip()
+    return Path(demande).expanduser() if demande else Path()
+
+
+def dossiers_de_travail() -> tuple[Path, Path]:
+    """Les chemins de `projets/` et `sortie/`, dans cet ordre."""
+    racine = _racine_travail()
+    return tuple(racine / nom for nom in NOMS_TRAVAIL)
+
+
+def _sous_onedrive(chemin: Path) -> bool:
+    """Vrai si ce chemin tombe dans un dossier synchronisé par OneDrive.
+
+    Les variables `OneDrive` et `OneDriveCommercial` sont posées par le client
+    Windows lui-même : les lire vaut mieux que de chercher « OneDrive » dans le
+    chemin, qui se tromperait sur un dossier simplement nommé ainsi.
+    """
+    try:
+        absolu = chemin.resolve()
+    except OSError:
+        return False
+    for variable in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        racine = os.environ.get(variable, "").strip()
+        if not racine:
+            continue
+        try:
+            absolu.relative_to(Path(racine).resolve())
+        except (ValueError, OSError):
+            continue
+        return True
+    return False
+
+
+def etat_travail() -> EtatTravail:
+    """Où l'outil écrit, et l'avertissement s'il écrit dans un dossier synchronisé.
+
+    Signalé en usage réel le 16/09/2026 : un `PermissionError` sur un DXF que
+    OneDrive tenait ouvert pendant qu'il le téléversait. L'outil ne réécrit plus
+    un fichier inchangé, ce qui referme l'essentiel de la fenêtre — mais un
+    dossier de travail synchronisé reste une mauvaise idée. Ces fichiers sont
+    volumineux, régénérables, et réécrits à chaque génération : les synchroniser
+    coûte de la bande passante pour rien et rouvre le risque à chaque écriture.
+
+    Dit au démarrage, comme l'état de cairo : ce qui gêne doit se savoir avant
+    de travailler, pas au milieu d'une génération.
+    """
+    projets, sortie = dossiers_de_travail()
+    if not any(_sous_onedrive(chemin) for chemin in (projets, sortie)):
+        return EtatTravail(projets, sortie, False, f"Fichiers de travail : {projets.resolve()}")
+    return EtatTravail(
+        projets,
+        sortie,
+        True,
+        "Les dossiers « projets » et « sortie » sont dans un dossier synchronisé "
+        "par OneDrive. Ils contiennent des fichiers volumineux, régénérables et "
+        "réécrits à chaque génération : la synchronisation les téléverse pour "
+        "rien, et peut bloquer une écriture en cours. Déplacez-les en posant "
+        f"{VARIABLE_TRAVAIL} vers un dossier local, par exemple "
+        r"« %LOCALAPPDATA%\UNITe\generateur-dp ».",
+    )

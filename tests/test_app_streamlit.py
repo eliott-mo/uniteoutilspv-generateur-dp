@@ -139,6 +139,9 @@ def _application(tmp_path, monkeypatch):
 
     if str(RACINE) not in sys.path:
         sys.path.insert(0, str(RACINE))
+    # Un poste qui a déplacé ses dossiers de travail ne doit pas faire écrire
+    # les tests ailleurs que dans leur dossier jetable.
+    monkeypatch.delenv("DP_DOSSIER_TRAVAIL", raising=False)
     monkeypatch.chdir(tmp_path)
     return AppTest.from_file(str(APP), default_timeout=DELAI_S)
 

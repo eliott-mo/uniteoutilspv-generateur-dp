@@ -175,6 +175,28 @@ pourtant installée.
 Sur la cible de déploiement (Linux), tout ceci est inutile : `packages.txt`
 fournit `libcairo2`.
 
+### Où l'outil écrit, et pourquoi pas dans OneDrive
+
+`projets/` reçoit les fichiers déposés, `sortie/` les dossiers assemblés. Tous
+deux sont **relatifs au dossier courant** par défaut, ce que la cible de
+déploiement attend, et `DP_DOSSIER_TRAVAIL` les déplace :
+
+```bash
+export DP_DOSSIER_TRAVAIL="$LOCALAPPDATA/UNITe/generateur-dp"
+```
+
+Un dossier de travail **synchronisé est signalé au démarrage**, comme l'état de
+cairo. Le motif est mesuré : le 16/09/2026, en usage réel, un `PermissionError`
+a interrompu une session — OneDrive tenait le DXF ouvert pendant qu'il le
+téléversait, au moment où l'application le réécrivait. L'outil ne réécrit plus
+un fichier inchangé, ce qui referme l'essentiel de la fenêtre, mais ces
+fichiers-là n'ont rien à faire dans un espace synchronisé : volumineux,
+régénérables, réécrits à chaque génération, ils se téléversent pour rien.
+
+La détection lit les variables que le client Windows pose lui-même — `OneDrive`,
+`OneDriveCommercial`, `OneDriveConsumer` — plutôt que de chercher « OneDrive »
+dans le chemin, ce qui se tromperait sur un dossier local nommé ainsi.
+
 ### Photos HEIC
 
 Le HEIC est le format par défaut des iPhone : un chef de projet qui dépose une

@@ -18,7 +18,7 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
-from dp_socle.environnement import etat_cairo, preparer_cairo
+from dp_socle.environnement import dossiers_de_travail, etat_cairo, etat_travail, preparer_cairo
 
 preparer_cairo()
 
@@ -78,8 +78,11 @@ from dp_socle.planches import dp11_notice
 from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
 from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
-DOSSIER_PROJETS = Path("projets")
-DOSSIER_SORTIE = Path("sortie")
+#: Où l'outil écrit ses fichiers de travail. Relatifs au dossier courant par
+#: défaut — ce que la cible de déploiement attend — et déplaçables par
+#: `DP_DOSSIER_TRAVAIL` : sur un poste Windows, les sortir d'un dossier
+#: synchronisé évite que OneDrive tienne un fichier ouvert pendant qu'on l'écrit.
+DOSSIER_PROJETS, DOSSIER_SORTIE = dossiers_de_travail()
 
 EXTENSIONS_SHAPEFILE = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qmd")
 
@@ -141,6 +144,11 @@ def _etat_heic():
     return etat_heic()
 
 
+@st.cache_resource
+def _etat_travail():
+    return etat_travail()
+
+
 # La bibliothèque de rendu se contrôle avant la police : sans cairo, aucune
 # mesure de police n'est possible et le diagnostic typographique n'a plus de
 # sens. Contrôlé ici plutôt qu'au rendu, pour ne pas échouer après le
@@ -156,6 +164,12 @@ if not cairo.disponible:
 heic = _etat_heic()
 if not heic.disponible:
     st.warning(f"Photos HEIC : {heic.message}", icon="⚠️")
+
+# Un dossier de travail synchronisé se dit au démarrage, comme l'état de cairo :
+# ce qui gêne doit se savoir avant de travailler.
+travail = _etat_travail()
+if travail.synchronise:
+    st.warning(travail.message, icon="⚠️")
 
 etat = _etat_polices()
 if etat.disponible:
