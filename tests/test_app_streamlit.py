@@ -270,6 +270,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
         "1. Métadonnées du projet",
         "2. Plan du bureau d'études",
         "3. Pièces fournies",
+        "3 bis. La carte : coupe A-A' et prises de vue",
         "4. Génération",
     ]
     assert _bouton_present(application, "Générer le dossier")
@@ -471,13 +472,16 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
     debut = source.index("### Le plan importé, et la ligne de coupe")
-    fin = source.index("if trace is not None and st.button")
+    fin = source.index("_saisir_les_prises_de_vue(photos)", debut)
     bloc = source[debut:fin]
 
     assert "for categorie in ORDRE_DESSIN:" in bloc
     assert "_style_carte(style)" in bloc
     assert "emprise_cadastrale" in bloc
-    # Et les modules en sont écartés : un plan en compte des milliers.
+    # Et ce qui n'ira pas sur la planche en est écarté : les modules, qu'un plan
+    # compte par milliers, et les catégories que `palette.EXCLUES` retire —
+    # installations de chantier et contours d'étude. Les montrer laissait croire
+    # qu'ils partiraient au dossier (retour d'usage du 17/09/2026).
     assert "CATEGORIES_HORS_CARTE" in bloc
 
 
@@ -490,7 +494,7 @@ def test_le_bouton_arme_le_clic_et_s_annule(tmp_path, monkeypatch):
     défauts. Ce qui se mesure est l'armement : sans lui, aucun clic ne sera
     destiné à la coupe.
     """
-    application = _plan_importe(tmp_path, monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
     assert "geste_carte" not in application.session_state
     assert _bouton_present(application, "Déplacer la coupe")
 
@@ -516,16 +520,17 @@ def test_un_clic_qui_ne_vient_pas_ne_deplace_rien(tmp_path, monkeypatch):
     """La carte armée sans clic laisse la coupe et le profil intacts.
 
     `last_clicked` persiste d'une exécution à la suivante : lu sans mémoire, il
-    ferait rejouer le même clic à chaque interaction. Ici il vaut None, et la
-    case du contournement se coche sans que la coupe bouge.
+    ferait rejouer le même clic à chaque interaction. Ici il vaut None, et le
+    script se rejoue sans que la coupe bouge.
     """
-    application = _plan_importe(tmp_path, monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
     coupe_avant = application.session_state["coupe_be"].geometrie.wkt
 
     _cliquer(application, "Déplacer la coupe")
     application = application.run()
+    # Streamlit rejoue le script à chaque interaction : deux tours suffisent à
+    # faire ressortir un clic qui serait relu à chaque fois.
     for _ in range(2):
-        application.checkbox[0].set_value(True)
         application = application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
@@ -576,7 +581,7 @@ def test_un_clic_deplace_la_coupe_et_releve_le_profil(tmp_path, monkeypatch):
     proposée, dans l'emprise du relevé altimétrique déposé.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _plan_importe(tmp_path, monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
     avant = application.session_state["coupe_be"].geometrie
     profil_avant = application.session_state["profil_be"]
 
@@ -619,7 +624,7 @@ def test_un_clic_hors_du_site_refuse_et_garde_la_coupe(tmp_path, monkeypatch):
     doit pas coûter la coupe qui était bonne.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _plan_importe(tmp_path, monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
     avant = application.session_state["coupe_be"].geometrie.wkt
 
     _cliquer(application, "Déplacer la coupe")
@@ -659,7 +664,7 @@ def test_le_trait_d_apercu_n_apparait_qu_une_fois_le_geste_arme(tmp_path, monkey
     à Streamlit : c'est tout l'intérêt, et c'est mesuré côté module.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _plan_importe(tmp_path, monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
     assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
 
     _cliquer(application, "Déplacer la coupe")
@@ -678,15 +683,14 @@ def test_le_clic_ne_remonte_pas_la_carte():
     """La carte garde sa clé après une translation, donc son zoom.
 
     Ce que les deux tests du clic ne peuvent pas voir : le composant y est
-    remplacé, et il ignore la clé qu'on lui passe. La clé porte un compteur qui
-    change à chaque coupe retenue par un *tracé*, pour chasser le trait Leaflet
-    résiduel qui se superposait sinon à la coupe redressée. Un clic ne laisse
-    aucun trait résiduel : la remonter ferait perdre son zoom au chef de projet
-    pour rien.
+    remplacé, et il ignore la clé qu'on lui passe. La clé portait un compteur
+    tant que le tracé polyligne existait, pour chasser le trait Leaflet résiduel
+    qui se superposait à la coupe redressée. Le tracé retiré le 17/09/2026, ce
+    trait n'existe plus : la clé est stable, et le zoom du chef de projet avec.
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
     debut = source.index("if _geste_arme() is None:")
-    fin = source.index('if trace is not None and st.button("Corriger')
+    fin = source.index("_saisir_les_prises_de_vue(photos)", debut)
     bloc = source[debut:fin]
 
     assert "translater_ligne_coupe(" in bloc
@@ -708,33 +712,38 @@ def test_la_carte_ne_relance_plus_le_script_pour_un_zoom():
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
     debut = source.index("resultat_carte = st_folium(")
-    fin = source.index("trace = trace_l93(resultat_carte)")
+    fin = source.index("clic = _clic_neuf(resultat_carte)", debut)
     appel = source[debut:fin]
 
     assert "returned_objects=" in appel
-    for lu in ("last_clicked", "all_drawings", "last_active_drawing"):
-        assert f'"{lu}"' in appel, lu
-    for inutile in ("bounds", "zoom", "last_object_clicked", "selected_layers"):
+    assert '"last_clicked"' in appel
+    # Le tracé retiré, les dessins n'ont plus à revenir : les laisser passer
+    # relancerait le script sans que rien ne les lise.
+    for inutile in (
+        "bounds", "zoom", "last_object_clicked", "selected_layers",
+        "all_drawings", "last_active_drawing",
+    ):
         assert f'"{inutile}"' not in appel, inutile
 
 
-def test_seule_la_coupe_redressee_est_montree():
-    """Le tracé d'origine ne s'affiche plus à côté de la coupe corrigée.
+def test_la_coupe_ne_se_trace_plus_a_la_main():
+    """Le tracé polyligne a été retiré le 17/09/2026, le clic l'a remplacé.
 
-    Relevé le 10/09/2026 par le chef de projet : tracer volontairement de
-    travers, corriger, et voir son trait oblique persister sur la carte donnait
-    à croire que rien n'avait été redressé. La carte remonte aussi à neuf après
-    chaque correction, faute de quoi Leaflet gardait le trait dessiné à la main
-    par-dessus la ligne retenue.
+    Il n'était déjà plus qu'un déclencheur : en automatique, la position était
+    recalculée sur le nombre de rangées et le tracé jeté. Son seul emploi
+    restant — imposer une direction oblique — allongeait toutes les distances
+    lues sur la planche, et le déplacement au clic tient la perpendiculaire.
+
+    Ce qui disparaît avec lui : l'outil de dessin de la carte, le compteur qui la
+    remontait pour chasser le trait résiduel, et le mode manuel.
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("### Le plan importé, et la ligne de coupe")
-    fin = source.index("with emplacement_avertissements:")
-    bloc = source[debut:fin]
+    bloc = source[source.index("### Le plan importé, et la ligne de coupe"):]
 
+    for disparu in ("Draw(", "trace_l93", "tour_carte", "manuel="):
+        assert disparu not in bloc, disparu
     assert "trace_initial" not in bloc
-    assert 'st.session_state["tour_carte"]' in bloc
-    assert "key=f\"carte_coupe_be_{st.session_state.get('tour_carte', 0)}\"" in bloc
+    assert 'key="carte_coupe_be"' in bloc
 
 
 # ---------------------------------------------------------------------------
