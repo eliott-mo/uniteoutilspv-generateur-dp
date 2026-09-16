@@ -489,6 +489,36 @@ def _style_carte(style) -> dict:
     return dessin
 
 
+#: Ce qui relève du fonctionnement normal de l'import, et se replie.
+#:
+#: Ces messages disent ce que l'import a écarté et pourquoi : calques de travail
+#: du BE, fond cadastral remplacé par le WFS, annotations et cotations. Ils sont
+#: utiles quand une catégorie manque au plan, et rien d'autre.
+#:
+#: Signalé à l'usage le 17/09/2026 : sur le plan de Sarnois, onze de ces messages
+#: noyaient les quatre qui demandaient une action — dont deux écarts de surface
+#: de 100 %. « Tellement qu'on n'a pas envie de les lire et qu'on passe à la
+#: suite. » Un avertissement qu'on ne lit plus ne protège plus de rien.
+#:
+#: Le classement se fait sur le texte, ce qui est fragile — mais le repli est
+#: sûr : un message dont la forme change n'est plus reconnu, et reste donc
+#: **visible**. Jamais l'inverse.
+MOTIFS_DE_ROUTINE = (
+    "calque(s) écarté(s) —",
+    "annotation(s) écartée(s)",
+    "entité(s) sans calque écartée(s)",
+)
+
+
+def _trier_les_avertissements(messages) -> tuple[list, list]:
+    """Sépare ce qui demande une action de ce qui décrit le fonctionnement normal."""
+    a_lire, routine = [], []
+    for message in messages:
+        cible = routine if any(m in message for m in MOTIFS_DE_ROUTINE) else a_lire
+        cible.append(message)
+    return a_lire, routine
+
+
 def _tableau_controles(controles) -> None:
     """Rend les contrôles croisés, quel que soit leur producteur."""
     st.dataframe(
@@ -1256,8 +1286,21 @@ if import_be_courant is not None and commune.strip():
             )
 
     with emplacement_avertissements:
-        for message in import_be_courant.avertissements:
+        a_lire, routine = _trier_les_avertissements(import_be_courant.avertissements)
+        for message in a_lire:
             st.warning(message, icon="⚠️")
+        if routine:
+            with st.expander(
+                f"Ce que l'import a écarté, comme prévu ({len(routine)} message(s))"
+            ):
+                st.caption(
+                    "Calques de travail du BE, fond cadastral remplacé par le "
+                    "WFS IGN, annotations, cotations : rien de tout cela ne va "
+                    "sur une planche. Ces messages disent ce qui a été laissé de "
+                    "côté, et pourquoi — à lire si une catégorie manque au plan."
+                )
+                for message in routine:
+                    st.caption(f"· {message}")
 
     coupe = st.session_state.coupe_be
     profil = st.session_state.profil_be
@@ -1862,16 +1905,97 @@ def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
                 del par_nom[nom]
 
 
-def _ligne_de_prise(code: str, fichier) -> None:
-    """Une photographie : sa vignette, son état, et ses deux boutons."""
+@st.cache_data(show_spinner=False, max_entries=24)
+def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
+    """La vignette telle que la planche la portera, rognage compris.
+
+    Bornée à vingt-quatre entrées : une image décodée pèse quelques mégaoctets,
+    et le cache de Streamlit est global à toutes les sessions.
+    """
+    import io as _io
+
+    from dp_socle.planches.photographies import _recadrer
+    from PIL import Image
+
+    with Image.open(_io.BytesIO(octets)) as source:
+        recadree, _ = _recadrer(source, rapport, (cadrage, cadrage), 30.0)
+    return recadree
+
+def _montrer_apercu(fichier, rapport: float, cadrage: float) -> None:
+    """L'aperçu recadré, ou l'image telle quelle si le recadrage échoue.
+
+    Ce qui s'affiche ici est ce que la planche portera : le curseur de recadrage
+    se règle en voyant le résultat, et non à l'aveugle (17/09/2026).
+    """
+    try:
+        octets = (
+            Path(fichier.chemin).read_bytes()
+            if isinstance(fichier, _PhotoReprise)
+            else fichier.getvalue()
+        )
+        st.image(
+            _apercu_recadre((fichier.name, len(octets)), octets, rapport, cadrage),
+            width="stretch",
+        )
+    except (OSError, ValueError) as erreur:
+        st.caption(f"⚠️ aperçu indisponible ({erreur})")
+
+
+def _fichiers_de_la_piece(code: str, photos_par_piece: dict) -> list:
+    """Les photographies d'une pièce, déposées et reprises d'un rapport.
+
+    Les deux se présentent pareil et se placent pareil : rien ne les distingue
+    une fois écrites, et ce bloc n'a pas à savoir d'où elles viennent.
+    """
+    deposees = [
+        f for f in (photos_par_piece.get(code) or [])
+        if not f.name.lower().endswith(".pdf")
+    ]
+    reprises = [
+        _PhotoReprise(nom, chemin)
+        for nom, chemin in sorted((_photos_reprises().get(code) or {}).items())
+    ]
+    return deposees + reprises
+
+
+def _source_image(fichier):
+    """De quoi ouvrir l'image, qu'elle soit déposée ou déjà sur le disque."""
+    return fichier.chemin if isinstance(fichier, _PhotoReprise) else fichier
+
+def _rapport_des_emplacements(fichiers) -> float:
+    """Largeur sur hauteur de l'emplacement que la planche donnera à ces images.
+
+    Le même calcul que `planches.photographies` : le rapport **médian** des
+    images de la planche, pour que des photographies de même format ne soient
+    pas rognées du tout. L'aperçu montre donc ce que la planche portera.
+    """
+    from statistics import median
+
+    from PIL import Image
+
+    rapports = []
+    for fichier in fichiers:
+        try:
+            with Image.open(_source_image(fichier)) as image:
+                rapports.append(image.width / image.height)
+        except (OSError, ZeroDivisionError):
+            continue
+        finally:
+            if not isinstance(fichier, _PhotoReprise):
+                fichier.seek(0)
+    return median(rapports) if rapports else 1.5
+
+
+
+
+
+
+def _ligne_de_prise(code: str, fichier, rapport: float = 1.5) -> None:
+    """Une photographie : son aperçu recadré, son état, et ses deux boutons."""
     vue = _vue_photo(code, fichier.name)
     vignette, libelle, bouton_placer, bouton_viser = st.columns([1, 3, 1, 1])
     with vignette:
-        if not fichier.name.lower().endswith(".pdf"):
-            st.image(
-                fichier.chemin if isinstance(fichier, _PhotoReprise) else fichier,
-                width=90,
-            )
+        _montrer_apercu(fichier, rapport, vue.get("cadrage", 0.0))
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
@@ -1928,11 +2052,17 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
     """
     _oublier_les_photos_remplacees(photos_par_piece)
     st.markdown("### Les prises de vue des pièces photographiques")
-    total = sum(len(f or []) for f in photos_par_piece.values())
-    if not total:
+    # Les photographies reprises d'un rapport comptent autant que les autres.
+    # Ne compter que les dépôts faisait sortir ce bloc en annonçant « aucune
+    # photographie » à un chef de projet qui venait d'en reprendre douze : ni
+    # bouton pour les placer, ni curseur pour les recadrer (17/09/2026).
+    par_piece = {
+        code: _fichiers_de_la_piece(code, photos_par_piece) for code in PIECES_PHOTOS
+    }
+    if not any(par_piece.values()):
         st.caption(
-            "Aucune photographie déposée : rien à placer sur la carte. Les "
-            "dépôts sont juste au-dessus, en section 3."
+            "Aucune photographie, ni déposée ni reprise d'un rapport : rien à "
+            "placer sur la carte. Les dépôts sont juste au-dessus, en section 3."
         )
         return
     st.caption(
@@ -1942,18 +2072,18 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
         "téléphone se trompe de 10 à 20°, et le dossier ne porte que ce qui "
         "a été vérifié."
     )
-    for code in PIECES_PHOTOS:
-        fichiers = photos_par_piece.get(code) or []
-        reprises = _photos_reprises().get(code) or {}
-        if not fichiers and not reprises:
+    for code, fichiers in par_piece.items():
+        if not fichiers:
             continue
         st.markdown(f"**{code}** — {piece(code).titre}")
+        # Le rapport de l'emplacement, celui que la planche retiendra : c'est à
+        # lui que l'aperçu recadre, pour que ce qu'on voit ici soit ce qu'on
+        # aura. Voir `planches.photographies`.
+        rapport = _rapport_des_emplacements(fichiers)
         for fichier in fichiers:
-            if not fichier.name.lower().endswith(".pdf"):
+            if not isinstance(fichier, _PhotoReprise):
                 _lire_exif_une_fois(code, fichier)
-            _ligne_de_prise(code, fichier)
-        for nom, chemin in sorted(reprises.items()):
-            _ligne_de_prise(code, _PhotoReprise(nom, chemin))
+            _ligne_de_prise(code, fichier, rapport)
 
 
 #: Les pièces où deux fichiers portent le même nom, avec les noms en cause.

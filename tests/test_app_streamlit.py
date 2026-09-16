@@ -1419,3 +1419,100 @@ def test_un_fichier_verrouille_designe_la_vraie_cause(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "write_bytes", _refuser)
     with pytest.raises(ErreurDepot, match="tient ouvert"):
         application_module._ecrire_depose(cible, b"peu importe")
+
+
+# ---------------------------------------------------------------------------
+# Le bruit des avertissements, et les photographies reprises
+# ---------------------------------------------------------------------------
+
+
+def test_les_messages_de_routine_se_replient():
+    """Un avertissement qu'on ne lit plus ne protège plus de rien.
+
+    Mesuré le 17/09/2026 sur le plan de Sarnois : vingt-deux messages, dont onze
+    qui disaient seulement quels calques de travail avaient été écartés. Ils
+    noyaient les quatre qui demandaient une action, dont deux écarts de surface
+    de 100 %.
+    """
+    import sys
+
+    if str(RACINE) not in sys.path:
+        sys.path.insert(0, str(RACINE))
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    espace = {}
+    exec(  # noqa: S102 — la fonction est extraite du script, qui ne s'importe pas
+        source[
+            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
+                "def _tableau_controles("
+            )
+        ],
+        espace,
+    )
+    trier = espace["_trier_les_avertissements"]
+
+    a_lire, routine = trier([
+        "16 calque(s) écarté(s) — fond cadastral du BE, remplacé par le WFS IGN : CAD_1",
+        "10533 annotation(s) écartée(s) (4394 3DSOLID) : textes et cotations",
+        "1 entité(s) sans calque écartée(s) (1 GEOMAPIMAGE).",
+        "Surface de voie lourde : Écart de 100.0%, au-delà des 5% admis.",
+        "Calque « ESPACE VERT » : 1 géométrie(s) invalide(s).",
+    ])
+    assert len(routine) == 3
+    assert a_lire == [
+        "Surface de voie lourde : Écart de 100.0%, au-delà des 5% admis.",
+        "Calque « ESPACE VERT » : 1 géométrie(s) invalide(s).",
+    ]
+
+
+def test_un_message_de_forme_inconnue_reste_visible():
+    """Le repli est sûr : ce qui n'est pas reconnu s'affiche.
+
+    Le classement se fait sur le texte, ce qui est fragile. Un message dont la
+    formulation change doit redevenir visible, jamais se replier en silence.
+    """
+    import sys
+
+    if str(RACINE) not in sys.path:
+        sys.path.insert(0, str(RACINE))
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    espace = {}
+    exec(  # noqa: S102
+        source[
+            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
+                "def _tableau_controles("
+            )
+        ],
+        espace,
+    )
+    a_lire, routine = espace["_trier_les_avertissements"](
+        ["Trois calques ont été laissés de côté"]
+    )
+    assert a_lire and not routine
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypatch):
+    """Elle compte autant qu'une photographie déposée à la main.
+
+    Signalé à l'usage le 17/09/2026 : le bloc ne comptait que les dépôts, et
+    sortait en annonçant « aucune photographie » à un chef de projet qui venait
+    d'en reprendre douze d'un rapport. Ni bouton pour les placer, ni curseur pour
+    les recadrer — alors qu'elles s'affichaient bien sur la carte.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    carte = _carte_photos([("proche.jpeg", 47.85268, 1.96650, 212.0, True)])
+    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
+    application = application.run()
+    _affectations(application)[0].set_value("DP 7")
+    application = application.run()
+    _cliquer(application, "Reprendre les photographies")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    assert _bouton_present(application, "📍 Placer"), [
+        b.label for b in application.button
+    ]
+    assert _bouton_present(application, "🎯 Viser")
+    curseurs = [c for c in application.slider if "Recadrage" in c.label]
+    assert curseurs, "le curseur de recadrage manque"
