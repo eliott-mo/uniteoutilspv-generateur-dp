@@ -705,3 +705,147 @@ def trace_l93(resultat_carte: dict | None):
     return LineString(
         [vers_l93.transform(float(lon), float(lat)) for lon, lat, *_ in coordonnees]
     )
+
+
+# ---------------------------------------------------------------------------
+# Repérage des voiries à trancher
+# ---------------------------------------------------------------------------
+
+#: Teintes du croquis de repérage. Le gris des objets écartés n'est pas une
+#: couleur de moins : c'est ce qui permet au chef de projet de comprendre
+#: pourquoi le plan compte quatre objets et le choix deux.
+_CROQUIS_FOND = (250, 250, 248)
+_CROQUIS_CLOTURE = (200, 40, 40)
+_CROQUIS_TABLES = (196, 208, 226)
+_CROQUIS_VOIRIE = (232, 140, 20)
+_CROQUIS_ECARTE = (150, 150, 150)
+
+
+def croquis_voiries(plan, largeur_px: int = 520, marge: float = 0.06):
+    """Situe chaque objet de la couche `voirie`, numéroté, sur la silhouette du site.
+
+    Sans fond cartographique : ce croquis répond à une seule question — « l'objet
+    2, c'est lequel ? » — et doit s'afficher à côté des boutons sans attendre un
+    téléchargement. La clôture et les tables suffisent à situer.
+
+    Les objets **sans surface** y figurent en gris. Ils ne sont pas proposés au
+    choix — un axe n'est ni lourd ni léger — mais les taire ferait un croquis à
+    deux objets pour un plan qui en compte quatre, et le chef de projet
+    chercherait l'erreur.
+
+    Rend une image Pillow, ou `None` si la couche est vide.
+    """
+    from PIL import Image, ImageDraw
+
+    voiries = plan.geometries("voirie")
+    if not voiries:
+        return None
+
+    cloture = plan.geometries("cloture")
+    tables = plan.tables
+    # Le cadre se prend sur le **site**, pas sur les voiries : un objet égaré à
+    # neuf cents mètres — cela arrive, et c'est en soi une information —
+    # écraserait tout le plan dans un coin de l'image. Ceux qui en sortent sont
+    # signalés par `voiries_hors_cadre`, non forcés dans le croquis.
+    cadre = _cadre_du_croquis(cloture or voiries, marge)
+    if cadre is None:
+        return None
+    minx, miny, maxx, maxy = cadre
+    largeur_m, hauteur_m = maxx - minx, maxy - miny
+    hauteur_px = max(1, int(round(largeur_px * hauteur_m / largeur_m)))
+    image = Image.new("RGB", (largeur_px, hauteur_px), _CROQUIS_FOND)
+    dessin = ImageDraw.Draw(image, "RGBA")
+
+    def en_pixels(coordonnees):
+        return [
+            (
+                (x - minx) / largeur_m * largeur_px,
+                (maxy - y) / hauteur_m * hauteur_px,
+            )
+            for x, y, *_ in coordonnees
+        ]
+
+    for table in tables:
+        for partie in _parties(table):
+            if partie.geom_type == "Polygon":
+                dessin.polygon(en_pixels(partie.exterior.coords), fill=_CROQUIS_TABLES)
+    for contour in cloture:
+        for partie in _parties(contour):
+            points = en_pixels(
+                partie.exterior.coords if partie.geom_type == "Polygon"
+                else partie.coords
+            )
+            if len(points) > 1:
+                dessin.line(points, fill=_CROQUIS_CLOTURE, width=2)
+
+    for rang, geometrie in enumerate(voiries, start=1):
+        surfacique = geometrie.area > 0
+        couleur = _CROQUIS_VOIRIE if surfacique else _CROQUIS_ECARTE
+        for partie in _parties(geometrie):
+            if partie.geom_type == "Polygon":
+                dessin.polygon(
+                    en_pixels(partie.exterior.coords), fill=couleur + (170,),
+                    outline=couleur, width=2,
+                )
+            elif partie.geom_type == "LineString":
+                points = en_pixels(partie.coords)
+                if len(points) > 1:
+                    dessin.line(points, fill=couleur, width=4)
+        _etiquette_croquis(
+            dessin, en_pixels([geometrie.centroid.coords[0]])[0], str(rang), couleur
+        )
+    return image
+
+
+def _cadre_du_croquis(geometries, marge: float):
+    """Boîte englobante élargie, ou `None` si rien n'est exploitable."""
+    bornes = [g.bounds for g in geometries if g is not None and not g.is_empty]
+    if not bornes:
+        return None
+    minx = min(b[0] for b in bornes)
+    miny = min(b[1] for b in bornes)
+    maxx = max(b[2] for b in bornes)
+    maxy = max(b[3] for b in bornes)
+    # Un plancher d'un mètre : une couche réduite à un seul point donnerait une
+    # boîte plate, et une division par zéro au passage en pixels.
+    largeur = max(maxx - minx, 1.0)
+    hauteur = max(maxy - miny, 1.0)
+    jeu = marge * max(largeur, hauteur)
+    return (minx - jeu, miny - jeu, minx + largeur + jeu, miny + hauteur + jeu)
+
+
+def voiries_hors_cadre(plan, marge: float = 0.06) -> list:
+    """Les objets de voirie que le croquis ne peut pas montrer, et leur éloignement.
+
+    Un objet hors du site n'est pas un détail de cadrage : c'est un résidu de
+    dessin, ou une voie oubliée loin du projet. Le dire nommément vaut mieux que
+    de le faire disparaître, et mieux que d'écraser le plan pour l'y faire tenir.
+
+    Rend une liste de `(rang, distance en mètres au site)`, rangs comptés à
+    partir de 1 comme sur le croquis.
+    """
+    from shapely.geometry import box
+
+    voiries = plan.geometries("voirie")
+    cloture = plan.geometries("cloture")
+    cadre = _cadre_du_croquis(cloture or voiries, marge)
+    if cadre is None or not cloture:
+        return []
+    fenetre = box(*cadre)
+    site = unary_union([c for c in cloture if c is not None and not c.is_empty])
+    return [
+        (rang, geometrie.distance(site))
+        for rang, geometrie in enumerate(voiries, start=1)
+        if not geometrie.is_empty and not fenetre.intersects(geometrie)
+    ]
+
+
+def _etiquette_croquis(dessin, point, texte: str, couleur) -> None:
+    """Pastille numérotée, lisible sur n'importe quel fond du croquis."""
+    rayon = 11
+    x, y = point
+    dessin.ellipse(
+        [x - rayon, y - rayon, x + rayon, y + rayon],
+        fill=(255, 255, 255), outline=couleur, width=2,
+    )
+    dessin.text((x, y), texte, fill=(26, 26, 26), anchor="mm")

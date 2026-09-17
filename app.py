@@ -510,13 +510,138 @@ MOTIFS_DE_ROUTINE = (
 )
 
 
-def _trier_les_avertissements(messages) -> tuple[list, list]:
-    """Sépare ce qui demande une action de ce qui décrit le fonctionnement normal."""
-    a_lire, routine = [], []
+#: La formule que les messages destinés au bureau d'études portent tous.
+#:
+#: Uniformisée dans `import_be.py` le 17/09/2026 pour que l'interface puisse les
+#: rassembler sans deviner. Un chef de projet qui reçoit un plan incomplet doit
+#: savoir **exactement quoi redemander**, sans trier lui-même une vingtaine de
+#: remarques ni connaître le DXF : « comme je ne serai pas toujours là pour
+#: vérifier les plans ».
+MARQUEUR_BUREAU_ETUDES = "à demander au bureau d'études"
+
+
+def _trier_les_avertissements(messages) -> tuple[list, list, list]:
+    """Range les remarques en trois : pour le BE, à lire, fonctionnement normal.
+
+    L'ordre d'examen compte : une demande au bureau d'études prime sur tout, y
+    compris sur la forme d'un message de routine.
+    """
+    au_be, a_lire, routine = [], [], []
     for message in messages:
-        cible = routine if any(m in message for m in MOTIFS_DE_ROUTINE) else a_lire
-        cible.append(message)
-    return a_lire, routine
+        if MARQUEUR_BUREAU_ETUDES in message:
+            au_be.append(message)
+        elif any(motif in message for motif in MOTIFS_DE_ROUTINE):
+            routine.append(message)
+        else:
+            a_lire.append(message)
+    return au_be, a_lire, routine
+
+
+def _demande_au_be(message: str) -> str:
+    """La demande seule, précédée de ce qu'elle concerne.
+
+    C'est ce que le chef de projet recopie dans son message au bureau d'études :
+    la phrase entière porterait un diagnostic d'outil dont le BE n'a que faire,
+    mais la demande nue — « le contour de cet élément » — ne dirait pas de quel
+    élément il s'agit. L'intitulé du message, jusqu'à son premier deux-points,
+    nomme le calque ou la surface en cause.
+    """
+    _, _, demande = message.partition(MARQUEUR_BUREAU_ETUDES)
+    demande = demande.lstrip(" :").strip()
+    if not demande:
+        return message
+    intitule, separateur, _ = message.partition(" : ")
+    return f"{intitule} — {demande}" if separateur else demande
+
+
+def _trancher_les_voiries(plan) -> None:
+    """Fait trancher le type des voiries, croquis à l'appui, dès l'import.
+
+    Deux choses que l'usage a demandées le 17/09/2026. La question se pose ici,
+    où l'alerte est levée, et non à la génération — « on fait tout le process
+    puis on tranche à la toute fin ». Et un croquis situe chaque objet : « avec
+    les infos données pour l'instant c'est très compliqué de savoir quelle
+    section correspond à quoi ».
+
+    Les objets sans surface ne sont pas proposés : un axe ou un bout de limite
+    n'est ni lourd ni léger, il n'entre dans aucun calcul et ne va sur aucune
+    planche. Ils restent au croquis, en gris, pour que le compte y soit.
+    """
+    from dp_socle.apercu_be import croquis_voiries, voiries_hors_cadre
+    from dp_socle.contrat import VOIRIE_SANS_OBJET, decrire_geometries_voirie
+
+    objets = decrire_geometries_voirie(plan.geometries("voirie"))
+    if not objets:
+        st.session_state["voirie_tranchee"] = None
+        return
+
+    surfaciques = [o for o in objets if o["surfacique"]]
+    st.warning(
+        f"**{len(surfaciques)} voirie(s) à typer.** Le calque du bureau d'études "
+        "ne dit pas si elles sont lourdes ou légères ; le tableau bilan sépare "
+        "les deux et la légende du dossier les distingue. Sans ce choix, les "
+        "planches ne sont pas dessinées.",
+        icon="⚠️",
+    )
+    colonne_croquis, colonne_choix = st.columns([1, 2])
+    with colonne_croquis:
+        image = croquis_voiries(plan)
+        if image is not None:
+            st.image(image, width="stretch")
+            st.caption(
+                "Orange : à typer. Gris : sans surface, écarté du choix. "
+                "Rouge : la clôture."
+            )
+    with colonne_choix:
+        if not surfaciques:
+            st.caption(
+                "Aucun objet à typer : tous sont des linéaires sans surface, "
+                "et n'iront sur aucune planche."
+            )
+        for objet in surfaciques:
+            st.markdown(f"**Objet {objet['rang'] + 1}** — {objet['resume']}")
+            st.radio(
+                f"Type de l'objet {objet['rang'] + 1}",
+                options=VOIRIES_ADMISES,
+                format_func=lambda v: {
+                    "piste_lourde": "Voie lourde",
+                    "piste_legere": "Piste légère",
+                }[v],
+                index=None,
+                horizontal=True,
+                label_visibility="collapsed",
+                key=f"voirie_{objet['rang']}",
+            )
+        if surfaciques:
+            st.caption(
+                "Une voie lourde fait cinq à six mètres de large, une piste "
+                "légère trois à quatre."
+            )
+
+    ecartes = [o["rang"] + 1 for o in objets if not o["surfacique"]]
+    if ecartes:
+        st.caption(
+            f"Objet(s) {', '.join(map(str, ecartes))} : linéaire(s) sans surface "
+            "— un axe ou un bout de limite, pas une voie dessinée. Écarté(s) du "
+            "choix, et d'aucune planche."
+        )
+    for rang, distance in voiries_hors_cadre(plan):
+        st.caption(
+            f"Objet {rang} : à {distance:.0f} m du site, hors du croquis. Un "
+            "résidu de dessin, le plus souvent."
+        )
+
+    # La liste va au contrat dans l'ordre de la couche, un élément par objet :
+    # les linéaires y prennent leur valeur convenue, les autres le choix fait.
+    tranche = [
+        VOIRIE_SANS_OBJET
+        if not objet["surfacique"]
+        else st.session_state.get(f"voirie_{objet['rang']}")
+        for objet in objets
+    ]
+    st.session_state["voirie_tranchee"] = (
+        tranche if all(t is not None for t in tranche) else None
+    )
 
 
 def _tableau_controles(controles) -> None:
@@ -1286,7 +1411,23 @@ if import_be_courant is not None and commune.strip():
             )
 
     with emplacement_avertissements:
-        a_lire, routine = _trier_les_avertissements(import_be_courant.avertissements)
+        au_be, a_lire, routine = _trier_les_avertissements(
+            import_be_courant.avertissements
+        )
+        if au_be:
+            st.error(
+                f"**{len(au_be)} point(s) à demander au bureau d'études** avant "
+                "que ce plan donne un dossier complet. Ce qui suit se recopie "
+                "tel quel dans votre message.",
+                icon="📋",
+            )
+            demandes = dict.fromkeys(_demande_au_be(m) for m in au_be)
+            st.code("\n".join(f"- {d}" for d in demandes), language="text")
+            with st.expander("Pourquoi ces demandes — le détail de chaque constat"):
+                for message in au_be:
+                    st.caption(f"· {message}")
+
+        _trancher_les_voiries(import_be_courant.plan)
         # Une fois l'import validé, ces remarques ont été lues : elles se
         # replient pour que la carte, qui vient après, ne soit plus à deux
         # écrans de défilement (retour d'usage du 17/09/2026). Elles restent
@@ -2386,51 +2527,11 @@ if nom:
             "ce dossier."
         )
 
-#: Décision D5 du lot 4 : quand un calque du bureau d'études ne disait pas si
-#: une voirie était lourde ou légère, le chef de projet tranche — **objet par
-#: objet**, parce qu'un projet a presque toujours les deux et que le calque les
-#: mélange. Aucune valeur par défaut : le tableau bilan sépare les deux, la
-#: légende du dossier les distingue, et aucune des deux n'est plus probable que
-#: l'autre. Tant qu'un objet n'est pas tranché, les planches ne sont pas
-#: dessinées.
-_voiries = decrire_voiries(DOSSIER_SORTIE / nom) if nom else []
-voirie = None
-if _voiries:
-    st.warning(
-        f"Le plan importé porte {len(_voiries)} objet(s) sur le calque "
-        "« voirie » dont le type n'était pas précisé. Le tableau bilan sépare la "
-        "voie lourde de la piste légère, et la légende du dossier les "
-        "distingue : tranchez avant de dessiner.",
-        icon="⚠️",
-    )
-    st.caption(
-        "Un objet à la fois : un projet a presque toujours les deux. La largeur "
-        "moyenne aide à les séparer — une voie lourde fait cinq à six mètres, "
-        "une piste légère trois à quatre."
-    )
-    choix = []
-    for objet in _voiries:
-        colonne_mesure, colonne_choix = st.columns([1, 2])
-        with colonne_mesure:
-            st.markdown(f"**Objet {objet['rang'] + 1}** — {objet['resume']}")
-        with colonne_choix:
-            choix.append(
-                st.radio(
-                    f"Type de l'objet {objet['rang'] + 1}",
-                    options=VOIRIES_ADMISES,
-                    format_func=lambda v: {
-                        "piste_lourde": "Voie lourde",
-                        "piste_legere": "Piste légère",
-                    }[v],
-                    index=None,
-                    horizontal=True,
-                    label_visibility="collapsed",
-                    key=f"voirie_{objet['rang']}",
-                )
-            )
-    # Aucune valeur par défaut, et rien de partiel : tant qu'un objet n'est pas
-    # tranché, le contrat refuse — c'est une décision de projet, pas un réglage.
-    voirie = choix if all(c is not None for c in choix) else None
+#: Le type de chaque voirie, tranché en section 2 — au moment où l'alerte est
+#: levée, et devant le croquis qui montre de quel objet il s'agit. Il se
+#: demandait ici, à la toute fin : « on se demande un peu pourquoi cette
+#: question arrive aussi tard » (retour d'usage du 17/09/2026).
+voirie = st.session_state.get("voirie_tranchee")
 
 
 

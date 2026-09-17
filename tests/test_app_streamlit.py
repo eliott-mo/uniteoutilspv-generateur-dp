@@ -1450,7 +1450,7 @@ def test_les_messages_de_routine_se_replient():
     )
     trier = espace["_trier_les_avertissements"]
 
-    a_lire, routine = trier([
+    _, a_lire, routine = trier([
         "16 calque(s) écarté(s) — fond cadastral du BE, remplacé par le WFS IGN : CAD_1",
         "10533 annotation(s) écartée(s) (4394 3DSOLID) : textes et cotations",
         "1 entité(s) sans calque écartée(s) (1 GEOMAPIMAGE).",
@@ -1484,7 +1484,7 @@ def test_un_message_de_forme_inconnue_reste_visible():
         ],
         espace,
     )
-    a_lire, routine = espace["_trier_les_avertissements"](
+    _, a_lire, routine = espace["_trier_les_avertissements"](
         ["Trois calques ont été laissés de côté"]
     )
     assert a_lire and not routine
@@ -1516,3 +1516,40 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
     assert _bouton_present(application, "🎯 Viser")
     curseurs = [c for c in application.slider if "Recadrage" in c.label]
     assert curseurs, "le curseur de recadrage manque"
+
+
+def test_les_demandes_au_bureau_d_etudes_sont_rassemblees():
+    """« Comme je ne serai pas toujours là pour vérifier les plans. »
+
+    Un chef de projet qui reçoit un plan incomplet doit savoir exactement quoi
+    redemander, sans trier lui-même une vingtaine de remarques ni connaître le
+    DXF. La demande est recopiable telle quelle, et nomme ce qu'elle concerne.
+    """
+    import sys
+
+    if str(RACINE) not in sys.path:
+        sys.path.insert(0, str(RACINE))
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    espace = {}
+    exec(  # noqa: S102
+        source[
+            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
+                "def _trancher_les_voiries("
+            )
+        ],
+        espace,
+    )
+    au_be, a_lire, routine = espace["_trier_les_avertissements"]([
+        "Calque « PVcase Road » : 13 remplissage(s) HATCH et aucune polyligne. "
+        "L'élément serait perdu — à demander au bureau d'études : le contour de "
+        "cet élément, en polyligne fermée.",
+        "16 calque(s) écarté(s) — fond cadastral du BE : CAD_1",
+        "Calque « UNI_Cloture » : 1 sommet(s) dupliqué(s).",
+    ])
+    assert len(au_be) == 1 and len(routine) == 1 and len(a_lire) == 1
+    # La demande porte ce qu'elle concerne : « le contour de cet élément » seul
+    # ne dirait pas de quel élément il s'agit.
+    demande = espace["_demande_au_be"](au_be[0])
+    assert demande.startswith("Calque « PVcase Road » —")
+    assert "polyligne fermée" in demande
+    assert "HATCH" not in demande

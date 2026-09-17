@@ -1141,7 +1141,10 @@ def test_une_voirie_non_tranchee_ne_masque_pas_un_plan_qui_ne_la_dessine_pas():
     voie_lourde = next(c for c in controles if c.libelle == "Surface de voie lourde")
     assert voie_lourde.statut == AVERTISSEMENT
     assert "n'ont pas encore de type" in voie_lourde.message
-    assert "Demandez-les au bureau d'études" in voie_lourde.message
+    # La formule est celle que l'interface reconnaît pour rassembler les
+    # demandes en un bloc recopiable : la changer ici sans la changer dans
+    # `app.MARQUEUR_BUREAU_ETUDES` ferait disparaître la demande de cette liste.
+    assert "à demander au bureau d'études" in voie_lourde.message
     # Le total est mesuré, lui : 36 m² dessinés contre 3 870 déclarés.
     assert voie_lourde.valeur_dxf == pytest.approx(36.0)
     assert voie_lourde.valeur_tableau == pytest.approx(3870.0)

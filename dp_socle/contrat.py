@@ -32,6 +32,12 @@ from .import_be import (
     lire_parametres,
 )
 
+#: Ce qu'un objet de voirie sans surface reçoit : un axe ou un bout de limite
+#: n'est pas une voie dessinée, il n'entre dans aucun calcul et ne va sur aucune
+#: planche. Le dire explicitement vaut mieux que de lui attribuer un type au
+#: hasard — un choix muet resterait un choix, et il se lirait au contrat.
+VOIRIE_SANS_OBJET = "sans_objet"
+
 #: Types de voirie entre lesquels le chef de projet tranche (décision D5).
 #: Aucune valeur par défaut : c'est tout l'objet de la règle.
 VOIRIES_ADMISES = ("piste_lourde", "piste_legere")
@@ -317,7 +323,10 @@ class Contrat:
         return [
             geometrie
             for geometrie, choisi in zip(objets, self.voirie)
-            if choisi == categorie
+            # `area > 0` est un garde-fou et non une redite : un objet sans
+            # surface ne va sur aucune planche, quel que soit le type qu'on lui
+            # ait donné — un axe dessiné comme une piste serait faux.
+            if choisi == categorie and geometrie.area > 0
         ]
 
     def entites(self, categorie: str) -> list:
@@ -483,11 +492,12 @@ def charger_contrat(dossier: str | Path, voirie=None) -> Contrat:
     nb_voiries = len(couches.get("voirie", []))
     choix = [voirie] * nb_voiries if isinstance(voirie, str) else voirie
     if choix is not None:
-        inconnus = sorted({c for c in choix if c not in VOIRIES_ADMISES})
+        admis = set(VOIRIES_ADMISES) | {VOIRIE_SANS_OBJET}
+        inconnus = sorted({c for c in choix if c not in admis})
         if inconnus:
             raise ErreurVoirieIndecise(
                 f"Type de voirie « {', '.join(map(str, inconnus))} » inconnu, "
-                f"attendu parmi {', '.join(VOIRIES_ADMISES)}."
+                f"attendu parmi {', '.join(sorted(admis))}."
             )
         if len(choix) != nb_voiries:
             raise ErreurVoirieIndecise(
@@ -543,6 +553,12 @@ def decrire_voiries(dossier: str | Path) -> list:
     de quoi reconnaître chaque objet. Une voie lourde fait cinq à six mètres de
     large, une piste légère trois à quatre — la largeur moyenne, surface divisée
     par longueur, suffit le plus souvent à les séparer.
+
+    Le champ `surfacique` dit lesquels appellent une décision. Un linéaire sur
+    ce calque n'est pas une voie dessinée mais un axe ou un bout de limite : il
+    n'a pas de surface, il n'entrera dans aucun calcul, et demander s'il est
+    lourd ou léger n'aurait pas de sens. Deux des trois objets de Sarnois sont
+    dans ce cas (mesuré le 17/09/2026).
     """
     import fiona
     from shapely.geometry import shape
@@ -557,6 +573,18 @@ def decrire_voiries(dossier: str | Path) -> list:
             objets = [shape(entite["geometry"]) for entite in source]
     except Exception:
         return []
+
+    return decrire_geometries_voirie(objets)
+
+
+def decrire_geometries_voirie(objets) -> list:
+    """Décrit des objets de voirie pour l'interface, sans savoir d'où ils viennent.
+
+    Le contrat écrit et le plan encore en mémoire portent la même couche dans le
+    même ordre : le choix peut donc se faire dès l'import, avant que le contrat
+    n'existe, et se relire ensuite au même rang.
+    """
+    from shapely.geometry import Point
 
     descriptions = []
     for rang, geometrie in enumerate(objets):

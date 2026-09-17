@@ -825,8 +825,8 @@ def lire_plan_be(
         if calque not in entites_par_calque and motif_ecart(calque) is None:
             avertissements.append(
                 f"Calque « {calque} » : {nombre} remplissage(s) HATCH et aucune "
-                "polyligne. L'élément serait perdu — demandez au BE de fournir "
-                "son contour."
+                "polyligne. L'élément serait perdu — à demander au bureau "
+                "d'études : le contour de cet élément, en polyligne fermée."
             )
 
     # Les calques déclarés mais sans entité sont ignorés sans message : le
@@ -948,7 +948,8 @@ def lire_plan_be(
         avertissements.append(
             f"Calque « {calque} » : {nombre} géométrie(s) invalide(s), "
             "auto-intersectante(s) le plus souvent. Les surfaces calculées "
-            "dessus sont douteuses — demandez au BE de reprendre le tracé."
+            "dessus sont douteuses — à demander au bureau d'études : reprendre "
+            "le tracé de ce calque."
         )
 
     tables = [
@@ -1106,7 +1107,7 @@ def _detecter_unite(entites_par_calque: dict[str, list], nom: str) -> tuple[str,
             f"X={centre_x:.1f} Y={centre_y:.1f} (attendu X entre "
             f"{X_MIN_L93:,.0f} et {X_MAX_L93:,.0f}, Y entre {Y_MIN_L93:,.0f} et "
             f"{Y_MAX_L93:,.0f}). Le plan ne semble pas géoréférencé en Lambert 93 ; "
-            "demandez au BE un export en EPSG:2154."
+            "à demander au bureau d'études : un export en EPSG:2154."
             .replace(",", " ")
         )
     if len(candidats) > 1:
@@ -1528,7 +1529,8 @@ def _voirie_en_attente(
             + " m² contre "
             + f"{declaree_totale:,.0f}".replace(",", chr(160))
             + " m² déclarés : le plan ne les dessine pas toutes, et les planches "
-            "ne les montreront pas. Demandez-les au bureau d'études.",
+            "ne les montreront pas — à demander au bureau d'études : les voies "
+            "manquantes, dessinées en polygones.",
         )
     return Controle(libelle, None, declaree, "m²", AVERTISSEMENT, attente)
 
