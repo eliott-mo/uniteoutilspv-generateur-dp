@@ -384,6 +384,25 @@ POINTS_PAR_REQUETE = 200
 #: parallélisées.
 ATTENTE_ALTIMETRIE_S = 0.25
 
+#: Nombre de tentatives d'une requête altimétrique, sur le patron du WMS.
+#:
+#: Constaté le 17/09/2026 : le contrôle croisé du nuage du BE contre le RGE ALTI
+#: échouait par intermittence quand la suite de tests enchaînait les appels au
+#: service, et passait relancé seul. La requête altimétrique était la seule du
+#: module sans reprise, alors que le WMS en a depuis le 02/09/2026 pour le même
+#: motif — et elle porte davantage : un aléa de quelques secondes fait perdre la
+#: coupe entière au chef de projet, qui doit tout recommencer.
+#:
+#: Ce n'est pas un repli : rien n'est substitué, on redemande les mêmes points,
+#: un nombre borné de fois, et toute reprise est signalée.
+TENTATIVES_ALTIMETRIE = 3
+
+#: Codes HTTP qu'il vaut la peine de rejouer : surcharge passagère (429) et
+#: panne d'un nœud (5xx). Un 400 ou un 414 viennent de la requête elle-même —
+#: mesuré le 03/09/2026, 500 points la font dépasser la longueur d'URL admise —
+#: et se reproduiraient à l'identique.
+CODES_ALTIMETRIE_TRANSITOIRES = (429, 500, 502, 503, 504)
+
 _VERS_WGS84 = Transformer.from_crs(2154, 4326, always_xy=True)
 
 
@@ -418,6 +437,53 @@ def telecharger_altitudes(
     return altitudes
 
 
+def _reponse_altimetrie(parametres: dict, timeout: int, points: int):
+    """La réponse du service, en rejouant ce qui mérite de l'être.
+
+    Rend la réponse HTTP 200 ; lève `ErreurAltimetrie` dès qu'un échec ne se
+    rejoue pas, ou une fois les tentatives épuisées.
+    """
+    tentatives = 0
+    while True:
+        tentatives += 1
+        rejouable = True
+        try:
+            reponse = requests.get(
+                URL_ALTIMETRIE, params=parametres, headers=_ENTETES, timeout=timeout
+            )
+        except requests.RequestException as exc:
+            echec = (
+                f"Service altimétrique de la Géoplateforme injoignable : {exc}."
+            )
+        else:
+            if reponse.status_code == 200:
+                return reponse
+            rejouable = reponse.status_code in CODES_ALTIMETRIE_TRANSITOIRES
+            echec = (
+                f"Service altimétrique : HTTP {reponse.status_code} sur "
+                f"{points} points. {reponse.text[:200]}"
+            )
+
+        if not rejouable:
+            raise ErreurAltimetrie(
+                f"{echec} Cette réponse ne vient pas d'un aléa du service : "
+                "la même requête donnerait le même résultat."
+            )
+        if tentatives >= TENTATIVES_ALTIMETRIE:
+            raise ErreurAltimetrie(
+                f"{echec} Échec après {tentatives} tentatives. Fournissez un "
+                "fichier d'altimétrie en repli."
+            )
+        warnings.warn(
+            f"Service altimétrique : échec de la tentative {tentatives} sur "
+            f"{TENTATIVES_ALTIMETRIE}, nouvelle tentative dans "
+            f"{ATTENTE_REPRISE_S:.0f} s. {echec}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        time.sleep(ATTENTE_REPRISE_S)
+
+
 def _paquet_altitudes(paquet: list[tuple[float, float]], timeout: int) -> list[float]:
     lons, lats = _VERS_WGS84.transform([p[0] for p in paquet], [p[1] for p in paquet])
     parametres = {
@@ -428,20 +494,7 @@ def _paquet_altitudes(paquet: list[tuple[float, float]], timeout: int) -> list[f
         "zonly": "true",
         "indent": "false",
     }
-    try:
-        reponse = requests.get(
-            URL_ALTIMETRIE, params=parametres, headers=_ENTETES, timeout=timeout
-        )
-    except requests.RequestException as exc:
-        raise ErreurAltimetrie(
-            f"Service altimétrique de la Géoplateforme injoignable : {exc}. "
-            "Fournissez un fichier d'altimétrie en repli."
-        ) from exc
-    if reponse.status_code != 200:
-        raise ErreurAltimetrie(
-            f"Service altimétrique : HTTP {reponse.status_code} sur "
-            f"{len(paquet)} points. {reponse.text[:200]}"
-        )
+    reponse = _reponse_altimetrie(parametres, timeout, len(paquet))
     try:
         donnees = reponse.json()
     except ValueError as exc:

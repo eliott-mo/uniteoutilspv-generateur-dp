@@ -604,6 +604,96 @@ def test_profil_recupere_en_une_requete_et_concorde_avec_les_z_du_dxf(plan, empr
     assert abs(coherence.ecart_median_m) <= 2.0
 
 
+class _ReponseFeinte:
+    """Ce que `requests.get` rend, réduit à ce que le module en lit."""
+
+    def __init__(self, status_code: int, altitudes=None, text: str = ""):
+        self.status_code = status_code
+        self.text = text
+        self._altitudes = altitudes
+
+    def json(self):
+        return {"elevations": list(self._altitudes)}
+
+
+def _service_altimetrique_feint(monkeypatch, reponses):
+    """Remplace le transport du service. Rend la liste des appels effectués."""
+    import dp_socle.ign as ign
+
+    appels = []
+    restantes = list(reponses)
+
+    def faux_get(url, params=None, headers=None, timeout=None):
+        appels.append(params)
+        reponse = restantes.pop(0)
+        if isinstance(reponse, Exception):
+            raise reponse
+        return reponse
+
+    monkeypatch.setattr(ign.requests, "get", faux_get)
+    # Sans cela, trois tentatives feraient attendre le test quatre secondes.
+    monkeypatch.setattr(ign.time, "sleep", lambda _: None)
+    return appels
+
+
+def test_une_panne_passagere_du_rge_alti_est_rejouee(monkeypatch):
+    """Un 503 suivi d'un 200 rend les altitudes, et la reprise se dit.
+
+    La coupe d'un dossier tient en une ou deux requêtes : sans reprise, un aléa
+    de quelques secondes du service faisait perdre la coupe entière, et c'est ce
+    qui faisait échouer le contrôle croisé par intermittence (17/09/2026).
+    """
+    from dp_socle.ign import telecharger_altitudes
+
+    appels = _service_altimetrique_feint(
+        monkeypatch,
+        [
+            _ReponseFeinte(503, text="Service Unavailable"),
+            _ReponseFeinte(200, altitudes=[101.0, 102.0]),
+        ],
+    )
+    with pytest.warns(RuntimeWarning, match="tentative 1 sur 3"):
+        altitudes = telecharger_altitudes([(650000.0, 6750000.0), (650005.0, 6750000.0)])
+
+    assert altitudes == [101.0, 102.0]
+    assert len(appels) == 2
+    # Ce sont bien les mêmes points qui sont redemandés, rien n'est substitué.
+    assert appels[0] == appels[1]
+
+
+def test_une_requete_refusee_par_sa_forme_n_est_pas_rejouee(monkeypatch):
+    """Un 414 vient de l'URL, pas du service : le rejouer perdrait du temps."""
+    from dp_socle.erreurs import ErreurAltimetrie
+    from dp_socle.ign import telecharger_altitudes
+
+    appels = _service_altimetrique_feint(
+        monkeypatch, [_ReponseFeinte(414, text="Request-URI Too Long")]
+    )
+    with pytest.raises(ErreurAltimetrie, match="même requête donnerait le même"):
+        telecharger_altitudes([(650000.0, 6750000.0)])
+
+    assert len(appels) == 1
+
+
+def test_un_service_durablement_injoignable_finit_par_lever(monkeypatch):
+    """Trois échecs de transport : le message compte les tentatives et oriente."""
+    import requests
+
+    from dp_socle.erreurs import ErreurAltimetrie
+    from dp_socle.ign import telecharger_altitudes
+
+    appels = _service_altimetrique_feint(
+        monkeypatch, [requests.ConnectionError("coupure") for _ in range(3)]
+    )
+    with pytest.warns(RuntimeWarning):
+        with pytest.raises(ErreurAltimetrie) as leve:
+            telecharger_altitudes([(650000.0, 6750000.0)])
+
+    assert "après 3 tentatives" in str(leve.value)
+    assert "fichier d'altimétrie en repli" in str(leve.value)
+    assert len(appels) == 3
+
+
 def test_virgule_decimale_et_virgule_separatrice_ne_sont_pas_confondues(tmp_path):
     """« 0,0;0,0;100,00 » compte trois colonnes, pas six."""
     fichier = tmp_path / "csv_francais.txt"

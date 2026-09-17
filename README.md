@@ -453,6 +453,17 @@ passer :
 python -m pytest -q -m "not reseau"
 ```
 
+Un de ces tests, le contrôle croisé du nuage du BE contre le RGE ALTI, échouait
+par intermittence et passait relancé seul. Ce n'était pas un défaut du test : la
+requête altimétrique était la seule du module sans reprise, là où le WMS en a
+depuis le 02/09/2026. Elle en a désormais aussi, bornée à
+`ign.TENTATIVES_ALTIMETRIE`, et seulement sur ce qui vaut la peine d'être
+rejoué — coupure de transport, surcharge (429), panne de nœud (5xx). Un 400 ou
+un 414 viennent de la requête et lèvent aussitôt. Ce que le test rendait visible
+touchait d'abord la production : un aléa de quelques secondes faisait perdre la
+coupe entière au chef de projet. Les trois tests de cette reprise ne demandent
+aucun réseau : ils remplacent le transport.
+
 ## Architecture
 
 ```
