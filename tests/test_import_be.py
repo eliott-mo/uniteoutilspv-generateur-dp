@@ -1205,3 +1205,214 @@ def test_un_objet_sans_objet_ne_compte_dans_aucune_surface():
     # Rien n'est dessiné : l'écart porte sur les 900 m² déclarés, et le message
     # ne parle plus d'un type en attente — il n'y en a plus.
     assert "n'ont pas encore de type" not in voie_lourde.message
+
+
+# ---------------------------------------------------------------------------
+# Fond cadastral du plan du BE — contrôle croisé du foncier
+# ---------------------------------------------------------------------------
+#
+# Tous les plans n'en portent pas : Saint-Cyr n'a aucun calque cadastral, celui
+# de Sarnois en a vingt-quatre, aux noms d'un export EDIGÉO de la DGFiP. Le DXF
+# de Sarnois n'est pas versionné — 50 Mo — et ces DXF synthétiques rejouent ce
+# qu'il a montré, y compris son enclave.
+
+_ORIGINE = (622_900.0, 6_750_700.0)
+
+
+def _rectangle(x, y, largeur, hauteur):
+    return [(x, y), (x + largeur, y), (x + largeur, y + hauteur), (x, y + hauteur)]
+
+
+def _dxf_cadastre(
+    chemin: Path,
+    section: str | None = "ZA",
+    numeros=("58", "59"),
+    enclave: bool = False,
+    cloture=(20, 20, 100, 60),
+) -> Path:
+    """Deux parcelles mitoyennes de 200 x 100 m, clôture dans la première.
+
+    `enclave` ajoute dans la première parcelle une parcelle de 10 x 10 m,
+    dessinée deux fois comme le fait un export DGFiP : comme parcelle, et comme
+    trou de celle qui l'entoure.
+    """
+    from dp_socle.import_be import (
+        CALQUE_NUMEROS_PARCELLE,
+        CALQUE_NUMEROS_SECTION,
+        CALQUE_PARCELLES,
+        CALQUE_SECTIONS,
+        CALQUE_TROUS_PARCELLE,
+    )
+
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    x, y = _ORIGINE
+
+    dx, dy, largeur, hauteur = cloture
+    espace.add_lwpolyline(
+        _rectangle(x + dx, y + dy, largeur, hauteur),
+        close=True,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    _ajouter_table(espace, (x + 40, y + 40))
+
+    for rang, numero in enumerate(numeros):
+        espace.add_lwpolyline(
+            _rectangle(x + rang * 200, y, 200, 100),
+            close=True,
+            dxfattribs={"layer": CALQUE_PARCELLES},
+        )
+        if numero:
+            espace.add_text(
+                numero, dxfattribs={"layer": CALQUE_NUMEROS_PARCELLE}
+            ).set_placement((x + rang * 200 + 160, y + 90))
+
+    if enclave:
+        coin = _rectangle(x + 150, y + 10, 10, 10)
+        espace.add_lwpolyline(coin, close=True, dxfattribs={"layer": CALQUE_PARCELLES})
+        espace.add_lwpolyline(
+            coin, close=True, dxfattribs={"layer": CALQUE_TROUS_PARCELLE}
+        )
+        espace.add_text(
+            "99", dxfattribs={"layer": CALQUE_NUMEROS_PARCELLE}
+        ).set_placement((x + 155, y + 15))
+
+    if section is not None:
+        espace.add_lwpolyline(
+            _rectangle(x - 50, y - 50, 500, 300),
+            close=True,
+            dxfattribs={"layer": CALQUE_SECTIONS},
+        )
+        espace.add_text(
+            section, dxfattribs={"layer": CALQUE_NUMEROS_SECTION}
+        ).set_placement((x + 10, y + 10))
+
+    document.saveas(str(chemin))
+    return chemin
+
+
+def _parcelle_du_projet():
+    """Le foncier maîtrisé : la première parcelle, telle que le géomètre la rend."""
+    from shapely.geometry import Polygon
+
+    x, y = _ORIGINE
+    return Polygon(_rectangle(x, y, 200, 100))
+
+
+def test_le_fond_cadastral_du_be_est_lu_sans_etre_dessine(tmp_path):
+    """Écarté du dessin comme les points de terrain, lu pour la mesure.
+
+    Le cadastre de la planche DP 1-3 vient du WFS IGN, qui fait foi ; celui du
+    DXF est une copie de travail. Il ne remplace donc aucune géométrie du plan.
+    """
+    from dp_socle.import_be import CALQUE_PARCELLES
+
+    plan = lire_plan_be(_dxf_cadastre(tmp_path / "cadastre.dxf"))
+    assert [p.reference for p in plan.parcelles] == ["ZA 58", "ZA 59"]
+    assert not any(e.calque == CALQUE_PARCELLES for e in plan.entites)
+
+
+def test_un_plan_sans_calque_cadastral_ne_porte_aucune_parcelle(tmp_path):
+    """Le cas de Saint-Cyr : l'absence n'est pas une anomalie."""
+    plan = lire_plan_be(_dxf_minimal(tmp_path / "sans_cadastre.dxf", "UNI_Clôture"))
+    assert plan.parcelles == []
+
+
+def test_la_parcelle_sous_la_cloture_est_nommee_quand_l_emprise_concorde(tmp_path):
+    """Le shapefile dit ce qui est maîtrisé, le cadastre du BE dit lequel c'est."""
+    from dp_socle.import_be import OK, _emprise
+
+    plan = lire_plan_be(_dxf_cadastre(tmp_path / "cadastre.dxf"))
+    controle = _emprise(plan, _parcelle_du_projet())
+    assert controle.statut == OK
+    assert "la parcelle ZA 58" in controle.message
+    # La parcelle voisine n'est pas sous la clôture : elle n'est pas nommée.
+    assert "ZA 59" not in controle.message
+
+
+def test_un_debordement_est_situe_sur_la_parcelle_qu_il_mord(tmp_path):
+    """« déborde de 1 200 m² » ne dit pas quoi négocier ; « sur ZA 59 », si."""
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import AVERTISSEMENT, _emprise
+
+    # La clôture est à cheval sur les deux parcelles ; le foncier maîtrisé
+    # s'arrête à la limite de la première.
+    plan = lire_plan_be(
+        _dxf_cadastre(tmp_path / "cadastre.dxf", cloture=(150, 20, 100, 60))
+    )
+    x, y = _ORIGINE
+    controle = _emprise(plan, Polygon(_rectangle(x, y, 200, 100)))
+    assert controle.statut == AVERTISSEMENT
+    assert "ZA 59" in controle.message
+    assert "maîtrise foncière" in controle.message
+
+
+def test_sans_shapefile_le_cadastre_du_be_nomme_sans_conclure(tmp_path):
+    """Le cadastre ne connaît pas la maîtrise foncière : il ne la remplace pas.
+
+    Le contrôle reste donc en avertissement — mais il donne la liste à
+    confronter à l'acte, au lieu de dire seulement qu'il n'a pas eu lieu.
+    """
+    from dp_socle.import_be import AVERTISSEMENT, _emprise
+
+    plan = lire_plan_be(_dxf_cadastre(tmp_path / "cadastre.dxf"))
+    controle = _emprise(plan, None)
+    assert controle.statut == AVERTISSEMENT
+    assert "la parcelle ZA 58" in controle.message
+    assert "shapefile" in controle.message
+
+
+def test_une_enclave_ne_prend_pas_le_numero_de_la_parcelle_qui_l_entoure(tmp_path):
+    """Mesuré sur Sarnois : la parcelle 46 héritait du numéro de son enclave.
+
+    Un export DGFiP dessine une parcelle enclavée deux fois — comme parcelle, et
+    comme trou de l'englobante. Sans ôter le trou, deux numéros tombent dans
+    l'englobante et sa référence devient illisible.
+    """
+    plan = lire_plan_be(_dxf_cadastre(tmp_path / "enclave.dxf", enclave=True))
+    references = sorted(p.reference or "?" for p in plan.parcelles)
+    assert references == ["ZA 58", "ZA 59", "ZA 99"]
+
+
+def test_une_parcelle_sans_numero_sort_sans_reference_plutot_qu_avec_une_fausse(
+    tmp_path,
+):
+    """Une référence inventée irait telle quelle dans un message de contrôle."""
+    plan = lire_plan_be(
+        _dxf_cadastre(tmp_path / "anonyme.dxf", section=None, numeros=("58", ""))
+    )
+    assert [p.reference for p in plan.parcelles] == ["58", None]
+
+
+def test_les_parcelles_sont_enumerees_dans_l_ordre_des_numeros():
+    """Trié en texte, « ZA 10 » passerait avant « ZA 9 »."""
+    from shapely.geometry import box
+
+    from dp_socle.import_be import ParcelleBE, _enumerer_parcelles
+
+    carre = box(0, 0, 1, 1)
+    parcelles = [
+        ParcelleBE(geometrie=carre, reference=f"ZA {n}") for n in (10, 9, 100, 2)
+    ]
+    assert _enumerer_parcelles(parcelles) == "les parcelles ZA 2, ZA 9, ZA 10 et ZA 100"
+
+
+def test_une_longue_liste_de_parcelles_est_tronquee_et_comptee():
+    """Une énumération de quarante références ne se lit pas."""
+    from shapely.geometry import box
+
+    from dp_socle.import_be import (
+        PARCELLES_ENUMEREES_MAX,
+        ParcelleBE,
+        _enumerer_parcelles,
+    )
+
+    carre = box(0, 0, 1, 1)
+    nombre = PARCELLES_ENUMEREES_MAX + 4
+    parcelles = [
+        ParcelleBE(geometrie=carre, reference=f"ZA {n}") for n in range(1, nombre + 1)
+    ]
+    phrase = _enumerer_parcelles(parcelles)
+    assert phrase.startswith(f"{nombre} parcelles, dont ZA 1,")
+    assert phrase.endswith("et 4 autres")

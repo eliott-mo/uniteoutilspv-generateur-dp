@@ -1056,7 +1056,7 @@ ne remarque avant l'instruction du dossier.
 | Surface de voie lourde, dessinée vs déclarée | 5 % | avertissement |
 | Surface de piste légère, dessinée vs déclarée | 5 % | avertissement |
 | Inclinaison des rangées, mesurée vs déclarée | 2°, en valeur absolue | avertissement |
-| Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement |
+| Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement, parcelles nommées si le DXF porte un cadastre |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
 
 Le seuil de 1 m² sur le débordement n'est pas arbitraire : sur le jeu de
@@ -1069,6 +1069,37 @@ polygone**, géométriquement identiques, 4,5259 ha chacun. `charger_emprise` en
 fait l'union et rend un seul polygone, ce qui évite d'en compter la surface deux
 fois — mais si un jour un export contient deux parcelles *distinctes*, elles
 seront unies de la même façon.
+
+#### Nommer le foncier, quand le plan du BE porte un cadastre
+
+Certains BE importent un fond cadastral dans leur plan. Celui de Sarnois en
+porte un, complet, aux noms d'un export EDIGÉO de la DGFiP : `CAD_1PARCELLE`
+pour les contours, `CAD_3PARCELLETEX` pour les numéros, `CAD_1SECTION` et
+`CAD_3SECTIONTEX` pour la section. Celui de Saint-Cyr n'en porte aucun.
+
+**Ce fond ne remplace pas le shapefile du géomètre**, et la distinction est le
+tout du sujet : le cadastre dit ce qui **existe**, le shapefile dit ce qui est
+**maîtrisé**, et c'est le second qui engage le dossier. Mesuré le 17/09/2026 sur
+Sarnois, la concordance des deux sources est frappante — la parcelle ZA 58 du
+DXF et le shapefile diffèrent de 1,8 m² sur 3,69 ha, soit 0,005 % — mais elle ne
+tient qu'à un projet sur parcelle unique. Sur un projet à cheval sur plusieurs,
+« parcelles touchées par la clôture » et « parcelles maîtrisées » divergent : une
+voisine effleurée entrerait, une parcelle du projet non clôturée sortirait.
+
+Le fond sert donc à **nommer**, comme les calques de terrain servent à mesurer :
+écarté du dessin — la planche DP 1-3 prend son cadastre du WFS IGN, qui fait foi
+— et lu pour le contrôle. Le contrôle « Clôture dans l'emprise cadastrale » dit
+alors quelles parcelles la clôture occupe, et, en cas de débordement, **sur
+lesquelles il tombe** : « déborde de 1 200 m² » ne dit pas quoi négocier, « sur
+la parcelle ZA 59 », si. Sans shapefile, il reste en avertissement — le cadastre
+ne connaît pas la maîtrise foncière — mais il donne la liste à confronter à
+l'acte au lieu de dire seulement qu'il n'a pas eu lieu.
+
+Rien n'est deviné : une parcelle dans laquelle aucun numéro ne tombe, ou deux,
+sort **sans référence**. Le cas des deux numéros est réel — un export DGFiP
+dessine une parcelle enclavée deux fois, comme parcelle et comme trou de celle
+qui l'entoure, et sur Sarnois la parcelle 46 héritait ainsi du 47. Le trou est
+donc ôté de l'englobante, et seulement d'elle.
 
 #### Les surfaces de piste
 

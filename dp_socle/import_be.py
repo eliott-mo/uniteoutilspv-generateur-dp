@@ -435,6 +435,10 @@ class PlanBE:
     points_terrain: dict[str, list[tuple[float, float, float]]] = field(
         default_factory=dict
     )
+    #: Parcelles du fond cadastral du BE, quand son plan en porte un. Non
+    #: dessinées non plus : elles servent à nommer le foncier que la clôture
+    #: occupe, voir `CALQUE_PARCELLES`. Vide n'est pas une anomalie.
+    parcelles: list["ParcelleBE"] = field(default_factory=list)
     avertissements: list[str] = field(default_factory=list)
 
     def par_categorie(self, categorie: str) -> list[EntiteBE]:
@@ -699,6 +703,136 @@ _TERRAIN_NORMALISES = {normaliser(nom): nom for nom in CALQUES_TERRAIN}
 #: maillages polyface du DXF portent des sommets à Z nul qui ne décrivent aucun
 #: relief.
 _Z_TERRAIN_MINIMAL_M = 1.0
+
+
+#: Calques du fond cadastral que le BE importe dans son plan, aux noms d'un
+#: export EDIGÉO de la DGFiP. Relevés le 17/09/2026 sur le plan de Sarnois, qui
+#: en porte vingt-quatre ; ces cinq-là suffisent à nommer une parcelle.
+#:
+#: Ils restent **écartés du dessin** — la planche DP 1-3 prend son cadastre du
+#: WFS IGN, qui fait foi, et celui du DXF est une copie de travail sans garantie
+#: de fraîcheur. Ils servent à la mesure, comme les calques de terrain : dire
+#: quelles parcelles la clôture occupe, ce que le shapefile du géomètre ne dit
+#: pas tout seul.
+#:
+#: Tous les plans n'en portent pas : celui de Saint-Cyr n'a aucun calque
+#: cadastral. Le contrôle est alors sans objet, et le dit plutôt que de laisser
+#: croire qu'il a eu lieu.
+CALQUE_PARCELLES = "CAD_1PARCELLE"
+CALQUE_TROUS_PARCELLE = "CAD_1TROUPARCELLE"
+CALQUE_NUMEROS_PARCELLE = "CAD_3PARCELLETEX"
+CALQUE_SECTIONS = "CAD_1SECTION"
+CALQUE_NUMEROS_SECTION = "CAD_3SECTIONTEX"
+
+
+@dataclass(frozen=True)
+class ParcelleBE:
+    """Une parcelle du fond cadastral repris par le BE dans son plan.
+
+    `reference` est ce que le fond porte — « ZA 58 » — ou None quand le dessin
+    ne permet pas de la lire sans deviner. Une référence inventée serait pire
+    qu'absente : elle irait telle quelle dans un message qui demande au chef de
+    projet de vérifier sa maîtrise foncière.
+    """
+
+    geometrie: BaseGeometry
+    reference: str | None = None
+
+
+def _polygones_du_calque(modelspace, calque: str, facteur: float) -> list:
+    """Polygones fermés d'un calque, sans passer par la correspondance.
+
+    Le fond cadastral est écarté du dessin : ses entités ne traversent pas
+    `entites_par_calque`, et il faut donc les relire ici.
+    """
+    from shapely.geometry import Polygon
+
+    attendu = normaliser(calque)
+    polygones = []
+    for entite in modelspace:
+        nom = _calque_de(entite)
+        if nom is None or normaliser(nom) != attendu:
+            continue
+        if entite.dxftype() != "LWPOLYLINE":
+            continue
+        sommets = [
+            (p[0] * facteur, p[1] * facteur) for p in entite.get_points("xy")
+        ]
+        if len(sommets) < 3:
+            continue
+        forme = Polygon(sommets).buffer(0)
+        if forme.is_empty or forme.area <= 0:
+            continue
+        polygones.append(forme)
+    return polygones
+
+
+def _textes_du_calque(modelspace, calque: str, facteur: float) -> list:
+    """Textes d'un calque et leur point d'insertion, en mètres."""
+    from shapely.geometry import Point
+
+    attendu = normaliser(calque)
+    textes = []
+    for entite in modelspace:
+        nom = _calque_de(entite)
+        if nom is None or normaliser(nom) != attendu:
+            continue
+        if entite.dxftype() != "TEXT":
+            continue
+        contenu = (entite.dxf.text or "").strip()
+        if not contenu:
+            continue
+        point = entite.dxf.insert
+        textes.append((Point(point.x * facteur, point.y * facteur), contenu))
+    return textes
+
+
+def _parcelles_cadastrales(modelspace, facteur: float) -> list[ParcelleBE]:
+    """Parcelles du fond cadastral du BE, avec leur référence quand elle se lit.
+
+    Le contour vient de `CAD_1PARCELLE`, le numéro du texte de
+    `CAD_3PARCELLETEX` qui tombe dedans, la section de `CAD_3SECTIONTEX`.
+    Rien n'est deviné : une parcelle dans laquelle aucun numéro ne tombe, ou
+    deux, sort sans référence.
+    """
+    contours = _polygones_du_calque(modelspace, CALQUE_PARCELLES, facteur)
+    if not contours:
+        return []
+
+    trous = _polygones_du_calque(modelspace, CALQUE_TROUS_PARCELLE, facteur)
+    numeros = _textes_du_calque(modelspace, CALQUE_NUMEROS_PARCELLE, facteur)
+    sections = _polygones_du_calque(modelspace, CALQUE_SECTIONS, facteur)
+    noms_section = _textes_du_calque(modelspace, CALQUE_NUMEROS_SECTION, facteur)
+
+    parcelles = []
+    for contour in contours:
+        # Une parcelle enclavée est dessinée deux fois : comme parcelle, et
+        # comme trou de celle qui l'entoure. Sans ôter le trou, le numéro de
+        # l'enclave tombe aussi dans l'englobante — mesuré sur Sarnois, la
+        # parcelle 46 héritait du 47 et se retrouvait sans référence lisible.
+        # Seuls les trous plus petits sont ôtés : sinon l'enclave, qui est son
+        # propre trou, se viderait de son numéro à son tour.
+        interieur = contour
+        for trou in trous:
+            if trou.area < contour.area:
+                interieur = interieur.difference(trou)
+
+        trouves = [texte for point, texte in numeros if interieur.contains(point)]
+        reference = None
+        if len(trouves) == 1:
+            reference = trouves[0]
+            repere = interieur.representative_point()
+            for polygone, nom in (
+                (polygone, nom)
+                for polygone in sections
+                for point, nom in noms_section
+                if polygone.contains(point)
+            ):
+                if polygone.contains(repere):
+                    reference = f"{nom} {reference}"
+                    break
+        parcelles.append(ParcelleBE(geometrie=contour, reference=reference))
+    return parcelles
 
 
 def _points_terrain(modelspace) -> dict[str, list[tuple[float, float, float]]]:
@@ -972,6 +1106,7 @@ def lire_plan_be(
             nom: [(x * facteur, y * facteur, z * facteur) for x, y, z in pts]
             for nom, pts in points_terrain.items()
         },
+        parcelles=_parcelles_cadastrales(modelspace, facteur),
         avertissements=avertissements,
     )
 
@@ -1764,18 +1899,74 @@ def _azimut(azimut_dxf: float, azimut_tableau: float, azimut_brut: str) -> Contr
     )
 
 
+def _parcelles_touchees(plan: PlanBE, zone: BaseGeometry | None) -> list[ParcelleBE]:
+    """Parcelles du fond cadastral du BE que `zone` recouvre.
+
+    Le seuil est celui du débordement : sous un mètre carré, c'est le trait du
+    parcellaire, pas une emprise.
+    """
+    if zone is None or zone.is_empty:
+        return []
+    return [
+        parcelle
+        for parcelle in plan.parcelles
+        if parcelle.geometrie.intersection(zone).area > DEBORDEMENT_NEGLIGEABLE_M2
+    ]
+
+
+#: Au-delà, l'énumération des parcelles est tronquée et leur nombre est dit.
+#: Un vrai débordement en concerne une à trois ; une liste de quarante ne se
+#: lit pas, et ce qu'elle apprend tient dans son compte.
+PARCELLES_ENUMEREES_MAX = 6
+
+
+def _rang_de_parcelle(parcelle: ParcelleBE):
+    """Clé de tri : la section, puis le numéro **en nombre**.
+
+    Trié en texte, « ZA 10 » passerait avant « ZA 9 » — l'ordre qu'on relit
+    contre un acte notarié est celui des numéros.
+    """
+    reference = parcelle.reference or ""
+    section, _, numero = reference.rpartition(" ")
+    if numero.isdigit():
+        return (section, 0, int(numero), "")
+    # Les références sans numéro lisible passent en fin de liste, et se rangent
+    # entre elles par leur texte. Les tuples gardent la même forme : comparer
+    # des tuples de longueurs différentes casse dès que les préfixes s'égalent.
+    return (section, 1, 0, reference)
+
+
+def _enumerer_parcelles(parcelles: list[ParcelleBE]) -> str:
+    """« la parcelle ZA 58 », « les parcelles ZA 50, ZA 51 et ZA 52 »."""
+    rangees = sorted(parcelles, key=_rang_de_parcelle)
+    references = [
+        parcelle.reference
+        or f"une sans référence lisible ({parcelle.geometrie.area:.0f} m²)"
+        for parcelle in rangees
+    ]
+    if len(references) == 1:
+        return f"la parcelle {references[0]}"
+    # Tronquer pour gagner une seule référence ne ferait pas un message plus
+    # court : le seuil ne mord qu'à partir de deux de trop.
+    if len(references) > PARCELLES_ENUMEREES_MAX + 1:
+        gardees = references[:PARCELLES_ENUMEREES_MAX]
+        reste = len(references) - PARCELLES_ENUMEREES_MAX
+        autres = "1 autre" if reste == 1 else f"{reste} autres"
+        return f"{len(references)} parcelles, dont {', '.join(gardees)} et {autres}"
+    return f"les parcelles {', '.join(references[:-1])} et {references[-1]}"
+
+
 def _emprise(plan: PlanBE, emprise_cadastrale: BaseGeometry | None) -> Controle:
+    """Débordement de la clôture hors du foncier maîtrisé.
+
+    L'emprise fournie est le shapefile du géomètre : elle dit ce qui est
+    **maîtrisé**, et c'est elle qui engage le dossier. Le fond cadastral que le
+    BE a parfois importé dans son plan dit autre chose — ce qui **existe** — et
+    ne la remplace donc pas. Il sert à nommer : dire « la clôture occupe la
+    parcelle ZA 58 » plutôt que de compter des mètres carrés anonymes, c'est
+    donner au chef de projet de quoi la confronter à son acte.
+    """
     polygone = plan.polygone_cloture
-    if emprise_cadastrale is None:
-        return Controle(
-            "Clôture dans l'emprise cadastrale",
-            None,
-            None,
-            "",
-            AVERTISSEMENT,
-            "Emprise cadastrale non fournie : un débordement de la clôture hors "
-            "des parcelles du projet n'aurait pas été vu.",
-        )
     if polygone is None:
         return Controle(
             "Clôture dans l'emprise cadastrale",
@@ -1785,16 +1976,48 @@ def _emprise(plan: PlanBE, emprise_cadastrale: BaseGeometry | None) -> Controle:
             AVERTISSEMENT,
             "Aucun contour de clôture dans le DXF : contrôle impossible.",
         )
-    surface = float(polygone.difference(emprise_cadastrale).area)
-    if surface <= DEBORDEMENT_NEGLIGEABLE_M2:
+
+    occupees = _parcelles_touchees(plan, polygone)
+    if emprise_cadastrale is None:
+        manque = (
+            "Emprise cadastrale non fournie : un débordement de la clôture hors "
+            "des parcelles du projet n'aurait pas été vu."
+        )
+        if not occupees:
+            return Controle(
+                "Clôture dans l'emprise cadastrale", None, None, "", AVERTISSEMENT, manque
+            )
         return Controle(
             "Clôture dans l'emprise cadastrale",
-            0.0,
             None,
-            "m²",
-            OK,
-            "L'emprise clôturée est contenue dans l'emprise cadastrale fournie.",
+            None,
+            "",
+            AVERTISSEMENT,
+            f"{manque} Le plan du BE porte un fond cadastral, où la clôture "
+            f"occupe {_enumerer_parcelles(occupees)} : le cadastre dit ce qui "
+            "existe, pas ce qui est maîtrisé. Vérifiez cette liste contre votre "
+            "maîtrise foncière, et fournissez le shapefile du géomètre.",
         )
+
+    surface = float(polygone.difference(emprise_cadastrale).area)
+    if surface <= DEBORDEMENT_NEGLIGEABLE_M2:
+        confirme = "L'emprise clôturée est contenue dans l'emprise cadastrale fournie."
+        if occupees:
+            confirme += (
+                f" Le fond cadastral du plan du BE l'y confirme : la clôture y "
+                f"occupe {_enumerer_parcelles(occupees)}."
+            )
+        return Controle(
+            "Clôture dans l'emprise cadastrale", 0.0, None, "m²", OK, confirme
+        )
+
+    debordantes = _parcelles_touchees(plan, polygone.difference(emprise_cadastrale))
+    ou = (
+        f" Le fond cadastral du plan du BE situe ce débordement sur "
+        f"{_enumerer_parcelles(debordantes)}."
+        if debordantes
+        else ""
+    )
     return Controle(
         "Clôture dans l'emprise cadastrale",
         surface,
@@ -1802,7 +2025,7 @@ def _emprise(plan: PlanBE, emprise_cadastrale: BaseGeometry | None) -> Controle:
         "m²",
         AVERTISSEMENT,
         f"L'emprise clôturée déborde de {surface:.0f} m² hors de l'emprise "
-        "cadastrale fournie. Vérifiez la maîtrise foncière avant le dépôt.",
+        f"cadastrale fournie.{ou} Vérifiez la maîtrise foncière avant le dépôt.",
     )
 
 
