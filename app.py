@@ -554,7 +554,32 @@ def _demande_au_be(message: str) -> str:
     return f"{intitule} — {demande}" if separateur else demande
 
 
-def _trancher_les_voiries(plan) -> None:
+def _recouper_les_voiries(import_be, tranche) -> None:
+    """Rejoue le recoupement des surfaces, maintenant que le type est connu.
+
+    Le contrôle se fait à l'import, où il ne peut pas conclure : sans lui, il
+    restait suspendu pour toute la vie du dossier, et l'écart qu'il doit
+    attraper — un plan mis à jour sans son tableau — passait inaperçu. Il se
+    rejoue donc ici, dès le choix fait, et dit ce qu'il trouve.
+    """
+    from dp_socle.import_be import OK, controler_surfaces_de_voirie
+
+    controles = controler_surfaces_de_voirie(
+        import_be.plan, import_be.tableau.pistes, tranche
+    )
+    ecarts = [controle for controle in controles if controle.statut != OK]
+    if not ecarts:
+        st.success(
+            "Surfaces de voirie recoupées avec le tableau bilan : elles "
+            "concordent.",
+            icon="✅",
+        )
+        return
+    for controle in ecarts:
+        st.warning(f"{controle.libelle} : {controle.message}", icon="⚠️")
+
+
+def _trancher_les_voiries(import_be) -> None:
     """Fait trancher le type des voiries, croquis à l'appui, dès l'import.
 
     Deux choses que l'usage a demandées le 17/09/2026. La question se pose ici,
@@ -570,6 +595,7 @@ def _trancher_les_voiries(plan) -> None:
     from dp_socle.apercu_be import croquis_voiries, voiries_hors_cadre
     from dp_socle.contrat import VOIRIE_SANS_OBJET, decrire_geometries_voirie
 
+    plan = import_be.plan
     objets = decrire_geometries_voirie(plan.geometries("voirie"))
     if not objets:
         st.session_state["voirie_tranchee"] = None
@@ -639,9 +665,11 @@ def _trancher_les_voiries(plan) -> None:
         else st.session_state.get(f"voirie_{objet['rang']}")
         for objet in objets
     ]
-    st.session_state["voirie_tranchee"] = (
-        tranche if all(t is not None for t in tranche) else None
-    )
+    complet = all(t is not None for t in tranche)
+    st.session_state["voirie_tranchee"] = tranche if complet else None
+    if complet:
+        _recouper_les_voiries(import_be, tranche)
+
 
 
 def _tableau_controles(controles) -> None:
@@ -1427,7 +1455,7 @@ if import_be_courant is not None and commune.strip():
                 for message in au_be:
                     st.caption(f"· {message}")
 
-        _trancher_les_voiries(import_be_courant.plan)
+        _trancher_les_voiries(import_be_courant)
         # Une fois l'import validé, ces remarques ont été lues : elles se
         # replient pour que la carte, qui vient après, ne soit plus à deux
         # écrans de défilement (retour d'usage du 17/09/2026). Elles restent

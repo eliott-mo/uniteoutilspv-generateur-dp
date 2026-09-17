@@ -1148,3 +1148,60 @@ def test_une_voirie_non_tranchee_ne_masque_pas_un_plan_qui_ne_la_dessine_pas():
     # Le total est mesuré, lui : 36 m² dessinés contre 3 870 déclarés.
     assert voie_lourde.valeur_dxf == pytest.approx(36.0)
     assert voie_lourde.valeur_tableau == pytest.approx(3870.0)
+
+
+def test_le_recoupement_se_rejoue_une_fois_le_type_tranche():
+    """Suspendre un contrôle ne doit pas le suspendre pour toute la vie du dossier.
+
+    Demandé le 17/09/2026 : sans cette reprise, l'écart que ce contrôle doit
+    attraper — un plan mis à jour sans son tableau — passait inaperçu dès lors
+    que le calque du bureau d'études ne nommait pas le type de ses voies.
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.contrat import VOIRIE_SANS_OBJET
+    from dp_socle.import_be import OK, controler_surfaces_de_voirie
+
+    plan = _plan_d_essai(
+        "voirie", "UNI_VRD_Voirie", Polygon([(0, 0), (100, 0), (100, 10), (0, 10)])
+    )
+    pistes = {"surface_piste_lourde_m2": 1000.0}
+
+    # Avant le choix : le contrôle ne conclut pas, et le dit.
+    suspendu = next(
+        c for c in controler_surfaces_de_voirie(plan, pistes)
+        if c.libelle == "Surface de voie lourde"
+    )
+    assert "n'ont pas encore de type" in suspendu.message
+
+    # Après : les 1 000 m² dessinés recoupent les 1 000 m² déclarés.
+    rejoue = next(
+        c for c in controler_surfaces_de_voirie(plan, pistes, ["piste_lourde"])
+        if c.libelle == "Surface de voie lourde"
+    )
+    assert rejoue.statut == OK
+    assert rejoue.valeur_dxf == pytest.approx(1000.0)
+
+    # Et rangée du mauvais côté, elle fait ressortir l'écart des deux côtés.
+    mal_rangee = {
+        c.libelle: c
+        for c in controler_surfaces_de_voirie(plan, pistes, ["piste_legere"])
+    }
+    assert mal_rangee["Surface de voie lourde"].statut != OK
+
+
+def test_un_objet_sans_objet_ne_compte_dans_aucune_surface():
+    """Un axe rangé « sans objet » n'entre ni dans l'une ni dans l'autre."""
+    from shapely.geometry import LineString
+
+    from dp_socle.contrat import VOIRIE_SANS_OBJET
+    from dp_socle.import_be import controler_surfaces_de_voirie
+
+    plan = _plan_d_essai("voirie", "UNI_VRD_Voirie", LineString([(0, 0), (50, 0)]))
+    controles = controler_surfaces_de_voirie(
+        plan, {"surface_piste_lourde_m2": 900.0}, [VOIRIE_SANS_OBJET]
+    )
+    voie_lourde = next(c for c in controles if c.libelle == "Surface de voie lourde")
+    # Rien n'est dessiné : l'écart porte sur les 900 m² déclarés, et le message
+    # ne parle plus d'un type en attente — il n'y en a plus.
+    assert "n'ont pas encore de type" not in voie_lourde.message

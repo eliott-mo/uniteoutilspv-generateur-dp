@@ -1495,6 +1495,17 @@ def _surface_dessinee(plan: PlanBE, categories) -> float:
     return float(unary_union(polygones).area)
 
 
+#: À quelle catégorie de tranchage chaque contrôle de surface correspond.
+_CATEGORIE_DU_CONTROLE = {
+    "Surface de voie lourde": "piste_lourde",
+    "Surface de piste légère": "piste_legere",
+}
+
+
+def _categorie_de(libelle: str) -> str:
+    return _CATEGORIE_DU_CONTROLE.get(libelle, "")
+
+
 def _voirie_en_attente(
     plan: PlanBE, pistes: dict, libelle: str, en_attente: int, declaree: float
 ) -> Controle:
@@ -1535,7 +1546,38 @@ def _voirie_en_attente(
     return Controle(libelle, None, declaree, "m²", AVERTISSEMENT, attente)
 
 
-def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
+def controler_surfaces_de_voirie(plan: PlanBE, pistes: dict, voirie=None) -> list:
+    """Recoupe les surfaces de voirie, en tenant compte du tranchage s'il a eu lieu.
+
+    Appelée une première fois à l'import, où le type des voiries n'est pas encore
+    connu, puis **rejouée** dès que le chef de projet a tranché : le contrôle
+    restait sinon suspendu pour toute la vie du dossier, et l'écart qu'il devait
+    attraper — un plan mis à jour sans son tableau — passait inaperçu.
+
+    `voirie` est la liste des types retenus, un par objet de la couche, dans son
+    ordre. Voir `contrat.VOIRIE_SANS_OBJET` pour les objets sans surface.
+    """
+    return _surfaces_de_piste(plan, pistes, voirie)
+
+
+def _voiries_rangees(plan: PlanBE, voirie, categorie: str) -> list:
+    """Les objets de la couche `voirie` que le tranchage a mis dans `categorie`.
+
+    Miroir de `Contrat.voiries_de`, du côté du plan en mémoire : le contrôle se
+    rejoue avant que le contrat ne soit réécrit, et doit compter les mêmes
+    surfaces que lui.
+    """
+    if not voirie:
+        return []
+    objets = plan.geometries("voirie")
+    return [
+        geometrie
+        for geometrie, choisi in zip(objets, voirie)
+        if choisi == categorie and geometrie.area > 0
+    ]
+
+
+def _surfaces_de_piste(plan: PlanBE, pistes: dict, voirie=None) -> list[Controle]:
     """Recoupe les surfaces de piste dessinées avec celles du tableau.
 
     Le lot 4 annonce ces surfaces au dossier : elles doivent correspondre à ce
@@ -1559,7 +1601,16 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
     calque nomme ses voies « à créer », continue de se recouper à 0,1 % près.
     """
     controles: list[Controle] = []
-    en_attente = len(plan.geometries("voirie"))
+    # Les objets déjà rangés par le chef de projet ne sont plus en attente : le
+    # contrôle rejoué après le tranchage doit conclure, pas se suspendre encore.
+    en_attente = sum(
+        1
+        for geometrie, choisi in zip(
+            plan.geometries("voirie"),
+            voirie or [None] * len(plan.geometries("voirie")),
+        )
+        if choisi is None and geometrie.area > 0
+    )
     for libelle, categories, declaree in (
         (
             "Surface de voie lourde",
@@ -1573,7 +1624,9 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
             + (pistes.get("surface_piste_legere_externe_m2") or 0.0),
         ),
     ):
-        dessinee = _surface_dessinee(plan, categories)
+        dessinee = _surface_dessinee(plan, categories) + sum(
+            g.area for g in _voiries_rangees(plan, voirie, _categorie_de(libelle))
+        )
         if not dessinee and not declaree:
             continue
         if not dessinee and en_attente:
