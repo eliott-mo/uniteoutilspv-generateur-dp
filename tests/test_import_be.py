@@ -1048,3 +1048,100 @@ def test_l_aire_de_grutage_se_dessine_en_voie_lourde(tmp_path):
     entrees = legende_presente(lire_plan_be(chemin))
     voies = [(s.libelle, nb) for _, s, nb in entrees if s.libelle == "Voie lourde"]
     assert voies == [("Voie lourde", 2)]
+
+
+# ---------------------------------------------------------------------------
+# La voirie dont le type n'est pas encore tranché
+# ---------------------------------------------------------------------------
+
+
+def _plan_d_essai(categorie: str, calque: str, geometrie):
+    """Un plan réduit à une seule entité, pour éprouver un contrôle isolé."""
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    return PlanBE(
+        entites=[EntiteBE(categorie, calque, geometrie, False)],
+        azimut_tables_deg=0.0,
+        correspondance={calque: categorie},
+        unite="m",
+        facteur_unite=1.0,
+        calques_ignores=[],
+        calques_vides=[],
+        source="essai.dxf",
+    )
+
+
+def test_une_voirie_non_tranchee_suspend_le_recoupement_des_surfaces():
+    """Une alerte qui se déclenche sur le cas ordinaire n'alerte plus de rien.
+
+    Mesuré le 17/09/2026 sur Sarnois : son calque de voirie ne dit pas si les
+    voies sont lourdes ou légères, tout tombe donc dans la catégorie `voirie`
+    que le chef de projet répartit plus tard (D5 du lot 4). Les deux catégories
+    précises étant vides et le tableau déclarant ses surfaces, le recoupement
+    annonçait un écart de 100 % — sur un plan parfaitement normal.
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import AVERTISSEMENT, _surfaces_de_piste
+
+    plan = _plan_d_essai("voirie", "UNI_VRD_Voirie", Polygon([(0, 0), (40, 0), (40, 5), (0, 5)]))
+    controles = _surfaces_de_piste(
+        plan,
+        {"surface_piste_lourde_m2": 200.0, "surface_piste_legere_interne_m2": 0.0},
+    )
+    voie_lourde = next(c for c in controles if c.libelle == "Surface de voie lourde")
+    assert voie_lourde.statut == AVERTISSEMENT
+    assert "n'ont pas encore de type" in voie_lourde.message
+    # Le total dessiné (200 m²) couvre le total déclaré : rien d'autre à dire
+    # que la suspension du détail.
+    assert "Demandez-les" not in voie_lourde.message
+    assert voie_lourde.valeur_dxf is None
+
+
+def test_une_voirie_tranchee_se_recoupe_normalement():
+    """Saint-Cyr nomme ses voies « à créer » : le contrôle conclut, et le doit."""
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import OK, _surfaces_de_piste
+
+    plan = _plan_d_essai(
+        "piste_lourde_a_creer",
+        "UNI_VRD_Piste_lourde_a_creer",
+        Polygon([(0, 0), (100, 0), (100, 10), (0, 10)]),
+    )
+    controles = _surfaces_de_piste(plan, {"surface_piste_lourde_m2": 1000.0})
+    voie_lourde = next(c for c in controles if c.libelle == "Surface de voie lourde")
+    assert voie_lourde.statut == OK
+    assert voie_lourde.valeur_dxf == pytest.approx(1000.0)
+
+
+def test_une_voirie_non_tranchee_ne_masque_pas_un_plan_qui_ne_la_dessine_pas():
+    """Suspendre le détail ne doit pas faire taire ce qui reste mesurable.
+
+    Mesuré le 17/09/2026 sur Sarnois : ses trois objets de voirie sont deux
+    linéaires sans surface et un polygone de 36 m², contre 3 870 m² déclarés au
+    tableau. Le plan ne dessine quasiment pas ses voies — les planches DP 2 et
+    DP 4 ne les montreront pas — et un contrôle simplement « suspendu » l'aurait
+    passé sous silence.
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import AVERTISSEMENT, _surfaces_de_piste
+
+    plan = _plan_d_essai(
+        "voirie", "UNI_VRD_Voirie", Polygon([(0, 0), (12, 0), (12, 3), (0, 3)])
+    )
+    controles = _surfaces_de_piste(
+        plan,
+        {
+            "surface_piste_lourde_m2": 1423.0,
+            "surface_piste_legere_interne_m2": 2447.0,
+        },
+    )
+    voie_lourde = next(c for c in controles if c.libelle == "Surface de voie lourde")
+    assert voie_lourde.statut == AVERTISSEMENT
+    assert "n'ont pas encore de type" in voie_lourde.message
+    assert "Demandez-les au bureau d'études" in voie_lourde.message
+    # Le total est mesuré, lui : 36 m² dessinés contre 3 870 déclarés.
+    assert voie_lourde.valeur_dxf == pytest.approx(36.0)
+    assert voie_lourde.valeur_tableau == pytest.approx(3870.0)

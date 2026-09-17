@@ -1494,6 +1494,45 @@ def _surface_dessinee(plan: PlanBE, categories) -> float:
     return float(unary_union(polygones).area)
 
 
+def _voirie_en_attente(
+    plan: PlanBE, pistes: dict, libelle: str, en_attente: int, declaree: float
+) -> Controle:
+    """Le contrôle d'une voirie dont le type n'est pas encore tranché.
+
+    Ce qui est mesurable l'est : le total dessiné, toutes voies confondues,
+    contre le total déclaré. Ce qui ne l'est pas — la répartition entre lourde
+    et légère — est annoncé comme suspendu, et non comme un écart.
+    """
+    dessinee_totale = _surface_dessinee(
+        plan, tuple(CATEGORIES_VOIE_LOURDE) + tuple(CATEGORIES_PISTE_LEGERE) + ("voirie",)
+    )
+    declaree_totale = (
+        (pistes.get("surface_piste_lourde_m2") or 0.0)
+        + (pistes.get("surface_piste_legere_interne_m2") or 0.0)
+        + (pistes.get("surface_piste_legere_externe_m2") or 0.0)
+    )
+    attente = (
+        f"{en_attente} objet(s) de voirie n'ont pas encore de type — leur calque "
+        "ne dit pas s'ils sont lourds ou légers — et le détail par type ne se "
+        "recoupera qu'une fois tranché."
+    )
+    if declaree_totale and dessinee_totale / declaree_totale < 1 - TOLERANCE_SURFACE_PISTE:
+        return Controle(
+            libelle,
+            dessinee_totale,
+            declaree_totale,
+            "m²",
+            AVERTISSEMENT,
+            f"{attente} Mais toutes voies confondues, le plan n'en dessine que "
+            + f"{dessinee_totale:,.0f}".replace(",", chr(160))
+            + " m² contre "
+            + f"{declaree_totale:,.0f}".replace(",", chr(160))
+            + " m² déclarés : le plan ne les dessine pas toutes, et les planches "
+            "ne les montreront pas. Demandez-les au bureau d'études.",
+        )
+    return Controle(libelle, None, declaree, "m²", AVERTISSEMENT, attente)
+
+
 def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
     """Recoupe les surfaces de piste dessinées avec celles du tableau.
 
@@ -1504,8 +1543,21 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
     Une piste absente du plan **et** du tableau n'appelle pas de contrôle : sur
     le jeu de Saint-Cyr, aucune piste légère n'est dessinée et le tableau n'en
     déclare pas davantage.
+
+    PIÈGE — LA VOIRIE NON TRANCHÉE (mesuré le 17/09/2026 sur Sarnois)
+    -----------------------------------------------------------------
+    Un plan dont le calque de voirie ne dit pas si elle est lourde ou légère
+    verse tout dans la catégorie `voirie`, que le chef de projet répartit plus
+    tard (D5 du lot 4). Les deux catégories précises sont alors **vides**, le
+    tableau déclare pourtant ses surfaces, et le recoupement annonçait un écart
+    de 100 % — sur un plan parfaitement normal.
+
+    Une alerte qui se déclenche sur le cas ordinaire n'alerte plus de rien : le
+    contrôle dit maintenant ce qui l'empêche de conclure. Saint-Cyr, dont le
+    calque nomme ses voies « à créer », continue de se recouper à 0,1 % près.
     """
     controles: list[Controle] = []
+    en_attente = len(plan.geometries("voirie"))
     for libelle, categories, declaree in (
         (
             "Surface de voie lourde",
@@ -1521,6 +1573,17 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict) -> list[Controle]:
     ):
         dessinee = _surface_dessinee(plan, categories)
         if not dessinee and not declaree:
+            continue
+        if not dessinee and en_attente:
+            # Le détail par type ne peut pas se recouper — mais le **total**, si.
+            # Mesuré le 17/09/2026 sur Sarnois : ses trois objets de voirie sont
+            # deux linéaires sans surface et un polygone de 36 m², contre 3 870 m²
+            # déclarés au tableau. Suspendre le contrôle sans rien mesurer aurait
+            # masqué cela — le plan ne dessine quasiment pas ses voiries, et les
+            # planches DP 2 et DP 4 le montreraient sans que rien ne l'ait dit.
+            controles.append(
+                _voirie_en_attente(plan, pistes, libelle, en_attente, declaree)
+            )
             continue
         controles.append(
             _ecart_relatif(

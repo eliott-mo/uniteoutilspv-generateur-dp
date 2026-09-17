@@ -1287,8 +1287,21 @@ if import_be_courant is not None and commune.strip():
 
     with emplacement_avertissements:
         a_lire, routine = _trier_les_avertissements(import_be_courant.avertissements)
-        for message in a_lire:
-            st.warning(message, icon="⚠️")
+        # Une fois l'import validé, ces remarques ont été lues : elles se
+        # replient pour que la carte, qui vient après, ne soit plus à deux
+        # écrans de défilement (retour d'usage du 17/09/2026). Elles restent
+        # dépliées tant que l'import n'est pas validé — c'est le moment où
+        # elles servent.
+        deja_valide = (
+            DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
+        ).exists()
+        if a_lire and deja_valide:
+            with st.expander(f"Les remarques de l'import ({len(a_lire)})"):
+                for message in a_lire:
+                    st.warning(message, icon="⚠️")
+        else:
+            for message in a_lire:
+                st.warning(message, icon="⚠️")
         if routine:
             with st.expander(
                 f"Ce que l'import a écarté, comme prévu ({len(routine)} message(s))"
