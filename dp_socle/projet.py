@@ -202,17 +202,20 @@ class Projet:
                     "métropolitaine (-5,5° à 10,0°). Refaites le calage."
                 )
         if self.voirie is not None:
-            from .contrat import VOIRIES_ADMISES
+            # Le même ensemble que celui du contrat, et non une seconde liste :
+            # « sans objet » n'était arrivé que dans `decrire_voiries`, et un
+            # dossier trié se validait à l'écran puis refusait de se générer.
+            from .contrat import VOIRIES_DU_CONTRAT
 
             # Une chaîne vaut pour toute la couche — c'est la forme des
             # `projet.json` écrits avant que le tri ne se fasse objet par objet,
             # et elle reste lisible. Une liste donne un type par objet.
             choix = [self.voirie] if isinstance(self.voirie, str) else self.voirie
-            inconnus = sorted({c for c in choix if c not in VOIRIES_ADMISES})
+            inconnus = sorted({c for c in choix if c not in VOIRIES_DU_CONTRAT})
             if inconnus:
                 raise ErreurDP(
                     f"voirie = « {', '.join(map(str, inconnus))} » inconnu dans "
-                    f"projet.json ; attendu parmi {', '.join(VOIRIES_ADMISES)}."
+                    f"projet.json ; attendu parmi {', '.join(VOIRIES_DU_CONTRAT)}."
                 )
         if self.correction_nord_sud_m is not None:
             if self.longitude_calage is None:

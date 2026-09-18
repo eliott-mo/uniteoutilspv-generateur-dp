@@ -42,6 +42,15 @@ VOIRIE_SANS_OBJET = "sans_objet"
 #: Aucune valeur par défaut : c'est tout l'objet de la règle.
 VOIRIES_ADMISES = ("piste_lourde", "piste_legere")
 
+#: Tout ce qu'un `projet.json` trié peut porter sur sa couche de voirie.
+#:
+#: **Un seul ensemble, lu partout.** `Projet.valider` et `decrire_voiries` le
+#: construisaient chacun de leur côté, et « sans objet » n'est arrivé que dans
+#: le second : un dossier trié passait l'écran de validation puis refusait de se
+#: générer, sur « voirie = sans_objet inconnu dans projet.json » (retour d'usage
+#: du 19/09/2026). Ajouter un type ici le fait connaître des deux.
+VOIRIES_DU_CONTRAT = VOIRIES_ADMISES + (VOIRIE_SANS_OBJET,)
+
 
 # ---------------------------------------------------------------------------
 # Cotes normalisées
@@ -492,12 +501,11 @@ def charger_contrat(dossier: str | Path, voirie=None) -> Contrat:
     nb_voiries = len(couches.get("voirie", []))
     choix = [voirie] * nb_voiries if isinstance(voirie, str) else voirie
     if choix is not None:
-        admis = set(VOIRIES_ADMISES) | {VOIRIE_SANS_OBJET}
-        inconnus = sorted({c for c in choix if c not in admis})
+        inconnus = sorted({c for c in choix if c not in VOIRIES_DU_CONTRAT})
         if inconnus:
             raise ErreurVoirieIndecise(
                 f"Type de voirie « {', '.join(map(str, inconnus))} » inconnu, "
-                f"attendu parmi {', '.join(sorted(admis))}."
+                f"attendu parmi {', '.join(VOIRIES_DU_CONTRAT)}."
             )
         if len(choix) != nb_voiries:
             raise ErreurVoirieIndecise(

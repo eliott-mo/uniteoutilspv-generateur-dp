@@ -21,6 +21,7 @@ from dp_socle.contrat import (
 )
 from dp_socle.erreurs import (
     ErreurContrat,
+    ErreurDP,
     ErreurCoteOuvrage,
     ErreurImportBE,
     ErreurVoirieIndecise,
@@ -240,6 +241,60 @@ def test_type_de_voirie_inconnu_refuse(tmp_path):
     synthese.ecrire(tmp_path, avec_voirie=True)
     with pytest.raises(ErreurVoirieIndecise, match="inconnu"):
         charger_contrat(tmp_path, voirie="piste_moyenne")
+
+
+def _projet_trie(tmp_path, voirie):
+    """Un `projet.json` minimal portant un tri de voirie, prêt à valider."""
+    from dp_socle.projet import Projet
+
+    emprise = tmp_path / "emprise.geojson"
+    emprise.write_text(
+        json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8"
+    )
+    return Projet(
+        nom="essai",
+        commune="Sarnois",
+        code_postal="60210",
+        date="2026-09-19",
+        emprise=str(emprise),
+        voirie=voirie,
+    )
+
+
+def test_un_objet_sans_objet_ne_bloque_pas_la_generation(tmp_path):
+    """Régression du 19/09/2026 : trié à l'écran, refusé à la génération.
+
+    « sans objet » était arrivé dans `decrire_voiries` sans arriver dans
+    `Projet.valider`, qui construisait sa propre liste. Le chef de projet
+    tranchait ses voiries, l'import passait, puis la génération levait
+    « voirie = sans_objet inconnu dans projet.json ».
+    """
+    from dp_socle.contrat import VOIRIE_SANS_OBJET
+
+    _projet_trie(tmp_path, ["piste_legere", VOIRIE_SANS_OBJET]).valider()
+    _projet_trie(tmp_path, VOIRIE_SANS_OBJET).valider()
+
+
+def test_le_contrat_et_le_projet_admettent_les_memes_types_de_voirie(tmp_path):
+    """Les deux validations lisent le même ensemble, et rien ne s'y ajoute seul.
+
+    C'est ce contrôle qui manquait : deux listes construites séparément peuvent
+    diverger d'un commit, et la divergence ne se voit qu'à la génération d'un
+    dossier réel.
+    """
+    from dp_socle.contrat import VOIRIES_DU_CONTRAT
+
+    synthese.ecrire(tmp_path / "contrat", avec_voirie=True)
+    for type_de_voirie in VOIRIES_DU_CONTRAT:
+        # Admis du côté du contrat…
+        charger_contrat(tmp_path / "contrat", voirie=type_de_voirie)
+        # … et du côté du projet.
+        _projet_trie(tmp_path, type_de_voirie).valider()
+
+    with pytest.raises(ErreurVoirieIndecise, match="inconnu"):
+        charger_contrat(tmp_path / "contrat", voirie="piste_moyenne")
+    with pytest.raises(ErreurDP, match="inconnu"):
+        _projet_trie(tmp_path, "piste_moyenne").valider()
 
 
 # ---------------------------------------------------------------------------
