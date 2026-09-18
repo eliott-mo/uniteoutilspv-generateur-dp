@@ -830,7 +830,10 @@ def _deposer(fichier, commune: str) -> Path | None:
     return cible
 
 
-@st.cache_data(show_spinner="Lecture des calques du DXF…")
+@st.cache_data(
+    show_spinner="Lecture des calques du DXF… (une dizaine de secondes pour un "
+    "plan de 50 Mo comme celui de Sarnois)"
+)
 def _calques_caches(chemin: str, taille: int, charte: str):
     """Calques du DXF, avec la catégorie proposée par la charte.
 
@@ -851,6 +854,16 @@ def _calques_caches(chemin: str, taille: int, charte: str):
 #: « Placer » et « viser » sont les deux gestes de `photos-geoloc`, au même sens
 #: et dans les mêmes termes — l'un désigne où est la photo, l'autre ce qu'elle
 #: regarde. Le chef de projet les connaît déjà.
+#: Libellé du bouton, texte du bandeau, et **couleur du liseré** dont la carte
+#: s'entoure tant que le geste est armé.
+#:
+#: Le bandeau ne suffisait pas : « quand il faut viser pour changer un cap, c'est
+#: toujours une main qui apparaît sur la carte, donc on ne comprend pas trop que
+#: le mode visée est actif » (retour d'usage du 19/09/2026). Le curseur de
+#: Leaflet reste celui du déplacement, et rien sur la carte ne dit qu'elle
+#: attend un clic. La couleur est celle de ce que le geste pose — le noir de la
+#: coupe, le rose des prises de vue — pour que le liseré désigne le geste et pas
+#: seulement un état.
 GESTES_CARTE = {
     "translation_coupe": (
         "Déplacer la coupe",
@@ -858,17 +871,44 @@ GESTES_CARTE = {
         "pointillé qui suit votre souris montre où elle se posera — elle reste "
         "perpendiculaire aux rangées, vous choisissez sa position et jamais sa "
         "direction.",
+        "#000000",
     ),
     "placer_vue": (
         "📍 Placer",
         "📍 **Cliquez sur la carte** à l'emplacement réel de « {nom} ».",
+        "#d81b8c",
     ),
     "viser_vue": (
         "🎯 Viser",
         "🎯 **Cliquez sur la carte** vers ce que regarde « {nom} ». La direction "
         "s'en déduit, et c'est elle qui fera dessiner le cône.",
+        "#d81b8c",
     ),
 }
+
+
+def _signaler_le_geste(carte, geste: str) -> None:
+    """Met la carte en réticule et l'entoure du liseré du geste armé.
+
+    Le style s'injecte dans le document de la carte, et non dans la page : le
+    composant `st_folium` vit dans un cadre isolé qu'aucune feuille de style de
+    Streamlit n'atteint.
+
+    Les trois classes sont nécessaires : Leaflet pose `grab` sur `.leaflet-grab`,
+    `grabbing` pendant le déplacement, et son propre curseur sur les objets
+    cliquables. Sans les trois, la main revient dès que la souris passe sur une
+    table ou sur la clôture.
+    """
+    couleur = GESTES_CARTE[geste][2]
+    carte.get_root().header.add_child(
+        folium.Element(
+            "<style>"
+            ".leaflet-container,.leaflet-grab,.leaflet-interactive,"
+            ".leaflet-dragging .leaflet-grab{cursor:crosshair !important}"
+            f".leaflet-container{{box-shadow:inset 0 0 0 4px {couleur}}}"
+            "</style>"
+        )
+    )
 
 
 def _armer_geste(geste: str) -> None:
@@ -1262,15 +1302,21 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
         )
         indice_choisi = indice
 
+        # Hors de l'expander, et non dedans : Streamlit rend le spinner à
+        # l'endroit de l'appel, et un spinner dans un panneau replié ne se voit
+        # pas. Le plan de Sarnois demande 13 s de lecture — pendant lesquelles
+        # rien ne bougeait à l'écran et le bouton « Importer et contrôler »
+        # n'était pas encore apparu : « je me suis demandé si ça n'avait pas
+        # planté » (retour d'usage du 19/09/2026).
+        calques = _calques_caches(
+            str(chemin_dxf), chemin_dxf.stat().st_size, empreinte_charte()
+        )
         with st.expander("Correspondance des calques — modifiable", expanded=False):
             st.caption(
                 "Proposée d'après la charte de nommage `UNI_` du BE, en ignorant "
                 "accents, tirets, espaces et underscores. Un calque laissé sur "
                 "« (ignorer) » n'est pas importé, et l'élément n'apparaîtra sur "
                 "aucune planche."
-            )
-            calques = _calques_caches(
-                str(chemin_dxf), chemin_dxf.stat().st_size, empreinte_charte()
             )
             choix = {}
             options = ["(ignorer)"] + list(CATEGORIES)
@@ -2460,6 +2506,9 @@ if import_be_courant is not None and commune.strip():
 
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
     carte.fit_bounds([[sud, ouest], [nord, est]])
+
+    if _geste_arme() is not None:
+        _signaler_le_geste(carte, _geste_arme())
 
     # La clé porte un compteur : elle change à chaque coupe retenue, ce qui
     # remonte la carte à neuf. Sans cela le trait tracé par le chef de projet

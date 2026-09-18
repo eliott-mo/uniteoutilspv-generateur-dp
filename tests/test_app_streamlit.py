@@ -462,6 +462,50 @@ def test_le_plan_importe_ne_s_affiche_qu_une_fois(tmp_path, monkeypatch):
     assert not application.get("imgs")
 
 
+def _gestes_de_l_app():
+    """`GESTES_CARTE` et `_signaler_le_geste` tirés du source de `app.py`.
+
+    `app.py` est un script Streamlit : il ne s'importe pas. Le bloc des gestes
+    ne dépend que de folium, et s'exécute donc seul.
+    """
+    import folium
+
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    bloc = source[source.index("GESTES_CARTE = {") : source.index("def _armer_geste")]
+    espace = {"folium": folium}
+    exec(bloc, espace)  # noqa: S102 — code du dépôt, pas une entrée
+    return espace
+
+
+def test_un_geste_arme_se_voit_sur_la_carte_et_pas_seulement_au_dessus():
+    """Retour d'usage du 19/09/2026 : « c'est toujours une main qui apparaît ».
+
+    Le bandeau disait quel geste était armé, mais la carte gardait le curseur de
+    déplacement de Leaflet et rien ne l'entourait : on ne voyait pas qu'elle
+    attendait un clic. Le style s'injecte dans le document de la carte — le
+    composant vit dans un cadre isolé qu'aucune feuille de style de Streamlit
+    n'atteint.
+    """
+    import folium
+
+    espace = _gestes_de_l_app()
+    for geste, (_bouton, _bandeau, couleur) in espace["GESTES_CARTE"].items():
+        carte = folium.Map(tiles=None)
+        espace["_signaler_le_geste"](carte, geste)
+        html = carte._repr_html_()
+        assert "cursor:crosshair" in html, geste
+        # Les trois classes de Leaflet, sans quoi la main revient dès que la
+        # souris passe sur une table ou sur la clôture.
+        for classe in (".leaflet-container", ".leaflet-grab", ".leaflet-interactive"):
+            assert classe in html, (geste, classe)
+        assert couleur in html, geste
+
+    # Et la carte n'est signalée que lorsqu'un geste est armé : hors geste, elle
+    # se déplace à la main comme n'importe quelle carte.
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    assert "if _geste_arme() is not None:\n        _signaler_le_geste(" in source
+
+
 def test_la_carte_porte_toutes_les_categories_de_la_planche():
     """La carte dessine le plan aux couleurs de la légende DP, pas deux calques.
 
