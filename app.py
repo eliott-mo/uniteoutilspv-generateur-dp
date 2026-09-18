@@ -470,6 +470,38 @@ def _teinte(composantes) -> str:
     return f"#{rouge:02x}{vert:02x}{bleu:02x}"
 
 
+def _couches_de_la_carte(plan):
+    """Les couches du plan en WGS 84, reprojetées une fois par import.
+
+    Streamlit rejoue le script entier à chaque interaction. Sans ce cache, les
+    504 objets du plan de Sarnois — dont 290 arbres existants — étaient
+    reprojetés et resérialisés à chaque clic : mesuré le 19/09/2026, 0,80 s des
+    1,25 s que coûtait la carte, pour un résultat rigoureusement identique.
+    C'est ce qui figeait la page trois à quatre secondes à chaque geste.
+
+    Le cache vit dans la session plutôt que dans `st.cache_data` : le plan
+    n'est pas hachable, et surtout l'invalidation est ici évidente — le plan ne
+    change qu'à l'import, qui remet la clé à None.
+    """
+    couches = st.session_state.get("couches_carte")
+    if couches is not None:
+        return couches
+    couches = []
+    # Dans l'ordre de la planche : ce qui se recouvre se recouvre pareil ici.
+    for categorie in ORDRE_DESSIN:
+        if categorie in CATEGORIES_HORS_CARTE:
+            continue
+        style = STYLES.get(categorie)
+        if style is None:
+            continue
+        collection = en_wgs84(plan.geometries(categorie))
+        if not collection["features"]:
+            continue
+        couches.append((style, collection))
+    st.session_state["couches_carte"] = couches
+    return couches
+
+
 def _style_carte(style) -> dict:
     """Style Leaflet d'une catégorie, aux couleurs de la légende DP.
 
@@ -1308,6 +1340,10 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
         if st.button("Importer et contrôler", type="primary", width="stretch"):
             st.session_state.coupe_be = None
             st.session_state.profil_be = None
+            # Le plan change : les couches reprojetées de la carte ne valent
+            # plus, et une carte qui garderait les anciennes serait pire que
+            # lente — elle montrerait l'import précédent.
+            st.session_state["couches_carte"] = None
             emprise_cadastrale = None
             # Le nom se compose ici avec l'indice qu'on est en train
             # d'importer : `_nom_dossier` porte encore celui de l'import
@@ -2376,16 +2412,7 @@ if import_be_courant is not None and commune.strip():
             name="Emprise cadastrale",
         ).add_to(carte)
 
-    # Dans l'ordre de la planche : ce qui se recouvre se recouvre pareil ici.
-    for categorie in ORDRE_DESSIN:
-        if categorie in CATEGORIES_HORS_CARTE:
-            continue
-        style = STYLES.get(categorie)
-        if style is None:
-            continue
-        collection = en_wgs84(plan.geometries(categorie))
-        if not collection["features"]:
-            continue
+    for style, collection in _couches_de_la_carte(plan):
         folium.GeoJson(
             collection,
             style_function=lambda _trait, style=style: _style_carte(style),

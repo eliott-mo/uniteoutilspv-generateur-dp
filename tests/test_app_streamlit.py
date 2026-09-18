@@ -475,14 +475,22 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     fin = source.index("_saisir_les_prises_de_vue(photos)", debut)
     bloc = source[debut:fin]
 
-    assert "for categorie in ORDRE_DESSIN:" in bloc
+    assert "_couches_de_la_carte(plan)" in bloc
     assert "_style_carte(style)" in bloc
     assert "emprise_cadastrale" in bloc
+
+    # Le choix des catégories vit dans la fonction qui les reprojette — elles
+    # ne le sont qu'une fois par import, et non à chaque exécution du script.
+    debut = source.index("def _couches_de_la_carte(plan):")
+    fin = source.index(chr(10) + "def ", debut + 1)
+    couches = source[debut:fin]
+
+    assert "for categorie in ORDRE_DESSIN:" in couches
     # Et ce qui n'ira pas sur la planche en est écarté : les modules, qu'un plan
     # compte par milliers, et les catégories que `palette.EXCLUES` retire —
     # installations de chantier et contours d'étude. Les montrer laissait croire
     # qu'ils partiraient au dossier (retour d'usage du 17/09/2026).
-    assert "CATEGORIES_HORS_CARTE" in bloc
+    assert "CATEGORIES_HORS_CARTE" in couches
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
