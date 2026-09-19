@@ -270,7 +270,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
         "1. Métadonnées du projet",
         "2. Plan du bureau d'études",
         "3. Pièces fournies",
-        "3 bis. La carte : coupe A-A' et prises de vue",
+        "3 bis. La carte : placer et viser les prises de vue",
         "4. Génération",
     ]
     assert _bouton_present(application, "Générer le dossier")
@@ -516,16 +516,17 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
     debut = source.index("### Le plan importé, et la ligne de coupe")
-    fin = source.index("_saisir_les_prises_de_vue(photos)", debut)
+    # La carte vit dans _carte_du_plan : la borne est la fin de cette fonction.
+    fin = source.index(chr(10) + "def ", debut)
     bloc = source[debut:fin]
 
-    assert "_couches_de_la_carte(plan)" in bloc
+    assert "_couches_de_la_carte(plan, avec_vegetation)" in bloc
     assert "_style_carte(style)" in bloc
     assert "emprise_cadastrale" in bloc
 
     # Le choix des catégories vit dans la fonction qui les reprojette — elles
     # ne le sont qu'une fois par import, et non à chaque exécution du script.
-    debut = source.index("def _couches_de_la_carte(plan):")
+    debut = source.index("def _couches_de_la_carte(plan, avec_vegetation: bool):")
     fin = source.index(chr(10) + "def ", debut + 1)
     couches = source[debut:fin]
 
@@ -535,6 +536,14 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     # installations de chantier et contours d'étude. Les montrer laissait croire
     # qu'ils partiraient au dossier (retour d'usage du 17/09/2026).
     assert "CATEGORIES_HORS_CARTE" in couches
+
+    # Les arbres existants sortent de la carte des prises de vue, et d'elle
+    # seule : la coupe DP 3 les dessine à 8 m quand elle les traverse, et les
+    # cacher au moment de tracer reviendrait à choisir à l'aveugle ce qui sera
+    # dessiné (objection du 19/09/2026, vérifiée dans `_vegetation_sur_le_profil`).
+    assert "CATEGORIES_HORS_CARTE_DES_VUES" in couches
+    assert "avec_vegetation=True" in source   # la carte de la coupe les garde
+    assert "avec_vegetation=False" in source  # celle des prises de vue, non
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -742,7 +751,8 @@ def test_le_clic_ne_remonte_pas_la_carte():
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
     debut = source.index("if _geste_arme() is None:")
-    fin = source.index("_saisir_les_prises_de_vue(photos)", debut)
+    # La carte vit dans _carte_du_plan : la borne est la fin de cette fonction.
+    fin = source.index(chr(10) + "def ", debut)
     bloc = source[debut:fin]
 
     assert "translater_ligne_coupe(" in bloc

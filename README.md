@@ -70,6 +70,25 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    et un plan en compte des milliers. Seule la coupe **retenue** est dessinée,
    jamais le tracé d'origine — le voir persister donnait à croire que rien
    n'avait été redressé.
+
+   La carte se tient **ici tant que l'import n'est pas validé**, et c'est
+   voulu : la coupe se règle avant qu'on la fige, pas après. La validation
+   libérait tout d'un coup — la coupe et les photographies — et l'annonce
+   « Tracez sur la carte si vous voulez la déplacer » s'affichait alors
+   qu'aucune carte n'existait encore (retour d'usage du 19/09/2026). Une fois
+   l'import validé, elle **redescend** sous les dépôts de photographies, où
+   les prises de vue se placent. Jamais deux cartes à l'écran : l'état est figé
+   au début de l'exécution du script et relu plus bas, faute de quoi le clic
+   sur « Valider » — qui écrit le contrat au milieu de la page — en faisait
+   dessiner deux, et Streamlit refusait le second bouton « Déplacer la coupe ».
+
+   Les deux cartes ne portent pas tout à fait la même chose. Celle des prises
+   de vue laisse de côté les **arbres existants** : 290 des 504 objets du plan
+   de Sarnois, 43 % des 308 Ko envoyés au navigateur à chaque exécution, et
+   l'ortho IGN les montre déjà. Celle de la coupe les **garde** — `dp3_coupes`
+   dessine à 8 m les arbres que la coupe traverse, et cette hauteur fixe celle
+   du bloc de la planche : choisir par où passer sans les voir reviendrait à
+   choisir à l'aveugle ce qui sera dessiné.
 3. **Pièces fournies** — ce que l'outil ne dessine pas. La **notice DP 11**
    ouvre la section : c'est la seule que l'outil intègre au dossier assemblé —
    voir « Notice DP 11 » plus bas. Elle est attendue de tout dossier déposable

@@ -470,7 +470,23 @@ def _teinte(composantes) -> str:
     return f"#{rouge:02x}{vert:02x}{bleu:02x}"
 
 
-def _couches_de_la_carte(plan):
+#: Ce que la carte des prises de vue laisse de côté, et que celle de la coupe
+#: garde.
+#:
+#: Les arbres existants sont 290 des 504 objets du plan de Sarnois, et 43 % des
+#: 308 Ko que la carte envoie au navigateur à chaque exécution du script. Sur
+#: l'orthophoto IGN, qui les montre déjà, ils n'aident pas à placer une
+#: photographie.
+#:
+#: Mais ils ne se retirent **pas** de la carte de la coupe, et la nuance est
+#: tout : `dp3_coupes` dessine à 8 m les arbres que la coupe traverse, et cette
+#: hauteur fixe celle du bloc de la planche. Choisir par où passe la coupe sans
+#: voir les arbres, ce serait choisir à l'aveugle ce qui sera dessiné — objection
+#: du 19/09/2026, vérifiée dans `_vegetation_sur_le_profil`.
+CATEGORIES_HORS_CARTE_DES_VUES = ("arbre_existant",)
+
+
+def _couches_de_la_carte(plan, avec_vegetation: bool):
     """Les couches du plan en WGS 84, reprojetées une fois par import.
 
     Streamlit rejoue le script entier à chaque interaction. Sans ce cache, les
@@ -481,15 +497,19 @@ def _couches_de_la_carte(plan):
 
     Le cache vit dans la session plutôt que dans `st.cache_data` : le plan
     n'est pas hachable, et surtout l'invalidation est ici évidente — le plan ne
-    change qu'à l'import, qui remet la clé à None.
+    change qu'à l'import, qui remet les clés à None.
     """
-    couches = st.session_state.get("couches_carte")
+    cle = "couches_carte" if avec_vegetation else "couches_carte_sans_vegetation"
+    couches = st.session_state.get(cle)
     if couches is not None:
         return couches
+    ecartees = CATEGORIES_HORS_CARTE
+    if not avec_vegetation:
+        ecartees = ecartees + CATEGORIES_HORS_CARTE_DES_VUES
     couches = []
     # Dans l'ordre de la planche : ce qui se recouvre se recouvre pareil ici.
     for categorie in ORDRE_DESSIN:
-        if categorie in CATEGORIES_HORS_CARTE:
+        if categorie in ecartees:
             continue
         style = STYLES.get(categorie)
         if style is None:
@@ -498,7 +518,7 @@ def _couches_de_la_carte(plan):
         if not collection["features"]:
             continue
         couches.append((style, collection))
-    st.session_state["couches_carte"] = couches
+    st.session_state[cle] = couches
     return couches
 
 
@@ -755,6 +775,15 @@ if not (commune.strip() and fichiers_emprise):
     st.stop()
 
 st.divider()
+#: Vrai quand la carte se tient dans cette section-ci, pour régler la coupe.
+#:
+#: Figé une fois pour toute l'exécution du script, et relu tel quel par la
+#: section 3 bis. Recalculé là-bas, il aurait changé de valeur entre les deux :
+#: le clic sur « Valider » écrit le contrat au milieu de la page, et la carte se
+#: serait dessinée deux fois dans la même exécution — Streamlit refuse alors le
+#: bouton « Déplacer la coupe », dont la clé serait en double.
+carte_de_la_coupe = False
+
 st.subheader("2. Plan du bureau d'études")
 st.caption(
     "Import du DXF et du tableau bilan fournis par le BE, recoupement des deux, "
@@ -1153,6 +1182,256 @@ def _proposer_la_coupe(import_be) -> None:
     )
 
 
+def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
+    """La carte du plan : le plan importé, la coupe, et les prises de vue posées.
+
+    Un seul composant de carte, appelé à un endroit ou à un autre selon
+    l'avancement — jamais deux à l'écran. Avant la validation il vit dans la
+    section 2, où la coupe se règle ; après, il descend sous les dépôts de
+    photographies, où les prises de vue se placent.
+
+    C'est ce que le parcours demandait : « il faudra d'abord la coupe, puis
+    ensuite les photos » (retour d'usage du 19/09/2026). La validation
+    libérait tout d'un coup — la coupe et les photographies — et le message
+    « Tracez sur la carte » s'affichait avant qu'aucune carte n'existe.
+
+    `plan` et `emprise_cloturee` sont relus de l'import plutôt que lus au
+    module : une fonction qui lit un global écrit plus bas lève dans le
+    navigateur et nulle part ailleurs, ce que `test_ordre_app` refuse.
+    """
+    plan = import_be_courant.plan
+    emprise_cloturee = plan.polygone_cloture
+
+    # -----------------------------------------------------------------------
+    # Le plan importé, et la coupe qui se pose dessus
+    # -----------------------------------------------------------------------
+    #
+    # Une seule carte, et non un aperçu statique suivi d'une carte à tracer :
+    # les deux montraient presque la même chose, et le chef de projet plaçait sa
+    # coupe sur des tables et une clôture sans voir ce qu'elle allait couper. Il
+    # procédait par essai-erreur — tracer, corriger, descendre lire l'aperçu,
+    # remonter. Ici il la pose sur le plan lui-même, aux couleurs de la planche.
+    st.markdown("### Le plan importé, et la ligne de coupe A-A'")
+    if not avec_vegetation:
+        st.caption(
+            "Les arbres existants ne sont pas repris sur cette carte : ils ne "
+            "servent qu'au tracé de la coupe, où ils sont dessinés à 8 m. Ils "
+            "restent sur la planche DP 2 et sur la coupe DP 3."
+        )
+    st.caption(
+        "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
+        "et posée là où elle traverse le plus de tables. Si elle vous convient, "
+        "il n'y a rien à faire.\n\n"
+        "Pour la déplacer, cliquez sur **« Déplacer la coupe »** puis sur la "
+        "carte : elle glissera pour passer par ce point, en gardant la direction "
+        "imposée par les rangées (azimut des tables mesuré à "
+        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°) et son étendue à "
+        "toute l'emprise clôturée avec 10 m de marge."
+    )
+
+    # Le clic armé, et le tracé replié dessous en contournement. Tracer ne
+    # déplaçait rien : en automatique la position est recalculée par
+    # `position_de_coupe` et la coupe repose là où elle était, le tracé ne servant
+    # que de déclencheur. Le seul moyen d'imposer une position était de conserver
+    # la direction tracée — donc une oblique, qui allonge toutes les distances
+    # lues sur la planche.
+    #
+    # Armer et désarmer relancent le script. Sans cela l'écran restait d'un tour
+    # en retard sur lui-même : la bannière s'affichait sous un bouton qui
+    # proposait encore de déplacer la coupe, sans moyen d'annuler, et l'inverse à
+    # l'annulation — la bannière réclamait un clic que plus rien n'attendait.
+    if _geste_arme() in ("placer_vue", "viser_vue"):
+        # La bannière des prises de vue s'affiche ici, au-dessus de la carte, et
+        # non près du bouton qui l'a armée : c'est la carte qui attend le clic,
+        # et le bouton vit plus bas, dans la section des pièces fournies.
+        st.info(_bandeau_geste(_geste_arme()), icon="🖱️")
+        if st.button("Annuler", key="annuler_geste_vue"):
+            _desarmer_geste()
+            st.rerun()
+    elif _geste_arme() == "translation_coupe":
+        st.info(GESTES_CARTE["translation_coupe"][1], icon="🖱️")
+        if st.button("Annuler le déplacement", key="annuler_translation_coupe"):
+            _desarmer_geste()
+            st.rerun()
+    elif st.button(
+        GESTES_CARTE["translation_coupe"][0],
+        key="armer_translation_coupe",
+        width="stretch",
+    ):
+        _armer_geste("translation_coupe")
+        st.rerun()
+
+    carte = folium.Map(tiles=None, control_scale=True)
+    folium.TileLayer(
+        tiles=URL_TUILES_ORTHO,
+        attr="IGN — Géoplateforme",
+        name="Ortho IGN",
+        max_zoom=21,
+    ).add_to(carte)
+
+    # L'emprise cadastrale sous le reste : c'est le cadre foncier, pas un objet
+    # du projet.
+    emprise_cadastrale = st.session_state.get("emprise_cadastrale_be")
+    if emprise_cadastrale is not None:
+        folium.GeoJson(
+            en_wgs84([emprise_cadastrale]),
+            style_function=lambda _trait: {
+                "color": "#ffd700",
+                "weight": 3,
+                "fill": False,
+            },
+            name="Emprise cadastrale",
+        ).add_to(carte)
+
+    for style, collection in _couches_de_la_carte(plan, avec_vegetation):
+        folium.GeoJson(
+            collection,
+            style_function=lambda _trait, style=style: _style_carte(style),
+            name=style.libelle,
+        ).add_to(carte)
+
+    # La coupe retenue, et elle seule. Le tracé d'origine était montré à côté,
+    # en orange : le chef de projet qui traçait volontairement de travers voyait
+    # son trait oblique persister et croyait que rien n'avait été redressé.
+    if st.session_state.coupe_be is not None:
+        folium.GeoJson(
+            en_wgs84([st.session_state.coupe_be.geometrie]),
+            style_function=lambda _trait: {"color": "#000000", "weight": 4},
+            name="Coupe A-A'",
+        ).add_to(carte)
+
+    # Le trait d'aperçu, et seulement quand le geste est armé : une ligne qui
+    # suivrait la souris en permanence serait du bruit. Tout se passe dans le
+    # navigateur — aucun rechargement, contrairement à `return_on_hover` qui
+    # relancerait le script à chaque mouvement de souris. Voir `apercu_au_survol`.
+    if _geste_arme() == "translation_coupe":
+        # `representative_point` plutôt que le centroïde : shapely le garantit
+        # **dans** le polygone, quand le centroïde d'une emprise concave peut en
+        # sortir — et une coupe qui n'y passe pas est refusée. Le cas ne se
+        # présente qu'avant toute coupe retenue ; d'ordinaire c'est celle de
+        # l'écran qui sert de référence, et l'aperçu lui est exactement parallèle.
+        apercu_au_survol(
+            st.session_state.coupe_be.geometrie
+            if st.session_state.coupe_be is not None
+            else translater_ligne_coupe(
+                emprise_cloturee.representative_point(),
+                plan.azimut_tables_deg,
+                emprise_cloturee,
+            ).geometrie
+        ).add_to(carte)
+
+    # Les prises de vue déjà placées, pour que le chef de projet voie ce qu'il a
+    # posé — et les corrige au besoin. Même symbole que sur la planche : un
+    # repère, et un cône seulement quand la direction est confirmée.
+    for code_piece, par_nom in _vues_photo().items():
+        for nom_photo, vue in par_nom.items():
+            if vue.get("x") is None:
+                continue
+            _poser_prise_sur_la_carte(carte, code_piece, nom_photo, vue)
+
+    sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
+    carte.fit_bounds([[sud, ouest], [nord, est]])
+
+    if _geste_arme() is not None:
+        _signaler_le_geste(carte, _geste_arme())
+
+    # La clé porte un compteur : elle change à chaque coupe retenue, ce qui
+    # remonte la carte à neuf. Sans cela le trait tracé par le chef de projet
+    # restait affiché par Leaflet, par-dessus la coupe redressée, et le bouton
+    # « Corriger » se represéntait indéfiniment.
+    resultat_carte = st_folium(
+        carte,
+        width=None,
+        height=560,
+        # Clé stable : la carte ne se remonte jamais, et garde donc le zoom et
+        # le cadrage du chef de projet. Elle portait un compteur tant que le
+        # tracé polyligne existait — il fallait chasser le trait Leaflet
+        # résiduel qui se superposait à la coupe redressée. Le tracé retiré, ce
+        # trait n'existe plus, et le compteur non plus.
+        key="carte_coupe_be",
+        # Les trois seules valeurs que cet écran lise. Sans cette restriction le
+        # composant renvoyait aussi le cadrage et le niveau de zoom, et déplacer
+        # la carte ou zoomer relançait le script. Mesuré le 15/09/2026 dans son
+        # bundle : la charge est filtrée sur cette liste, puis comparée à la
+        # précédente, et `setComponentValue` n'est appelé que si elle a changé.
+        # Le tracé polyligne a été retiré le 17/09/2026 : la carte ne rend plus
+        # que le clic, seul geste qui décide encore de la coupe.
+        returned_objects=["last_clicked"],
+    )
+    clic = _clic_neuf(resultat_carte)
+
+    st.caption(
+        "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier de "
+        "référence HOCH « Les Islettes » : "
+        + " · ".join(
+            f"{style.libelle} ({nombre})"
+            for _, style, nombre in legende_presente(plan)
+        )
+        + ". Jaune : emprise cadastrale. Noir : coupe A-A' retenue. Les modules "
+        "ne sont pas dessinés ici — la silhouette des rangées dit la même chose "
+        "et un plan en compte des milliers. Les couleurs du DXF ne sont pas "
+        "reprises, les codes ACI y sont des couleurs de travail."
+    )
+
+    if _geste_arme() is None:
+        # Aucun geste attendu : ce clic-là ne l'était pas non plus. Le retenir
+        # l'empêche d'être consommé par le prochain geste armé, ce qui faisait
+        # sauter la coupe à un endroit cliqué bien avant, sans nouveau clic.
+        _retenir_clic(clic)
+    elif _geste_arme() in ("placer_vue", "viser_vue") and clic is not None:
+        _retenir_clic(clic)
+        code, nom = _cible_du_geste()
+        vue = _vue_photo(code, nom)
+        if _geste_arme() == "placer_vue":
+            vue["x"], vue["y"] = clic.x, clic.y
+            vue["origine_position"] = ORIGINE_MAIN
+        elif vue.get("x") is None:
+            # Viser avant d'avoir placé ne veut rien dire : le cap se mesure
+            # depuis la position de la photographie, pas depuis rien.
+            st.warning(
+                f"« {nom} » n'a pas encore de position : placez-la avant de "
+                "viser ce qu'elle regarde.",
+                icon="⚠️",
+            )
+        else:
+            vue["cap_deg"] = cap_vers(vue["x"], vue["y"], clic.x, clic.y)
+            vue["origine_cap"] = ORIGINE_MAIN
+            vue["cap_confirme"] = True
+        _desarmer_geste()
+        st.rerun()
+    elif _geste_arme() == "translation_coupe" and clic is not None:
+        _retenir_clic(clic)
+        _desarmer_geste()
+        try:
+            _relever_et_controler(
+                translater_ligne_coupe(
+                    clic, plan.azimut_tables_deg, emprise_cloturee
+                ),
+                import_be_courant,
+                plan,
+                "deplacee",
+            )
+        except ErreurDP as erreur:
+            # La coupe précédente reste en place, contrairement au tracé qui
+            # l'efface : un clic tombé trop loin du site ne doit pas faire perdre
+            # la coupe qui était retenue.
+            st.error(f"{type(erreur).__name__} : {erreur}")
+        else:
+            # La carte a déjà été dessinée avec l'ancienne coupe : il faut
+            # rejouer le script pour la voir bouger. Un rechargement par clic,
+            # celui du bouton « Corriger » d'à côté. La clé de la carte, elle,
+            # ne change pas — un clic ne laisse aucun tracé Leaflet résiduel à
+            # chasser, et la remonter ferait perdre son zoom au chef de projet.
+            st.rerun()
+
+    if st.session_state.coupe_be is None:
+        st.info(
+            "Aucune coupe retenue : cliquez sur « Déplacer la coupe » puis sur "
+            "la carte, à l'endroit où elle doit traverser les rangées."
+        )
+
+
+
 def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) -> None:
     """Recharge le tracé de coupe laissé par un import précédent, s'il y en a un.
 
@@ -1390,6 +1669,7 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             # plus, et une carte qui garderait les anciennes serait pire que
             # lente — elle montrerait l'import précédent.
             st.session_state["couches_carte"] = None
+            st.session_state["couches_carte_sans_vegetation"] = None
             emprise_cadastrale = None
             # Le nom se compose ici avec l'indice qu'on est en train
             # d'importer : `_nom_dossier` porte encore celui de l'import
@@ -1605,6 +1885,20 @@ if import_be_courant is not None and commune.strip():
             icon="📐",
         )
 
+    # La carte, ici et pas plus bas, tant que le contrat n'est pas écrit : c'est
+    # le moment où la coupe se règle, et la validation la fige. Elle redescend
+    # sous les dépôts une fois l'import validé, pour les prises de vue — une
+    # seule carte à l'écran à chaque instant, jamais deux.
+    #
+    # L'annonce au-dessus dit « Tracez sur la carte si vous voulez la déplacer » :
+    # elle s'affichait alors qu'aucune carte n'existait encore, et rien ne
+    # permettait d'agir (retour d'usage du 19/09/2026).
+    carte_de_la_coupe = not (
+        DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
+    ).exists()
+    if carte_de_la_coupe:
+        _carte_du_plan(import_be_courant, avec_vegetation=True)
+
     st.markdown("### Validation")
     if indice_choisi is not None and indice_choisi != tableau.indice:
         st.error(
@@ -1629,13 +1923,23 @@ if import_be_courant is not None and commune.strip():
     elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
         try:
             import_be_courant.ecrire(DOSSIER_SORTIE / _nom_dossier(commune))
-            st.success(
-                "Import validé. Les photographies et la génération du dossier "
-                "s'ouvrent ci-dessous.",
-                icon="✅",
-            )
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
+        else:
+            # Rejoué aussitôt : la carte change de place à la validation, et
+            # sans cette relance la page finissait son exécution avec la carte
+            # encore en haut, sous une annonce disant qu'elle était descendue.
+            # L'annonce passe par la session, sinon la relance l'emporterait.
+            st.session_state["annonce_validation"] = (
+                "Import validé, coupe A-A' figée. Les photographies et la "
+                "génération du dossier s'ouvrent ci-dessous, et la carte a "
+                "redescendu pour placer les prises de vue."
+            )
+            st.rerun()
+
+    annonce = st.session_state.pop("annonce_validation", None)
+    if annonce:
+        st.success(annonce, icon="✅")
 
 
 # ---------------------------------------------------------------------------
@@ -2371,241 +2675,40 @@ for code, doubles in photos_en_double.items():
 
 
 st.divider()
-st.subheader("3 bis. La carte : coupe A-A' et prises de vue")
+st.subheader("3 bis. La carte : placer et viser les prises de vue")
 
-# La carte vient après les dépôts, et non plus au milieu de la section 2.
+# La carte sert deux gestes, à deux moments du parcours, et se tient donc à deux
+# endroits — jamais aux deux à la fois.
 #
-# Elle sert deux gestes qui portent sur des pièces déposées plus bas : poser la
-# coupe, et placer les prises de vue des photographies. Tant qu'elle vivait dans
-# la section 2, le chef de projet déposait ses photographies puis remontait pour
-# les placer — un aller-retour par photographie, signalé à l'usage le
-# 17/09/2026. Le parcours descend maintenant sans un seul retour : métadonnées,
-# plan, pièces fournies, tout ce qui se désigne sur la carte, génération.
+# Ici, sous les dépôts, elle sert à placer les prises de vue. Tant qu'elle
+# vivait dans la seule section 2, le chef de projet déposait ses photographies
+# puis remontait pour les placer — un aller-retour par photographie, signalé à
+# l'usage le 17/09/2026.
+#
+# Avant la validation, elle se tient dans la section 2, où la coupe se règle :
+# « il faudra d'abord la coupe, puis ensuite les photos » (19/09/2026). La
+# validation libérait tout d'un coup, et l'annonce « Tracez sur la carte »
+# s'affichait alors qu'aucune carte n'existait.
+#
+# Les deux cartes ne portent pas tout à fait la même chose : celle de la coupe
+# garde les arbres existants, que `dp3_coupes` dessine à 8 m quand la coupe les
+# traverse ; celle des prises de vue les laisse — voir
+# `CATEGORIES_HORS_CARTE_DES_VUES`.
 
-if import_be_courant is not None and commune.strip():
-    # -----------------------------------------------------------------------
-    # Le plan importé, et la coupe qui se pose dessus
-    # -----------------------------------------------------------------------
-    #
-    # Une seule carte, et non un aperçu statique suivi d'une carte à tracer :
-    # les deux montraient presque la même chose, et le chef de projet plaçait sa
-    # coupe sur des tables et une clôture sans voir ce qu'elle allait couper. Il
-    # procédait par essai-erreur — tracer, corriger, descendre lire l'aperçu,
-    # remonter. Ici il la pose sur le plan lui-même, aux couleurs de la planche.
-    st.markdown("### Le plan importé, et la ligne de coupe A-A'")
-    st.caption(
-        "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
-        "et posée là où elle traverse le plus de tables. Si elle vous convient, "
-        "il n'y a rien à faire.\n\n"
-        "Pour la déplacer, cliquez sur **« Déplacer la coupe »** puis sur la "
-        "carte : elle glissera pour passer par ce point, en gardant la direction "
-        "imposée par les rangées (azimut des tables mesuré à "
-        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°) et son étendue à "
-        "toute l'emprise clôturée avec 10 m de marge."
-    )
-
-    # Le clic armé, et le tracé replié dessous en contournement. Tracer ne
-    # déplaçait rien : en automatique la position est recalculée par
-    # `position_de_coupe` et la coupe repose là où elle était, le tracé ne servant
-    # que de déclencheur. Le seul moyen d'imposer une position était de conserver
-    # la direction tracée — donc une oblique, qui allonge toutes les distances
-    # lues sur la planche.
-    #
-    # Armer et désarmer relancent le script. Sans cela l'écran restait d'un tour
-    # en retard sur lui-même : la bannière s'affichait sous un bouton qui
-    # proposait encore de déplacer la coupe, sans moyen d'annuler, et l'inverse à
-    # l'annulation — la bannière réclamait un clic que plus rien n'attendait.
-    if _geste_arme() in ("placer_vue", "viser_vue"):
-        # La bannière des prises de vue s'affiche ici, au-dessus de la carte, et
-        # non près du bouton qui l'a armée : c'est la carte qui attend le clic,
-        # et le bouton vit plus bas, dans la section des pièces fournies.
-        st.info(_bandeau_geste(_geste_arme()), icon="🖱️")
-        if st.button("Annuler", key="annuler_geste_vue"):
-            _desarmer_geste()
-            st.rerun()
-    elif _geste_arme() == "translation_coupe":
-        st.info(GESTES_CARTE["translation_coupe"][1], icon="🖱️")
-        if st.button("Annuler le déplacement", key="annuler_translation_coupe"):
-            _desarmer_geste()
-            st.rerun()
-    elif st.button(
-        GESTES_CARTE["translation_coupe"][0],
-        key="armer_translation_coupe",
-        width="stretch",
-    ):
-        _armer_geste("translation_coupe")
-        st.rerun()
-
-    carte = folium.Map(tiles=None, control_scale=True)
-    folium.TileLayer(
-        tiles=URL_TUILES_ORTHO,
-        attr="IGN — Géoplateforme",
-        name="Ortho IGN",
-        max_zoom=21,
-    ).add_to(carte)
-
-    # L'emprise cadastrale sous le reste : c'est le cadre foncier, pas un objet
-    # du projet.
-    emprise_cadastrale = st.session_state.get("emprise_cadastrale_be")
-    if emprise_cadastrale is not None:
-        folium.GeoJson(
-            en_wgs84([emprise_cadastrale]),
-            style_function=lambda _trait: {
-                "color": "#ffd700",
-                "weight": 3,
-                "fill": False,
-            },
-            name="Emprise cadastrale",
-        ).add_to(carte)
-
-    for style, collection in _couches_de_la_carte(plan):
-        folium.GeoJson(
-            collection,
-            style_function=lambda _trait, style=style: _style_carte(style),
-            name=style.libelle,
-        ).add_to(carte)
-
-    # La coupe retenue, et elle seule. Le tracé d'origine était montré à côté,
-    # en orange : le chef de projet qui traçait volontairement de travers voyait
-    # son trait oblique persister et croyait que rien n'avait été redressé.
-    if st.session_state.coupe_be is not None:
-        folium.GeoJson(
-            en_wgs84([st.session_state.coupe_be.geometrie]),
-            style_function=lambda _trait: {"color": "#000000", "weight": 4},
-            name="Coupe A-A'",
-        ).add_to(carte)
-
-    # Le trait d'aperçu, et seulement quand le geste est armé : une ligne qui
-    # suivrait la souris en permanence serait du bruit. Tout se passe dans le
-    # navigateur — aucun rechargement, contrairement à `return_on_hover` qui
-    # relancerait le script à chaque mouvement de souris. Voir `apercu_au_survol`.
-    if _geste_arme() == "translation_coupe":
-        # `representative_point` plutôt que le centroïde : shapely le garantit
-        # **dans** le polygone, quand le centroïde d'une emprise concave peut en
-        # sortir — et une coupe qui n'y passe pas est refusée. Le cas ne se
-        # présente qu'avant toute coupe retenue ; d'ordinaire c'est celle de
-        # l'écran qui sert de référence, et l'aperçu lui est exactement parallèle.
-        apercu_au_survol(
-            st.session_state.coupe_be.geometrie
-            if st.session_state.coupe_be is not None
-            else translater_ligne_coupe(
-                emprise_cloturee.representative_point(),
-                plan.azimut_tables_deg,
-                emprise_cloturee,
-            ).geometrie
-        ).add_to(carte)
-
-    # Les prises de vue déjà placées, pour que le chef de projet voie ce qu'il a
-    # posé — et les corrige au besoin. Même symbole que sur la planche : un
-    # repère, et un cône seulement quand la direction est confirmée.
-    for code_piece, par_nom in _vues_photo().items():
-        for nom_photo, vue in par_nom.items():
-            if vue.get("x") is None:
-                continue
-            _poser_prise_sur_la_carte(carte, code_piece, nom_photo, vue)
-
-    sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
-    carte.fit_bounds([[sud, ouest], [nord, est]])
-
-    if _geste_arme() is not None:
-        _signaler_le_geste(carte, _geste_arme())
-
-    # La clé porte un compteur : elle change à chaque coupe retenue, ce qui
-    # remonte la carte à neuf. Sans cela le trait tracé par le chef de projet
-    # restait affiché par Leaflet, par-dessus la coupe redressée, et le bouton
-    # « Corriger » se represéntait indéfiniment.
-    resultat_carte = st_folium(
-        carte,
-        width=None,
-        height=560,
-        # Clé stable : la carte ne se remonte jamais, et garde donc le zoom et
-        # le cadrage du chef de projet. Elle portait un compteur tant que le
-        # tracé polyligne existait — il fallait chasser le trait Leaflet
-        # résiduel qui se superposait à la coupe redressée. Le tracé retiré, ce
-        # trait n'existe plus, et le compteur non plus.
-        key="carte_coupe_be",
-        # Les trois seules valeurs que cet écran lise. Sans cette restriction le
-        # composant renvoyait aussi le cadrage et le niveau de zoom, et déplacer
-        # la carte ou zoomer relançait le script. Mesuré le 15/09/2026 dans son
-        # bundle : la charge est filtrée sur cette liste, puis comparée à la
-        # précédente, et `setComponentValue` n'est appelé que si elle a changé.
-        # Le tracé polyligne a été retiré le 17/09/2026 : la carte ne rend plus
-        # que le clic, seul geste qui décide encore de la coupe.
-        returned_objects=["last_clicked"],
-    )
-    clic = _clic_neuf(resultat_carte)
-
-    st.caption(
-        "Couleurs de la légende DP, relevées sur la planche DP 2 du dossier de "
-        "référence HOCH « Les Islettes » : "
-        + " · ".join(
-            f"{style.libelle} ({nombre})"
-            for _, style, nombre in legende_presente(plan)
-        )
-        + ". Jaune : emprise cadastrale. Noir : coupe A-A' retenue. Les modules "
-        "ne sont pas dessinés ici — la silhouette des rangées dit la même chose "
-        "et un plan en compte des milliers. Les couleurs du DXF ne sont pas "
-        "reprises, les codes ACI y sont des couleurs de travail."
-    )
-
-    if _geste_arme() is None:
-        # Aucun geste attendu : ce clic-là ne l'était pas non plus. Le retenir
-        # l'empêche d'être consommé par le prochain geste armé, ce qui faisait
-        # sauter la coupe à un endroit cliqué bien avant, sans nouveau clic.
-        _retenir_clic(clic)
-    elif _geste_arme() in ("placer_vue", "viser_vue") and clic is not None:
-        _retenir_clic(clic)
-        code, nom = _cible_du_geste()
-        vue = _vue_photo(code, nom)
-        if _geste_arme() == "placer_vue":
-            vue["x"], vue["y"] = clic.x, clic.y
-            vue["origine_position"] = ORIGINE_MAIN
-        elif vue.get("x") is None:
-            # Viser avant d'avoir placé ne veut rien dire : le cap se mesure
-            # depuis la position de la photographie, pas depuis rien.
-            st.warning(
-                f"« {nom} » n'a pas encore de position : placez-la avant de "
-                "viser ce qu'elle regarde.",
-                icon="⚠️",
-            )
-        else:
-            vue["cap_deg"] = cap_vers(vue["x"], vue["y"], clic.x, clic.y)
-            vue["origine_cap"] = ORIGINE_MAIN
-            vue["cap_confirme"] = True
-        _desarmer_geste()
-        st.rerun()
-    elif _geste_arme() == "translation_coupe" and clic is not None:
-        _retenir_clic(clic)
-        _desarmer_geste()
-        try:
-            _relever_et_controler(
-                translater_ligne_coupe(
-                    clic, plan.azimut_tables_deg, emprise_cloturee
-                ),
-                import_be_courant,
-                plan,
-                "deplacee",
-            )
-        except ErreurDP as erreur:
-            # La coupe précédente reste en place, contrairement au tracé qui
-            # l'efface : un clic tombé trop loin du site ne doit pas faire perdre
-            # la coupe qui était retenue.
-            st.error(f"{type(erreur).__name__} : {erreur}")
-        else:
-            # La carte a déjà été dessinée avec l'ancienne coupe : il faut
-            # rejouer le script pour la voir bouger. Un rechargement par clic,
-            # celui du bouton « Corriger » d'à côté. La clé de la carte, elle,
-            # ne change pas — un clic ne laisse aucun tracé Leaflet résiduel à
-            # chasser, et la remonter ferait perdre son zoom au chef de projet.
-            st.rerun()
-
-    if st.session_state.coupe_be is None:
-        st.info(
-            "Aucune coupe retenue : cliquez sur « Déplacer la coupe » puis sur "
-            "la carte, à l'endroit où elle doit traverser les rangées."
-        )
-
+if (
+    import_be_courant is not None
+    and commune.strip()
+    and contrat_present
+    and not carte_de_la_coupe
+):
+    _carte_du_plan(import_be_courant, avec_vegetation=False)
     _saisir_les_prises_de_vue(photos)
+elif import_be_courant is not None and commune.strip():
+    st.caption(
+        "La carte est plus haut, sous les contrôles croisés : c'est là que la "
+        "coupe A-A' se règle, avant la validation. Elle redescend ici une fois "
+        "l'import validé, pour placer les prises de vue."
+    )
 else:
     st.caption(
         "La carte s'ouvre une fois le plan du bureau d'études importé : c'est "
