@@ -486,7 +486,7 @@ def _teinte(composantes) -> str:
 CATEGORIES_HORS_CARTE_DES_VUES = ("arbre_existant",)
 
 
-def _couches_de_la_carte(plan, avec_vegetation: bool):
+def _couches_de_la_carte(plan, regler_la_coupe: bool):
     """Les couches du plan en WGS 84, reprojetées une fois par import.
 
     Streamlit rejoue le script entier à chaque interaction. Sans ce cache, les
@@ -499,12 +499,12 @@ def _couches_de_la_carte(plan, avec_vegetation: bool):
     n'est pas hachable, et surtout l'invalidation est ici évidente — le plan ne
     change qu'à l'import, qui remet les clés à None.
     """
-    cle = "couches_carte" if avec_vegetation else "couches_carte_sans_vegetation"
+    cle = "couches_carte" if regler_la_coupe else "couches_carte_sans_vegetation"
     couches = st.session_state.get(cle)
     if couches is not None:
         return couches
     ecartees = CATEGORIES_HORS_CARTE
-    if not avec_vegetation:
+    if not regler_la_coupe:
         ecartees = ecartees + CATEGORIES_HORS_CARTE_DES_VUES
     couches = []
     # Dans l'ordre de la planche : ce qui se recouvre se recouvre pareil ici.
@@ -1182,7 +1182,7 @@ def _proposer_la_coupe(import_be) -> None:
     )
 
 
-def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
+def _carte_du_plan(import_be_courant, regler_la_coupe: bool) -> None:
     """La carte du plan : le plan importé, la coupe, et les prises de vue posées.
 
     Un seul composant de carte, appelé à un endroit ou à un autre selon
@@ -1202,6 +1202,11 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
     plan = import_be_courant.plan
     emprise_cloturee = plan.polygone_cloture
 
+    if not regler_la_coupe and _geste_arme() == "translation_coupe":
+        # Armé avant la validation, puis validé : le geste n'a plus de bouton
+        # pour l'annuler et sa bannière réclamerait un clic que rien n'attend.
+        _desarmer_geste()
+
     # -----------------------------------------------------------------------
     # Le plan importé, et la coupe qui se pose dessus
     # -----------------------------------------------------------------------
@@ -1211,23 +1216,28 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
     # coupe sur des tables et une clôture sans voir ce qu'elle allait couper. Il
     # procédait par essai-erreur — tracer, corriger, descendre lire l'aperçu,
     # remonter. Ici il la pose sur le plan lui-même, aux couleurs de la planche.
-    st.markdown("### Le plan importé, et la ligne de coupe A-A'")
-    if not avec_vegetation:
+    if regler_la_coupe:
+        st.markdown("### Le plan importé, et la ligne de coupe A-A'")
         st.caption(
-            "Les arbres existants ne sont pas repris sur cette carte : ils ne "
-            "servent qu'au tracé de la coupe, où ils sont dessinés à 8 m. Ils "
+            "**Une coupe est déjà proposée** : elle est perpendiculaire aux "
+            "rangées et posée là où elle traverse le plus de tables. Si elle "
+            "vous convient, il n'y a rien à faire.\n\n"
+            "Pour la déplacer, cliquez sur **« Déplacer la coupe »** puis sur "
+            "la carte : elle glissera pour passer par ce point, en gardant la "
+            "direction imposée par les rangées (azimut des tables mesuré à "
+            f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°) et son "
+            "étendue à toute l'emprise clôturée avec 10 m de marge."
+        )
+    else:
+        # Plus un mot sur la coupe ici : elle est figée par la validation, et
+        # continuer d'en parler « vient polluer le reste du process » (retour
+        # d'usage du 22/09/2026). Cette carte ne sert plus qu'aux photographies.
+        st.markdown("### Le plan, pour placer les prises de vue")
+        st.caption(
+            "Les arbres existants ne sont pas repris ici : l'ortho IGN les "
+            "montre déjà, et ils ne servent qu'au tracé de la coupe. Ils "
             "restent sur la planche DP 2 et sur la coupe DP 3."
         )
-    st.caption(
-        "**Une coupe est déjà proposée** : elle est perpendiculaire aux rangées "
-        "et posée là où elle traverse le plus de tables. Si elle vous convient, "
-        "il n'y a rien à faire.\n\n"
-        "Pour la déplacer, cliquez sur **« Déplacer la coupe »** puis sur la "
-        "carte : elle glissera pour passer par ce point, en gardant la direction "
-        "imposée par les rangées (azimut des tables mesuré à "
-        f"{plan.azimut_tables_deg:.2f}° depuis l'est, plus 90°) et son étendue à "
-        "toute l'emprise clôturée avec 10 m de marge."
-    )
 
     # Le clic armé, et le tracé replié dessous en contournement. Tracer ne
     # déplaçait rien : en automatique la position est recalculée par
@@ -1248,12 +1258,12 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
         if st.button("Annuler", key="annuler_geste_vue"):
             _desarmer_geste()
             st.rerun()
-    elif _geste_arme() == "translation_coupe":
+    elif _geste_arme() == "translation_coupe" and regler_la_coupe:
         st.info(GESTES_CARTE["translation_coupe"][1], icon="🖱️")
         if st.button("Annuler le déplacement", key="annuler_translation_coupe"):
             _desarmer_geste()
             st.rerun()
-    elif st.button(
+    elif regler_la_coupe and st.button(
         GESTES_CARTE["translation_coupe"][0],
         key="armer_translation_coupe",
         width="stretch",
@@ -1283,7 +1293,7 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
             name="Emprise cadastrale",
         ).add_to(carte)
 
-    for style, collection in _couches_de_la_carte(plan, avec_vegetation):
+    for style, collection in _couches_de_la_carte(plan, regler_la_coupe):
         folium.GeoJson(
             collection,
             style_function=lambda _trait, style=style: _style_carte(style),
@@ -1293,7 +1303,10 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
     # La coupe retenue, et elle seule. Le tracé d'origine était montré à côté,
     # en orange : le chef de projet qui traçait volontairement de travers voyait
     # son trait oblique persister et croyait que rien n'avait été redressé.
-    if st.session_state.coupe_be is not None:
+    #
+    # Une fois la coupe figée, elle quitte la carte avec le reste de son
+    # attirail : à ce moment-là le plan « ne sert plus qu'à gérer les photos ».
+    if regler_la_coupe and st.session_state.coupe_be is not None:
         folium.GeoJson(
             en_wgs84([st.session_state.coupe_be.geometrie]),
             style_function=lambda _trait: {"color": "#000000", "weight": 4},
@@ -1367,10 +1380,11 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
             f"{style.libelle} ({nombre})"
             for _, style, nombre in legende_presente(plan)
         )
-        + ". Jaune : emprise cadastrale. Noir : coupe A-A' retenue. Les modules "
-        "ne sont pas dessinés ici — la silhouette des rangées dit la même chose "
-        "et un plan en compte des milliers. Les couleurs du DXF ne sont pas "
-        "reprises, les codes ACI y sont des couleurs de travail."
+        + ". Jaune : emprise cadastrale."
+        + (" Noir : coupe A-A' retenue." if regler_la_coupe else "")
+        + " Les modules ne sont pas dessinés ici — la silhouette des rangées dit "
+        "la même chose et un plan en compte des milliers. Les couleurs du DXF ne "
+        "sont pas reprises, les codes ACI y sont des couleurs de travail."
     )
 
     if _geste_arme() is None:
@@ -1424,7 +1438,7 @@ def _carte_du_plan(import_be_courant, avec_vegetation: bool) -> None:
             # chasser, et la remonter ferait perdre son zoom au chef de projet.
             st.rerun()
 
-    if st.session_state.coupe_be is None:
+    if regler_la_coupe and st.session_state.coupe_be is None:
         st.info(
             "Aucune coupe retenue : cliquez sur « Déplacer la coupe » puis sur "
             "la carte, à l'endroit où elle doit traverser les rangées."
@@ -1897,7 +1911,7 @@ if import_be_courant is not None and commune.strip():
         DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
     ).exists()
     if carte_de_la_coupe:
-        _carte_du_plan(import_be_courant, avec_vegetation=True)
+        _carte_du_plan(import_be_courant, regler_la_coupe=True)
 
     st.markdown("### Validation")
     if indice_choisi is not None and indice_choisi != tableau.indice:
@@ -2701,7 +2715,7 @@ if (
     and contrat_present
     and not carte_de_la_coupe
 ):
-    _carte_du_plan(import_be_courant, avec_vegetation=False)
+    _carte_du_plan(import_be_courant, regler_la_coupe=False)
     _saisir_les_prises_de_vue(photos)
 elif import_be_courant is not None and commune.strip():
     st.caption(

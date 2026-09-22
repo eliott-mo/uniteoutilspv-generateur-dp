@@ -520,13 +520,13 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     fin = source.index(chr(10) + "def ", debut)
     bloc = source[debut:fin]
 
-    assert "_couches_de_la_carte(plan, avec_vegetation)" in bloc
+    assert "_couches_de_la_carte(plan, regler_la_coupe)" in bloc
     assert "_style_carte(style)" in bloc
     assert "emprise_cadastrale" in bloc
 
     # Le choix des catégories vit dans la fonction qui les reprojette — elles
     # ne le sont qu'une fois par import, et non à chaque exécution du script.
-    debut = source.index("def _couches_de_la_carte(plan, avec_vegetation: bool):")
+    debut = source.index("def _couches_de_la_carte(plan, regler_la_coupe: bool):")
     fin = source.index(chr(10) + "def ", debut + 1)
     couches = source[debut:fin]
 
@@ -542,8 +542,52 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     # cacher au moment de tracer reviendrait à choisir à l'aveugle ce qui sera
     # dessiné (objection du 19/09/2026, vérifiée dans `_vegetation_sur_le_profil`).
     assert "CATEGORIES_HORS_CARTE_DES_VUES" in couches
-    assert "avec_vegetation=True" in source   # la carte de la coupe les garde
-    assert "avec_vegetation=False" in source  # celle des prises de vue, non
+    assert "regler_la_coupe=True" in source   # la carte de la coupe les garde
+    assert "regler_la_coupe=False" in source  # celle des prises de vue, non
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_coupe_quitte_l_ecran_une_fois_l_import_valide(tmp_path, monkeypatch):
+    """« Une fois qu'on a validé, on ne parle plus de la coupe. »
+
+    Retour d'usage du 22/09/2026 : le bouton « Déplacer la coupe » survivait à
+    la validation et « venait polluer le reste du process ». La carte qui reste
+    à l'écran ne sert plus qu'aux photographies — la coupe est figée, son
+    bouton, son trait et ses consignes s'en vont avec elle.
+    """
+    _carte_cliquable(monkeypatch)
+    avant = _plan_importe(tmp_path, monkeypatch)
+    assert _bouton_present(avant, "Déplacer la coupe")
+
+    apres = _import_valide(tmp_path, monkeypatch)
+    assert not apres.exception, [str(e.value) for e in apres.exception]
+    assert not _bouton_present(apres, "Déplacer la coupe")
+    # La coupe est bien retenue : ce n'est pas qu'elle a disparu du dossier.
+    assert apres.session_state["coupe_be"] is not None
+
+    # Et plus une consigne à son sujet sur la carte des prises de vue.
+    textes = [element.value for element in apres.get("markdown")]
+    assert not any("Déplacer la coupe" in texte for texte in textes), [
+        texte for texte in textes if "coupe" in texte
+    ]
+
+
+def test_un_geste_de_coupe_arme_ne_survit_pas_a_la_validation():
+    """Armé avant de valider, il n'aurait plus de bouton pour l'annuler.
+
+    Sa bannière réclamerait un clic que plus rien n'attend — le cas exact qui
+    avait motivé la relance du script à l'armement.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _carte_du_plan(")
+    fin = source.index(chr(10) + "def ", debut + 1)
+    fonction = source[debut:fin]
+
+    assert 'if not regler_la_coupe and _geste_arme() == "translation_coupe":' in fonction
+    # Le trait, le bouton et le rappel sont tous tenus par le même drapeau.
+    assert "if regler_la_coupe and st.session_state.coupe_be is not None:" in fonction
+    assert "elif regler_la_coupe and st.button(" in fonction
+    assert "if regler_la_coupe and st.session_state.coupe_be is None:" in fonction
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -555,7 +599,7 @@ def test_le_bouton_arme_le_clic_et_s_annule(tmp_path, monkeypatch):
     défauts. Ce qui se mesure est l'armement : sans lui, aucun clic ne sera
     destiné à la coupe.
     """
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     assert "geste_carte" not in application.session_state
     assert _bouton_present(application, "Déplacer la coupe")
 
@@ -584,7 +628,7 @@ def test_un_clic_qui_ne_vient_pas_ne_deplace_rien(tmp_path, monkeypatch):
     ferait rejouer le même clic à chaque interaction. Ici il vaut None, et le
     script se rejoue sans que la coupe bouge.
     """
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     coupe_avant = application.session_state["coupe_be"].geometrie.wkt
 
     _cliquer(application, "Déplacer la coupe")
@@ -642,7 +686,7 @@ def test_un_clic_deplace_la_coupe_et_releve_le_profil(tmp_path, monkeypatch):
     proposée, dans l'emprise du relevé altimétrique déposé.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     avant = application.session_state["coupe_be"].geometrie
     profil_avant = application.session_state["profil_be"]
 
@@ -685,7 +729,7 @@ def test_un_clic_hors_du_site_refuse_et_garde_la_coupe(tmp_path, monkeypatch):
     doit pas coûter la coupe qui était bonne.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     avant = application.session_state["coupe_be"].geometrie.wkt
 
     _cliquer(application, "Déplacer la coupe")
@@ -725,7 +769,7 @@ def test_le_trait_d_apercu_n_apparait_qu_une_fois_le_geste_arme(tmp_path, monkey
     à Streamlit : c'est tout l'intérêt, et c'est mesuré côté module.
     """
     carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
 
     _cliquer(application, "Déplacer la coupe")
@@ -1428,7 +1472,7 @@ def test_un_fichier_inchange_n_est_pas_reecrit_a_chaque_interaction(
     pendant son téléversement et l'écriture échouait.
     """
     _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
     assert depose.exists(), "le DXF déposé est introuvable"
 
@@ -1450,7 +1494,7 @@ def test_un_fichier_efface_du_disque_est_reecrit(tmp_path, monkeypatch):
     la génération échouait plus tard sur un chemin qui ne mène nulle part.
     """
     _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
+    application = _plan_importe(tmp_path, monkeypatch)
     depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
     depose.unlink()
 
