@@ -789,6 +789,100 @@ def test_le_trait_d_apercu_n_apparait_qu_une_fois_le_geste_arme(tmp_path, monkey
     assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
 
 
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_viser_pose_un_cone_qui_suit_la_souris(tmp_path, monkeypatch):
+    """« Rien ne m'indique dans quelle direction je vise. »
+
+    Retour d'usage du 22/09/2026. Le bandeau annonçait le geste, mais la carte
+    ne montrait rien : ni le point concerné, ni la direction en cours. Le cône
+    d'aperçu est ancré à la photographie et pivote vers la souris — comme le
+    trait de la coupe, et pour la même raison : tout se passe dans Leaflet, et
+    rien ne remonte à Streamlit avant le clic.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+    assert not _calques(carte["carte"], "ApercuDeVisee")
+
+    _cliquer(application, "🎯 Viser")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    assert len(_calques(carte["carte"], "ApercuDeVisee")) == 1
+    # Et pas celui du placement : un seul geste à la fois.
+    assert not _calques(carte["carte"], "ApercuDePlacement")
+
+    _cliquer(application, "Annuler")
+    application = application.run()
+    assert not _calques(carte["carte"], "ApercuDeVisee")
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_placer_pose_un_repere_qui_suit_la_souris(tmp_path, monkeypatch):
+    """Le pendant du cône pour le placement, sur une photo sans position.
+
+    Un photomontage n'a pas d'EXIF : il reste à placer, et c'est le cas où le
+    geste sert vraiment.
+    """
+    carte = _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(application, "DP 8", [("montage.png", _image_png(), "image/png")])
+    application = application.run()
+
+    _cliquer(application, "📍 Placer")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    assert len(_calques(carte["carte"], "ApercuDePlacement")) == 1
+    # Sans position, aucun cône : viser depuis nulle part ne veut rien dire.
+    assert not _calques(carte["carte"], "ApercuDeVisee")
+
+
+def test_le_cone_d_apercu_se_fige_au_clic_et_dit_ce_qu_il_attend():
+    """Au clic, Streamlit met une à deux secondes à redessiner.
+
+    « Quand on clique pour valider, on a l'impression que tout plante l'espace
+    d'une seconde. » Le cône se fige donc dans sa position, prend sa couleur
+    pleine, et la carte annonce ce qu'elle fait — exactement ce que le trait de
+    la coupe fait depuis le 15/09/2026.
+    """
+    import folium
+
+    from dp_socle.apercu_be import apercu_de_placement, apercu_de_visee
+
+    for calque in (
+        apercu_de_visee(47.9, 1.94, 50.0, 60.0, "#d81b8c"),
+        apercu_de_placement("#d81b8c"),
+    ):
+        carte = folium.Map(tiles=None)
+        calque.add_to(carte)
+        html = carte._repr_html_()
+        assert "fige = true" in html
+        assert "cursor = " in html and "progress" in html
+        # Le survol ne remonte jamais à Streamlit : c'est tout l'intérêt.
+        assert "mousemove" in html
+        assert "return_on_hover" not in html
+
+
+def test_le_cone_d_apercu_pointe_vers_le_curseur_depuis_la_photographie():
+    """Son sommet est la prise de vue, et lui seul : c'est ce qu'il montre."""
+    import folium
+
+    from dp_socle.apercu_be import SEGMENTS_CONE_APERCU, apercu_de_visee
+
+    carte = folium.Map(tiles=None)
+    apercu_de_visee(47.9, 1.94, 50.0, 60.0, "#d81b8c").add_to(carte)
+    html = carte._repr_html_()
+
+    assert "47.9" in html and "1.94" in html
+    assert f"var n = {SEGMENTS_CONE_APERCU};" in html
+    # La demi-ouverture est en radians, pas en degrés : 50° donne 0,436 rad.
+    assert "0.436" in html
+
+
 def test_le_clic_ne_remonte_pas_la_carte():
     """La carte garde sa clé après une translation, donc son zoom.
 

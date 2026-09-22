@@ -14,6 +14,8 @@ portails partagent la valeur 1.
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 
 from shapely.geometry.base import BaseGeometry
@@ -676,6 +678,233 @@ def apercu_au_survol(
             self.epaisseur_fige = epaisseur + 1
 
     return _ApercuAuSurvol()
+
+
+#: Nombre de segments du bord courbe du cône d'aperçu. Huit suffisent pour un
+#: secteur de 50° : l'arc y est lisse à l'œil, et chaque sommet de plus est
+#: recalculé à chaque mouvement de souris.
+SEGMENTS_CONE_APERCU = 8
+
+#: Rayon terrestre servant à convertir un rayon en mètres en écart de latitude.
+#: Le cône d'aperçu n'a pas à être métriquement exact — il montre une direction
+#: — mais un rayon en mètres le fait ressembler au cône de la planche, à tous
+#: les niveaux de zoom.
+_METRES_PAR_DEGRE_LAT = 111_320.0
+
+
+def apercu_de_visee(
+    lat: float,
+    lon: float,
+    ouverture_deg: float,
+    rayon_m: float,
+    couleur: str,
+    message_attente: str = "Direction prise — mise à jour de la carte…",
+):
+    """Cône ancré à la prise de vue, qui pivote vers la souris sans rechargement.
+
+    Même principe que `apercu_au_survol`, et pour la même raison : **tout se
+    passe dans le navigateur**. Faire suivre la souris côté Python demanderait
+    `return_on_hover`, qui relance le script Streamlit à chaque mouvement.
+
+    Sans lui, viser était un geste aveugle : « je clique sur Viser, la carte
+    semble se rafraîchir, mais rien ne m'indique quel point est concerné ni dans
+    quelle direction je vise » (retour d'usage du 22/09/2026). Le cône montre
+    les deux — son sommet est la photographie, sa direction est celle du
+    curseur — et il se fige au clic, comme le trait de la coupe, parce que
+    Streamlit met une à deux secondes à redessiner et qu'un cône qui
+    continuerait de suivre la souris ferait croire que le clic n'a pas pris.
+
+    L'angle est calculé **en pixels de l'écran**, et non en Lambert 93 : c'est
+    ce dont Leaflet dispose, et c'est aussi la direction que l'œil voit. Le cap
+    retenu, lui, est recalculé en Lambert 93 par `cap_vers` une fois le clic
+    remonté — l'aperçu montre, il ne mesure pas.
+    """
+    from branca.element import MacroElement, Template
+
+    class _ApercuDeVisee(MacroElement):
+        _template = Template(
+            """
+            {% macro script(this, kwargs) %}
+            (function () {
+                var carte = {{ this._parent.get_name() }};
+                var ancre = L.latLng({{ this.lat }}, {{ this.lon }});
+                var cone = L.polygon([], {
+                    color: "{{ this.couleur }}",
+                    weight: 1,
+                    opacity: 0,
+                    fillColor: "{{ this.couleur }}",
+                    fillOpacity: 0,
+                    interactive: false
+                }).addTo(carte);
+
+                // Le sommet du cone : la photographie elle-meme, bien visible
+                // des que le geste est arme. C'est la reponse a « quel point
+                // est concerne ».
+                var sommet = L.circleMarker(ancre, {
+                    radius: 9,
+                    color: "{{ this.couleur }}",
+                    weight: 3,
+                    fillColor: "#ffffff",
+                    fillOpacity: 1,
+                    interactive: false
+                }).addTo(carte);
+
+                var fige = false;
+
+                var attente = L.DomUtil.create("div", "", carte.getContainer());
+                attente.textContent = "{{ this.message_attente }}";
+                attente.style.cssText = [
+                    "display:none", "position:absolute", "top:10px", "left:50%",
+                    "transform:translateX(-50%)", "z-index:1000",
+                    "padding:6px 12px", "border-radius:4px",
+                    "background:rgba(17,17,17,0.88)", "color:#ffffff",
+                    "font:13px system-ui, sans-serif", "pointer-events:none",
+                    "white-space:nowrap"
+                ].join(";");
+
+                function rayonEnPixels() {
+                    var a = carte.latLngToLayerPoint(ancre);
+                    var b = carte.latLngToLayerPoint(
+                        L.latLng(ancre.lat + {{ this.delta_lat }}, ancre.lng)
+                    );
+                    return Math.max(12, Math.abs(b.y - a.y));
+                }
+
+                function placer(curseur) {
+                    var a = carte.latLngToLayerPoint(ancre);
+                    var c = carte.latLngToLayerPoint(curseur);
+                    var dx = c.x - a.x, dy = c.y - a.y;
+                    if (!dx && !dy) { return; }
+                    // Angle a l'ecran : y descend, ce qui inverse le sens, mais
+                    // le cone n'a qu'a pointer vers le curseur.
+                    var axe = Math.atan2(dy, dx);
+                    var demi = {{ this.demi_ouverture_rad }};
+                    var rayon = rayonEnPixels();
+                    var sommets = [carte.layerPointToLatLng(a)];
+                    var n = {{ this.segments }};
+                    for (var i = 0; i <= n; i += 1) {
+                        var angle = axe - demi + (2 * demi * i) / n;
+                        sommets.push(carte.layerPointToLatLng(L.point(
+                            a.x + rayon * Math.cos(angle),
+                            a.y + rayon * Math.sin(angle)
+                        )));
+                    }
+                    cone.setLatLngs(sommets);
+                    cone.setStyle({opacity: 0.9, fillOpacity: 0.35});
+                }
+
+                carte.on("mousemove", function (e) {
+                    if (!fige) { placer(e.latlng); }
+                });
+                carte.on("mouseout", function () {
+                    if (!fige) { cone.setStyle({opacity: 0, fillOpacity: 0}); }
+                });
+                carte.on("zoomend", function () {
+                    if (fige) { return; }
+                    cone.setStyle({opacity: 0, fillOpacity: 0});
+                });
+                carte.on("click", function (e) {
+                    if (fige) { return; }
+                    placer(e.latlng);
+                    fige = true;
+                    cone.setStyle({opacity: 1, fillOpacity: 0.55});
+                    attente.style.display = "block";
+                    carte.getContainer().style.cursor = "progress";
+                });
+            })();
+            {% endmacro %}
+            """
+        )
+
+        def __init__(self):
+            super().__init__()
+            # Après `super().__init__()` : voir `apercu_au_survol`.
+            self._name = "ApercuDeVisee"
+            self.lat = lat
+            self.lon = lon
+            self.couleur = couleur
+            self.segments = SEGMENTS_CONE_APERCU
+            self.demi_ouverture_rad = math.radians(ouverture_deg) / 2.0
+            self.delta_lat = rayon_m / _METRES_PAR_DEGRE_LAT
+            self.message_attente = message_attente
+
+    return _ApercuDeVisee()
+
+
+def apercu_de_placement(
+    couleur: str,
+    message_attente: str = "Position prise — mise à jour de la carte…",
+):
+    """Repère qui suit la souris, pour montrer où la photographie se posera.
+
+    Le pendant de `apercu_de_visee` pour le geste de placement : « idem pour le
+    replacement, trop lent et pas visuel, on ne comprend pas quoi faire et quand
+    on clique pour valider on a l'impression que tout plante l'espace d'une
+    seconde » (22/09/2026).
+
+    Le figement au clic répond directement à cette dernière phrase : le repère
+    prend sa couleur pleine, la carte passe en curseur d'attente et dit ce
+    qu'elle fait, pendant que Streamlit rejoue le script.
+    """
+    from branca.element import MacroElement, Template
+
+    class _ApercuDePlacement(MacroElement):
+        _template = Template(
+            """
+            {% macro script(this, kwargs) %}
+            (function () {
+                var carte = {{ this._parent.get_name() }};
+                var repere = L.circleMarker(carte.getCenter(), {
+                    radius: 8,
+                    color: "{{ this.couleur }}",
+                    weight: 3,
+                    opacity: 0,
+                    fillColor: "{{ this.couleur }}",
+                    fillOpacity: 0,
+                    interactive: false
+                }).addTo(carte);
+
+                var fige = false;
+
+                var attente = L.DomUtil.create("div", "", carte.getContainer());
+                attente.textContent = "{{ this.message_attente }}";
+                attente.style.cssText = [
+                    "display:none", "position:absolute", "top:10px", "left:50%",
+                    "transform:translateX(-50%)", "z-index:1000",
+                    "padding:6px 12px", "border-radius:4px",
+                    "background:rgba(17,17,17,0.88)", "color:#ffffff",
+                    "font:13px system-ui, sans-serif", "pointer-events:none",
+                    "white-space:nowrap"
+                ].join(";");
+
+                carte.on("mousemove", function (e) {
+                    if (fige) { return; }
+                    repere.setLatLng(e.latlng);
+                    repere.setStyle({opacity: 0.9, fillOpacity: 0.35});
+                });
+                carte.on("mouseout", function () {
+                    if (!fige) { repere.setStyle({opacity: 0, fillOpacity: 0}); }
+                });
+                carte.on("click", function (e) {
+                    if (fige) { return; }
+                    repere.setLatLng(e.latlng);
+                    fige = true;
+                    repere.setStyle({opacity: 1, fillOpacity: 1});
+                    attente.style.display = "block";
+                    carte.getContainer().style.cursor = "progress";
+                });
+            })();
+            {% endmacro %}
+            """
+        )
+
+        def __init__(self):
+            super().__init__()
+            self._name = "ApercuDePlacement"
+            self.couleur = couleur
+            self.message_attente = message_attente
+
+    return _ApercuDePlacement()
 
 
 def trace_l93(resultat_carte: dict | None):

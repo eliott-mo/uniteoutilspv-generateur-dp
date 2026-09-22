@@ -1308,6 +1308,30 @@ relecture sur son champ `origine` : y chercher une ligne de coupe ne rendrait
 rien de bon. Une version de contrat plus récente que celle que l'outil sait lire
 est refusée aussi, plutôt que reprise à moitié.
 
+### Ce que la carte montre pendant qu'on vise
+
+Le bandeau annonce le geste armé, mais il est au-dessus de la carte : il ne dit
+ni **quel** point est concerné, ni **où** le geste mène. « Je clique sur Viser,
+la carte semble se rafraîchir, mais rien ne m'indique sur la carte quel point
+est concerné et dans quelle direction je vise » (22/09/2026).
+
+Trois choses répondent à cela, toutes dans Leaflet et aucune ne remontant à
+Streamlit avant le clic :
+
+- **le point visé passe en rose et grossit** — vingt-cinq marqueurs blancs
+  identiques ne disent pas lequel attend le clic ;
+- **le cône suit la souris**, ancré à la photographie, à l'ouverture du cône de
+  la planche. Pour le placement, c'est un repère qui suit la souris ;
+- **au clic, l'aperçu se fige** dans sa position, prend sa couleur pleine, et la
+  carte passe en curseur d'attente avec un message. C'est la réponse à « quand
+  on clique pour valider, on a l'impression que tout plante l'espace d'une
+  seconde » : Streamlit met une à deux secondes à rejouer le script, et un cône
+  qui continuerait de suivre la souris ferait croire que le clic n'a pas pris.
+
+L'angle de l'aperçu est calculé **en pixels de l'écran**, ce dont Leaflet
+dispose et ce que l'œil voit. Le cap retenu, lui, est recalculé en Lambert 93
+par `cap_vers` une fois le clic remonté : l'aperçu montre, il ne mesure pas.
+
 ### Le clic armé sur la carte
 
 Le mécanisme est écrit une fois pour tous les gestes de la carte : le lot 6 y

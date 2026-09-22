@@ -42,6 +42,8 @@ from dp_socle.apercu_be import (
     STYLES,
     URL_TUILES_ORTHO,
     apercu_au_survol,
+    apercu_de_placement,
+    apercu_de_visee,
     bornes_wgs84,
     clic_l93,
     en_wgs84,
@@ -1007,12 +1009,19 @@ def _secteur_de_visee(x: float, y: float, cap_deg: float):
     return Polygon(sommets)
 
 
-def _poser_prise_sur_la_carte(carte, code: str, nom: str, vue: dict) -> None:
+def _poser_prise_sur_la_carte(
+    carte, code: str, nom: str, vue: dict, visee: bool = False
+) -> None:
     """Marqueur d'une prise de vue placée, et son cône si la direction est sûre.
 
     Le cône est un secteur de 50°, comme sur la planche et comme sur les
     marqueurs de `photos-geoloc` : le chef de projet doit reconnaître d'un coup
     d'œil ce qu'il retrouvera sur le dossier.
+
+    `visee` désigne la photographie que le geste armé concerne. Elle passe en
+    rose et grossit : « rien ne m'indique sur la carte quel point est concerné »
+    (retour d'usage du 22/09/2026). Vingt-cinq points blancs identiques ne
+    disent pas lequel attend le clic.
     """
     from shapely.geometry import Point, Polygon
 
@@ -1028,8 +1037,13 @@ def _poser_prise_sur_la_carte(carte, code: str, nom: str, vue: dict) -> None:
             name=f"{code} — {nom}",
         ).add_to(carte)
     folium.CircleMarker(
-        location=(lat, lon), radius=5, color="#1a1a1a", weight=2,
-        fill=True, fillColor="#ffffff", fillOpacity=1.0,
+        location=(lat, lon),
+        radius=9 if visee else 5,
+        color=TEINTE_VISEE if visee else "#1a1a1a",
+        weight=3 if visee else 2,
+        fill=True,
+        fillColor="#ffffff",
+        fillOpacity=1.0,
         tooltip=f"{code} — {nom}",
     ).add_to(carte)
 
@@ -1336,11 +1350,36 @@ def _carte_du_plan(import_be_courant, regler_la_coupe: bool) -> None:
     # Les prises de vue déjà placées, pour que le chef de projet voie ce qu'il a
     # posé — et les corrige au besoin. Même symbole que sur la planche : un
     # repère, et un cône seulement quand la direction est confirmée.
+    cible = _cible_du_geste() if _geste_arme() in ("placer_vue", "viser_vue") else None
     for code_piece, par_nom in _vues_photo().items():
         for nom_photo, vue in par_nom.items():
             if vue.get("x") is None:
                 continue
-            _poser_prise_sur_la_carte(carte, code_piece, nom_photo, vue)
+            _poser_prise_sur_la_carte(
+                carte, code_piece, nom_photo, vue,
+                visee=cible == (code_piece, nom_photo),
+            )
+
+    # Le geste des prises de vue se montre comme celui de la coupe : ce qui se
+    # posera suit la souris, et se fige au clic. Sans cela viser était aveugle —
+    # « rien ne m'indique dans quelle direction je vise », et au clic « on a
+    # l'impression que tout plante l'espace d'une seconde » (22/09/2026).
+    if cible is not None:
+        vue_ciblee = _vue_photo(*cible)
+        if _geste_arme() == "viser_vue" and vue_ciblee.get("x") is not None:
+            lat_vue, lon_vue = en_wgs84_point(vue_ciblee["x"], vue_ciblee["y"])
+            apercu_de_visee(
+                lat_vue, lon_vue, OUVERTURE_CONE_DEG, RAYON_VISEE_CARTE_M,
+                TEINTE_VISEE,
+                message_attente=f"Direction de « {cible[1]} » prise — "
+                "mise à jour de la carte…",
+            ).add_to(carte)
+        elif _geste_arme() == "placer_vue":
+            apercu_de_placement(
+                TEINTE_VISEE,
+                message_attente=f"Position de « {cible[1]} » prise — "
+                "mise à jour de la carte…",
+            ).add_to(carte)
 
     sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
     carte.fit_bounds([[sud, ouest], [nord, est]])
