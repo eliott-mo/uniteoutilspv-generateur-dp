@@ -47,13 +47,18 @@ BORNES = (622_800.0, 6_750_550.0, 623_120.0, 6_750_970.0)
 # ---------------------------------------------------------------------------
 
 
-def _image_geolocalisee(lat=47.9, lon=1.94, cap=None) -> bytes:
-    """Un JPEG minuscule portant une position GPS, comme une photo de visite."""
+def _image_geolocalisee(lat=47.9, lon=1.94, cap=None, taille=(240, 160)) -> bytes:
+    """Un JPEG minuscule portant une position GPS, comme une photo de visite.
+
+    `taille` porte le rapport de l'image. Il décide du rognage : l'emplacement
+    de la planche prend le rapport **médian** des photographies d'une pièce, et
+    des images de même rapport ne se rognent donc pas du tout.
+    """
     import io
 
     from PIL import Image
 
-    image = Image.new("RGB", (240, 160), (150, 180, 150))
+    image = Image.new("RGB", taille, (150, 180, 150))
     exif = image.getexif()
     gps = exif.get_ifd(0x8825)
     gps.update({
@@ -1300,8 +1305,21 @@ def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatc
     """Ce que le chef de projet règle à l'écran doit atteindre la planche."""
     _carte_cliquable(monkeypatch)
     application = _import_valide(tmp_path, monkeypatch)
+    # Deux rapports différents : l'emplacement prend leur médiane, et les deux
+    # images doivent donc être rognées. Deux photographies de même rapport
+    # n'auraient rien à rogner, et le curseur ne s'afficherait pas — c'est le
+    # cas courant, celui d'un même appareil.
     _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+        application,
+        "DP 8",
+        [
+            ("visite.jpg", _image_geolocalisee(), "image/jpeg"),
+            (
+                "haute.jpg",
+                _image_geolocalisee(taille=(160, 240)),
+                "image/jpeg",
+            ),
+        ],
     )
     application = application.run()
 
@@ -1380,7 +1398,7 @@ def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkey
 
     # Rien n'est retenu tant que le chef de projet n'a pas choisi : le bouton
     # reste hors d'atteinte, et c'est tout l'objet du défaut « Ne pas retenir ».
-    reprendre = [b for b in application.button if "Reprendre" in b.label]
+    reprendre = [b for b in application.button if "au projet" in b.label]
     assert reprendre and reprendre[0].disabled
 
     # Les widgets sont reconstruits à chaque exécution : la liste se relit à
@@ -1390,7 +1408,7 @@ def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkey
         _affectations(application)[rang].set_value(piece_voulue)
         application = application.run()
 
-    _cliquer(application, "Reprendre les photographies")
+    _cliquer(application, "Ajouter ces")
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1597,6 +1615,54 @@ def test_un_message_de_forme_inconnue_reste_visible():
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_vue_dp6_a_une_seule_image_est_signalee_avant_de_generer(
+    tmp_path, monkeypatch
+):
+    """« DP 6 n'est pas dedans, j'avais pourtant choisi une image brute. »
+
+    Retour d'usage du 22/09/2026. Le refus était juste — une insertion
+    paysagère compare l'état actuel et le projet, une image seule ne compare
+    rien — mais il tombait à la génération, au bout du parcours, dans le
+    rapport. Il se dit maintenant là où le photomontage peut encore être
+    déposé.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 6", [("brute.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    # L'EXIF l'a placée : elle compte, et il en manque donc une.
+    assert application.session_state["vues_photo"]["DP 6"]["brute.jpg"]["x"]
+    alertes = [a.value for a in application.warning]
+    assert any("une seule photographie placée" in a for a in alertes), alertes
+    assert any("photomontage" in a for a in alertes), alertes
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_vue_dp6_complete_ne_se_fait_rien_reprocher(tmp_path, monkeypatch):
+    """Deux volets sur la même vue : la planche sortira, rien à signaler."""
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application,
+        "DP 6",
+        [
+            ("brute.jpg", _image_geolocalisee(), "image/jpeg"),
+            ("montage.jpg", _image_geolocalisee(lat=47.9001), "image/jpeg"),
+        ],
+    )
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    # Les deux sont sur la vue A par défaut : c'est la même prise de vue.
+    alertes = [a.value for a in application.warning]
+    assert not any("une seule photographie placée" in a for a in alertes), alertes
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypatch):
     """Elle compte autant qu'une photographie déposée à la main.
 
@@ -1612,7 +1678,7 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
     application = application.run()
     _affectations(application)[0].set_value("DP 7")
     application = application.run()
-    _cliquer(application, "Reprendre les photographies")
+    _cliquer(application, "Ajouter ces")
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1620,8 +1686,37 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
         b.label for b in application.button
     ]
     assert _bouton_present(application, "🎯 Viser")
+    # Son image du rapport a déjà le rapport de son emplacement : il n'y a rien
+    # à rogner, et c'est ce que la ligne dit à la place du curseur. L'un ou
+    # l'autre prouve que la photographie reprise est bien rendue.
+    legendes = [c.value for c in application.get("caption")]
     curseurs = [c for c in application.slider if "Recadrage" in c.label]
-    assert curseurs, "le curseur de recadrage manque"
+    assert curseurs or any("Rien à rogner" in legende for legende in legendes), (
+        legendes
+    )
+
+
+def test_un_curseur_de_recadrage_ne_s_affiche_que_s_il_peut_rogner(
+    tmp_path, monkeypatch
+):
+    """« Le recadrage ne fonctionne pas, je bouge le curseur et il ne se passe
+    rien. » Retour d'usage du 22/09/2026 — et pour cause.
+
+    L'emplacement de la planche prend le rapport **médian** des photographies
+    d'une pièce. Quand elles viennent toutes du même appareil, elles ont toutes
+    ce rapport : il n'y a rien à retirer, et le curseur n'a rien à déplacer.
+    Un curseur qui ne peut rien faire doit le dire.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+
+    assert not [c for c in application.slider if "Recadrage" in c.label]
+    legendes = [c.value for c in application.get("caption")]
+    assert any("Rien à rogner" in legende for legende in legendes), legendes
 
 
 def test_les_demandes_au_bureau_d_etudes_sont_rassemblees():

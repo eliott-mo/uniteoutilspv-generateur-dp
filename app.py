@@ -2095,7 +2095,17 @@ DISTANCE_PAYSAGE_LOINTAIN_M = 500.0
 #: consistait à écarter les autres une par une — l'inverse du geste attendu
 #: (retour d'usage du 17/09/2026). La pièce que la distance suggère est
 #: maintenant affichée à côté de la liste, sans rien décider.
-AFFECTATIONS = ("Ne pas retenir", "DP 6 — image brute", "DP 7", "DP 8")
+#: « DP 6 — image brute » nomme un **volet**, pas une pièce complète : une
+#: insertion paysagère compare l'état actuel et le projet, et le photomontage
+#: n'est pas dans un rapport de visite. Le libellé le dit, faute de quoi on
+#: choisit DP 6, on place son point de vue, et la planche ne sort pas — c'est
+#: arrivé le 22/09/2026.
+AFFECTATIONS = (
+    "Ne pas retenir",
+    "DP 6 — image brute (photomontage à ajouter)",
+    "DP 7",
+    "DP 8",
+)
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
@@ -2274,10 +2284,18 @@ if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
                 "restent sur « Ne pas retenir »."
             )
 
+        # « Reprendre les photographies retenues » ne disait ni d'où ni vers
+        # où — « ce n'est pas clair » (22/09/2026). Le libellé nomme maintenant
+        # le geste, et compte ce qu'il emporte.
         if st.button(
-            "Reprendre les photographies retenues",
+            f"Ajouter ces {len(retenues)} photographie(s) au projet"
+            if retenues
+            else "Ajouter les photographies choisies au projet",
             width="stretch",
             disabled=not retenues,
+            help="Les images choisies sont copiées dans le dossier du projet, "
+            "avec la position et la direction que le rapport leur donne. Le "
+            "rapport lui-même n'est pas conservé.",
         ):
             reprises = _reprendre_du_rapport(
                 _nom_dossier(commune), octets_carte, carte_rapport,
@@ -2325,7 +2343,20 @@ for code in PIECES_PHOTOS:
         type=["jpg", "jpeg", "png", "pdf"],
         accept_multiple_files=True,
         key=f"photos_{code.replace(' ', '_')}",
+        help=(
+            "Deux images par vue au minimum : l'état actuel et son "
+            "photomontage, que la planche met côte à côte. Une troisième "
+            "montre l'aménagement paysager quand il y en a un. Une vue à une "
+            "seule image n'est pas produite."
+            if code == "DP 6"
+            else None
+        ),
     )
+st.caption(
+    "**DP 6 demande une paire par vue** : l'image brute et son photomontage. "
+    "Elles se rattachent l'une à l'autre par la lettre de vue, plus bas, au "
+    "moment de placer les prises de vue."
+)
 
 # La page de garde prend l'insertion paysagère : c'est la vue du projet fini,
 # et c'est elle que le dossier de référence met en couverture. Une seule le
@@ -2500,14 +2531,22 @@ def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
     from PIL import Image
 
     with Image.open(_io.BytesIO(octets)) as source:
-        recadree, _ = _recadrer(source, rapport, (cadrage, cadrage), 30.0)
-    return recadree
+        recadree, perte = _recadrer(source, rapport, (cadrage, cadrage), 30.0)
+    return recadree, perte
 
-def _montrer_apercu(fichier, rapport: float, cadrage: float) -> None:
-    """L'aperçu recadré, ou l'image telle quelle si le recadrage échoue.
+
+def _montrer_apercu(fichier, rapport: float, cadrage: float) -> float | None:
+    """L'aperçu recadré. Rend la part rognée, ou None si l'image ne s'ouvre pas.
 
     Ce qui s'affiche ici est ce que la planche portera : le curseur de recadrage
     se règle en voyant le résultat, et non à l'aveugle (17/09/2026).
+
+    La part rognée remonte parce qu'elle décide du curseur : quand elle est
+    nulle, il n'a rien à déplacer. « Le recadrage ne fonctionne pas, je bouge le
+    curseur mais il ne se passe rien » (22/09/2026) — et pour cause : les
+    photographies d'une même pièce viennent du même appareil, l'emplacement
+    prend leur rapport médian, donc leur rapport, et il n'y a rien à retirer.
+    Un curseur qui ne peut rien faire doit le dire.
     """
     try:
         octets = (
@@ -2515,12 +2554,14 @@ def _montrer_apercu(fichier, rapport: float, cadrage: float) -> None:
             if isinstance(fichier, _PhotoReprise)
             else fichier.getvalue()
         )
-        st.image(
-            _apercu_recadre((fichier.name, len(octets)), octets, rapport, cadrage),
-            width="stretch",
+        image, perte = _apercu_recadre(
+            (fichier.name, len(octets)), octets, rapport, cadrage
         )
     except (OSError, ValueError) as erreur:
         st.caption(f"⚠️ aperçu indisponible ({erreur})")
+        return None
+    st.image(image, width="stretch")
+    return perte
 
 
 def _fichiers_de_la_piece(code: str, photos_par_piece: dict) -> list:
@@ -2572,12 +2613,63 @@ def _rapport_des_emplacements(fichiers) -> float:
 
 
 
+def _controler_les_volets_dp6(fichiers) -> None:
+    """Dit, avant de générer, quelles vues DP 6 n'iront pas au dossier.
+
+    Une insertion paysagère compare l'état actuel et le projet : il faut donc
+    **deux** images par vue, l'image brute et son photomontage. Une vue qui n'en
+    a qu'une est refusée à la composition, jamais complétée en silence.
+
+    Ce refus était juste, mais il tombait à la génération, au bout du parcours,
+    dans le rapport : « DP 6 n'est pas dedans, j'avais pourtant choisi une image
+    brute et ajouté un angle de prise de vue » (22/09/2026). Il se dit
+    maintenant ici, où la photographie manquante peut encore être déposée.
+    """
+    from dp_socle.planches.dp6_insertions import INTITULES
+
+    par_vue = {}
+    for fichier in fichiers:
+        vue = _vue_photo("DP 6", fichier.name)
+        if vue.get("x") is None:
+            # Non placée : elle n'entrera pas au projet, et l'état de sa ligne
+            # le dit déjà. La compter ici annoncerait une vue complète qui ne
+            # le serait pas.
+            continue
+        par_vue.setdefault(vue.get("vue", "A"), []).append(fichier.name)
+
+    if not par_vue:
+        return
+    for lettre, noms in sorted(par_vue.items()):
+        if len(noms) == 1:
+            st.warning(
+                f"**Vue {lettre} : une seule photographie placée** "
+                f"({noms[0]}). DP 6 compare l'état actuel et le projet — il "
+                "faut au moins deux images pour cette vue : l'image brute et "
+                "son photomontage. Déposez le photomontage en section 3, "
+                f"placez-le, et donnez-lui la vue {lettre}. **En l'état, la "
+                "planche ne sera pas produite.**",
+                icon="⚠️",
+            )
+        elif len(noms) > len(INTITULES):
+            st.warning(
+                f"**Vue {lettre} : {len(noms)} photographies** pour une même "
+                f"vue, alors que la pièce en décline {len(INTITULES)} au plus "
+                f"({', '.join(INTITULES)}). Une vue de plus est une planche de "
+                f"plus : donnez la lettre suivante aux images en trop.",
+                icon="⚠️",
+            )
+
+
 def _ligne_de_prise(code: str, fichier, rapport: float = 1.5) -> None:
     """Une photographie : son aperçu recadré, son état, et ses deux boutons."""
+    # Le seuil de la planche, et non un second : deux seuils construits chacun
+    # de leur côté finissent par diverger, la voirie l'a montré le 19/09/2026.
+    from dp_socle.planches.photographies import ROGNAGE_SIGNALE
+
     vue = _vue_photo(code, fichier.name)
     vignette, libelle, bouton_placer, bouton_viser = st.columns([1, 3, 1, 1])
     with vignette:
-        _montrer_apercu(fichier, rapport, vue.get("cadrage", 0.0))
+        perte = _montrer_apercu(fichier, rapport, vue.get("cadrage", 0.0))
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
@@ -2601,17 +2693,35 @@ def _ligne_de_prise(code: str, fichier, rapport: float = 1.5) -> None:
         # hauteur sinon — et donner la même valeur aux deux laisse le réglage
         # agir sur celui qui compte, sans demander au chef de projet de deviner
         # lequel c'est.
-        cadrage = st.slider(
-            "Recadrage",
-            min_value=-50, max_value=50, value=int(vue.get("cadrage", 0.0) * 100),
-            step=5, format="%d %%",
-            key=f"cadrage_{code}_{fichier.name}",
-            help="La photographie est rognée pour remplir son emplacement. "
-            "Déplacez ce curseur si le rognage retire ce qu'il fallait montrer : "
-            "vers la gauche pour garder le haut ou la gauche de l'image, vers la "
-            "droite pour l'inverse.",
-        )
-        vue["cadrage"] = cadrage / 100.0
+        # Sous un demi pour cent, le rognage tient à l'arrondi du pixel : il n'y
+        # a rien à déplacer, et le curseur le dit plutôt que de bouger dans le
+        # vide. Le seuil n'est pas zéro parce qu'un rapport se calcule en
+        # flottants et tombe rarement juste.
+        rien_a_rogner = perte is not None and perte < 0.005
+        if rien_a_rogner:
+            st.caption(
+                "Rien à rogner : cette photographie a déjà le format de son "
+                "emplacement. Elle partira entière."
+            )
+        else:
+            cadrage = st.slider(
+                "Recadrage",
+                min_value=-50, max_value=50,
+                value=int(vue.get("cadrage", 0.0) * 100),
+                step=5, format="%d %%",
+                key=f"cadrage_{code}_{fichier.name}",
+                help="La photographie est rognée pour remplir son emplacement. "
+                "Déplacez ce curseur si le rognage retire ce qu'il fallait "
+                "montrer : vers la gauche pour garder le haut ou la gauche de "
+                "l'image, vers la droite pour l'inverse.",
+            )
+            vue["cadrage"] = cadrage / 100.0
+            if perte is not None:
+                st.caption(
+                    f"Rognage : {perte:.0%} du plus grand côté"
+                    + (" — c'est beaucoup, vérifiez ce qui disparaît."
+                       if perte >= ROGNAGE_SIGNALE else ".")
+                )
 
     with bouton_placer:
         if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}"):
@@ -2666,6 +2776,8 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
             if not isinstance(fichier, _PhotoReprise):
                 _lire_exif_une_fois(code, fichier)
             _ligne_de_prise(code, fichier, rapport)
+        if code == "DP 6":
+            _controler_les_volets_dp6(fichiers)
 
 
 #: Les pièces où deux fichiers portent le même nom, avec les noms en cause.
