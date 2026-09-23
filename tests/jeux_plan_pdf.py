@@ -21,6 +21,23 @@ PLAN_GANNAY_SANS_CLOTURE = GANNAY / "Annexe5_CasXCas_PlanProjet_2026-08-28.pdf"
 DXF_GANNAY = GANNAY / "helioscope_design_10465241.dxf"
 FOND_GANNAY = GANNAY / "design_10465241_baseimage.jpg"
 
+#: Calage de l'export de Gannay, validé sur l'ortho IGN : le fond HelioScope y
+#: a été corrélé dans le dépôt `photomontage` le 21/09/2026 (`ancrage.json`,
+#: dE = 745 855,87, dN = 6 625 785,12), puis traduit le 23/09/2026 dans les
+#: deux réglages du lot 2. Le projet n'a pas d'emprise cadastrale au dépôt.
+LONGITUDE_GANNAY = 3.600487654
+NORD_SUD_GANNAY_M = -6.26
+
+#: Bray-Saint-Aignan (45) : un second plan, tiré du même modèle PowerPoint mais
+#: exporté autrement — ses traits y sont des contours remplis — et aux couleurs
+#: toutes différentes de celles de Gannay.
+BRAY = EXEMPLES / "bray-saint-aignan-PDF"
+PLAN_BRAY = BRAY / "Plan implantation_Bray-Saint-Aignan.pdf"
+DXF_BRAY = BRAY / "helioscope_design_10482797.dxf"
+FOND_BRAY = BRAY / "design_10482797_baseimage.jpg"
+#: L'emprise réelle du projet, celle du lot 1 : 27,99 ha.
+EMPRISE_BRAY = BRAY / "emprise_reelle.zip"
+
 
 def layout_cad(dossier: Path, dxf: Path, fond: Path) -> Path:
     """Le ZIP « Layout CAD » que HelioScope livre, recomposé dans `dossier`."""
@@ -33,3 +50,7 @@ def layout_cad(dossier: Path, dxf: Path, fond: Path) -> Path:
 
 def gannay_present() -> bool:
     return all(p.exists() for p in (PLAN_GANNAY, DXF_GANNAY, FOND_GANNAY))
+
+
+def bray_present() -> bool:
+    return all(p.exists() for p in (PLAN_BRAY, DXF_BRAY, FOND_BRAY, EMPRISE_BRAY))

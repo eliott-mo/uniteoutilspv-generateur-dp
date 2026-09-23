@@ -11,6 +11,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 1 | Moteur de planche, page de garde, DP 1-1, DP 1-2, DP 1-3 | livré |
 | 2 | Import DXF HelioScope et calage géographique | livré, en réserve |
 | 2bis | Import du plan du BE interne, contrôles croisés, coupe A-A' | livré |
+| 2ter | Import d'un plan projet PDF, calé sur les tables d'un export HelioScope | livré |
 | 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
 | 4 | DP 2, DP 3, DP 4 | livré |
 | 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
@@ -20,11 +21,13 @@ Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
 fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE,
 et produit depuis le 03/09/2026 **le même contrat de sortie** que le lot 2bis :
 un `geometries.gpkg` et un `projet.json` dans `sortie/{projet}/`, à
-`version_contrat` égale, distingués par leur champ `origine`. Le lot 4 lira une
-seule structure sans savoir de quel lot vient le dossier. Le test
-`tests/test_contrat_helioscope.py::test_les_deux_lots_ecrivent_le_meme_schema`
-est ce qui empêche les deux producteurs de repartir chacun de leur côté :
-n'ajoutez une couche ou une colonne d'un côté qu'en la traitant de l'autre.
+`version_contrat` égale, distingués par leur champ `origine`. Le lot 2ter en
+est le troisième producteur depuis le 23/09/2026 : un plan projet PDF, calé sur
+les tables que le lot 2 a posées, en aval de lui et non à sa place. Le lot 4
+lira une seule structure sans savoir de quel lot vient le dossier. Le test
+`tests/test_contrat_helioscope.py::test_les_trois_producteurs_ecrivent_le_meme_schema`
+est ce qui empêche les producteurs de repartir chacun de leur côté :
+n'ajoutez une couche ou une colonne d'un côté qu'en la traitant des deux autres.
 
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on

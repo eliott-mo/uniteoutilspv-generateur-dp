@@ -11,6 +11,11 @@ projets/
 # Dossiers DP de référence déposés dans exemples/ : binaires volumineux,
 # consultés en local, sans intérêt dans l'historique.
 exemples/**/*.pdf
+# Sauf les plans projet PDF du lot 2ter : ce sont des pièces d'entrée, lues
+# par l'outil et mesurées par les tests, pas des dossiers de référence. Ils
+# pèsent de 250 à 460 Ko.
+!exemples/gannay-PDF/*.pdf
+!exemples/bray-saint-aignan-PDF/Plan implantation_Bray-Saint-Aignan.pdf
 
 # Sources AutoCAD des plans du BE : seul le DXF exporté est lu par l'outil.
 # Le DWG pèse dix fois plus lourd, et les fichiers de verrou n'ont aucun sens

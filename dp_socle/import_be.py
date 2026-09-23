@@ -2086,7 +2086,10 @@ NOM_PARAMETRES = "projet.json"
 #: porte le même nom dans `projets/`.
 ORIGINE_IMPORT_BE = "import_be"
 ORIGINE_HELIOSCOPE = "helioscope"
-ORIGINES = (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE)
+#: Troisième producteur, depuis le 23/09/2026 : un plan projet PDF calé sur les
+#: tables d'un export HelioScope (lot 2ter, `dp_socle.plan_pdf`).
+ORIGINE_PLAN_PDF = "plan_pdf"
+ORIGINES = (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE, ORIGINE_PLAN_PDF)
 
 #: Version du contrat de sortie. Elle permet au lot 4 de refuser une sortie
 #: qu'il ne sait pas lire, plutôt que de dessiner une planche fausse.

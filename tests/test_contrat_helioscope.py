@@ -1,8 +1,9 @@
 """Tests de l'alignement du lot 2 sur le contrat de sortie du lot 2bis.
 
-Le test qui compte ici est `test_les_deux_lots_ecrivent_le_meme_schema` : c'est
-lui qui empêche les deux producteurs de repartir chacun de leur côté. Les
-autres figent les décisions prises le 03/09/2026, chacune contre une mesure.
+Le test qui compte ici est `test_les_trois_producteurs_ecrivent_le_meme_schema` :
+c'est lui qui empêche les producteurs du contrat — le plan du BE, l'export
+HelioScope, le plan PDF — de repartir chacun de leur côté. Les autres figent
+les décisions prises le 03/09/2026, chacune contre une mesure.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from dp_socle.import_be import (
     NOM_GEOPACKAGE,
     ORIGINE_HELIOSCOPE,
     ORIGINE_IMPORT_BE,
+    ORIGINE_PLAN_PDF,
     VERSION_CONTRAT,
     azimut_tables,
     ecrire_geopackage,
@@ -128,21 +130,93 @@ def _schema(chemin: Path) -> dict[str, set[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Le garde-fou : les deux lots écrivent le même schéma
+# Le garde-fou : les trois producteurs écrivent le même schéma
 # ---------------------------------------------------------------------------
+
+#: Troisième producteur, depuis le 23/09/2026 : le plan PDF de Gannay calé sur
+#: son export HelioScope (lot 2ter).
+besoin_plan_pdf = pytest.mark.skipif(
+    not (EXEMPLES / "gannay-PDF" / "Annexe5_CasXCas_PlanProjet_2026-09-21.pdf").exists(),
+    reason="plan PDF de Gannay absent",
+)
+
+#: Clés du `projet.json` que le lot 2bis écrit toujours, et que les deux autres
+#: producteurs doivent donc écrire aussi : le lot 4 les lit sans savoir d'où
+#: vient le fichier. Chacun peut en ajouter — le calage pour le lot 2, le calage
+#: du plan pour le lot 2ter —, aucun ne peut en retirer.
+CLES_PARAMETRES = {
+    "version_contrat",
+    "origine",
+    "sources",
+    "projet",
+    "plan",
+    "parametres",
+    "cotes_normalisees",
+    "standards_unite",
+    "controles",
+    "seuil_puissance_dp_mwc",
+    "avertissements_tableau",
+}
+CLES_PLAN = {
+    "unite_dxf",
+    "azimut_tables_deg",
+    "nb_tables",
+    "nb_portails",
+    "surface_cloturee_m2",
+    "lineaire_cloture_m",
+    "surface_tables_m2",
+    "correspondance_calques",
+    "calques_ignores",
+    "avertissements",
+}
+
+
+def _sortie_plan_pdf(dossier: Path):
+    """Le plan de Gannay, calé et écrit par le lot 2ter, coupe comprise."""
+    from dp_socle.coupe import coupe_par_defaut
+    from dp_socle.plan_pdf import ChoixDuPlan, importer_plan_pdf
+    from tests.jeux_plan_pdf import (
+        DXF_GANNAY,
+        FOND_GANNAY,
+        LONGITUDE_GANNAY,
+        NORD_SUD_GANNAY_M,
+        PLAN_GANNAY,
+        layout_cad,
+    )
+
+    dossier.mkdir(parents=True, exist_ok=True)
+    resultat = importer_plan_pdf(
+        PLAN_GANNAY,
+        layout_cad(dossier, DXF_GANNAY, FOND_GANNAY),
+        longitude_origine=LONGITUDE_GANNAY,
+        correction_nord_sud_m=NORD_SUD_GANNAY_M,
+        choix=ChoixDuPlan(volume_citerne_m3=120, largeur_portail_m=7.0),
+    )
+    plan = resultat.plan
+    resultat.ligne_coupe = coupe_par_defaut(
+        plan.azimut_tables_deg, plan.polygone_cloture, plan.tables
+    )
+    return resultat.ecrire(dossier / "sortie")
 
 
 @besoin_export
 @besoin_dxf_be
-def test_les_deux_lots_ecrivent_le_meme_schema(sortie_lot2, tmp_path):
-    """Un GeoPackage du lot 2 et un du lot 2bis se lisent de la même façon.
+@besoin_plan_pdf
+def test_les_trois_producteurs_ecrivent_le_meme_schema(sortie_lot2, tmp_path):
+    """Un GeoPackage du lot 2, du lot 2bis et du lot 2ter se lisent pareil.
 
-    C'est ce test qui empêche les deux formats de diverger : toute couche
-    nouvelle, toute colonne renommée d'un côté et pas de l'autre le fait échouer.
-    Les couches ne sont pas les mêmes — chaque source apporte ce qu'elle a — mais
-    elles viennent toutes du contrat, et leurs colonnes sont identiques.
+    C'est ce test qui empêche les formats de diverger : toute couche nouvelle,
+    toute colonne renommée d'un côté et pas des autres le fait échouer. Les
+    couches ne sont pas les mêmes — chaque source apporte ce qu'elle a — mais
+    elles viennent toutes du contrat, et leurs colonnes sont identiques. Le
+    `projet.json` est comparé de même, sur les clés que le lot 4 peut lire.
+
+    Deux producteurs jusqu'au 23/09/2026, trois depuis le plan PDF (lot 2ter,
+    décision D6 de son brief).
     """
     from dp_socle.coupe import corriger_ligne_coupe
+    from dp_socle.import_be import parametres_json
+    from dp_socle.tableau_bilan import lire_tableau
 
     dossier_lot2, _, _, _ = sortie_lot2
     implantation_lot2 = _implantation_pour_schema()
@@ -179,23 +253,48 @@ def test_les_deux_lots_ecrivent_le_meme_schema(sortie_lot2, tmp_path):
         plan, tmp_path / "lot2bis", ligne_coupe=coupe_lot2bis
     )
 
-    schema_lot2 = _schema(gpkg_lot2)
-    schema_lot2bis = _schema(gpkg_lot2bis)
+    gpkg_lot2ter, json_lot2ter = _sortie_plan_pdf(tmp_path / "lot2ter")
+
+    schemas = {
+        "lot 2": _schema(gpkg_lot2),
+        "lot 2bis": _schema(gpkg_lot2bis),
+        "lot 2ter": _schema(gpkg_lot2ter),
+    }
 
     connues = set(CATEGORIES) | {"ligne_coupe"}
-    for etiquette, schema in (("lot 2", schema_lot2), ("lot 2bis", schema_lot2bis)):
+    for etiquette, schema in schemas.items():
         hors = sorted(set(schema) - connues)
         assert not hors, f"couches hors contrat côté {etiquette} : {hors}"
         assert "tables_pv" in schema, etiquette
         assert "ligne_coupe" in schema, etiquette
+        for nom, colonnes in schema.items():
+            attendu = COLONNES_COUPE if nom == "ligne_coupe" else COLONNES
+            assert colonnes == attendu, (
+                f"couche « {nom} » côté {etiquette} : colonnes {sorted(colonnes)}"
+            )
 
-    for nom, colonnes in {**schema_lot2bis, **schema_lot2}.items():
-        attendu = COLONNES_COUPE if nom == "ligne_coupe" else COLONNES
-        assert colonnes == attendu, f"couche « {nom} » : colonnes {sorted(colonnes)}"
+    # Et les couches communes se lisent pareil des trois côtés.
+    for couche in ("tables_pv", "ligne_coupe"):
+        assert len({frozenset(s[couche]) for s in schemas.values()}) == 1, couche
+    # Le lot 2ter porte ce que le lot 2 ne pouvait pas donner : le reste du plan.
+    assert {"cloture", "portail", "pdl_ptr"} <= set(schemas["lot 2ter"])
 
-    # Et la couche commune se lit pareil des deux côtés.
-    assert schema_lot2["tables_pv"] == schema_lot2bis["tables_pv"]
-    assert schema_lot2["ligne_coupe"] == schema_lot2bis["ligne_coupe"]
+    # Le `projet.json`, sur les clés que le lot 4 peut lire.
+    parametres = {
+        "lot 2": json.loads((dossier_lot2 / "projet.json").read_text(encoding="utf-8")),
+        "lot 2bis": parametres_json(
+            plan,
+            lire_tableau(EXEMPLES / "saint-cyr-DXF" / "20260825_SCV_Tableau_Bilan_V6.xlsx", "IND06"),
+            [],
+        ),
+        "lot 2ter": json.loads(json_lot2ter.read_text(encoding="utf-8")),
+    }
+    for etiquette, donnees in parametres.items():
+        manquantes = sorted(CLES_PARAMETRES - set(donnees))
+        assert not manquantes, f"projet.json côté {etiquette} : il manque {manquantes}"
+        manquantes = sorted(CLES_PLAN - set(donnees["plan"]))
+        assert not manquantes, f"« plan » côté {etiquette} : il manque {manquantes}"
+        assert donnees["version_contrat"] == VERSION_CONTRAT, etiquette
 
 
 @besoin_export
@@ -436,8 +535,8 @@ def test_origine_inconnue_refusee(tmp_path):
         lire_parametres(tmp_path)
 
 
-def test_les_deux_origines_du_contrat_sont_reconnues(tmp_path):
-    for origine in (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE):
+def test_les_trois_origines_du_contrat_sont_reconnues(tmp_path):
+    for origine in (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE, ORIGINE_PLAN_PDF):
         dossier = tmp_path / origine
         dossier.mkdir()
         (dossier / "projet.json").write_text(

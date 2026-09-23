@@ -51,3 +51,11 @@ streamlit-image-coordinates==0.4.1
 # `dp_socle/lecture_exif.py` ; mesuré le 15/09/2026, il ajoute cinq extensions
 # et ne touche à aucun format existant.
 pillow-heif==1.7.0
+# Lecture du plan projet PDF (lot 2ter) : ses tracés vectoriels, leur couleur,
+# le texte de sa légende, et l'image de fond qui porte les tables. C'est PDFium,
+# le moteur PDF de Chrome, en roue autonome de 3,7 Mo sans aucune dépendance,
+# sous licence BSD/Apache. PyMuPDF faisait la même chose plus commodément mais
+# sous licence AGPL — et il était installé sur le poste de développement sans
+# figurer ici, le piège déjà rencontré avec pillow-heif. pypdf, déjà épinglé,
+# ne rend ni les tracés aplatis ni les images décodées.
+pypdfium2==5.12.1

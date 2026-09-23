@@ -38,6 +38,10 @@ ONGLETS_CARACTERISTIQUES = ("2. Caractéristiques du projet", "Projet")
 ONGLET_CARACTERISTIQUES = ONGLETS_CARACTERISTIQUES[0]
 ONGLET_DIMENSIONS = "Dimensions postes et pieux"
 ONGLET_STANDARDS = "Standards UNITe"
+#: La même table des cotes, sous le nom que lui donne le classeur des gabarits
+#: UNITe dont le tableau bilan la recopie. Relevé le 23/09/2026 : même mise en
+#: page, mêmes sections, mêmes en-têtes « Dimensions (…) ».
+ONGLET_GABARITS = "Dimensions postes"
 
 #: Motif de l'indice de révision, tel qu'il apparaît en en-tête de colonne et
 #: dans le nom du fichier DXF (`20260903_SCV_IND06.dxf`).
@@ -544,20 +548,25 @@ MOTIF_AIRE_ASPIRATION = re.compile(
 )
 
 
-def _lire_cotes(classeur, chemin: Path) -> tuple[list[CoteNormalisee], list[str]]:
+def _lire_cotes(
+    classeur, chemin: Path, onglet: str = ONGLET_DIMENSIONS, lire_valeur=None
+) -> tuple[list[CoteNormalisee], list[str]]:
     """Table des cotes normalisées, pour la génération paramétrique du lot 4.
 
     Cette table ne sert pas aux contrôles de ce lot : son absence n'arrête donc
     pas l'import, mais elle est signalée — le lot 4 ne pourra pas dessiner les
     planches DP 4 sans elle.
+
+    `onglet` et `lire_valeur` servent au classeur des gabarits UNITe, qui porte
+    la même table sous un autre nom et l'écrit autrement — voir `lire_gabarits`.
     """
     avertissements: list[str] = []
-    if ONGLET_DIMENSIONS not in classeur.sheetnames:
+    if onglet not in classeur.sheetnames:
         return [], [
-            f"Onglet « {ONGLET_DIMENSIONS} » absent de {chemin.name} : les cotes "
+            f"Onglet « {onglet} » absent de {chemin.name} : les cotes "
             "normalisées des postes ne seront pas disponibles pour les planches DP 4."
         ]
-    feuille = classeur[ONGLET_DIMENSIONS]
+    feuille = classeur[onglet]
 
     positions = {}
     for ligne in range(1, feuille.max_row + 1):
@@ -572,7 +581,7 @@ def _lire_cotes(classeur, chemin: Path) -> tuple[list[CoteNormalisee], list[str]
         if titre not in positions:
             avertissements.append(
                 f"Section « {titre} » introuvable dans l'onglet "
-                f"« {ONGLET_DIMENSIONS} » : cotes normalisées manquantes."
+                f"« {onglet} » : cotes normalisées manquantes."
             )
             continue
         ligne, colonne = positions[titre]
@@ -593,6 +602,7 @@ def _lire_cotes(classeur, chemin: Path) -> tuple[list[CoteNormalisee], list[str]
                 ordre,
                 colonne_surface,
                 colonne_plateforme,
+                lire_valeur or _valeur_facultative,
             )
         )
 
@@ -600,11 +610,49 @@ def _lire_cotes(classeur, chemin: Path) -> tuple[list[CoteNormalisee], list[str]
     if aire is None:
         avertissements.append(
             f"Cote de l'aire d'aspiration introuvable dans l'onglet "
-            f"« {ONGLET_DIMENSIONS} » : le lot 4 ne pourra pas la dessiner."
+            f"« {onglet} » : le lot 4 ne pourra pas la dessiner."
         )
     else:
         cotes.append(aire)
     return cotes, avertissements
+
+
+def lire_gabarits(chemin: str | Path) -> tuple[list[CoteNormalisee], list[str]]:
+    """Cotes normalisées des ouvrages UNITe, lues dans le classeur des gabarits.
+
+    Un projet sans tableau bilan — un plan PDF sur un export HelioScope, le
+    lot 2ter — n'a pas d'autre source pour les dimensions de ses ouvrages : son
+    plan les situe sans être à l'échelle. Le classeur est une ressource de
+    l'outil ; une section qui y manque est un défaut de l'outil, pas du projet,
+    et lève. Rend aussi les cases de surface écartées, à dire au rapport.
+    """
+    chemin = Path(chemin)
+    ecartees: list[str] = []
+
+    def surface(feuille, ligne: int, colonne: int | None) -> float | None:
+        # Le classeur écrit ses surfaces avec leur unité, « 18m² », que
+        # `_nombre` sait lire, et porte ailleurs ce qui n'en est pas une :
+        # « Volume 120m3 » ou « N/A » dans la colonne des plateformes de l'aire
+        # de charge BESS (relevé le 23/09/2026). Ces cases sont écartées en le
+        # disant ; aucune ne porte une dimension d'ouvrage.
+        try:
+            return _valeur_facultative(feuille, ligne, colonne)
+        except ErreurTableauBilan:
+            ecartees.append(
+                f"« {feuille.cell(ligne, colonne).value} » (ligne {ligne}), qui "
+                "n'est pas une surface"
+            )
+            return None
+
+    cotes, avertissements = _lire_cotes(
+        _classeur(chemin), chemin, onglet=ONGLET_GABARITS, lire_valeur=surface
+    )
+    if avertissements:
+        raise ErreurTableauBilan(
+            f"Classeur des gabarits UNITe incomplet ({chemin.name}) : "
+            + " ; ".join(avertissements)
+        )
+    return cotes, ecartees
 
 
 def _entete_dimensions(feuille, ligne_titre: int, colonne_titre: int):
@@ -637,8 +685,10 @@ def _lignes_de_cotes(
     ordre: str,
     colonne_surface: int | None,
     colonne_plateforme: int | None,
+    lire_valeur=None,
 ) -> list[CoteNormalisee]:
     """Lignes de données d'une section, jusqu'à la première ligne sans dimension."""
+    lire_valeur = lire_valeur or _valeur_facultative
     resultat = []
     for ligne in range(ligne_entete + 1, feuille.max_row + 1):
         dimensions = feuille.cell(ligne, colonne_dim).value
@@ -654,10 +704,8 @@ def _lignes_de_cotes(
                 ouvrage=str(ouvrage).strip(),
                 dimensions=" ".join(str(dimensions).split()),
                 ordre_cotes=ordre,
-                surface_m2=_valeur_facultative(feuille, ligne, colonne_surface),
-                surface_plateforme_m2=_valeur_facultative(
-                    feuille, ligne, colonne_plateforme
-                ),
+                surface_m2=lire_valeur(feuille, ligne, colonne_surface),
+                surface_plateforme_m2=lire_valeur(feuille, ligne, colonne_plateforme),
             )
         )
     return resultat

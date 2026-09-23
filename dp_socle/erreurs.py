@@ -104,3 +104,23 @@ class ErreurPhotoIllisible(ErreurPointDeVue):
 
 class ErreurDepot(ErreurDP):
     """Un fichier déposé n'a pas pu être écrit dans le dossier du projet."""
+
+
+class ErreurPlanPDF(ErreurDP):
+    """Le plan projet PDF est illisible, ou ne porte pas ce qu'il faut lire (lot 2ter)."""
+
+
+class ErreurLegendeIntrouvable(ErreurPlanPDF):
+    """Un libellé attendu manque à la légende du plan, ou sa pastille est illisible."""
+
+
+class ErreurEchelleIncoherente(ErreurPlanPDF):
+    """L'échelle mesurée sur le pas des rangées contredit l'emprise des tables."""
+
+
+class ErreurRecouvrementInsuffisant(ErreurPlanPDF):
+    """Les tables du plan et celles du DXF ne se recouvrent pas assez une fois calées."""
+
+
+class ErreurGabaritIndecis(ErreurPlanPDF):
+    """Un ouvrage du plan n'a pas de dimension tranchée : variante ou largeur à choisir."""

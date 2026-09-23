@@ -5,7 +5,8 @@ photovoltaïques au sol de moins de 3 MWc.
 
 Lots livrés : le **socle** (lot 1, moteur de planche et planches DP 1), le
 **calepinage HelioScope** (lot 2, en réserve), l'**import du plan du bureau
-d'études** (lot 2bis), les **planches du projet** (lot 4, DP 2 à DP 4) et la
+d'études** (lot 2bis), l'**import d'un plan projet PDF** calé sur un export
+HelioScope (lot 2ter), les **planches du projet** (lot 4, DP 2 à DP 4) et la
 **notice fournie** (lot 5, DP 11).
 
 Le lot 1 couvre le moteur de planche et les trois planches cartographiques :
@@ -396,6 +397,14 @@ python -m pytest -q
   des contours, paramètres du calepinage, et **contrôle d'échelle vraie** —
   une longueur du DXF est comparée à la distance géodésique entre ses deux
   extrémités projetées.
+- `tests/test_plan_pdf.py` — import d'un plan projet PDF (lot 2ter), mesuré sur
+  le GeoPackage écrit : échelle et recouvrement du calage sur le plan de
+  Gannay, clôture fermée et ouvrages aux cotes de leur gabarit, correction de
+  plan proposée sans être appliquée, et les refus nommés — légende sans
+  clôture, plan étiré d'un seul côté, calepinage qui n'est pas celui du plan,
+  dimension d'ouvrage non tranchée. Le plan de Bray-Saint-Aignan, exporté
+  autrement et aux couleurs toutes différentes, y vérifie que rien n'est
+  propre au premier.
 - `tests/test_import_be.py` — lecture du DXF et du tableau bilan du BE, mesurées
   contre le relevé manuel du jeu Saint-Cyr-en-Val, plus les cas d'erreur :
   coordonnées hors des bornes L93, calque renommé avec une variante
@@ -492,6 +501,7 @@ dp_socle/
 ├── dossier.py        composition du dossier : pièces, titres, numérotation
 ├── geometrie.py      lecture d'emprise, CRS, union
 ├── helioscope.py     import DXF HelioScope, calage géographique, GeoJSON L93
+├── plan_pdf.py       plan projet PDF calé sur les tables HelioScope (lot 2ter)
 ├── import_be.py      import DXF du BE, contrôles croisés, sorties GeoPackage
 ├── tableau_bilan.py  lecture du tableau bilan Excel du BE
 ├── coupe.py          ligne de coupe A-A' et profil du terrain naturel
@@ -1728,6 +1738,212 @@ lève ni contrôle bloquant ni avertissement.
 | Point bas / point haut | 2,5 m / 4,0 m | — |
 | Puissance | 2,93878 MWc | — |
 | Emprise cadastrale | — | 4,5259 ha, clôture débordant de 0,53 m² |
+
+## Import d'un plan projet PDF (lot 2ter)
+
+Certains projets n'ont ni plan du bureau d'études ni DXF complet. Le cas est
+arrivé à **Gannay-sur-Loire (03)** en septembre 2026 : le chef de projet
+disposait d'un export HelioScope qui ne porte **que les tables**, et d'un plan
+PDF — l'annexe 5 d'une demande d'examen au cas par cas, montée dans PowerPoint
+sur une copie d'écran HelioScope — qui porte tout le reste : clôture, portail,
+haies, pistes, postes, local technique, réserve incendie.
+
+Ce lot est **en aval du lot 2**, pas à sa place. Le lot 2 lit le DXF et pose
+les tables ; le plan se cale sur ces tables **dans le repère du DXF** — mètres
+au sol, nord en haut, où leur pas est exact — puis passe en Lambert 93 par la
+projection du lot 2, avec elles. Régler le calage géographique déplace donc le
+plan sans avoir à le recaler. Un plan PDF sans export HelioScope n'est pas
+traitable : c'est une limite assumée. Le contrat écrit est celui des deux
+autres producteurs, à `version_contrat` égale, distingué par
+`origine = "plan_pdf"`.
+
+### Ce que la mesure a corrigé au brief
+
+Le brief décrivait la méthode du prototype mono-cas du dépôt `photomontage` :
+rendre la page à 300 dpi et relever chaque élément à sa couleur, pixel par
+pixel. Mesuré le 23/09/2026, en rejouant ce prototype sur le même fichier :
+
+- **le plan est vectoriel.** PowerPoint exporte ses formes en tracés, avec
+  leur couleur exacte ; seule la copie d'écran HelioScope, qui porte les
+  tables, est une image. Relevé au pixel, le prototype trouvait **huit locaux
+  techniques et quatre BESS** là où le plan en dessine un de chaque, et
+  manquait le poste de livraison et le bac de rétention. Les tracés sont donc
+  lus comme tracés, et l'image intégrée pour les tables seulement — telle
+  qu'elle est dans le PDF, à 150 dpi, sans les formes posées dessus. Le rendu
+  à 300 dpi n'apportait rien : il interpolait l'image et y mêlait le violet du
+  poste de transformation, voisin du bleu des tables ;
+- **la clôture fait 684,4 m, et non 667.** Le prototype ordonnait les pixels
+  de la clôture en secteurs de 6° autour du centre. Ses sommets tombent bien
+  sur le tracé — écart médian nul —, mais chacun des quatre angles est coupé de
+  2,6 à 4,9 m. Les 180 points du pointillé, relus comme des points, donnent
+  quatre côtés droits à 0,06 pt près, qu'on prolonge jusqu'à leurs angles.
+  Le critère « 667 m ± 1 % » du brief est donc remplacé par la longueur du
+  tracé, et le test le dit ;
+- **le pas des rangées est la pente de leurs centres sur leur rang**, et non
+  la médiane de leurs écarts. Sur l'image à 150 dpi, chaque centre porte
+  l'arrondi de ses bords au pixel, et la médiane de quinze écarts en gardait
+  ±2,5 ‰ — autant que la tolérance. La droite s'appuie sur les seize rangées :
+  71,39 px à 300 dpi, contre les 71,40 ± 0,17 du prototype ;
+- **la rotation se mesure aussi**, sur l'axe principal de chaque rangée : le
+  brief ne l'évoquait pas, parce que le prototype posait les tables par simple
+  translation. Elle est nulle dans le repère du DXF — 0,002° —, et c'est la
+  projection du lot 2 qui applique ensuite la convergence des méridiens,
+  0,436° au droit du site ;
+- **le lot 2 formait mal les rangées de ce design** : tables espacées de
+  0,49 m, modules séparés de 1,2 cm, rien ne s'y touche. Son union rendait
+  4 752 « rangées » — les modules — et un azimut de 90° au lieu de 0°. Il
+  regroupe désormais les tables par ligne du calepinage.
+
+### Les couleurs se relèvent, elles ne se supposent pas
+
+Chaque entrée de la légende est une pastille suivie d'un libellé : la pastille
+se reconnaît à sa place — une petite forme dont un texte commence juste à
+droite, à sa hauteur —, jamais à sa couleur. Un libellé sur deux lignes se
+recolle, les fragments d'une ligne aussi : PDFium rend « Portai » et « l ».
+
+Le second plan d'essai, **Bray-Saint-Aignan**, confirme la décision à la
+lettre. Tiré du même modèle PowerPoint, il n'a **aucune** couleur en commun
+avec Gannay : la clôture y est un trait rouge (231, 18, 36), le local
+technique un aplat rouge (255, 0, 0), le poste de livraison noir. Il n'est pas
+non plus exporté de la même façon : ses traits y sont des contours remplis — un
+trait épais devient une capsule, dont on lit l'axe.
+
+Une forme de la carte va à la pastille dont elle porte la couleur, à trois
+règles près, toutes mesurées :
+
+- la couleur n'est pas toujours exacte : les pistes à créer de Gannay sont
+  (237, 125, 49) sur la carte et (244, 99, 34) sur leur pastille, soit 30,8
+  d'écart. Au-delà de 60, une forme n'est rattachée à rien ;
+- la plus proche doit l'être nettement plus que la suivante : le local
+  technique de Bray est à 46,9 de la clôture, et c'est la couleur exacte qui
+  les sépare ;
+- deux pastilles de même couleur se départagent par le **liseré** et le
+  **motif** : à Bray, la citerne incendie et la citerne de refroidissement
+  portent le même cyan, et seul le liseré noir de la seconde les distingue ; à
+  Gannay, la clôture et le portail portent le même magenta, en points pour
+  l'une, en ellipse pleine pour l'autre.
+
+Une forme qu'aucune pastille n'explique n'est rangée nulle part, et le rapport
+le dit ; une entrée de légende sans rien sur la carte aussi.
+
+Les libellés, eux, changent d'un plan à l'autre comme les calques du BE :
+« Réserve Incendie » ici, « Citerne Incendie » là, et « Haie à crée » avec sa
+faute. La correspondance est proposée, puis modifiable. Deux libellés de Bray
+ne se rangent nulle part d'office : « Piste existante » et « Piste à créer » ne
+disent pas si la piste est lourde ou légère.
+
+**Sans clôture en légende, le plan est refusé** (`ErreurLegendeIntrouvable`) :
+c'est le cas de la version du 28/08/2026 du plan de Gannay, antérieure à celle
+qui a servi.
+
+### L'échelle se mesure sur les tables
+
+Les rangées de la copie d'écran ont un pas connu, celui du DXF : l'échelle en
+découle sans rien chercher. Deux recoupements la tiennent :
+
+- **l'emprise des tables**, le long des rangées et en travers, doit donner la
+  même échelle à 2 % près (`ErreurEchelleIncoherente`). Une copie d'écran
+  étirée d'un seul côté dans PowerPoint garde son pas en travers et le perd le
+  long : c'est ce que le test simule ;
+- **le recouvrement** des deux damiers, une fois la translation trouvée, doit
+  atteindre 70 % (`ErreurRecouvrementInsuffisant`). La translation maximise le
+  recouvrement de Jaccard sur un domaine borné à 0,6 pas autour de
+  l'alignement des centroïdes : au-delà, c'est une rangée voisine qu'on
+  alignerait. Le demi-tour est essayé aussi, et recouvre nettement moins.
+
+| Grandeur | Brief | Gannay | Bray |
+|---|---|---|---|
+| Rangées sur le plan / dans le DXF | — | 16 / 16 | 17 / 17 |
+| Échelle, m/px à 300 dpi | 0,1531 ± 2 ‰ | 0,15307 | 0,16745 |
+| Emprise le long / en travers | — | +0,4 ‰ / −3,0 ‰ | −1,4 ‰ / −1,4 ‰ |
+| Recouvrement de Jaccard | ≥ 0,85 (0,883) | 0,954 | 0,985 |
+| Même chose, plan retourné | — | 0,810 | 0,598 |
+| Clôture | 667 m ± 1 % | 684,4 m au sol | 905 m, refermée |
+| Surface clôturée | « ~3 ha » au plan | 2,9145 ha | 4,87 ha |
+
+Le cartouche du plan de Bray annonce 5 296 modules quand son DXF en porte
+4 590 : le recouvrement de 98,5 % dit que c'est le cartouche qui est périmé,
+pas le dessin.
+
+### Ce que le plan ne dit pas, et comment on le complète
+
+**Un ouvrage n'est retenu que par sa position et son orientation** : les
+formes du plan ne sont pas à l'échelle (instruction du chef de projet du
+21/09/2026). Le poste combiné de Gannay est dessiné 7,25 × 3,65 m ; il sort à
+12 × 3 m, son gabarit. Les gabarits sont ceux du classeur « Standards UNITe »,
+dont `dp_socle/ressources/gabarits_unite.xlsx` est la copie — un test vérifie
+que les deux disent la même chose, cote par cote. Le catalogue entier est
+recopié dans `cotes_normalisees`, comme le lot 2bis le recopie du tableau
+bilan : le lot 4 y retrouve chaque ouvrage sans rien savoir de la source.
+
+Trois choses restent à trancher, et aucune n'a de valeur par défaut :
+
+- **le volume d'une réserve incendie** — le catalogue en compte quatre, de 30 à
+  240 m³, et le plan dit « réserve » sans volume ;
+- **la largeur d'un portail** — le classeur des gabarits n'en porte pas ; les
+  tableaux bilan de Saint-Cyr et de Sarnois disent 7 m, mais c'est une valeur
+  de projet ;
+- l'orientation d'un repère **carré**, dont le grand côté ne dit rien : il est
+  posé parallèle à la clôture voisine, et le rapport le dit.
+
+Un ouvrage dont une dimension n'est pas tranchée **refuse l'écriture du
+contrat** (`ErreurGabaritIndecis`), comme une voirie non tranchée : le supposer
+dessinerait un ouvrage juste de forme et faux de taille. Le local de stockage,
+lui, se déduit : un dossier de déclaration préalable porte sur moins de 3 MWc,
+c'est toujours la variante « P ≤ 5 MWc ».
+
+### La clôture s'arrête aux ouvrages qui en tiennent lieu
+
+À Bray, le chef de projet a dessiné la clôture comme elle sera bâtie : elle
+s'arrête au poste de livraison et au portail, reprend, et s'arrête encore au
+local technique. Deux tracés ouverts ne font pas une enceinte, et le lot 4 lit
+l'enceinte comme un polygone — pour son cadrage, et pour trouver où la coupe
+la franchit. Chaque interruption qu'enjambe un ouvrage est donc refermée d'un
+trait droit — 16,6 m au poste et au portail, 9,6 m au local —, et seulement
+celles-là : un trou sans ouvrage reste un trou, et le rapport le dit.
+`projet.json` garde la liste de ces ponts sous `enceinte_plan`.
+
+### La correction de plan se déclare (D8)
+
+À Gannay, le poste de livraison est dessiné en retrait de la clôture — son
+centre à 7,8 m du tracé, son long pan à 6,3 m une fois le poste à ses cotes —
+alors qu'il en tient lieu sur sa longueur. L'import le **propose**, avec sa
+raison, et ne l'applique que si on le lui demande : le poste est alors posé
+long pan sur la clôture, côté intérieur, et la correction figure au contrat
+sous `corrections_plan`, sa longueur parmi les interruptions de l'enceinte.
+
+### Ce que le lot 2ter ne peut pas fournir
+
+Le plan PDF et l'export HelioScope sont deux sources, mais aucune n'est un
+tableau bilan. Le recoupement plan / tableau et la cohérence altimétrique
+restent **impossibles**, et le disent comme au lot 2. Le seul recoupement neuf
+confronte les deux sources entre elles : **les tables du calepinage doivent
+tomber dans la clôture du plan**. S'y ajoutent, avec une emprise cadastrale,
+la clôture et les tables contre le foncier.
+
+Le géoréférencement reste celui du lot 2 : pré-positionnement sur l'emprise
+cadastrale, puis réglage à l'œil. L'emprise « geoperso-3 » déposée pour Bray
+le 23/09/2026 ne s'y prête pas — 147 ha en quatre morceaux sur 13 km, son
+centre à 2,3 km du site ; celle du lot 1, 27,99 ha, contient bien la clôture
+et les tables. Le calage de Gannay vient du fond HelioScope corrélé à l'ortho
+IGN dans le dépôt `photomontage`, traduit dans les deux réglages du lot 2 :
+longitude 3,600487654°, correction nord-sud −6,26 m.
+
+### Lecteur PDF
+
+`pypdfium2`, c'est-à-dire PDFium, le moteur PDF de Chrome : une roue de 3,7 Mo
+sans dépendance, sous licence BSD/Apache. PyMuPDF faisait la même chose plus
+commodément, mais sous licence AGPL — et il était installé sur le poste de
+développement sans figurer à `requirements.txt`, le piège déjà rencontré avec
+`pillow-heif`.
+
+### Hors de ce lot : la focale des photographies
+
+Le photomontage a besoin de la focale de chaque photographie — champ EXIF
+`FocalLengthIn35mmFilm`, tag 41989 — que `dp_socle/lecture_exif.py` ne lit
+pas : entre 22 et 30 mm équivalents, l'emprise latérale de la nappe varie de
+±15 % à Gannay. Ce module étant repris par le lot 6, le besoin lui est
+signalé, avec le refus bruyant qui doit aller avec quand la focale manque.
 
 ## Planches du projet (lot 4)
 
