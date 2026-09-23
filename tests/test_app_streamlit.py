@@ -1449,35 +1449,51 @@ def test_une_photo_sans_exif_reste_a_placer(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
-    """Ce que le chef de projet règle à l'écran doit atteindre la planche."""
+def test_le_cadrage_regle_a_l_ecran_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
+    """Ce que le chef de projet règle doit atteindre la planche.
+
+    Le cadrage se pose au clic sur l'image depuis le 24/09/2026, et le
+    composant qui le reçoit n'est pas pilotable depuis `AppTest`. Ce qui se
+    mesure ici est l'autre moitié du chemin, celle qui compte : un cadrage
+    posé en session se retrouve dans `projet.json`, donc sur la planche.
+    """
     _carte_cliquable(monkeypatch)
     application = _import_valide(tmp_path, monkeypatch)
-    # Deux rapports différents : l'emplacement prend leur médiane, et les deux
-    # images doivent donc être rognées. Deux photographies de même rapport
-    # n'auraient rien à rogner, et le curseur ne s'afficherait pas — c'est le
-    # cas courant, celui d'un même appareil.
     _televerser(
-        application,
-        "DP 8",
-        [
-            ("visite.jpg", _image_geolocalisee(), "image/jpeg"),
-            (
-                "haute.jpg",
-                _image_geolocalisee(taille=(160, 240)),
-                "image/jpeg",
-            ),
-        ],
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
     )
     application = application.run()
 
-    curseurs = [c for c in application.slider if "cadre garde" in c.label]
-    assert curseurs, "le curseur de recadrage manque"
-    curseurs[0].set_value(-30)
+    application.session_state["vues_photo"]["DP 8"]["visite.jpg"]["cadrage"] = -0.30
+    _televerser(
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
     application = application.run()
-    assert application.session_state["vues_photo"]["DP 8"]["visite.jpg"][
-        "cadrage"
-    ] == pytest.approx(-0.30)
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    photographies = application.session_state["vues_photo"]["DP 8"]["visite.jpg"]
+    assert photographies["cadrage"] == pytest.approx(-0.30)
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_l_image_se_clique_pour_choisir_ce_que_le_cadre_garde(tmp_path, monkeypatch):
+    """Plus de curseur : « on est obligé de bouger le curseur, attendre une à
+    deux secondes, et refaire des essais-erreurs » (24/09/2026).
+
+    L'aperçu porte le cadre et se clique. Le composant ne se pilote pas depuis
+    `AppTest` — ce qui se vérifie est qu'aucun curseur ne subsiste, et que
+    l'écran dit le geste.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+
+    assert not [c for c in application.slider if "cadre" in c.label.lower()]
+    legendes = "\n".join(bloc.value for bloc in application.get("caption"))
+    assert "Cliquez sur l'image" in legendes, legendes
 
 
 # ---------------------------------------------------------------------------
@@ -1838,10 +1854,12 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
     # à rogner, et c'est ce que la ligne dit à la place du curseur. L'un ou
     # l'autre prouve que la photographie reprise est bien rendue.
     legendes = [c.value for c in application.get("caption")]
-    curseurs = [c for c in application.slider if "cadre garde" in c.label]
-    assert curseurs or any("Rien à rogner" in legende for legende in legendes), (
-        legendes
-    )
+    # Son cadrage se règle au clic sur l'image, ou il n'y a rien à rogner :
+    # l'un ou l'autre prouve que la photographie reprise est bien rendue.
+    assert any(
+        "Cliquez sur l'image" in legende or "Rien à rogner" in legende
+        for legende in legendes
+    ), legendes
 
 
 def test_un_curseur_de_recadrage_ne_s_affiche_que_s_il_peut_rogner(
@@ -1907,3 +1925,64 @@ def test_les_demandes_au_bureau_d_etudes_sont_rassemblees():
     assert demande.startswith("Calque « PVcase Road » —")
     assert "polyligne fermée" in demande
     assert "HATCH" not in demande
+
+
+def _calcul_du_cadrage():
+    """`_cadrage_depuis_le_clic` tirée du source, hors de Streamlit."""
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _cadrage_depuis_le_clic(")
+    fin = source.index(chr(10) + "def ", debut + 1)
+    espace = {}
+    exec(source[debut:fin], espace)  # noqa: S102 — code du dépôt
+    return espace["_cadrage_depuis_le_clic"]
+
+
+def test_le_cadre_se_centre_sur_le_point_clique():
+    """« On clique et ça sélectionne le cadrage à garder. »
+
+    Retour d'usage du 24/09/2026. Le curseur demandait des essais-erreurs : on
+    le bougeait, on attendait le rerun, et on découvrait où le cadre était
+    allé. Le clic dit où le cadre doit être, et il y va.
+    """
+    from dp_socle.planches.photographies import fenetre_de_cadrage
+
+    calcul = _calcul_du_cadrage()
+    taille, rapport = (460, 613), 1.924  # une image portrait dans un bandeau
+
+    for y in (150, 306, 460):
+        cadrage = calcul(taille, rapport, {"x": 230, "y": y})
+        boite, _ = fenetre_de_cadrage(taille, rapport, (cadrage, cadrage))
+        milieu = (boite[1] + boite[3]) / 2
+        assert milieu == pytest.approx(y, abs=1.0), (y, milieu)
+
+
+def test_un_clic_au_bord_ne_fait_pas_sortir_le_cadre_de_l_image():
+    """Le cadre reste dans la photographie : il n'y a rien au-delà."""
+    from dp_socle.planches.photographies import fenetre_de_cadrage
+
+    calcul = _calcul_du_cadrage()
+    taille, rapport = (460, 613), 1.924
+
+    for y in (0, 613):
+        cadrage = calcul(taille, rapport, {"x": 230, "y": y})
+        assert -0.5 <= cadrage <= 0.5
+        boite, _ = fenetre_de_cadrage(taille, rapport, (cadrage, cadrage))
+        assert boite[1] >= -0.5 and boite[3] <= taille[1] + 0.5
+
+
+def test_le_clic_agit_sur_l_axe_que_le_rognage_touche():
+    """Le rognage n'en touche qu'un : l'autre ne veut rien dire.
+
+    Une photographie plus panoramique que son emplacement perd de la largeur,
+    et c'est alors l'abscisse du clic qui compte ; sinon c'est l'ordonnée.
+    """
+    calcul = _calcul_du_cadrage()
+
+    # Panoramique dans un cadre plus carré : le clic horizontal agit.
+    large = calcul((900, 300), 1.5, {"x": 200, "y": 150})
+    assert large is not None and large != calcul((900, 300), 1.5, {"x": 700, "y": 150})
+    # Et le vertical ne change rien, puisque la hauteur est déjà au format.
+    assert calcul((900, 300), 1.5, {"x": 200, "y": 10}) == large
+
+    # Une image déjà au format n'a aucun jeu : le clic ne décide de rien.
+    assert calcul((900, 600), 1.5, {"x": 200, "y": 150}) is None

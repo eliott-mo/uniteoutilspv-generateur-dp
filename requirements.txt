@@ -34,6 +34,15 @@ folium==0.20.0
 streamlit-folium==0.27.2
 # Tracé du profil altimétrique de la coupe.
 matplotlib==3.10.9
+# Cadrage des photographies au clic (lot 6). Le format des emplacements est
+# imposé, la photographie y est donc rognée, et le chef de projet choisit la
+# part qu'il garde. Un curseur le faisait à l'aveugle : « on est obligé de
+# bouger le curseur, attendre une à deux secondes que le cadre se replace sans
+# trop savoir où il va aller, et refaire des essais-erreurs » (24/09/2026).
+# Streamlit ne rend pas les clics sur une image, et un composant React écrit
+# pour cela seul serait plus lourd que ce paquet de 300 Ko, dont la seule
+# dépendance est Streamlit.
+streamlit-image-coordinates==0.4.1
 # Lecture des photos HEIC (lot 6). C'est le format par défaut des iPhone, et un
 # chef de projet qui dépose une photo de visite dépose un HEIC sans le savoir.
 # Roue autonome de 5,6 Mo, disponible pour cp312 à cp314 : elle embarque libheif

@@ -2539,6 +2539,11 @@ def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
                 del par_nom[nom]
 
 
+#: Part écartée sous laquelle il n'y a rien à déplacer : le rognage tient alors
+#: à l'arrondi du pixel. Le seuil n'est pas zéro parce qu'un rapport se calcule
+#: en flottants et tombe rarement juste.
+RIEN_A_ROGNER = 0.005
+
 #: Ce que la part écartée garde de sa luminosité sur l'aperçu. Assez sombre pour
 #: que le cadre saute aux yeux, assez claire pour qu'on voie ce qu'on perd — et
 #: c'est bien là-dessus qu'on décide de le perdre.
@@ -2598,19 +2603,52 @@ def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
     return image, perte
 
 
-def _montrer_apercu(fichier, rapport: float, cadrage: float) -> float | None:
-    """L'aperçu recadré. Rend la part rognée, ou None si l'image ne s'ouvre pas.
+#: Largeur de l'aperçu cliquable, en pixels. Assez grand pour qu'on voie ce que
+#: le cadre retient, assez petit pour que l'image traverse vite.
+LARGEUR_APERCU_PX = 460
 
-    Ce qui s'affiche ici est ce que la planche portera : le curseur de recadrage
-    se règle en voyant le résultat, et non à l'aveugle (17/09/2026).
 
-    La part rognée remonte parce qu'elle décide du curseur : quand elle est
-    nulle, il n'a rien à déplacer. « Le recadrage ne fonctionne pas, je bouge le
-    curseur mais il ne se passe rien » (22/09/2026) — et pour cause : les
-    photographies d'une même pièce viennent du même appareil, l'emplacement
-    prend leur rapport médian, donc leur rapport, et il n'y a rien à retirer.
-    Un curseur qui ne peut rien faire doit le dire.
+def _cadrage_depuis_le_clic(taille, rapport: float, clic: dict) -> float | None:
+    """Le décalage qui centre le cadre sur le point cliqué, ou None si inutile.
+
+    `taille` est celle de l'aperçu affiché, et `clic` porte ses coordonnées :
+    le composant les rend dans l'image telle qu'elle est montrée, pas dans le
+    fichier d'origine. Le rapport, lui, ne dépend pas de l'échelle.
+
+    Le rognage ne touche qu'un axe — la largeur d'une photographie plus
+    panoramique que son emplacement, sa hauteur sinon — et c'est sur celui-là
+    que le clic agit. Un clic sur l'autre axe ne veut rien dire et ne change
+    rien.
     """
+    largeur, hauteur = taille
+    if largeur / hauteur > rapport:
+        gardee = hauteur * rapport
+        libre = largeur - gardee
+        position = clic.get("x")
+    else:
+        gardee = largeur / rapport
+        libre = hauteur - gardee
+        position = clic.get("y")
+    if libre <= 0 or position is None:
+        return None
+    # `fenetre_de_cadrage` pose le bord de la fenêtre à `libre * (0,5 + cadrage)` :
+    # pour que son milieu tombe sur le clic, il faut résoudre pour le cadrage.
+    cadrage = (position - gardee / 2.0) / libre - 0.5
+    return max(-0.5, min(0.5, cadrage))
+
+
+def _apercu_cliquable(code: str, fichier, rapport: float, vue: dict) -> float | None:
+    """L'aperçu avec son cadre, qui se replace là où l'on clique.
+
+    Rend la part écartée, ou None si l'image ne s'ouvre pas.
+
+    Le curseur qui servait avant demandait des essais-erreurs : on le bougeait,
+    on attendait le rerun, et on découvrait où le cadre était allé. Ici le
+    cadre va où l'on montre — un clic, un seul rerun (retour d'usage du
+    24/09/2026).
+    """
+    from streamlit_image_coordinates import streamlit_image_coordinates
+
     try:
         octets = (
             Path(fichier.chemin).read_bytes()
@@ -2618,12 +2656,38 @@ def _montrer_apercu(fichier, rapport: float, cadrage: float) -> float | None:
             else fichier.getvalue()
         )
         image, perte = _apercu_recadre(
-            (fichier.name, len(octets)), octets, rapport, cadrage
+            (fichier.name, len(octets)), octets, rapport, vue.get("cadrage", 0.0)
         )
     except (OSError, ValueError) as erreur:
         st.caption(f"⚠️ aperçu indisponible ({erreur})")
         return None
-    st.image(image, width="stretch")
+
+    if perte < RIEN_A_ROGNER:
+        # Rien à déplacer : l'image ne se clique pas, et le dire vaut mieux
+        # qu'offrir un geste sans effet.
+        st.image(image, width="stretch")
+        return perte
+
+    clic = streamlit_image_coordinates(
+        image,
+        width=LARGEUR_APERCU_PX,
+        key=f"cadre_{code}_{fichier.name}",
+        cursor="crosshair",
+    )
+    if clic is not None and clic != vue.get("dernier_clic_cadre"):
+        # `streamlit_image_coordinates` rend le dernier clic tant que le
+        # composant vit, et non « un clic vient d'avoir lieu » — le même piège
+        # que `last_clicked` sur la carte. Sans cette mémoire, le cadrage se
+        # rejouerait à chaque exécution du script.
+        vue["dernier_clic_cadre"] = clic
+        largeur_affichee = LARGEUR_APERCU_PX
+        hauteur_affichee = largeur_affichee * image.height / image.width
+        cadrage = _cadrage_depuis_le_clic(
+            (largeur_affichee, hauteur_affichee), rapport, clic
+        )
+        if cadrage is not None and cadrage != vue.get("cadrage"):
+            vue["cadrage"] = cadrage
+            st.rerun()
     return perte
 
 
@@ -2780,7 +2844,7 @@ def _ligne_de_prise(
     # taille d'une vignette on ne voyait pas ce que le cadre retenait.
     vignette, libelle = st.columns([2, 4])
     with vignette:
-        perte = _montrer_apercu(fichier, rapport, vue.get("cadrage", 0.0))
+        perte = _apercu_cliquable(code, fichier, rapport, vue)
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
@@ -2826,41 +2890,21 @@ def _ligne_de_prise(
                 )
             else:
                 vue["vue"] = "A"
-        # Un seul curseur pour les deux axes : le rognage n'en touche qu'un —
-        # la largeur d'une photographie plus panoramique que son emplacement, sa
-        # hauteur sinon — et donner la même valeur aux deux laisse le réglage
-        # agir sur celui qui compte, sans demander au chef de projet de deviner
-        # lequel c'est.
-        # Sous un demi pour cent, le rognage tient à l'arrondi du pixel : il n'y
-        # a rien à déplacer, et le curseur le dit plutôt que de bouger dans le
-        # vide. Le seuil n'est pas zéro parce qu'un rapport se calcule en
-        # flottants et tombe rarement juste.
-        rien_a_rogner = perte is not None and perte < 0.005
-        if rien_a_rogner:
+        # Le cadrage se fait sur l'image, au clic : plus de curseur à pousser à
+        # l'aveugle. Ne reste ici que ce qu'il en coûte.
+        if perte is not None and perte < RIEN_A_ROGNER:
             st.caption(
                 "Rien à rogner : cette photographie a déjà le format de son "
                 "emplacement. Elle partira entière."
             )
-        else:
-            cadrage = st.slider(
-                "Ce que le cadre garde",
-                min_value=-50, max_value=50,
-                value=int(vue.get("cadrage", 0.0) * 100),
-                step=5, format="%d %%",
-                key=f"cadrage_{code}_{fichier.name}",
-                help="Le cadre blanc sur l'image montre ce qui partira au "
-                "dossier ; le reste est assombri. Déplacez-le vers la gauche "
-                "pour garder le haut ou la gauche de la photographie, vers la "
-                "droite pour l'inverse.",
+        elif perte is not None:
+            st.caption(
+                f"**Cliquez sur l'image** pour choisir ce que le cadre garde. "
+                f"Il laisse de côté {perte:.0%} de la photographie"
+                + (" — c'est beaucoup. Une insertion paysagère se "
+                   "photographie en paysage large."
+                   if perte >= ROGNAGE_SIGNALE else ".")
             )
-            vue["cadrage"] = cadrage / 100.0
-            if perte is not None:
-                st.caption(
-                    f"Le cadre laisse de côté {perte:.0%} de la photographie"
-                    + (" — c'est beaucoup. Une insertion paysagère se "
-                       "photographie en paysage large."
-                       if perte >= ROGNAGE_SIGNALE else ".")
-                )
 
         placer, viser = st.columns(2)
         with placer:
