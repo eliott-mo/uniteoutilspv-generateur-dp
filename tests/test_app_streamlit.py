@@ -563,7 +563,7 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     bloc = source[debut:fin]
 
     assert "_couches_de_la_carte(plan, regler_la_coupe)" in bloc
-    assert "_style_carte(style)" in bloc
+    assert "_style_carte(style, trait)" in bloc
     assert "emprise_cadastrale" in bloc
 
     # Le choix des catégories vit dans la fonction qui les reprojette — elles
@@ -586,6 +586,66 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     assert "CATEGORIES_HORS_CARTE_DES_VUES" in couches
     assert "regler_la_coupe=True" in source   # la carte de la coupe les garde
     assert "regler_la_coupe=False" in source  # celle des prises de vue, non
+
+
+def test_un_axe_a_aplat_se_trace_en_trait_sur_la_carte():
+    """Une haie du plan PDF est un axe : la carte la trace, elle ne la remplit pas.
+
+    Remplie, elle colorait l'aire entre son tracé et sa corde — le navigateur
+    ferme implicitement un chemin SVG rempli —, et l'axe n'avait que
+    l'épaisseur du filet. Même règle que `palette.style_de` pour les planches :
+    un linéaire d'une catégorie à aplat se trace dans la teinte de l'aplat.
+    """
+    if str(RACINE) not in sys.path:
+        sys.path.insert(0, str(RACINE))
+    from dp_socle.apercu_be import STYLES
+    from dp_socle.planches.palette import EXCLUES
+
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    espace = {"EXCLUES": EXCLUES}
+    exec(  # noqa: S102 — la fonction est extraite du script, qui ne s'importe pas
+        source[
+            source.index("OPACITE_CARTE = ") : source.index(
+                "#: Ce qui relève du fonctionnement normal de l'import"
+            )
+        ],
+        espace,
+    )
+    style_carte, teinte = espace["_style_carte"], espace["_teinte"]
+
+    def entite(type_geometrie, coordonnees):
+        return {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {"type": type_geometrie, "coordinates": coordonnees},
+        }
+
+    haie = STYLES["haie"]
+    assert haie.remplissage is not None
+    for axe in (
+        entite("LineString", [[2.35, 47.84], [2.36, 47.85]]),
+        entite("MultiLineString", [[[2.35, 47.84], [2.36, 47.85]]]),
+    ):
+        dessin = style_carte(haie, axe)
+        assert dessin["fill"] is False
+        assert dessin["color"] == teinte(haie.remplissage)
+        assert dessin["weight"] >= espace["EPAISSEUR_AXE_CARTE_PX"]
+
+    # Une surface garde le style de sa catégorie, inchangé.
+    surface = entite("Polygon", [[[2.35, 47.84], [2.36, 47.84], [2.36, 47.85], [2.35, 47.84]]])
+    assert style_carte(haie, surface) == {
+        "color": teinte(haie.filet),
+        "weight": max(haie.epaisseur, 1),
+        "fill": True,
+        "fillColor": teinte(haie.remplissage),
+        "fillOpacity": espace["OPACITE_CARTE"],
+    }
+    assert style_carte(haie, surface) == style_carte(haie)
+    # Un linéaire par nature, sans aplat — la clôture — garde le sien.
+    cloture = STYLES["cloture"]
+    assert style_carte(cloture, entite("LineString", [[2.35, 47.84], [2.36, 47.85]])) == (
+        style_carte(cloture)
+    )
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")

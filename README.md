@@ -2060,12 +2060,16 @@ tableau bilan, et il n'y en a pas.
 ligne : un carré de 500 m tient lieu d'emprise, un relevé de synthèse de
 RGE ALTI.
 
-**Ce que la carte ne montre pas encore bien.** La carte de la section 2 prend
-ses couleurs de `apercu_be.STYLES`, où les haies ont un aplat : Leaflet
-remplit alors l'axe d'une haie comme le faisait la planche, en fermant son
-chemin. Les planches sont corrigées ; la carte, sur laquelle le lot 6
-travaille, ne l'est pas encore. Les pistes, devenues des surfaces, s'y
-dessinent juste.
+**La carte trace un axe comme la planche.** La carte de la section 2 prend
+ses couleurs de `apercu_be.STYLES`, où les haies ont un aplat. Or une haie du
+plan PDF est un axe : remplie, Leaflet coloriait l'aire entre son tracé et sa
+corde — le navigateur ferme implicitement un chemin SVG rempli —, et l'axe
+lui-même n'avait que l'épaisseur du filet, 2 px. `_style_carte` reçoit
+désormais l'entité GeoJSON que folium passe à sa fonction de style : un axe
+d'une catégorie à aplat s'y trace dans la teinte de l'aplat, sans
+remplissage, à 4 px, l'épaisseur de la clôture — la règle de
+`palette.style_de` pour les planches. Une surface garde son style. Les
+pistes, devenues des surfaces, n'étaient pas concernées.
 
 ### Lecteur PDF
 

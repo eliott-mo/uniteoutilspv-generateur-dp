@@ -523,12 +523,36 @@ def _couches_de_la_carte(plan, regler_la_coupe: bool):
     return couches
 
 
-def _style_carte(style) -> dict:
-    """Style Leaflet d'une catégorie, aux couleurs de la légende DP.
+#: Épaisseur d'un axe à aplat sur la carte, en pixels.
+#:
+#: Même règle que `palette.style_de` pour les planches : un linéaire d'une
+#: catégorie à aplat se trace dans la teinte de l'aplat, sans remplissage. Une
+#: haie du plan PDF (lot 2ter) est un axe : remplie, elle colorait l'aire entre
+#: son tracé et sa corde — le navigateur ferme implicitement un chemin SVG
+#: rempli —, et l'axe lui-même n'avait que l'épaisseur du filet, 2 px. Quatre
+#: pixels, l'épaisseur de la clôture, la plus forte de la carte.
+EPAISSEUR_AXE_CARTE_PX = 4
+
+#: Types GeoJSON d'un axe.
+AXES_GEOJSON = ("LineString", "MultiLineString")
+
+
+def _style_carte(style, trait: dict | None = None) -> dict:
+    """Style Leaflet d'un objet, aux couleurs de la légende DP.
 
     Les mêmes teintes que la planche produite : ce que le chef de projet voit
-    ici est ce qu'il retrouvera sur DP 2, à l'opacité près.
+    ici est ce qu'il retrouvera sur DP 2, à l'opacité près. `trait` est
+    l'entité GeoJSON que folium passe à sa fonction de style : un axe d'une
+    catégorie à aplat s'y trace en trait, comme sur la planche.
     """
+    geometrie = (trait or {}).get("geometry") or {}
+    if style.remplissage is not None and geometrie.get("type") in AXES_GEOJSON:
+        return {
+            "color": _teinte(style.remplissage),
+            "weight": max(style.epaisseur, EPAISSEUR_AXE_CARTE_PX),
+            "fill": False,
+            "fillOpacity": 0.0,
+        }
     dessin = {
         "color": _teinte(style.filet),
         "weight": max(style.epaisseur, 1),
@@ -1363,7 +1387,7 @@ def _carte_du_plan(import_be_courant, regler_la_coupe: bool) -> None:
     for style, collection in _couches_de_la_carte(plan, regler_la_coupe):
         folium.GeoJson(
             collection,
-            style_function=lambda _trait, style=style: _style_carte(style),
+            style_function=lambda trait, style=style: _style_carte(style, trait),
             name=style.libelle,
         ).add_to(carte)
 
