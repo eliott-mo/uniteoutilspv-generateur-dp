@@ -1912,6 +1912,18 @@ raison, et ne l'applique que si on le lui demande : le poste est alors posé
 long pan sur la clôture, côté intérieur, et la correction figure au contrat
 sous `corrections_plan`, sa longueur parmi les interruptions de l'enceinte.
 
+### Le portail se dessine comme sa légende
+
+Posé d'abord en simple segment sur la clôture, le portail sortait au DP 2 en
+trait rouge épaissi, sous une légende qui montre deux vantaux et leur
+débattement — relevé à la relecture du 23/09/2026. La légende a raison : c'est
+ce que porte le calque du BE. Mesuré le même jour sur Saint-Cyr, chaque
+portail y est fait de cinq entités jointives : l'ouverture de 7 m sur la
+clôture, deux vantaux de 3,5 m ouverts à angle droit vers l'intérieur de
+l'enceinte, et deux quarts de cercle qui ramènent chaque vantail au milieu de
+l'ouverture. Le portail du plan PDF s'écrit désormais ainsi, et le lot 4 le
+dessine comme celui du BE.
+
 ### Ce que le lot 2ter ne peut pas fournir
 
 Le plan PDF et l'export HelioScope sont deux sources, mais aucune n'est un

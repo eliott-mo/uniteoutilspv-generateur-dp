@@ -1840,6 +1840,14 @@ PARALLELISME_DEG = 15.0
 #: clôture, en mètres : il garde alors sa propre orientation, et le rapport le dit.
 PORTAIL_SUR_LA_CLOTURE_M = 10.0
 
+#: Segments d'un arc de débattement de portail. Relevé le 23/09/2026 sur le
+#: calque du BE de Saint-Cyr (lot 2bis) : chaque portail y est fait de cinq
+#: entités jointives — l'ouverture de 7 m sur la clôture, deux vantaux de
+#: 3,5 m ouverts à angle droit vers l'intérieur de l'enceinte, et deux quarts
+#: de cercle de 16 segments qui ramènent chaque vantail au milieu de
+#: l'ouverture. Le portail du plan PDF se dessine de même.
+SEGMENTS_ARC_PORTAIL = 16
+
 #: Catégories de poste auxquelles la correction D8 se propose : ce sont les
 #: postes de livraison qui ferment l'enceinte sur leur long pan, le raccordement
 #: se faisant depuis l'extérieur.
@@ -1933,6 +1941,59 @@ class Enceinte:
     @property
     def polygone(self) -> Polygon | None:
         return Polygon(self.anneau.coords) if self.anneau is not None else None
+
+
+def symbole_portail(
+    centre: Point, direction_deg: float, largeur_m: float, vers_interieur: tuple
+) -> list[LineString]:
+    """Un portail à deux vantaux vu en plan, tel que le bureau d'études le dessine.
+
+    Un simple segment posé sur la clôture ne se lisait pas comme le portail que
+    la légende du dossier annonce : celle-ci montre les vantaux et leur
+    débattement (`planches/legende.py`), parce que c'est ce que le calque du BE
+    porte. Mesuré le 23/09/2026 sur le DP 2 de Gannay : un trait rouge épaissi
+    sur la clôture, sous une légende à deux arcs.
+
+    `vers_interieur` est la normale à la clôture qui entre dans l'enceinte :
+    les vantaux s'ouvrent de ce côté, comme à Saint-Cyr.
+    """
+    rayon = largeur_m / 2.0
+    ux, uy = math.cos(math.radians(direction_deg)), math.sin(math.radians(direction_deg))
+    nx, ny = vers_interieur
+    a = (centre.x - ux * rayon, centre.y - uy * rayon)
+    b = (centre.x + ux * rayon, centre.y + uy * rayon)
+    entites = [LineString([a, b])]
+    for pivot, sens in ((a, 1.0), (b, -1.0)):
+        entites.append(LineString([pivot, (pivot[0] + nx * rayon, pivot[1] + ny * rayon)]))
+        # De la pointe du vantail ouvert au milieu de l'ouverture.
+        arc = []
+        for rang in range(SEGMENTS_ARC_PORTAIL + 1):
+            t = math.radians(90.0 * rang / SEGMENTS_ARC_PORTAIL)
+            arc.append(
+                (
+                    pivot[0] + rayon * (nx * math.cos(t) + sens * ux * math.sin(t)),
+                    pivot[1] + rayon * (ny * math.cos(t) + sens * uy * math.sin(t)),
+                )
+            )
+        entites.append(LineString(arc))
+    return entites
+
+
+def _normale_vers(enceinte: Polygon | None, centre: Point, direction_deg: float, repere: Point):
+    """Normale à une direction, du côté de l'enceinte.
+
+    Sur la clôture, le côté se juge au contact : un pas d'un demi-mètre doit
+    entrer dans l'enceinte, ce qui vaut aussi pour une enceinte concave. Loin
+    d'elle, ou sans enceinte fermée, il se juge au point de repère donné.
+    """
+    ux, uy = math.cos(math.radians(direction_deg)), math.sin(math.radians(direction_deg))
+    nx, ny = -uy, ux
+    if enceinte is not None and enceinte.exterior.distance(centre) < 0.01:
+        if not enceinte.contains(Point(centre.x + nx * 0.5, centre.y + ny * 0.5)):
+            nx, ny = -nx, -ny
+    elif (repere.x - centre.x) * nx + (repere.y - centre.y) * ny < 0:
+        nx, ny = -nx, -ny
+    return nx, ny
 
 
 def _direction_de_ligne(ligne: LineString, point: Point) -> float:
@@ -2090,6 +2151,7 @@ class Construction:
     traces: list
     enceinte: Enceinte | None
     ouvrages: list
+    #: Un couple (libellé, entités) par portail : les cinq traits de son symbole.
     portails: list
     corrections_proposees: list
     corrections_appliquees: list
@@ -2224,6 +2286,13 @@ def construire(
         )
 
     portails = []
+    polygone = enceinte.polygone if enceinte is not None else None
+    if polygone is not None:
+        repere_interieur = polygone.representative_point()
+    elif cloture:
+        repere_interieur = unary_union(cloture).convex_hull.centroid
+    else:
+        repere_interieur = None
     for repere in reperes_par_categorie["portail"]:
         centre = Point(calage.point_vers_dxf(*repere.centre))
         direction = calage.direction_vers_dxf(repere.direction_deg)
@@ -2233,19 +2302,23 @@ def construire(
         else:
             notes.append(
                 f"« {repere.libelle} » à plus de {PORTAIL_SUR_LA_CLOTURE_M:.0f} m de "
-                "la clôture : posé selon sa propre orientation au plan."
+                "la clôture : posé selon sa propre orientation au plan, ses "
+                "vantaux ouverts du côté de la clôture."
             )
         if choix.largeur_portail_m is None:
             manques.add("la largeur du portail")
             continue
-        demi = choix.largeur_portail_m / 2.0
-        ux, uy = math.cos(math.radians(direction)), math.sin(math.radians(direction))
+        if repere_interieur is None:
+            notes.append(
+                f"« {repere.libelle} » : aucune clôture au plan pour dire de quel "
+                "côté ses vantaux s'ouvrent. Ils sont dessinés à gauche de son "
+                "orientation, sans autre raison : à vérifier."
+            )
+        normale = _normale_vers(polygone, centre, direction, repere_interieur or centre)
         portails.append(
             (
                 repere.libelle,
-                LineString(
-                    [(centre.x - ux * demi, centre.y - uy * demi), (centre.x + ux * demi, centre.y + uy * demi)]
-                ),
+                symbole_portail(centre, direction, choix.largeur_portail_m, normale),
             )
         )
 
@@ -2379,8 +2452,10 @@ class ImportPlanPDF:
             geometrie = ouvrage.geometrie()
             if geometrie is not None:
                 ajouter(ouvrage.categorie, ouvrage.libelle, geometrie)
-        for libelle, ligne in construction.portails:
-            ajouter("portail", libelle, ligne)
+        # Cinq entités par portail, comme au calque du BE : l'ouverture d'abord.
+        for libelle, entites_portail in construction.portails:
+            for ligne in entites_portail:
+                ajouter("portail", libelle, ligne)
         self._memoire[cle] = entites
         return entites
 

@@ -470,12 +470,30 @@ def test_le_contrat_porte_les_tables_du_lot_2_et_le_reste_du_plan(contrat_gannay
 
 
 @besoin_gannay
-def test_le_portail_est_pose_sur_la_cloture_a_sa_largeur(contrat_gannay):
-    portail = contrat_gannay.geometries("portail")[0]
+def test_le_portail_est_dessine_comme_au_calque_du_be(contrat_gannay):
+    """L'ouverture sur la clôture, deux vantaux ouverts vers l'intérieur, leurs arcs.
+
+    Cinq entités jointives, de 7 m, 2 x 3,5 m et 2 x 5,50 m : c'est ce que
+    porte le calque du BE de Saint-Cyr, et ce que la légende du dossier
+    annonce. Un simple segment sur la clôture ne ressemblait pas à sa légende.
+    """
+    parties = contrat_gannay.geometries("portail")
     enceinte = contrat_gannay.geometries("cloture")[0]
-    assert portail.length == pytest.approx(7.0, rel=0.002)
-    assert enceinte.exterior.distance(portail.centroid) < 0.01
+    # À 2 ‰ près : 7 m au sol font 6,993 m en Lambert 93 à Gannay, dont
+    # l'altération linéaire est de −0,9 ‰ — comme pour les tables du lot 2.
+    longueurs = sorted(p.length for p in parties)
+    assert longueurs == pytest.approx(
+        [3.5, 3.5, 3.5 * math.pi / 2, 3.5 * math.pi / 2, 7.0], rel=0.002
+    )
+    ouverture = parties[[p.length for p in parties].index(longueurs[-1])]
+    assert enceinte.exterior.distance(ouverture.centroid) < 0.01
+    # Tout le débattement est du côté de l'enceinte.
+    for partie in parties:
+        assert enceinte.buffer(0.01).contains(partie)
+    for arc in (p for p in parties if p.length == pytest.approx(5.5, rel=0.01)):
+        assert arc.distance(ouverture.centroid) < 0.01
     assert contrat_gannay.generalites["largeur_portails_m"] == 7.0
+    assert contrat_gannay.donnees["plan"]["nb_portails"] == 1
 
 
 # ---------------------------------------------------------------------------
