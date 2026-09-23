@@ -54,6 +54,13 @@ from .erreurs import (
     ErreurRecouvrementInsuffisant,
 )
 from .import_be import normaliser
+from .pistes import (
+    LARGEUR_PISTE_M,
+    RAYON_AXE_M,
+    RAYON_INTERIEUR_M,
+    AxePiste,
+    dessiner_pistes,
+)
 
 # ---------------------------------------------------------------------------
 # Vocabulaire de la légende
@@ -124,6 +131,16 @@ CATEGORIES_TRACEES = (
     "piste_lourde",
     "piste_legere",
     "voirie",
+)
+
+#: Catégories tracées qui sont des pistes : le plan en donne le tracé et le
+#: type, et `pistes.py` en fait une piste de 5 m aux virages arrondis
+#: (instruction du chef de projet du 23/09/2026).
+CATEGORIES_PISTES = (
+    "piste_lourde_existante",
+    "piste_lourde_a_creer",
+    "piste_lourde",
+    "piste_legere",
 )
 
 #: Catégories dont le plan ne donne que la position et l'orientation : leurs
@@ -2159,6 +2176,8 @@ class Construction:
     notes: list
     #: Ce qui reste à trancher pour dimensionner les ouvrages du plan.
     manques: list = field(default_factory=list)
+    #: Les pistes, en bandes de 5 m aux virages arrondis (`pistes.PisteDessinee`).
+    pistes: list = field(default_factory=list)
 
 
 def _gabarit_de(categorie: str, catalogue: dict, choix: ChoixDuPlan):
@@ -2193,6 +2212,7 @@ def construire(
     notes: list[str] = []
     traces_dxf: list = []
     cloture: list = []
+    axes_de_pistes: list = []
     for categorie in CATEGORIES_TRACEES:
         lus, remarques = traces(lecture, categorie)
         notes.extend(remarques)
@@ -2200,8 +2220,14 @@ def construire(
             ligne = calage.vers_dxf(trace.ligne)
             if categorie == "cloture":
                 cloture.append(ligne)
+            elif categorie in CATEGORIES_PISTES:
+                axes_de_pistes.append(AxePiste(trace.categorie, trace.libelle, ligne))
             else:
                 traces_dxf.append((trace.categorie, trace.libelle, ligne))
+    # Le plan donne le tracé et le type de chaque piste ; la piste elle-même
+    # se dessine comme sur un vrai plan : 5 m de large, virages arrondis.
+    pistes, notes_pistes = dessiner_pistes(axes_de_pistes)
+    notes.extend(notes_pistes)
 
     reperes_par_categorie = {c: reperes(lecture, c) for c in CATEGORIES_OUVRAGES}
     centres = []
@@ -2332,6 +2358,7 @@ def construire(
         gabarits=gabarits_utilises,
         notes=notes,
         manques=sorted(manques),
+        pistes=pistes,
     )
 
 
@@ -2448,6 +2475,11 @@ class ImportPlanPDF:
                     ajouter("cloture", libelle, ligne)
         for categorie, libelle, ligne in construction.traces:
             ajouter(categorie, libelle, ligne)
+        # Une piste est une surface, comme au calque du BE : un polygone par
+        # morceau, la couche n'en mélangeant pas les types.
+        for piste in construction.pistes:
+            for polygone in piste.polygones:
+                ajouter(piste.categorie, piste.libelle, polygone)
         for ouvrage in construction.ouvrages:
             geometrie = ouvrage.geometrie()
             if geometrie is not None:
@@ -2592,7 +2624,66 @@ class ImportPlanPDF:
             for c in limites_helioscope(self.implantation, self.emprise_cadastrale)
             if "emprise cadastrale" in c.libelle
         )
+        controle_pistes = self._controle_des_pistes(plan)
+        if controle_pistes is not None:
+            controles.append(controle_pistes)
         return controles
+
+    def _controle_des_pistes(self, plan):
+        """Ce que la piste de 5 m recouvre, là où le trait du plan passait au ras.
+
+        Le trait du plan n'a pas de largeur : il passe au ras des tables et de
+        la clôture sans rien toucher. Une piste de 5 m menée sur ce trait peut
+        les recouvrir. On ne la déplace pas — ce serait corriger le plan —, on
+        dit où et de combien. Mesuré le 23/09/2026 à Gannay : 21 m² de tables,
+        et la clôture couverte sur 113 m le long de la piste à créer, dont l'axe
+        passe à 2,1 m d'elle.
+        """
+        from .import_be import AVERTISSEMENT, OK, Controle
+
+        pistes = [g for c in CATEGORIES_PISTES for g in plan.geometries(c)]
+        if not pistes:
+            return None
+        surface = unary_union(pistes)
+        tables = unary_union(plan.geometries("tables_pv"))
+        ouvrages = unary_union(
+            [g for c in CATEGORIES_OUVRAGES if c != "portail" for g in plan.geometries(c)]
+        )
+        sur_tables = float(surface.intersection(tables).area) if not tables.is_empty else 0.0
+        sur_ouvrages = float(surface.intersection(ouvrages).area) if not ouvrages.is_empty else 0.0
+        enceinte = plan.polygone_cloture
+        sur_cloture = 0.0
+        if enceinte is not None:
+            # Une piste franchit la clôture à ses portails : ce n'est pas un
+            # recouvrement.
+            portails = unary_union(plan.geometries("portail")).buffer(0.5)
+            couverte = enceinte.exterior.intersection(surface)
+            if not portails.is_empty:
+                couverte = couverte.difference(portails)
+            sur_cloture = float(couverte.length)
+        constats = []
+        if sur_tables > 0.5:
+            constats.append(f"{sur_tables:.0f} m² de tables")
+        if sur_ouvrages > 0.5:
+            constats.append(f"{sur_ouvrages:.0f} m² d'ouvrages")
+        if sur_cloture > 1.0:
+            constats.append(f"la clôture sur {sur_cloture:.0f} m hors portails")
+        return Controle(
+            "Pistes de 5 m sur le tracé du plan",
+            round(sur_tables, 1),
+            None,
+            "m²",
+            AVERTISSEMENT if constats else OK,
+            (
+                f"Menées sur le tracé du plan, les pistes de {LARGEUR_PISTE_M:.0f} m "
+                f"recouvrent {', '.join(constats)} : le trait du plan passe trop près. "
+                "Elles sont dessinées là où le plan les place ; c'est au plan de "
+                "leur faire la place."
+            )
+            if constats
+            else f"Les pistes de {LARGEUR_PISTE_M:.0f} m ne recouvrent ni table, ni "
+            "ouvrage, ni la clôture hors des portails.",
+        )
 
     @property
     def bloquants(self) -> list:
@@ -2706,6 +2797,29 @@ class ImportPlanPDF:
             }
             for o in construction.ouvrages
         ]
+        # Ce que le plan donne d'une piste — son tracé, son type — et ce qui
+        # vient d'ailleurs : sa largeur et ses rayons, d'une instruction.
+        donnees["pistes_plan"] = {
+            "largeur_m": LARGEUR_PISTE_M,
+            "rayon_interieur_m": RAYON_INTERIEUR_M,
+            "rayon_axe_m": RAYON_AXE_M,
+            "source": (
+                "Instruction du chef de projet du 23/09/2026 : le plan donne le "
+                "tracé et le type ; la piste a 5 m de large et des virages de "
+                "11 m au bord intérieur (« voie engins »)."
+            ),
+            "pistes": [
+                {
+                    "categorie": p.categorie,
+                    "libelle": p.libelle,
+                    "longueur_axe_m": round(p.axe.length, 1),
+                    "surface_m2": round(p.surface.area, 1),
+                    "rayon_axe_min_m": p.rayon_axe_min_m,
+                    "rayons_raccords_m": p.rayons_raccords_m,
+                }
+                for p in construction.pistes
+            ],
+        }
         if construction.enceinte is not None:
             donnees["enceinte_plan"] = {
                 "fermee": construction.enceinte.anneau is not None,

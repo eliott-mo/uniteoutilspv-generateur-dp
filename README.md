@@ -405,6 +405,10 @@ python -m pytest -q
   dimension d'ouvrage non tranchée. Le plan de Bray-Saint-Aignan, exporté
   autrement et aux couleurs toutes différentes, y vérifie que rien n'est
   propre au premier.
+- `tests/test_pistes.py` — d'un tracé du plan à une piste de 5 m : largeur de
+  la bande, rayon de 11 m de son bord intérieur dans un virage, boucle fermée
+  par deux tracés mis bout à bout, raccord en T évasé, et ce que le rapport
+  dit d'un virage qui n'a pas la place.
 - `tests/test_import_be.py` — lecture du DXF et du tableau bilan du BE, mesurées
   contre le relevé manuel du jeu Saint-Cyr-en-Val, plus les cas d'erreur :
   coordonnées hors des bornes L93, calque renommé avec une variante
@@ -502,6 +506,7 @@ dp_socle/
 ├── geometrie.py      lecture d'emprise, CRS, union
 ├── helioscope.py     import DXF HelioScope, calage géographique, GeoJSON L93
 ├── plan_pdf.py       plan projet PDF calé sur les tables HelioScope (lot 2ter)
+├── pistes.py         piste de 5 m aux virages arrondis, sur le tracé du plan PDF
 ├── import_be.py      import DXF du BE, contrôles croisés, sorties GeoPackage
 ├── tableau_bilan.py  lecture du tableau bilan Excel du BE
 ├── coupe.py          ligne de coupe A-A' et profil du terrain naturel
@@ -1924,6 +1929,42 @@ l'enceinte, et deux quarts de cercle qui ramènent chaque vantail au milieu de
 l'ouverture. Le portail du plan PDF s'écrit désormais ainsi, et le lot 4 le
 dessine comme celui du BE.
 
+### Une piste se dessine comme sur un vrai plan
+
+Le plan PDF donne le tracé et le type de chaque piste, pas sa géométrie : un
+trait de PowerPoint, fait de segments mis bout à bout, avec un angle vif à
+chaque changement de direction. Instruction du chef de projet du 23/09/2026 :
+partir de ce tracé et de ce type, et reproduire la piste comme sur un vrai
+plan — **5 m de large**, et des virages de **11 m de rayon au bord
+intérieur**, celui de la « voie engins » des pompiers, soit 13,5 m sur l'axe.
+Les plans du BE de Sarnois tracent leurs virages à 12 m. C'est
+`dp_socle/pistes.py`, qui ne travaille qu'en géométrie, en mètres au sol.
+
+Aux extrémités d'un tracé, trois cas, tous trois mesurés sur les plans
+d'essai :
+
+| Cas | Mesuré | Traitement |
+|---|---|---|
+| Deux traits mis bout à bout | 1,9 et 2,2 m entre les bouts, à la boucle de Gannay | un virage comme un autre, arrondi et partagé entre les deux pistes |
+| Un trait qui en rejoint un autre | 0,04 à 0,36 m de l'axe, aux trois raccords en T de Gannay | le bout est mené jusqu'à l'axe, et les deux angles rentrants s'arrondissent à 11 m |
+| Deux bouts proches sans se toucher | 3,6 m, les deux pistes de Bray au local technique | laissés tels quels, et le rapport demande au plan de trancher |
+
+Ce qui n'a pas la place de s'arrondir se dit. Deux virages trop rapprochés
+se fondent en un seul, au sommet commun de leurs alignements — c'est le
+virage qu'un projeteur tracerait. Un décrochement du trait, segment court
+entre deux alignements presque parallèles, s'efface : celui de 0,8 m de la
+piste existante de Bray suivait un décrochement de la clôture. Un virage qui
+ne tient toujours pas se resserre au plus grand rayon possible. Et la
+bretelle du portail de Gannay, 11,4 m entre la boucle et l'anneau, n'offre
+que 3,2 m à chacun de ses quatre arrondis.
+
+Le trait du plan passe au ras de ce qu'il longe ; la piste de 5 m menée
+dessus peut le recouvrir. On ne la déplace pas, parce que ce serait corriger
+le plan : un contrôle dit ce qu'elle recouvre. À Gannay, la piste à créer
+couvre 21 m² de tables et 2 m² d'ouvrages, et la clôture sur 113 m, son
+axe passant à 2,1 m de celle-ci. À Bray, rien. `projet.json` garde la
+largeur, les rayons et leur source sous `pistes_plan`.
+
 ### Ce que le lot 2ter ne peut pas fournir
 
 Le plan PDF et l'export HelioScope sont deux sources, mais aucune n'est un
@@ -1966,10 +2007,11 @@ ligne : un carré de 500 m tient lieu d'emprise, un relevé de synthèse de
 RGE ALTI.
 
 **Ce que la carte ne montre pas encore bien.** La carte de la section 2 prend
-ses couleurs de `apercu_be.STYLES`, où les pistes et les haies ont un aplat :
-Leaflet remplit alors l'axe d'une piste comme le faisait la planche, en
-fermant son chemin. Les planches sont corrigées ; la carte, sur laquelle le
-lot 6 travaille, ne l'est pas encore.
+ses couleurs de `apercu_be.STYLES`, où les haies ont un aplat : Leaflet
+remplit alors l'axe d'une haie comme le faisait la planche, en fermant son
+chemin. Les planches sont corrigées ; la carte, sur laquelle le lot 6
+travaille, ne l'est pas encore. Les pistes, devenues des surfaces, s'y
+dessinent juste.
 
 ### Lecteur PDF
 
@@ -2441,10 +2483,12 @@ rapport : ce n'est pas la géométrie du calque.
 
 ### Et un axe n'est pas un contour
 
-Le plan projet PDF du lot 2ter ne donne d'une piste ou d'une haie que son axe :
-la largeur qu'il dessine n'est pas à l'échelle, et on ne la suppose pas. Deux
-choses le faisaient mal dessiner, mesurées le 23/09/2026 sur le contrat de
-Gannay :
+Le plan projet PDF du lot 2ter ne donne d'une haie que son axe : la largeur
+qu'il dessine n'est pas à l'échelle, et on ne la suppose pas. Il en allait de
+même des pistes jusqu'à ce qu'elles reçoivent leur largeur de 5 m (voir « Une
+piste se dessine comme sur un vrai plan », au lot 2ter) : ce sont désormais
+des surfaces. Deux choses faisaient mal dessiner un axe, mesurées le
+23/09/2026 sur le contrat de Gannay :
 
 - **une ligne fermée sur elle-même était recousue en surface.** Le cercle de
   piste existante, un axe de 189 m, devenait un disque de voie lourde de

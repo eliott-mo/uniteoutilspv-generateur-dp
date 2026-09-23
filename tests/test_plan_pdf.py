@@ -496,9 +496,71 @@ def test_le_portail_est_dessine_comme_au_calque_du_be(contrat_gannay):
     assert contrat_gannay.donnees["plan"]["nb_portails"] == 1
 
 
+@besoin_gannay
+def test_les_pistes_sortent_en_bandes_de_5_m_aux_virages_arrondis(contrat_gannay):
+    """Le plan donne le tracé et le type ; la piste est celle d'un vrai plan.
+
+    Instruction du chef de projet du 23/09/2026 : 5 m de large, 11 m au bord
+    intérieur des virages, soit 13,5 m sur l'axe. À Gannay, la piste existante
+    et la piste à créer ferment une boucle autour des tables.
+    """
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    categories = ("piste_lourde_existante", "piste_lourde_a_creer")
+    surfaces = [g for c in categories for g in contrat_gannay.geometries(c)]
+    assert surfaces and all(g.geom_type == "Polygon" for g in surfaces)
+    pistes = contrat_gannay.donnees["pistes_plan"]
+    assert pistes["largeur_m"] == 5.0
+    assert pistes["rayon_interieur_m"] == 11.0
+    for piste in pistes["pistes"]:
+        largeur = piste["surface_m2"] / piste["longueur_axe_m"]
+        if piste["rayons_raccords_m"]:
+            assert largeur > 5.0
+        else:
+            assert largeur == pytest.approx(5.0, rel=0.002)
+        if piste["rayon_axe_min_m"] is not None:
+            assert piste["rayon_axe_min_m"] == 13.5
+    boucle = unary_union(surfaces)
+    centre_des_tables = unary_union(contrat_gannay.geometries("tables_pv")).centroid
+    assert any(
+        Polygon(interieur).contains(centre_des_tables)
+        for morceau in getattr(boucle, "geoms", [boucle])
+        for interieur in morceau.interiors
+    )
+
+
+@besoin_gannay
+def test_une_piste_qui_recouvre_tables_et_cloture_est_signalee(import_gannay):
+    """Le trait du plan passe au ras des tables et de la clôture ; la piste de 5 m non.
+
+    Elle reste là où le plan la place — la déplacer serait corriger le plan —,
+    et le contrôle dit ce qu'elle recouvre.
+    """
+    controle = next(
+        c for c in import_gannay.controles if c.libelle == "Pistes de 5 m sur le tracé du plan"
+    )
+    assert controle.statut == "avertissement"
+    assert "tables" in controle.message
+    assert "clôture" in controle.message
+    assert controle.valeur_dxf == pytest.approx(21.0, abs=3.0)
+
+
 # ---------------------------------------------------------------------------
 # Bray : un plan exporté autrement, une clôture qui s'arrête aux ouvrages
 # ---------------------------------------------------------------------------
+
+
+@besoin_bray
+def test_les_pistes_de_bray_perdent_leur_decrochement_et_gardent_deux_acces(import_bray):
+    """Un décrochement de 0,8 m du trait s'efface ; deux accès au local restent deux."""
+    notes = import_bray.avertissements
+    assert any("décrochement de 0.8 m" in n for n in notes)
+    assert any("3.6 m l'une de l'autre" in n and "sans raccord" in n for n in notes)
+    controle = next(
+        c for c in import_bray.controles if c.libelle == "Pistes de 5 m sur le tracé du plan"
+    )
+    assert controle.statut == "ok"
 
 
 @besoin_bray
