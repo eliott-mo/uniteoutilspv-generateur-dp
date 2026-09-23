@@ -253,6 +253,46 @@ def test_les_rangees_et_non_les_tables_brutes_alimentent_tables_pv(implantation)
     assert azimut_tables(tables_pv) == pytest.approx(1.895, abs=0.01)
 
 
+@pytest.fixture(scope="module")
+def implantation_gannay(tmp_path_factory):
+    """Le design 10465241 de Gannay-sur-Loire, où rien ne se touche."""
+    from tests.jeux_plan_pdf import DXF_GANNAY, FOND_GANNAY, layout_cad
+
+    dossier = tmp_path_factory.mktemp("gannay")
+    return importer(layout_cad(dossier, DXF_GANNAY, FOND_GANNAY))
+
+
+@pytest.mark.skipif(
+    not (EXEMPLES / "gannay-PDF" / "helioscope_design_10465241.dxf").exists(),
+    reason="DXF de Gannay absent",
+)
+def test_des_tables_qui_ne_se_touchent_pas_forment_quand_meme_des_rangees(
+    implantation_gannay,
+):
+    """Tables espacées de 0,49 m, modules séparés de 1,2 cm : l'union ne suffit pas.
+
+    Mesuré le 23/09/2026 : l'union des tables contiguës rendait 4 752
+    « rangées » — les modules eux-mêmes —, dont le grand côté est nord-sud, et
+    l'azimut sortait à 90° au lieu de 0°. La coupe A-A' se serait posée
+    parallèle aux rangées, sans rien de visible sur la planche.
+    """
+    from dp_socle.helioscope import grouper_en_rangees, rangees_locales
+
+    union_seule = grouper_en_rangees(implantation_gannay.tables)
+    assert len(union_seule) == implantation_gannay.calepinage.nb_modules == 4752
+    assert azimut_tables(union_seule) == pytest.approx(90.0, abs=0.01)
+
+    lignes, jeu = rangees_locales(implantation_gannay)
+    assert len(lignes) == implantation_gannay.calepinage.nb_rangees == 16
+    assert jeu == pytest.approx(0.50, abs=0.02)
+    assert azimut_tables(lignes) == pytest.approx(0.0, abs=0.01)
+    # Chaque rangée est d'un seul tenant, et ne déborde pas de ses tables de
+    # plus que les jeux qu'elle referme.
+    surface_tables = sum(t.area for t in implantation_gannay.tables)
+    surface_rangees = sum(l.area for l in lignes)
+    assert 1.0 < surface_rangees / surface_tables < 1.10
+
+
 @besoin_export
 def test_l_ecart_a_orientation_deg_est_la_convergence_des_meridiens(implantation):
     """`orientation_deg` se rapporte au nord géographique, pas à celui de la grille.

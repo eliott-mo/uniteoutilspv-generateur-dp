@@ -1111,16 +1111,95 @@ def grouper_en_rangees(tables: list[BaseGeometry]) -> list[Polygon]:
     return list(polygones_ou_vide(unary_union(tables)))
 
 
-def rangees(implantation: Implantation) -> list[Polygon]:
-    """Rangées de tables, en Lambert 93 : union des colonnes contiguës.
+#: Seuil de regroupement des tables en rangées, en mètres, sur leur ordonnée
+#: dans le repère du calepinage. Le même que celui de `_rangees_et_pas`, qui
+#: mesure le pas sur les points d'insertion : deux rangées sont à plusieurs
+#: mètres l'une de l'autre, deux tables d'une même rangée au millimètre.
+SEUIL_RANGEE_M = 0.5
 
-    HelioScope n'encode aucun groupement en structures — sur les deux designs
-    des Islettes, **tous** les écarts entre tables valent exactement une largeur
-    de module (mesuré le 02/09/2026). La rangée est donc le seul regroupement
-    que le fichier permette de reconstituer, et c'est aussi celui que l'aperçu
-    de calage cerne de noir.
+#: Marge ajoutée au demi-jeu entre tables pour refermer une rangée, en mètres.
+#: Elle referme aussi les joints entre modules d'une même table, qui se
+#: comptent en millimètres : 1,2 cm sur le design 10465241 de Gannay.
+MARGE_FERMETURE_RANGEE_M = 0.01
+
+
+def _dans_le_repere_du_calepinage(implantation: Implantation):
+    """Bornes de chaque table dans le repère du calepinage, rotation annulée."""
+    angle = math.radians(-implantation.calepinage.orientation_deg)
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    bornes = []
+    for table in implantation.tables:
+        xs, ys = [], []
+        for polygone in polygones_ou_vide(table):
+            for x, y in polygone.exterior.coords:
+                xs.append(x * cos_a - y * sin_a)
+                ys.append(x * sin_a + y * cos_a)
+        bornes.append((min(xs), min(ys), max(xs), max(ys)))
+    return bornes
+
+
+def rangees_locales(implantation: Implantation) -> tuple[list[Polygon], float]:
+    """Rangées de tables dans le repère du DXF, et le jeu mesuré entre tables.
+
+    Les tables se regroupent **par leur ordonnée dans le repère du
+    calepinage**, comme `_rangees_et_pas` le fait pour mesurer le pas, et non
+    par contact. L'union des tables contiguës suffisait sur les deux designs
+    des Islettes, où tous les écarts entre tables valent exactement une largeur
+    de module (mesuré le 02/09/2026). Elle ne suffit pas au design 10465241 de
+    Gannay-sur-Loire (mesuré le 23/09/2026) : ses tables sont espacées de
+    0,49 m et ses modules séparés par des joints de 1,2 cm. Rien ne s'y touche,
+    et l'union rendait 4 752 « rangées » — les modules — dont `azimut_tables`
+    lisait le grand côté, nord-sud : 90° au lieu de 0°, et une coupe A-A'
+    parallèle aux rangées sans rien de visible sur la planche.
+
+    Chaque rangée est ensuite refermée sur le **jeu mesuré** entre ses tables
+    (fermeture morphologique de rayon demi-jeu, à angles vifs) : un vide plus
+    large — une rangée interrompue par une zone évitée — reste un vide, et la
+    rangée sort en deux morceaux.
     """
-    return grouper_en_rangees(geometries_l93(implantation)["tables"])
+    bornes = _dans_le_repere_du_calepinage(implantation)
+    ordre = sorted(range(len(bornes)), key=lambda i: (bornes[i][1] + bornes[i][3]) / 2)
+    groupes: list[list[int]] = []
+    derniere = None
+    for indice in ordre:
+        milieu = (bornes[indice][1] + bornes[indice][3]) / 2
+        if groupes and milieu - derniere < SEUIL_RANGEE_M:
+            groupes[-1].append(indice)
+        else:
+            groupes.append([indice])
+        derniere = milieu
+
+    jeux = []
+    for groupe in groupes:
+        suite = sorted(groupe, key=lambda i: bornes[i][0])
+        jeux.extend(
+            bornes[b][0] - bornes[a][2]
+            for a, b in zip(suite, suite[1:])
+            if bornes[b][0] - bornes[a][2] > 0
+        )
+    jeu = statistics.median(jeux) if jeux else 0.0
+    rayon = jeu / 2.0 + MARGE_FERMETURE_RANGEE_M
+
+    lignes: list[Polygon] = []
+    for groupe in groupes:
+        union = unary_union([implantation.tables[i] for i in groupe])
+        refermee = union.buffer(rayon, join_style="mitre").buffer(
+            -rayon, join_style="mitre"
+        )
+        lignes.extend(polygones_ou_vide(refermee))
+    return lignes, jeu
+
+
+def rangees(implantation: Implantation) -> list[Polygon]:
+    """Rangées de tables, en Lambert 93 : une par ligne du calepinage.
+
+    HelioScope n'encode aucun groupement en structures : la rangée est le seul
+    regroupement que le fichier permette de reconstituer, et c'est aussi celui
+    que l'aperçu de calage cerne de noir. Voir `rangees_locales` pour la façon
+    de la reconstituer quand les tables ne se touchent pas.
+    """
+    calage = implantation.calage
+    return [projeter(ligne, calage) for ligne in rangees_locales(implantation)[0]]
 
 
 def azimut_rangees(implantation: Implantation) -> float:
