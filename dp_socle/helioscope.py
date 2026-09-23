@@ -216,6 +216,24 @@ class ExportHelioScope:
     nom_image: str | None
 
 
+@dataclass(frozen=True)
+class FondHelioScope:
+    """L'image de fond de l'export, et sa place dans le repère du DXF.
+
+    C'est une photographie aérienne du site : `calage_ortho` la cherche dans
+    l'ortho IGN pour mesurer l'erreur du calage.
+    """
+
+    image: bytes
+    #: Coin bas-gauche de l'image dans le repère du DXF, en mètres — le point
+    #: d'insertion de l'entité IMAGE.
+    origine_m: tuple
+    #: Côté d'un pixel, en mètres au sol.
+    resolution_m_px: float
+    #: Largeur et hauteur de l'image, en pixels.
+    taille_px: tuple
+
+
 @dataclass
 class Implantation:
     """Résultat complet de l'import : géométries locales, calage, paramètres."""
@@ -232,6 +250,8 @@ class Implantation:
     #: que dessine le plan de masse ; `tables` n'en est que le contour groupé.
     modules: list[Polygon]
     avertissements: list[str] = field(default_factory=list)
+    #: L'image de fond, quand l'export la porte : de quoi caler sur l'ortho.
+    fond: FondHelioScope | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -947,6 +967,16 @@ def importer(chemin_export: str | Path) -> Implantation:
         tables=tables,
         modules=modules,
         avertissements=avertissements,
+        fond=(
+            FondHelioScope(
+                image=export.image_fond,
+                origine_m=(float(image.dxf.insert.x), float(image.dxf.insert.y)),
+                resolution_m_px=float(image.dxf.u_pixel.x),
+                taille_px=(int(image.dxf.image_size.x), int(image.dxf.image_size.y)),
+            )
+            if export.image_fond is not None
+            else None
+        ),
     )
 
 

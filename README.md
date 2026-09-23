@@ -2067,7 +2067,8 @@ tomber dans la clôture du plan**. S'y ajoutent, avec une emprise cadastrale,
 la clôture et les tables contre le foncier.
 
 Le géoréférencement reste celui du lot 2 : pré-positionnement sur l'emprise
-cadastrale, puis réglage à l'œil. L'emprise « geoperso-3 » déposée pour Bray
+cadastrale, puis calage sur l'ortho, ou réglage à l'œil (voir « Dans
+l'application »). L'emprise « geoperso-3 » déposée pour Bray
 le 23/09/2026 comptait quatre morceaux sur 13 km, 147 ha ; instruction du chef
 de projet du même jour, seul reste celui du site — 5,08 ha, les « 5,1 ha »
 d'emprise cadastrale que le tableau du plan annonce. Le calage de Gannay vient
@@ -2107,9 +2108,32 @@ du poste quand elle se propose, jamais cochée d'office. La validation attend
 que ces choix soient faits. Le dossier se nomme sans indice : l'indice vient du
 tableau bilan, et il n'y en a pas.
 
+**Caler sur l'ortho.** Le placement se réglait à l'œil. Le bouton « Caler sur
+l'ortho », au-dessus des deux réglages, le mesure : l'image de fond de l'export
+HelioScope est une photographie aérienne du site, qui se projette avec le
+calage courant et se cherche dans l'ortho IGN, à 220 m près autour de lui
+(`dp_socle/calage_ortho.py`). Les deux photographies n'ont ni la même date ni
+la même lumière ; ce qui se compare, ce sont leurs contours — routes, haies,
+limites de culture —, par corrélation normalisée des magnitudes de gradient,
+affinée au sous-pixel. Mise au point le 23/09/2026 sur les cinq exports du
+dépôt, elle rend à 8 cm près ce que donne la même mesure faite avec OpenCV.
+Le décalage trouvé s'applique aux deux réglages, le nord-sud d'abord : c'est
+lui qui peut sortir de sa borne, et rien n'a bougé quand il refuse. L'écran dit
+de combien le plan a bougé et avec quelle netteté le fond s'est reconnu — le
+pic de corrélation, et le meilleur ailleurs —, tant que le calage n'a pas été
+retouché depuis. En deçà d'un pic de 0,15, ou de 1,8 fois le meilleur à plus
+de 30 m, rien ne change et l'erreur le dit : autre site, saison, chantier, le
+réglage à l'œil reste ouvert. Pré-positionnées sur leur emprise, Gannay est à
+17,8 m de sa place et Bray à 22,3 m ; le bouton les ramène à 0,85 m et à 8 cm
+des calages mesurés indépendamment — dans le dépôt `photomontage` pour Gannay,
+avec OpenCV pour Bray. Il faut une dizaine de secondes, dont sept pour
+télécharger l'ortho.
+
 `tests/test_app_plan_pdf.py` joue ce parcours sur Gannay, sans service en
 ligne : un carré de 500 m tient lieu d'emprise, un relevé de synthèse de
-RGE ALTI.
+RGE ALTI, et la mesure sur l'ortho est remplacée par son résultat ;
+`tests/test_calage_ortho.py` la joue sur l'ortho réelle, depuis l'emprise de
+chaque site.
 
 **La carte trace un axe comme la planche.** La carte de la section 2 prend
 ses couleurs de `apercu_be.STYLES`, où les haies ont un aplat. Or une haie du

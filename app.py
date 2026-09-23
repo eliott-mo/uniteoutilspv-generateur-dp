@@ -1831,6 +1831,36 @@ def _regler_le_calage(import_pdf) -> None:
     calage = import_pdf.implantation.calage
     if import_pdf.prepositionnement is not None:
         st.caption(import_pdf.prepositionnement.message)
+    # Le calage sur l'ortho mesure ce que l'œil réglait : l'image de fond de
+    # l'export est une photographie aérienne du site, qui se cherche dans
+    # l'ortho IGN. Ce qu'il a fait reste affiché tant que le calage n'a pas
+    # bougé depuis.
+    if st.button(
+        "Caler sur l'ortho",
+        key="caler_sur_ortho_plan_pdf",
+        help="Cherche l'image de fond de l'export HelioScope dans l'ortho IGN, à "
+        "220 m près autour du placement actuel, et recale d'autant les deux "
+        "réglages ci-dessous. Refuse, sans rien changer, si l'image ne s'y "
+        "reconnaît pas nettement : le réglage à l'œil reste alors possible.",
+    ):
+        from dp_socle.calage_ortho import caler_sur_ortho
+
+        try:
+            with st.spinner("Recherche du fond HelioScope dans l'ortho IGN…"):
+                mesure = caler_sur_ortho(import_pdf.implantation)
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}")
+        else:
+            st.session_state["calage_ortho_plan_pdf"] = (
+                (calage.longitude_origine, calage.correction_nord_sud_m),
+                mesure.message,
+            )
+            _oublier_la_carte_et_la_coupe(import_pdf)
+            _proposer_la_coupe(import_pdf)
+            st.rerun()
+    derniere = st.session_state.get("calage_ortho_plan_pdf")
+    if derniere and derniere[0] == (calage.longitude_origine, calage.correction_nord_sud_m):
+        st.success(derniere[1], icon="🛰️")
     with st.form("calage_plan_pdf"):
         st.markdown(
             "**Placement sur l'ortho** — la clôture et les tables doivent tomber "

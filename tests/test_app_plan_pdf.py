@@ -6,9 +6,11 @@ trancher ce que le plan ne dit pas, valider. Ce qui compte est ce qui arrive au
 bout : le contrat écrit, d'origine `plan_pdf`, que les sections suivantes
 liront sans savoir d'où il vient.
 
-Gannay n'a pas d'emprise cadastrale au dépôt : un carré de 500 m centré sur le
-site en tient lieu, et un relevé altimétrique de synthèse évite le RGE ALTI. Ces
-tests ne demandent aucun service en ligne.
+Un carré de 500 m centré sur le site tient lieu d'emprise cadastrale — il pose
+le site à sa place dès le pré-positionnement, et le relevé altimétrique de
+synthèse qui évite le RGE ALTI le couvre exactement. L'emprise réelle de Gannay,
+déposée le 23/09/2026, sert au calage sur l'ortho (`tests/test_calage_ortho.py`),
+dont la mesure est ici remplacée. Ces tests ne demandent aucun service en ligne.
 """
 
 from __future__ import annotations
@@ -127,6 +129,80 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
     assert application.checkbox(
         key="correction_plan_poste_sur_cloture:pdl_ptr:1"
     ).value is False
+
+
+def _annonces_de_l_ortho(application) -> list:
+    """Ce que le calage sur l'ortho dit avoir fait — l'annonce de la coupe est à part."""
+    return [s.value for s in application.success if s.value.startswith("Calé sur l'ortho")]
+
+
+def _correction_nord_sud(application):
+    """Le champ de la correction nord-sud du formulaire de placement."""
+    for champ in application.number_input:
+        if champ.label.startswith("Correction nord-sud"):
+            return champ
+    raise AssertionError("le champ de la correction nord-sud n'est pas affiché")
+
+
+def test_caler_sur_l_ortho_refuse_sans_rien_changer_puis_cale_et_le_dit(tmp_path, monkeypatch):
+    """Le bouton applique la mesure aux deux réglages, et dit ce qu'il a fait.
+
+    La mesure, qui télécharge l'ortho, est éprouvée dans
+    `tests/test_calage_ortho.py` ; elle est ici remplacée : un refus d'abord,
+    puis ce qu'elle mesure sur Gannay pré-positionnée sur son emprise — 18,6 m
+    vers l'ouest, 0,8 m vers le sud.
+    """
+    from dp_socle import calage_ortho
+    from dp_socle.erreurs import ErreurCalage
+    from dp_socle.helioscope import metres_par_degre_longitude
+
+    application = _plan_pdf_importe(tmp_path, monkeypatch)
+    assert not application.exception, application.exception
+    calage = application.session_state["import_be"].implantation.calage
+    longitude, nord_sud = calage.longitude_origine, calage.correction_nord_sud_m
+
+    def refus(implantation, telecharger=None):
+        raise ErreurCalage("Le fond HelioScope ne se reconnaît pas nettement dans l'ortho IGN.")
+
+    monkeypatch.setattr(calage_ortho, "mesurer_sur_ortho", refus)
+    _cliquer(application, "Caler sur l'ortho")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert any("ne se reconnaît pas nettement" in e.value for e in application.error)
+    assert (calage.longitude_origine, calage.correction_nord_sud_m) == (longitude, nord_sud)
+    assert not _annonces_de_l_ortho(application)
+
+    def mesure(implantation, telecharger=None):
+        return calage_ortho.MesureOrtho(
+            decalage_est_m=-18.6, decalage_nord_m=-0.8, pic=0.51, second_pic=0.19, pas_m=0.4
+        )
+
+    monkeypatch.setattr(calage_ortho, "mesurer_sur_ortho", mesure)
+    _cliquer(application, "Caler sur l'ortho")
+    application = application.run()
+    assert not application.exception, application.exception
+    deplacement_est = (calage.longitude_origine - longitude) * metres_par_degre_longitude(
+        calage.latitude_origine
+    )
+    assert deplacement_est == pytest.approx(-18.6, abs=0.01)
+    assert calage.correction_nord_sud_m == pytest.approx(nord_sud - 0.8)
+    assert _annonces_de_l_ortho(application) == [
+        "Calé sur l'ortho : déplacé de 18,6 m vers l'ouest et de 0,8 m vers le sud. "
+        "Le fond HelioScope s'y reconnaît avec une corrélation de 0,51, contre 0,19 "
+        "au mieux ailleurs."
+    ]
+    # Le formulaire montre la correction appliquée : « Recaler » sans y
+    # toucher ne doit pas défaire en silence ce que le bouton a fait.
+    assert _correction_nord_sud(application).value == pytest.approx(nord_sud - 0.8)
+
+    # Réglé à la main ensuite, le calage n'est plus celui de l'ortho, et le
+    # message qui le disait s'efface.
+    _correction_nord_sud(application).set_value(nord_sud)
+    _cliquer(application, "Recaler")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert calage.correction_nord_sud_m == pytest.approx(nord_sud)
+    assert not _annonces_de_l_ortho(application)
 
 
 def test_le_contrat_ecrit_est_d_origine_plan_pdf(tmp_path, monkeypatch):
