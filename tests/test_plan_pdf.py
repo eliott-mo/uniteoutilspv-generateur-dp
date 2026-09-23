@@ -362,6 +362,88 @@ def test_une_dimension_non_tranchee_refuse_l_ecriture(export_gannay, tmp_path):
     assert not (tmp_path / "geometries.gpkg").exists()
 
 
+@pytest.mark.parametrize(
+    "libelle, categorie, cote",
+    [
+        ("Réserve incendie 120 m³", "bache_incendie", {"volume_citerne_m3": 120}),
+        ("Réserve Incendie (60m3)", "bache_incendie", {"volume_citerne_m3": 60}),
+        ("Citerne incendie - 240 m3", "bache_incendie", {"volume_citerne_m3": 240}),
+        ("Portail 7 m", "portail", {"largeur_portail_m": 7.0}),
+        ("Portail (7,5 m)", "portail", {"largeur_portail_m": 7.5}),
+        ("Portail de 6m", "portail", {"largeur_portail_m": 6.0}),
+        ("Portail", "portail", {}),
+        ("Réserve Incendie", "bache_incendie", {}),
+    ],
+)
+def test_une_cote_portee_en_legende_se_lit_sans_changer_la_categorie(libelle, categorie, cote):
+    """Instruction du chef de projet du 23/09/2026 : volume et largeur se portent en légende."""
+    from dp_socle.plan_pdf import categorie_proposee, cote_lue
+
+    assert categorie_proposee(libelle) == categorie
+    assert cote_lue(libelle, categorie) == cote
+
+
+@besoin_gannay
+def test_le_volume_et_la_largeur_portes_en_legende_suffisent(lecture_gannay, import_gannay, tmp_path):
+    """La légende de Gannay, complétée comme le chef de projet la complétera.
+
+    Rien ne reste alors à trancher à l'écran : la réserve prend la variante de
+    120 m³, le portail 7 m, et `projet.json` dit que les deux viennent de la
+    légende.
+    """
+    import copy
+    import json
+
+    from dp_socle.plan_pdf import CATEGORIES_OUVRAGES, ImportPlanPDF
+
+    lecture = copy.deepcopy(lecture_gannay)
+    for entree in lecture.legende:
+        if entree.categorie == "bache_incendie":
+            entree.libelle += " 120 m³"
+        elif entree.categorie == "portail":
+            entree.libelle += " 7 m"
+    complete = ImportPlanPDF(
+        implantation=import_gannay.implantation,
+        lecture=lecture,
+        calage=import_gannay.calage,
+        choix=ChoixDuPlan(),
+        source_export=import_gannay.source_export,
+    )
+    assert complete.decisions_manquantes == []
+    _, chemin_json = complete.ecrire(tmp_path)
+    donnees = json.loads(chemin_json.read_text(encoding="utf-8"))
+    reserves = [o for o in donnees["ouvrages_plan"] if o["categorie"] == "bache_incendie"]
+    assert {o["gabarit"] for o in reserves} == {"Citerne incendie — 120"}
+    assert {o["source_gabarit"] for o in reserves} == {"volume porté en légende"}
+    assert donnees["portails_plan"] == [
+        {"libelle": "Portail 7 m", "largeur_m": 7.0, "source": "largeur portée en légende"}
+    ]
+    assert donnees["parametres"]["generalites"]["largeur_portails_m"] == 7.0
+    assert "bache_incendie" in CATEGORIES_OUVRAGES
+
+
+@besoin_gannay
+def test_un_volume_de_legende_hors_catalogue_n_est_pas_retenu(lecture_gannay, import_gannay):
+    """100 m³ n'existe pas au catalogue : la légende ne l'impose pas, et le rapport le dit."""
+    import copy
+
+    from dp_socle.plan_pdf import ImportPlanPDF
+
+    lecture = copy.deepcopy(lecture_gannay)
+    for entree in lecture.legende:
+        if entree.categorie == "bache_incendie":
+            entree.libelle += " 100 m³"
+    hors = ImportPlanPDF(
+        implantation=import_gannay.implantation,
+        lecture=lecture,
+        calage=import_gannay.calage,
+        choix=ChoixDuPlan(largeur_portail_m=7.0),
+        source_export=import_gannay.source_export,
+    )
+    assert hors.decisions_manquantes == ["le volume de la réserve incendie"]
+    assert any("100 m³ en légende" in a for a in hors.avertissements)
+
+
 def test_le_classeur_des_gabarits_dit_ce_que_dit_celui_de_reference():
     """La ressource de l'outil est une copie : ses cotes ne doivent pas diverger.
 
@@ -549,6 +631,55 @@ def test_une_piste_qui_recouvre_tables_et_cloture_est_signalee(import_gannay):
 # ---------------------------------------------------------------------------
 # Bray : un plan exporté autrement, une clôture qui s'arrête aux ouvrages
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def contrat_bray(import_bray, tmp_path_factory):
+    from dp_socle.contrat import charger_contrat
+
+    dossier = tmp_path_factory.mktemp("sortie_bray")
+    import_bray.ecrire(dossier)
+    return charger_contrat(dossier)
+
+
+@besoin_bray
+def test_la_hauteur_des_tables_se_prend_au_tableau_du_plan(contrat_bray):
+    """Instruction du chef de projet du 23/09/2026 : au plan s'il la donne.
+
+    Le tableau de Bray dit « 1.1 mètres min » et « 3 mètres max ». La coupe
+    DP 3 dessine la table à partir de 1,10 m, et le maximum en gabarit ; elle
+    ne retombe plus sur les 1,50 m du standard UNITe.
+    """
+    from dp_socle.planches.dp3_coupes import geometrie_table
+
+    assert contrat_bray.structures["point_bas_m"] == 1.1
+    assert contrat_bray.structures["point_haut_m"] == 3.0
+    table, avertissements = geometrie_table(contrat_bray)
+    assert table.point_bas_m == 1.1
+    assert table.point_haut_max_m == 3.0
+    assert table.point_haut_m == pytest.approx(2.95, abs=0.01)
+    assert not any("standard UNITe" in a for a in avertissements)
+    lu = contrat_bray.donnees["informations_plan"]["point_bas_m"]
+    assert lu["texte"] == "Hauteur point bas | 1.1 mètres min"
+
+
+@besoin_bray
+def test_le_nombre_de_modules_du_tableau_ne_fait_pas_foi(import_bray, contrat_bray):
+    """Les modules se prennent à l'export : le cartouche de Bray est périmé, et c'est dit."""
+    assert contrat_bray.modules["nb_modules"] == 4590
+    assert any(
+        "annonce 5 296 modules" in a and "4 590" in a for a in import_bray.avertissements
+    )
+
+
+@besoin_gannay
+def test_le_tableau_de_gannay_se_lit_et_concorde_avec_l_export(lecture_gannay, import_gannay):
+    informations = lecture_gannay.informations
+    assert informations["point_bas_m"]["valeur"] == 1.1
+    assert informations["point_haut_m"]["valeur"] == 3.0
+    assert informations["nb_modules"]["valeur"] == 4752
+    assert informations["inclinaison_deg"]["valeur"] == 15.0
+    assert not any("annonce" in a for a in import_gannay.avertissements)
 
 
 @besoin_bray

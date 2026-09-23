@@ -298,9 +298,8 @@ def _arrondir(chemin: _Chemin, rayon: float) -> tuple[dict, dict, list[str]]:
         deviation = chemin.deviation(i)
         if abs(deviation) < ALIGNE_RAD or permises[i] <= 1e-9:
             continue
-        avant, apres = chemin._voisins(i)
+        avant, _ = chemin._voisins(i)
         entree = _direction(sommets[avant], sommets[i])
-        sortie = _direction(sommets[i], sommets[apres])
         tangente = permises[i]
         rayon_ici = tangente / math.tan(abs(deviation) / 2.0)
         debut = (sommets[i][0] - entree[0] * tangente, sommets[i][1] - entree[1] * tangente)

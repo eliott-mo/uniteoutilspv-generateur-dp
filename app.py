@@ -1809,31 +1809,65 @@ def _trancher_les_ouvrages(import_pdf) -> None:
     supposés se dessineraient parfaitement et ne se verraient jamais. La
     correction du poste (décision D8) se propose et ne s'applique que cochée.
     """
-    from dp_socle.plan_pdf import VOLUMES_CITERNE_M3, ChoixDuPlan
+    from dp_socle.plan_pdf import VOLUMES_CITERNE_M3, ChoixDuPlan, cote_lue
 
     lecture = import_pdf.lecture
+
+    def lues(categorie: str, cle: str) -> dict:
+        """La cote que porte chaque entrée de légende dessinée au plan, ou None."""
+        return {
+            e.libelle: cote_lue(e.libelle, e.categorie).get(cle)
+            for e in lecture.entree(categorie)
+            if any(x.entree is e for x in lecture.elements)
+        }
+
+    # Le volume et la largeur se portent en légende (instruction du chef de
+    # projet du 23/09/2026) : lus, ils se montrent ; absents, ils se choisissent
+    # ici, et l'écran dit où ils auraient dû être.
     volume = largeur = None
-    if lecture.elements_de("bache_incendie"):
+    volumes = lues("bache_incendie", "volume_citerne_m3")
+    if volumes and all(v in VOLUMES_CITERNE_M3 for v in volumes.values()):
+        st.caption(
+            "Volume de la réserve incendie lu à la légende : "
+            + ", ".join(f"« {l} »" for l in volumes)
+            + "."
+        )
+    elif volumes:
         volume = st.selectbox(
             "Volume de la réserve incendie (m³)",
             VOLUMES_CITERNE_M3,
             index=None,
-            placeholder="à choisir — le plan ne le dit pas",
+            placeholder="à choisir — la légende ne le dit pas",
             key="volume_citerne_plan_pdf",
             help="Le catalogue UNITe en compte quatre, de 7,95 x 4,44 m à "
             "10,4 x 18,5 m. Le plan situe la réserve, il ne la dimensionne pas.",
         )
-    if lecture.elements_de("portail"):
+        st.caption(
+            "Le volume se porte dans la légende du plan — « Réserve incendie "
+            "120 m³ » — et l'import le lit alors ; à défaut, il se choisit ici."
+        )
+    largeurs = lues("portail", "largeur_portail_m")
+    if largeurs and all(v is not None for v in largeurs.values()):
+        st.caption(
+            "Largeur du portail lue à la légende : "
+            + ", ".join(f"« {l} »" for l in largeurs)
+            + "."
+        )
+    elif largeurs:
         largeur = st.number_input(
             "Largeur du portail (m)",
             min_value=1.0,
             max_value=20.0,
             value=None,
             step=0.5,
-            placeholder="à saisir — le plan ne la dit pas",
+            placeholder="à saisir — la légende ne la dit pas",
             key="largeur_portail_plan_pdf",
             help="Aucun gabarit UNITe ne la donne ; les tableaux bilan de "
             "Saint-Cyr et de Sarnois disent 7 m.",
+        )
+        st.caption(
+            "La largeur se porte dans la légende du plan — « Portail 7 m » — et "
+            "l'import la lit alors ; à défaut, elle se saisit ici."
         )
     corrections = []
     for correction in import_pdf.corrections_proposees:

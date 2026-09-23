@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -165,14 +166,56 @@ CATEGORIES_OUVRAGES = (
 CATEGORIES_ATTENDUES = ("cloture",)
 
 
+#: Une cote écrite dans un libellé de légende. Instruction du chef de projet du
+#: 23/09/2026 : le volume d'une réserve incendie et la largeur d'un portail se
+#: portent en légende — « Réserve incendie 120 m³ », « Portail 7 m » —, et le
+#: plan les donne alors lui-même. Un volume s'écrit en m³ ou m3, une largeur en
+#: m ; un « m² » n'est ni l'un ni l'autre.
+_COTE_EN_LEGENDE = re.compile(
+    r"\s*[(\-–—:,]?\s*(?:(?:de|l\s*=)\s*)?(\d+(?:[.,]\d+)?)\s*(m\s*[3³]|m)(?![\w²])\s*\)?",
+    re.IGNORECASE,
+)
+
+
+def _sans_cote(libelle: str) -> tuple[float | None, str | None, str]:
+    """La cote qu'un libellé porte, son unité (« m3 » ou « m »), et le libellé sans elle."""
+    trouve = _COTE_EN_LEGENDE.search(libelle)
+    if trouve is None:
+        return None, None, libelle
+    valeur = float(trouve.group(1).replace(",", "."))
+    unite = "m" if trouve.group(2).lower() == "m" else "m3"
+    reste = (libelle[: trouve.start()] + " " + libelle[trouve.end() :]).strip(" -–—:,")
+    return valeur, unite, " ".join(reste.split())
+
+
 def categorie_proposee(libelle: str) -> str | None:
-    """Catégorie proposée pour un libellé de légende, ou None s'il est inconnu."""
-    return _CORRESPONDANCE_NORMALISEE.get(normaliser(libelle))
+    """Catégorie proposée pour un libellé de légende, ou None s'il est inconnu.
+
+    La cote qu'il porte n'y entre pas : « Réserve incendie 120 m³ » est une
+    réserve incendie.
+    """
+    return _CORRESPONDANCE_NORMALISEE.get(normaliser(_sans_cote(libelle)[2]))
 
 
 def motif_a_trancher(libelle: str) -> str | None:
     """Raison pour laquelle un libellé connu ne se rattache à rien d'office."""
-    return _A_TRANCHER_NORMALISES.get(normaliser(libelle))
+    return _A_TRANCHER_NORMALISES.get(normaliser(_sans_cote(libelle)[2]))
+
+
+def cote_lue(libelle: str, categorie: str | None) -> dict:
+    """Ce qu'un libellé de légende dit des dimensions de son ouvrage.
+
+    Un volume pour une réserve incendie, une largeur pour un portail : ce sont
+    les deux dimensions que les gabarits UNITe ne tranchent pas.
+    """
+    valeur, unite, _ = _sans_cote(libelle)
+    if valeur is None:
+        return {}
+    if categorie == "bache_incendie" and unite == "m3":
+        return {"volume_citerne_m3": int(valeur) if valeur.is_integer() else valeur}
+    if categorie == "portail" and unite == "m":
+        return {"largeur_portail_m": valeur}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +438,9 @@ class PlanPDF:
     #: rangées au hasard.
     non_reconnus: list = field(default_factory=list)
     avertissements: list = field(default_factory=list)
+    #: Ce que le tableau d'informations du plan déclare, quand il en porte un :
+    #: clé de `INFORMATIONS_DU_PLAN` → valeur, et le texte d'où elle vient.
+    informations: dict = field(default_factory=dict)
 
     def entree(self, categorie: str) -> list:
         return [e for e in self.legende if e.categorie == categorie]
@@ -897,6 +943,73 @@ def masque_des_tables(fond: ImageDeFond) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+#: Libellés du tableau d'informations d'un plan, et ce qu'on en lit.
+#:
+#: Relevés le 23/09/2026 sur le plan de Bray-Saint-Aignan, dont le cartouche
+#: porte un tableau en deux colonnes, libellé à gauche et valeur à droite sur
+#: la même ligne : « Hauteur point bas | 1.1 mètres min », « Hauteur point haut
+#: | 3 mètres max ». Le plan de Gannay n'en a pas. Instruction du chef de
+#: projet du même jour : la hauteur des tables se prend au plan quand il la
+#: donne, au standard UNITe sinon ; les modules se prennent à l'export
+#: HelioScope — le cartouche de Bray en annonce 5 296, l'export en porte 4 590.
+#: Le nombre de modules et l'inclinaison ne sont donc lus que pour être
+#: recoupés.
+INFORMATIONS_DU_PLAN = {
+    "point_bas_m": ("Hauteur point bas", "Hauteur du point bas"),
+    "point_haut_m": ("Hauteur point haut", "Hauteur du point haut"),
+    "nb_modules": ("Nombre de modules",),
+    "inclinaison_deg": ("Inclinaison",),
+}
+
+#: Forme de la valeur attendue pour chaque information : une longueur en
+#: mètres, un entier, un angle en degrés.
+_VALEURS_DU_PLAN = {
+    "point_bas_m": r"(\d+(?:[.,]\d+)?)\s*(?:m\b|mètres?\b|metres?\b)",
+    "point_haut_m": r"(\d+(?:[.,]\d+)?)\s*(?:m\b|mètres?\b|metres?\b)",
+    "nb_modules": r"(\d[\d\u00a0\u202f ]*)\s*$",
+    "inclinaison_deg": r"(\d+(?:[.,]\d+)?)\s*°",
+}
+
+
+def _informations(lignes: list[LigneTexte]) -> dict:
+    """Ce que le tableau d'informations du plan déclare, libellé par libellé.
+
+    La valeur se cherche sur la ligne du libellé, puis sur les lignes posées à
+    sa droite à la même hauteur : une cellule de tableau PowerPoint est un
+    texte à part, que rien ne relie à son libellé que sa place.
+    """
+    resultat: dict = {}
+    for ligne in lignes:
+        texte_normalise = normaliser(ligne.texte)
+        for cle, libelles in INFORMATIONS_DU_PLAN.items():
+            if cle in resultat or not any(
+                texte_normalise.startswith(normaliser(libelle)) for libelle in libelles
+            ):
+                continue
+            hauteur = ligne.hauteur
+            voisines = sorted(
+                (
+                    autre
+                    for autre in lignes
+                    if autre is not ligne
+                    and autre.bornes[0] >= ligne.bornes[2] - 1.0
+                    and abs(autre.milieu_y - ligne.milieu_y) < 0.5 * max(hauteur, autre.hauteur)
+                ),
+                key=lambda autre: autre.bornes[0],
+            )
+            for source in [ligne] + voisines:
+                trouve = re.search(_VALEURS_DU_PLAN[cle], source.texte.strip(), re.IGNORECASE)
+                if trouve is None:
+                    continue
+                brut = re.sub(r"[\s\u00a0\u202f]", "", trouve.group(1)).replace(",", ".")
+                resultat[cle] = {
+                    "valeur": int(brut) if cle == "nb_modules" else float(brut),
+                    "texte": ligne.texte if source is ligne else f"{ligne.texte} | {source.texte}",
+                }
+                break
+    return resultat
+
+
 def lire_legende(chemin: str | Path) -> list[EntreeLegende]:
     """Les entrées de la légende seules, pour en faire confirmer la correspondance.
 
@@ -908,7 +1021,7 @@ def lire_legende(chemin: str | Path) -> list[EntreeLegende]:
 
 
 def _page_du_plan(chemin: Path):
-    """La page qui porte la légende : son rang, sa légende, ses formes, ses images."""
+    """La page qui porte la légende : son rang, sa légende, ses formes, ses images, son texte."""
     document = _ouvrir(chemin)
     pages_lues = []
     for indice in range(len(document)):
@@ -919,7 +1032,7 @@ def _page_du_plan(chemin: Path):
         legende = _legende(objets, lignes)
         connues = [e for e in legende if e.categorie or e.a_trancher]
         if connues:
-            pages_lues.append((indice, legende, objets, images))
+            pages_lues.append((indice, legende, objets, images, lignes))
 
     if not pages_lues:
         raise ErreurLegendeIntrouvable(
@@ -947,7 +1060,7 @@ def lire_plan_pdf(
     écarté en lui donnant None.
     """
     chemin = Path(chemin)
-    indice, legende, objets, images = _page_du_plan(chemin)
+    indice, legende, objets, images, lignes = _page_du_plan(chemin)
     avertissements: list[str] = []
 
     if correspondance:
@@ -1036,6 +1149,7 @@ def lire_plan_pdf(
         fond=fond,
         non_reconnus=[o for o, _ in non_reconnus],
         avertissements=avertissements,
+        informations=_informations(lignes),
     )
 
 
@@ -1926,6 +2040,9 @@ class OuvragePlace:
     orientation: str
     dessine_m: tuple
     correction: str | None = None
+    #: D'où vient la variante du gabarit : le catalogue seul, la légende, ou
+    #: le choix fait à l'écran — c'est ce que `projet.json` doit pouvoir dire.
+    source_gabarit: str | None = None
 
     def geometrie(self) -> Polygon | None:
         if self.longueur_m is None or self.largeur_m is None:
@@ -2178,22 +2295,36 @@ class Construction:
     manques: list = field(default_factory=list)
     #: Les pistes, en bandes de 5 m aux virages arrondis (`pistes.PisteDessinee`).
     pistes: list = field(default_factory=list)
+    #: Un triplet (libellé, largeur, d'où elle vient) par portail posé.
+    largeurs_portails: list = field(default_factory=list)
 
 
-def _gabarit_de(categorie: str, catalogue: dict, choix: ChoixDuPlan):
-    """Cote du catalogue pour une catégorie, ou None et ce qui manque."""
+def _gabarit_de(categorie: str, catalogue: dict, choix: ChoixDuPlan, cote: dict | None = None):
+    """Cote du catalogue pour une catégorie, ce qui manque, et d'où vient la variante.
+
+    Le volume d'une réserve se prend à la légende quand elle le porte
+    (instruction du chef de projet du 23/09/2026), au choix fait à l'écran
+    sinon. Un volume de légende que le catalogue n'a pas n'est pas retenu.
+    """
     from .contrat import LIBELLES_COTES, decoder_cote
 
+    source = "gabarit UNITe"
     if categorie == "bache_incendie":
-        if choix.volume_citerne_m3 is None:
-            return None, "le volume de la réserve incendie"
-        libelle = f"Citerne incendie — {choix.volume_citerne_m3}"
+        volume = (cote or {}).get("volume_citerne_m3")
+        if volume in VOLUMES_CITERNE_M3:
+            source = "volume porté en légende"
+        else:
+            volume = choix.volume_citerne_m3
+            source = "volume choisi à l'écran"
+        if volume is None:
+            return None, "le volume de la réserve incendie", None
+        libelle = f"Citerne incendie — {volume}"
     elif categorie == "local_technique":
         libelle = VARIANTE_LOCAL_DP
     else:
         libelles = LIBELLES_COTES.get(categorie, ())
         if len(libelles) != 1:
-            return None, f"le gabarit de « {categorie} »"
+            return None, f"le gabarit de « {categorie} »", None
         libelle = libelles[0]
     brut = catalogue.get(libelle)
     if brut is None:
@@ -2202,7 +2333,7 @@ def _gabarit_de(categorie: str, catalogue: dict, choix: ChoixDuPlan):
             f"({CHEMIN_GABARITS.name}) : l'ouvrage « {categorie} » ne peut pas "
             "être dimensionné."
         )
-    return decoder_cote(brut), None
+    return decoder_cote(brut), None, source
 
 
 def construire(
@@ -2266,16 +2397,29 @@ def construire(
     ouvrages: list[OuvragePlace] = []
     gabarits_utilises: list = []
     manques: set[str] = set()
+    cotes = {e.libelle: cote_lue(e.libelle, e.categorie) for e in lecture.legende}
+    for entree in lecture.entree("bache_incendie"):
+        volume = cotes[entree.libelle].get("volume_citerne_m3")
+        if volume is not None and volume not in VOLUMES_CITERNE_M3:
+            notes.append(
+                f"« {entree.libelle} » : {volume:g} m³ en légende, un volume que le "
+                "catalogue UNITe n'a pas "
+                f"({', '.join(str(v) for v in VOLUMES_CITERNE_M3)} m³). Il n'est "
+                "pas retenu : corrigez la légende, ou choisissez un volume à l'écran."
+            )
     for categorie, liste in reperes_par_categorie.items():
         if categorie == "portail":
             continue
         for repere in liste:
-            gabarit, manque = _gabarit_de(categorie, catalogue, choix)
+            gabarit, manque, source = _gabarit_de(
+                categorie, catalogue, choix, cotes.get(repere.libelle)
+            )
             if manque:
                 manques.add(manque)
             elif gabarit not in gabarits_utilises:
                 gabarits_utilises.append(gabarit)
             ouvrage = _ouvrage(repere, calage, gabarit, anneau)
+            ouvrage.source_gabarit = source
             if ouvrage.orientation != "grand côté dessiné":
                 notes.append(
                     f"« {repere.libelle} » : repère carré au plan, le grand côté "
@@ -2312,6 +2456,7 @@ def construire(
         )
 
     portails = []
+    largeurs_portails: list = []
     polygone = enceinte.polygone if enceinte is not None else None
     if polygone is not None:
         repere_interieur = polygone.representative_point()
@@ -2331,9 +2476,14 @@ def construire(
                 "la clôture : posé selon sa propre orientation au plan, ses "
                 "vantaux ouverts du côté de la clôture."
             )
-        if choix.largeur_portail_m is None:
+        largeur = cotes.get(repere.libelle, {}).get("largeur_portail_m")
+        source = "largeur portée en légende"
+        if largeur is None:
+            largeur, source = choix.largeur_portail_m, "largeur choisie à l'écran"
+        if largeur is None:
             manques.add("la largeur du portail")
             continue
+        largeurs_portails.append((repere.libelle, largeur, source))
         if repere_interieur is None:
             notes.append(
                 f"« {repere.libelle} » : aucune clôture au plan pour dire de quel "
@@ -2342,10 +2492,14 @@ def construire(
             )
         normale = _normale_vers(polygone, centre, direction, repere_interieur or centre)
         portails.append(
-            (
-                repere.libelle,
-                symbole_portail(centre, direction, choix.largeur_portail_m, normale),
-            )
+            (repere.libelle, symbole_portail(centre, direction, largeur, normale))
+        )
+    if len({l for _, l, _ in largeurs_portails}) > 1:
+        notes.append(
+            "Portails de largeurs différentes ("
+            + ", ".join(f"« {n} » {l:g} m" for n, l, _ in largeurs_portails)
+            + ") : le plan de masse les dessine chacun à la sienne, l'élévation "
+            "de DP 4-2 au plus large."
         )
 
     return Construction(
@@ -2359,6 +2513,7 @@ def construire(
         notes=notes,
         manques=sorted(manques),
         pistes=pistes,
+        largeurs_portails=largeurs_portails,
     )
 
 
@@ -2534,6 +2689,37 @@ class ImportPlanPDF:
             if correction not in construction.corrections_appliquees:
                 messages.append(
                     f"Correction de plan proposée, non appliquée : {correction.raison}"
+                )
+        messages.extend(self._recoupements_du_tableau_du_plan())
+        return messages
+
+    def _recoupements_du_tableau_du_plan(self) -> list[str]:
+        """Ce que le tableau du plan déclare et que l'export HelioScope dément.
+
+        Les modules se prennent à l'export (instruction du chef de projet du
+        23/09/2026) : un cartouche qui en annonce un autre nombre est à mettre à
+        jour, pas à suivre. À Bray, 5 296 au plan pour 4 590 à l'export.
+        """
+        informations = self.lecture.informations
+        calepinage = self.implantation.calepinage
+        messages = []
+        if "nb_modules" in informations:
+            annonce = informations["nb_modules"]["valeur"]
+            if annonce != calepinage.nb_modules:
+                messages.append(
+                    f"Le plan annonce {f'{annonce:,}'.replace(',', ' ')} modules, "
+                    "l'export HelioScope en porte "
+                    f"{f'{calepinage.nb_modules:,}'.replace(',', ' ')} : c'est "
+                    "l'export qui fait foi. Mettez le tableau du plan à jour."
+                )
+        inclinaison = calepinage.module.inclinaison_deg
+        if "inclinaison_deg" in informations and inclinaison is not None:
+            annoncee = informations["inclinaison_deg"]["valeur"]
+            if abs(annoncee - inclinaison) > 0.5:
+                messages.append(
+                    f"Le plan annonce une inclinaison de {annoncee:g}°, l'export "
+                    f"HelioScope porte {inclinaison:g}° : c'est l'export qui fait "
+                    "foi pour la coupe. Mettez le tableau du plan à jour."
                 )
         return messages
 
@@ -2737,10 +2923,22 @@ class ImportPlanPDF:
                 "avertissements": plan.avertissements,
             }
         )
-        if self.choix.largeur_portail_m is not None:
-            donnees["parametres"]["generalites"]["largeur_portails_m"] = (
-                self.choix.largeur_portail_m
+        if construction.largeurs_portails:
+            # L'élévation de DP 4-2 se dessine à une largeur : la plus grande,
+            # et la note de construction le dit quand elles diffèrent.
+            donnees["parametres"]["generalites"]["largeur_portails_m"] = max(
+                l for _, l, _ in construction.largeurs_portails
             )
+        # La hauteur des tables se prend au tableau du plan quand il la donne
+        # (instruction du chef de projet du 23/09/2026), là où DP 3 la cherche
+        # d'abord ; sans elle, DP 3 prend le standard UNITe et le dit. Le reste
+        # du tableau ne sert qu'à recouper l'export.
+        informations = self.lecture.informations
+        structures = donnees["parametres"].setdefault("structures", {})
+        for cle in ("point_bas_m", "point_haut_m"):
+            if cle in informations:
+                structures[cle] = informations[cle]["valeur"]
+        donnees["informations_plan"] = informations
         donnees["parametres"]["generalites"]["nb_portails"] = plan.nb_portails
         # Le catalogue entier, comme le lot 2bis le recopie du tableau bilan :
         # le lot 4 y retrouve chaque ouvrage par son libellé, et la variante
@@ -2794,8 +2992,13 @@ class ImportPlanPDF:
                 "orientation": o.orientation,
                 "dessine_au_plan_m": [round(v, 2) for v in o.dessine_m],
                 "correction": o.correction,
+                "source_gabarit": o.source_gabarit,
             }
             for o in construction.ouvrages
+        ]
+        donnees["portails_plan"] = [
+            {"libelle": libelle, "largeur_m": largeur, "source": source}
+            for libelle, largeur, source in construction.largeurs_portails
         ]
         # Ce que le plan donne d'une piste — son tracé, son type — et ce qui
         # vient d'ailleurs : sa largeur et ses rayons, d'une instruction.

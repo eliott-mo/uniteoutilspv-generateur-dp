@@ -1870,6 +1870,26 @@ Le cartouche du plan de Bray annonce 5 296 modules quand son DXF en porte
 4 590 : le recouvrement de 98,5 % dit que c'est le cartouche qui est périmé,
 pas le dessin.
 
+### Le tableau du plan : la hauteur des tables s'y prend, le reste s'y recoupe
+
+Les deux plans portent, sur leur page de plan, un tableau en deux colonnes —
+libellé à gauche, valeur à droite, deux textes que seule leur hauteur relie :
+« Hauteur point bas | 1.1 mètres min », « Hauteur point haut | 3 mètres
+max », « Inclinaison ombrière | 15° », « Nombre de modules | 4 752 ».
+Instruction du chef de projet du 23/09/2026 :
+
+- **la hauteur des tables se prend au plan** quand il la donne, au standard
+  UNITe sinon. Elle entre au contrat sous `parametres.structures`, là où DP 3
+  la cherche d'abord : la coupe de Bray dessine sa table de 1,10 m au point
+  bas à 2,95 m au point haut, sous le gabarit de 3 m, sans plus retomber sur
+  les 1,50 m du standard ;
+- **les modules se prennent à l'export HelioScope**, pas au tableau. Le
+  nombre et l'inclinaison du tableau ne servent qu'à recouper : un écart est
+  écrit au rapport — à Bray, 5 296 modules annoncés pour 4 590 à l'export.
+  À Gannay, les deux concordent.
+
+`projet.json` garde le tableau tel qu'il a été lu, sous `informations_plan`.
+
 ### Ce que le plan ne dit pas, et comment on le complète
 
 **Un ouvrage n'est retenu que par sa position et son orientation** : les
@@ -1881,15 +1901,25 @@ que les deux disent la même chose, cote par cote. Le catalogue entier est
 recopié dans `cotes_normalisees`, comme le lot 2bis le recopie du tableau
 bilan : le lot 4 y retrouve chaque ouvrage sans rien savoir de la source.
 
-Trois choses restent à trancher, et aucune n'a de valeur par défaut :
+Trois choses ne se déduisent pas du dessin, et aucune n'a de valeur par
+défaut :
 
 - **le volume d'une réserve incendie** — le catalogue en compte quatre, de 30 à
-  240 m³, et le plan dit « réserve » sans volume ;
+  240 m³ ;
 - **la largeur d'un portail** — le classeur des gabarits n'en porte pas ; les
   tableaux bilan de Saint-Cyr et de Sarnois disent 7 m, mais c'est une valeur
   de projet ;
 - l'orientation d'un repère **carré**, dont le grand côté ne dit rien : il est
   posé parallèle à la clôture voisine, et le rapport le dit.
+
+**Le volume et la largeur se portent en légende** (instruction du chef de
+projet du 23/09/2026) : « Réserve incendie 120 m³ », « Portail 7 m ». Le
+libellé se rattache à sa catégorie sans sa cote, et la cote dimensionne
+l'ouvrage ; `projet.json` dit, ouvrage par ouvrage, qu'elle vient de la
+légende. Ni Gannay ni Bray ne la portent encore : tant qu'une légende ne la
+donne pas, elle se choisit à l'écran, qui rappelle où elle aurait dû être. Un
+volume de légende que le catalogue n'a pas — 100 m³ — n'est pas retenu, et le
+rapport le dit.
 
 Un ouvrage dont une dimension n'est pas tranchée **refuse l'écriture du
 contrat** (`ErreurGabaritIndecis`), comme une voirie non tranchée : le supposer
