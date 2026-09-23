@@ -3163,6 +3163,14 @@ def _construire_projet() -> Projet | None:
         date=date_projet.isoformat(),
         emprise=str(chemin_emprise),
         image_garde=chemin_image,
+        # Le cadrage réglé sur la planche DP 6 vaut pour la couverture : c'est
+        # la même photographie, et la couverture la montrait entière — donc en
+        # portrait dans un cadre paysage (retour d'usage du 24/09/2026).
+        cadrage_garde=(
+            _vue_photo("DP 6", image_garde.name).get("cadrage", 0.0)
+            if image_garde is not None
+            else 0.0
+        ),
         libelle=libelle or None,
         voirie=voirie,
         notice=chemin_notice,

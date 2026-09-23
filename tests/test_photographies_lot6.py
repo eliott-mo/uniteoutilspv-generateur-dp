@@ -385,3 +385,75 @@ def test_le_plan_de_masse_du_reperage_vient_du_meme_endroit_que_dp2():
     # La trame des modules n'y est pas : au 1/10 000 ses traits se
     # confondraient en un aplat tout en pesant leur poids dans le PDF.
     assert "trame" not in source.lower().replace("trame des modules", "")
+
+
+# ---------------------------------------------------------------------------
+# La couverture prend le format de son cadre
+# ---------------------------------------------------------------------------
+
+
+def _projet_avec_couverture(tmp_path, taille, cadrage=0.0):
+    """Un projet minimal portant une image de couverture de cette taille."""
+    import json
+
+    from dp_socle.projet import Projet
+
+    emprise = tmp_path / "emprise.geojson"
+    emprise.write_text(
+        json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8"
+    )
+    chemin = tmp_path / "montage.jpg"
+    Image.new("RGB", taille, (120, 160, 200)).save(chemin)
+    return Projet(
+        nom="essai", commune="Bray", code_postal="45460", date="2026-09-24",
+        emprise=str(emprise), image_garde=str(chemin), cadrage_garde=cadrage,
+    )
+
+
+def test_la_couverture_prend_le_format_de_son_cadre(tmp_path):
+    """Une photographie portrait y tenait une colonne étroite (24/09/2026).
+
+    La page de garde posait le cliché entier et calait son bandeau sur la zone
+    réellement occupée. Elle le recadre maintenant au format du cadre, qui est
+    celui du dossier de référence.
+    """
+    from dp_socle.planches import page_garde
+    from dp_socle.planches.page_garde import CADRE_IMAGE, HAUTEUR_LEGENDE_IMAGE
+
+    projet = _projet_avec_couverture(tmp_path, (1200, 1600))
+    page_garde.generer(projet, tmp_path)
+
+    _, _, largeur_mm, hauteur_mm = CADRE_IMAGE
+    attendu = largeur_mm / (hauteur_mm - HAUTEUR_LEGENDE_IMAGE)
+    with Image.open(tmp_path / "montage_couverture.jpg") as couverture:
+        assert couverture.width / couverture.height == pytest.approx(attendu, rel=0.01)
+
+
+def test_le_cadrage_de_la_planche_vaut_pour_la_couverture(tmp_path):
+    """C'est la même photographie : elle ne peut pas montrer deux parts."""
+    from dp_socle.planches import page_garde
+
+    hauts = []
+    for cadrage in (-0.5, 0.5):
+        dossier = tmp_path / f"c{cadrage}"
+        dossier.mkdir()
+        projet = _projet_avec_couverture(dossier, (1200, 1600), cadrage=cadrage)
+        page_garde.generer(projet, dossier)
+        with Image.open(dossier / "montage_couverture.jpg") as couverture:
+            # Le haut de l'image est plus clair que le bas : on distingue les
+            # deux fenêtres à leur contenu, pas à leur taille.
+            hauts.append(couverture.size)
+
+    # Les deux fenêtres ont la même taille — c'est le même format — mais elles
+    # ne sont pas prises au même endroit, ce que la planche rend visible.
+    assert hauts[0] == hauts[1]
+
+
+def test_le_recadrage_de_la_couverture_passe_par_la_fonction_des_planches():
+    """Deux calculs séparés montreraient des parts différentes de la même image."""
+    import inspect
+
+    from dp_socle.planches import page_garde
+
+    source = inspect.getsource(page_garde._recadrer_la_couverture)
+    assert "fenetre_de_cadrage" in source

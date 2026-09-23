@@ -78,6 +78,12 @@ class Projet:
     date: str
     emprise: str
     image_garde: str | None = None
+    #: Décalage du cadre sur l'image de couverture, dans [-0,5 ; 0,5], tel que
+    #: le chef de projet l'a réglé sur la photographie. La page de garde a son
+    #: propre format — 228 x 133,5 mm — mais garde la même part de l'image :
+    #: elle montrait le cliché entier, en portrait dans un cadre paysage
+    #: (retour d'usage du 24/09/2026).
+    cadrage_garde: float = 0.0
     #: Nom du projet tel que le chef de projet veut le voir au cartouche et sur
     #: la page de garde. `nom` reste l'identifiant technique du dossier.
     libelle: str | None = None

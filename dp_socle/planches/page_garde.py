@@ -97,6 +97,10 @@ def generer(
     image = projet.chemin_image_garde
     if image is not None and image.exists():
         x_img, y_img, largeur_img, hauteur_img = CADRE_IMAGE
+        image = _recadrer_la_couverture(
+            image, largeur_img, hauteur_img - HAUTEUR_LEGENDE_IMAGE,
+            projet.cadrage_garde,
+        )
         # L'image est posée d'abord : le bandeau de légende et le filet se calent
         # ensuite sur la zone qu'elle occupe réellement, quelles que soient ses
         # proportions. Sinon un cadre plus large que la photo laisse du blanc
@@ -154,6 +158,39 @@ def generer(
 
     chemin = planche.rendre_pdf(Path(dossier) / "DP_0_page_de_garde.pdf")
     return Sortie(numero=NUMERO, titre=TITRE, chemin=chemin)
+
+
+def _recadrer_la_couverture(chemin, largeur_mm: float, hauteur_mm: float,
+                            cadrage: float):
+    """L'image de couverture au format de son cadre, écrite à côté.
+
+    La page de garde posait le cliché entier et calait son bandeau sur la zone
+    réellement occupée : une photographie portrait y tenait une colonne étroite
+    au milieu d'un cadre paysage (retour d'usage du 24/09/2026). Elle prend
+    maintenant tout le cadre, et `cadrage` dit quelle part on garde — la même
+    que celle choisie pour la planche DP 6, puisque c'est la même image.
+
+    Le recadrage passe par `fenetre_de_cadrage`, la fonction des planches
+    photographiques : deux calculs séparés finiraient par montrer des parts
+    différentes de la même photographie.
+    """
+    from PIL import Image
+
+    from .photographies import fenetre_de_cadrage
+
+    with Image.open(chemin) as source:
+        boite, _ = fenetre_de_cadrage(
+            source.size, largeur_mm / hauteur_mm, (cadrage, cadrage)
+        )
+        recadree = source.crop(tuple(int(round(v)) for v in boite))
+        if recadree.mode in ("RGBA", "LA", "P"):
+            recadree = recadree.convert("RGBA")
+            fond = Image.new("RGBA", recadree.size, (255, 255, 255, 255))
+            recadree = Image.alpha_composite(fond, recadree)
+        recadree = recadree.convert("RGB")
+    voisin = Path(chemin).with_name(Path(chemin).stem + "_couverture.jpg")
+    recadree.save(voisin, quality=92)
+    return voisin
 
 
 def _cellule_titre(planche: Planche, x: float, y: float, largeur: float,
