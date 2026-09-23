@@ -733,19 +733,38 @@ Mesuré le 2026-09-02 sur les deux designs des Islettes, ils diffèrent de
 | 7676351 | 0,1954518020063469 | 49,110690462 |
 | 8102502 | 0,19545219342840345 | 49,110591106 |
 
-`res` n'est pas quantifiée sur la rangée de tuiles : elle est calculée au point
-de référence de chaque design, et ces points diffèrent. La latitude place donc
-le projet à une dizaine de mètres près, pas au mètre. Un écart nord-sud résiduel
-de cet ordre au pré-positionnement est normal et non suspect — constaté à
-+8,6 m sur un design et −12,4 m sur l'autre, contre la même emprise.
+On en avait conclu que la latitude ne plaçait le projet qu'à une dizaine de
+mètres près, et ouvert pour cela le réglage nord-sud. **L'explication est venue
+le 23/09/2026** : `res` est calculée au **centre de l'image de fond**, et c'est
+là que vaut la latitude déduite — la recette l'attribuait à l'origine du DXF.
+Les 11 m sont l'écart des centres d'image des deux designs, +2,51 m et
+−8,56 m dans leurs repères. Mesuré en corrélant le fond HelioScope de cinq
+exports avec l'ortho IGN, sans correction nord-sud :
 
-C'est ce constat qui justifie le réglage nord-sud, que la recette d'origine
-interdisait en supposant la latitude verrouillée. Sur le design 7676351, saisir
-la correction de −8,6 m annoncée par le diagnostic fait passer le recouvrement
-avec l'emprise de 80 % à 88 % — exactement ce que donnerait un recalage libre en
-deux dimensions. Le pré-positionnement ne l'applique jamais de lui-même : il
-annonce l'écart et laisse l'opérateur décider, parce qu'un écart corrigé
-automatiquement ne dirait plus rien de la qualité du calage.
+| Export | Centre de l'image | Décalage mesuré sur l'ortho |
+|---|---|---|
+| Les Islettes, `Export.zip` (7676351) | +2,51 m | −2,75 m |
+| Les Islettes, `Export_2.zip` (8102502) | −8,56 m | +8,50 m |
+| Bray, `helioscope_export.zip` du 01/09 | −90,98 m | +86,88 m |
+| Gannay, design 10465241 | +5,22 m | −5,58 m |
+| Bray, design 10482797 | −134,97 m | +134,31 m |
+
+Le décalage vaut l'opposé de l'ordonnée du centre, à 0,7 m près sur quatre
+exports, à 4,1 m sur le cinquième, dont la corrélation est la plus faible. Le
+calage en tient compte (`Calage.ordonnee_centre_image_m`) : une fois ce centre
+compté, les origines des deux designs des Islettes tombent au même point à
+1 cm près, et Bray, que la latitude posait 134 m trop au sud — au-delà de la
+borne de ±30 m du réglage —, se cale.
+
+Le réglage nord-sud reste ouvert, pour ce qu'il est devenu : un ajustement
+fin. Le pré-positionnement n'en applique aucun de lui-même : il annonce l'écart
+entre le centre de la zone HelioScope et celui de l'emprise, et laisse
+l'opérateur juger sur l'ortho, parce qu'un écart corrigé automatiquement ne
+dirait plus rien de la qualité du calage. Cet écart n'est pas l'erreur du
+calage : aux Islettes, il annonce encore +6,05 m quand l'ortho ne demande que
+−0,25 m. Le `projet.json` d'exemple des Islettes, réglé le 02/09 à −8,55 m sur
+le recouvrement de l'emprise, est recalé sur l'ortho : longitude 4,999342464°,
+correction −0,25 m, le fond tombant alors à 7 cm de l'ortho.
 
 ### Réglage du calage dans l'interface
 
@@ -2011,30 +2030,19 @@ de projet du même jour, seul reste celui du site — 5,08 ha, les « 5,1 ha »
 d'emprise cadastrale que le tableau du plan annonce. Le calage de Gannay vient
 du fond HelioScope corrélé à l'ortho IGN dans le dépôt `photomontage`, traduit
 dans les deux réglages du lot 2 : longitude 3,600487654°, correction nord-sud
-−6,26 m.
+−1,04 m — −6,26 m avant que le calage ne compte lui-même les −5,22 m du centre
+de l'image de fond.
 
-**Bray ne se cale pas dans l'application, et la cause est au lot 2.** Mesuré
-le 23/09/2026 en corrélant le fond HelioScope de cinq exports avec l'ortho
-IGN : la latitude que le lot 2 tire de la résolution du fond est celle du
-**centre de l'image**, qu'il attribue à l'origine du DXF. Le décalage nord-sud
-à rattraper vaut donc l'ordonnée de ce centre, au signe près — à 0,7 m près
-sur quatre exports, 4 m sur le cinquième :
-
-| Export | Centre de l'image | Décalage mesuré |
-|---|---|---|
-| Les Islettes, `Export.zip` | +2,51 m | −2,75 m |
-| Les Islettes, `Export_2.zip` | −8,56 m | +8,50 m |
-| Bray, `helioscope_export.zip` du 01/09 | −90,98 m | +86,88 m |
-| Gannay, design 10465241 | +5,22 m | −5,58 m |
-| Bray, design 10482797 | −134,97 m | +134,31 m |
-
-À Bray, le projet sort ainsi 134 m trop au sud, et le réglage nord-sud du
-lot 2, borné à ±30 m, refuse de l'y ramener. Les 11 m d'écart de latitude
-entre les deux designs des Islettes, que la section « Précision de la
-latitude » attribue à la précision de la recette, sont l'écart de leurs deux
-centres d'image. La correction relève du lot 2 et de sa propre conversation ;
-les dossiers d'essai de Bray du 23/09/2026 ont été produits avec le calage
-mesuré, posé à la main hors de l'application.
+**Bray ne se calait pas, et la cause était au lot 2** : la latitude que le
+lot 2 tire du fond HelioScope est celle du centre de l'image, qu'il attribuait
+à l'origine du DXF — 135 m plus au nord à Bray, au-delà de la borne de ±30 m
+du réglage nord-sud. Corrigé le 23/09/2026 (voir « Précision de la latitude »,
+au lot 2). Pré-positionnée sur l'emprise du site, la clôture de Bray tombe
+depuis à la bonne latitude ; l'est-ouest reste à régler sur l'ortho, comme
+partout — 22 m à Bray, où la zone HelioScope n'est pas centrée sur l'emprise.
+Le calage mesuré en corrélant le fond avec l'ortho est dans
+`tests/jeux_plan_pdf.py` : la clôture y épouse l'emprise du site à 111 m²
+près, pour 4,87 ha.
 
 ### Dans l'application
 

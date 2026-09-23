@@ -32,10 +32,13 @@ from tests.jeux_plan_pdf import (
     DXF_BRAY,
     DXF_GANNAY,
     EMPRISE_BRAY,
+    EMPRISE_SITE_BRAY,
     EXEMPLES,
     FOND_BRAY,
     FOND_GANNAY,
+    LONGITUDE_BRAY,
     LONGITUDE_GANNAY,
+    NORD_SUD_BRAY_M,
     NORD_SUD_GANNAY_M,
     PLAN_BRAY,
     PLAN_GANNAY,
@@ -703,6 +706,44 @@ def test_bray_se_cale_sur_son_propre_calepinage(import_bray):
     statuts = {c.libelle: c.statut for c in import_bray.controles}
     assert statuts["Clôture dans l'emprise cadastrale"] == "ok"
     assert statuts["Tables contenues dans la clôture"] == "ok"
+
+
+@besoin_bray
+def test_bray_tombe_sur_son_emprise_une_fois_la_latitude_corrigee(tmp_path):
+    """Le lot 2 posait Bray 134 m trop au sud, et le réglage ne pouvait l'y ramener.
+
+    Sa latitude était celle du centre de l'image de fond, 135 m au sud de
+    l'origine du DXF (corrigé le 23/09/2026). Pré-positionnée sur l'emprise du
+    site, la clôture tombe désormais à la bonne latitude — l'est-ouest reste à
+    régler, comme au lot 2. Au calage mesuré sur l'ortho, elle épouse
+    l'emprise cadastrale du site.
+    """
+    from dp_socle.geometrie import charger_emprise
+
+    site = charger_emprise(EMPRISE_SITE_BRAY).geometrie
+    export = layout_cad(tmp_path, DXF_BRAY, FOND_BRAY)
+    commun = dict(
+        emprise_cadastrale=site,
+        correspondance={
+            "Piste existante": "piste_lourde_existante",
+            "Piste à créer": "piste_lourde_a_creer",
+        },
+        choix=ChoixDuPlan(volume_citerne_m3=60, largeur_portail_m=7.0),
+    )
+    prepositionne = importer_plan_pdf(PLAN_BRAY, export, **commun)
+    cloture = prepositionne.plan.polygone_cloture
+    assert abs(cloture.centroid.y - site.centroid.y) < 3.0
+
+    cale = importer_plan_pdf(
+        PLAN_BRAY,
+        export,
+        longitude_origine=LONGITUDE_BRAY,
+        correction_nord_sud_m=NORD_SUD_BRAY_M,
+        **commun,
+    )
+    cloture = cale.plan.polygone_cloture
+    assert cloture.centroid.distance(site.centroid) < 2.0
+    assert cloture.difference(site).area < 0.005 * cloture.area
 
 
 @besoin_bray

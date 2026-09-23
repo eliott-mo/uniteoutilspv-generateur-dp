@@ -93,7 +93,8 @@ class Calage:
     resolution_m_px: float
     zoom: int
     fraction_zoom: float
-    #: Latitude de l'origine du repère DXF, entièrement déduite du fichier.
+    #: Latitude entièrement déduite du fichier. C'est celle du centre de l'image
+    #: de fond, et non de l'origine du DXF : voir `ordonnee_centre_image_m`.
     latitude_origine: float
     #: Facteur d'échelle sphérique 1/cos φ de la recette d'origine. Conservé
     #: comme témoin de la lecture du fichier ; le placement ne s'en sert pas,
@@ -106,23 +107,41 @@ class Calage:
     #: vers le nord et à partir de la latitude déduite du fichier.
     #:
     #: Stockée comme un écart et non fondue dans `latitude_origine` : la latitude
-    #: du fichier reste ainsi lisible, et toute correction saisie se voit. Elle
-    #: existe parce que la latitude déduite n'est pas exacte — les deux designs
-    #: des Islettes en donnent deux qui diffèrent de 11 m — alors que le modèle
-    #: la présentait comme verrouillée.
+    #: du fichier reste ainsi lisible, et toute correction saisie se voit.
+    #: Depuis que `ordonnee_centre_image_m` rend compte des 11 m qui séparaient
+    #: les deux designs des Islettes, ce n'est plus qu'un réglage fin : moins
+    #: d'un mètre sur quatre des cinq exports mesurés le 23/09/2026.
     correction_nord_sud_m: float = 0.0
+    #: Ordonnée du centre de l'image de fond dans le repère du DXF, en mètres.
+    #:
+    #: La latitude que la recette tire de la résolution du fond est celle du
+    #: **centre de l'image**, pas celle de l'origine du DXF. Mesuré le 23/09/2026
+    #: en corrélant le fond de cinq exports avec l'ortho IGN, sans correction
+    #: nord-sud : le décalage à rattraper valait l'opposé de cette ordonnée à
+    #: 0,7 m près sur quatre d'entre eux, à 4,1 m sur le cinquième.
+    #:
+    #:     Les Islettes, Export.zip        centre +2,51 m     décalage  −2,75 m
+    #:     Les Islettes, Export_2.zip      centre −8,56 m     décalage  +8,50 m
+    #:     Bray, export du 01/09/2026      centre −90,98 m    décalage +86,88 m
+    #:     Gannay, design 10465241         centre +5,22 m     décalage  −5,58 m
+    #:     Bray, design 10482797           centre −134,97 m   décalage +134,31 m
+    #:
+    #: Les 11 m entre les deux designs des Islettes étaient l'écart de leurs
+    #: centres d'image (11,07 m) ; à Bray, les 134 m dépassaient la borne du
+    #: réglage nord-sud, et le site ne se calait pas.
+    ordonnee_centre_image_m: float = 0.0
 
     @property
     def latitude_corrigee(self) -> float:
-        """Latitude effective, correction comprise. Pour affichage seulement.
+        """Latitude de l'origine du DXF, tout compris. Pour affichage seulement.
 
-        Le placement n'en passe pas par là : il applique la correction en mètres
-        dans le repère métrique local, ce qui est exact et n'a pas à repasser par
-        un angle.
+        Le placement n'en passe pas par là : il applique le décalage du centre
+        de l'image et la correction en mètres dans le repère métrique local, ce
+        qui est exact et n'a pas à repasser par un angle.
         """
-        return self.latitude_origine + self.correction_nord_sud_m / (
-            math.pi / 180.0 * RAYON_MERCATOR
-        )
+        return self.latitude_origine + (
+            self.correction_nord_sud_m - self.ordonnee_centre_image_m
+        ) / (math.pi / 180.0 * RAYON_MERCATOR)
 
     def exige_origine(self) -> float:
         if self.longitude_origine is None:
@@ -383,6 +402,15 @@ def calculer_calage(resolution_m_px: float) -> Calage:
         latitude_origine=latitude,
         facteur_echelle=facteur,
     )
+
+
+def ordonnee_centre_image(image) -> float:
+    """Ordonnée du centre de l'image de fond, dans le repère du DXF.
+
+    C'est là, et non à l'origine du DXF, que vaut la latitude déduite de la
+    résolution du fond (voir `Calage.ordonnee_centre_image_m`).
+    """
+    return float(image.dxf.insert.y + image.dxf.image_size.y * image.dxf.v_pixel.y / 2.0)
 
 
 def _controler_image(image) -> float:
@@ -890,6 +918,7 @@ def importer(chemin_export: str | Path) -> Implantation:
 
     image = _entite_image(msp)
     calage = calculer_calage(_controler_image(image))
+    calage.ordonnee_centre_image_m = ordonnee_centre_image(image)
 
     zone, reculs, evitees, avert_geom = extraire_geometries(msp)
     avertissements.extend(avert_geom)
@@ -968,11 +997,15 @@ def projeter(geometrie: BaseGeometry, calage: Calage) -> BaseGeometry:
     longitude = calage.exige_origine()
     transformateur = _transformateur_local(calage.latitude_origine, longitude)
 
+    decalage = calage.correction_nord_sud_m - calage.ordonnee_centre_image_m
+
     def _vers_l93(x, y, z=None):
-        # La correction nord-sud s'ajoute en mètres dans le repère métrique
-        # local : celui-ci est orienté nord à l'origine, une translation en y est
-        # donc exactement un déplacement vers le nord.
-        return transformateur.transform(x, y + calage.correction_nord_sud_m)
+        # Le repère métrique local est centré sur la latitude du fichier, qui
+        # est celle du centre de l'image de fond : on y ramène ce centre, puis
+        # on ajoute la correction nord-sud. Le repère est orienté nord à
+        # l'origine, une translation en y est donc exactement un déplacement
+        # vers le nord.
+        return transformateur.transform(x, y + decalage)
 
     return transformer_geom(_vers_l93, geometrie)
 
@@ -1449,6 +1482,7 @@ def parametres_contrat(
             "latitude_origine": calage.latitude_origine,
             "longitude_origine": calage.longitude_origine,
             "correction_nord_sud_m": calage.correction_nord_sud_m,
+            "ordonnee_centre_image_m": calage.ordonnee_centre_image_m,
             "facteur_echelle": calage.facteur_echelle,
         },
         "controles": [
@@ -1596,11 +1630,14 @@ def metres_par_degre_longitude(latitude: float) -> float:
     return math.pi / 180.0 * grande_normale * math.cos(phi)
 
 
-#: Correction nord-sud admise, en mètres. Les deux designs des Islettes donnent
-#: deux latitudes distantes de 11 m : la borne est à près de trois fois cet
-#: écart. Au-delà, ce n'est plus un ajustement mais le signe que le modèle de
-#: calage ne tient pas sur ce fichier, et le corriger à la main masquerait le
-#: problème au lieu de le montrer.
+#: Correction nord-sud admise, en mètres. Les deux designs des Islettes
+#: donnaient deux latitudes distantes de 11 m ; c'était l'écart de leurs centres
+#: d'image, dont le calage tient compte depuis le 23/09/2026
+#: (`Calage.ordonnee_centre_image_m`). La latitude est depuis bonne au mètre
+#: près sur quatre des cinq exports mesurés, à 4 m sur le cinquième : la borne
+#: garde une marge large. Au-delà, ce n'est plus un ajustement mais le signe
+#: que le modèle de calage ne tient pas sur ce fichier, et le corriger à la
+#: main masquerait le problème au lieu de le montrer.
 CORRECTION_NORD_SUD_MAX_M = 30.0
 
 
@@ -1608,7 +1645,7 @@ def corriger_nord_sud(calage: "Calage", metres: float) -> None:
     """Fixe la correction nord-sud, comptée positivement vers le nord.
 
     Second et dernier degré de liberté, ouvert parce que la latitude déduite du
-    fichier n'est bonne qu'à une dizaine de mètres. Il reste séparé du réglage
+    fichier n'est bonne qu'à quelques mètres. Il reste séparé du réglage
     est-ouest, et non fondu dans un glissement libre en deux dimensions : deux
     curseurs indépendants se règlent chacun sur un critère visuel simple, là où
     un déplacement libre laisse compenser une erreur d'un axe par l'autre.
@@ -1617,9 +1654,9 @@ def corriger_nord_sud(calage: "Calage", metres: float) -> None:
         raise ErreurCalage(
             f"Correction nord-sud de {metres:+.1f} m demandée, hors de la plage "
             f"admise (±{CORRECTION_NORD_SUD_MAX_M:.0f} m). La latitude déduite du "
-            "fichier est bonne à une dizaine de mètres près ; un écart de cet "
-            "ordre signale que le calage lui-même est faux — mauvais export, "
-            "mauvaise emprise — et non qu'il faut le rattraper à la main."
+            "fichier est bonne à quelques mètres près ; un écart de cet ordre "
+            "signale que le calage lui-même est faux — mauvais export, mauvaise "
+            "emprise — et non qu'il faut le rattraper à la main."
         )
     calage.correction_nord_sud_m = float(metres)
 

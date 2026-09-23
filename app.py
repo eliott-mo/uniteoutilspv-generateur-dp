@@ -1779,8 +1779,9 @@ def _oublier_la_carte_et_la_coupe(import_pdf) -> None:
 def _regler_le_calage(import_pdf) -> None:
     """Le placement en Lambert 93, réglé à l'œil sur l'ortho de la carte.
 
-    C'est le calage du lot 2 : pré-positionné sur l'emprise cadastrale, il n'est
-    bon qu'à quelques mètres, et la latitude déduite du fichier à une dizaine.
+    C'est le calage du lot 2 : la latitude déduite du fichier est bonne à
+    quelques mètres, la longitude pré-positionnée sur l'emprise cadastrale,
+    qui ne suit pas la zone HelioScope, l'est moins.
     Le plan PDF suit les tables — il est calé sur elles dans le repère du DXF —,
     et le régler ne demande donc pas de le recaler.
     """

@@ -24,9 +24,12 @@ FOND_GANNAY = GANNAY / "design_10465241_baseimage.jpg"
 #: Calage de l'export de Gannay, validé sur l'ortho IGN : le fond HelioScope y
 #: a été corrélé dans le dépôt `photomontage` le 21/09/2026 (`ancrage.json`,
 #: dE = 745 855,87, dN = 6 625 785,12), puis traduit le 23/09/2026 dans les
-#: deux réglages du lot 2. Le projet n'a pas d'emprise cadastrale au dépôt.
+#: deux réglages du lot 2. La correction nord-sud valait −6,26 m, dont −5,22 m
+#: venaient du centre de l'image de fond, que le calage compte lui-même depuis
+#: le même jour : il en reste −1,04 m, pour le même placement. Le projet n'a
+#: pas d'emprise cadastrale au dépôt.
 LONGITUDE_GANNAY = 3.600487654
-NORD_SUD_GANNAY_M = -6.26
+NORD_SUD_GANNAY_M = -1.04
 
 #: Bray-Saint-Aignan (45) : un second plan, tiré du même modèle PowerPoint mais
 #: exporté autrement — ses traits y sont des contours remplis — et aux couleurs
@@ -37,6 +40,18 @@ DXF_BRAY = BRAY / "helioscope_design_10482797.dxf"
 FOND_BRAY = BRAY / "design_10482797_baseimage.jpg"
 #: L'emprise réelle du projet, celle du lot 1 : 27,99 ha.
 EMPRISE_BRAY = BRAY / "emprise_reelle.zip"
+#: L'emprise cadastrale du site seul, 5,08 ha — les « 5,1 ha » du tableau du
+#: plan —, tirée le 23/09/2026 de l'emprise « geoperso-3 » dont les trois
+#: autres morceaux étaient à plusieurs kilomètres.
+EMPRISE_SITE_BRAY = BRAY / "alr_45_bray-saint-aignan-geoperso-3-23_09_2026_13_39.zip"
+
+#: Calage de l'export de Bray, mesuré le 23/09/2026 en corrélant son fond
+#: HelioScope avec l'ortho IGN, une fois le centre de l'image compté (pic de
+#: corrélation 0,34 contre 0,10 pour le second) : 22,34 m à l'est du
+#: pré-positionnement sur `EMPRISE_SITE_BRAY`, 0,66 m au sud de la latitude
+#: du fichier.
+LONGITUDE_BRAY = 2.347192657
+NORD_SUD_BRAY_M = -0.66
 
 
 def layout_cad(dossier: Path, dxf: Path, fond: Path) -> Path:

@@ -550,30 +550,35 @@ def test_calepinage_du_design_paysage(implantation_paysage):
 
 @besoin_export_complet
 @besoin_export_complet_2
-def test_les_deux_designs_ne_donnent_pas_la_meme_latitude(
+def test_les_deux_designs_s_accordent_une_fois_le_centre_de_l_image_compte(
     implantation, implantation_paysage
 ):
-    """Mesure de la précision réelle de la latitude déduite : environ ±10 m.
+    """La latitude du fichier est celle du centre de l'image de fond.
 
-    Le brief annonçait deux designs d'un même projet concordant à 1e-6 degré.
-    Mesuré le 02/09/2026 sur les deux designs des Islettes, ils diffèrent de
-    9,9e-5 degré, soit 11 m nord-sud : `res` n'est pas quantifiée sur la rangée
-    de tuiles, elle est calculée au point de référence de chaque design, et ces
-    points diffèrent.
-
-    Ce test fige la limite constatée plutôt que l'affirmation du brief. La
-    latitude reste utilement contrainte — elle place le projet à une dizaine de
-    mètres près — mais elle n'est pas exacte, et un écart nord-sud résiduel de
-    cet ordre au pré-positionnement est normal, pas suspect.
+    Mesuré le 02/09/2026 : les deux designs des Islettes donnent deux latitudes
+    distantes de 9,9e-5 degré, 11 m nord-sud, et l'on en avait conclu que la
+    latitude n'était bonne qu'à une dizaine de mètres. Mesuré le 23/09/2026 :
+    ces 11 m sont l'écart des centres de leurs images de fond, +2,51 m et
+    −8,56 m dans leurs repères. Une fois ce centre pris en compte, les origines
+    des deux designs, projetées à la même longitude, tombent au même point à
+    quelques centimètres près.
     """
-    ecart = abs(
-        implantation.calage.latitude_origine
-        - implantation_paysage.calage.latitude_origine
-    )
-    assert ecart > 1e-6, "les deux designs concorderaient : revoir ce constat"
+    un, deux = implantation.calage, implantation_paysage.calage
+    ecart = abs(un.latitude_origine - deux.latitude_origine)
     assert ecart == pytest.approx(9.94e-5, rel=0.05)
-    # En mètres sur le terrain, pour que l'ordre de grandeur soit lisible.
-    assert ecart * 111_320 == pytest.approx(11.0, abs=1.0)
+    assert un.ordonnee_centre_image_m == pytest.approx(2.505, abs=0.01)
+    assert deux.ordonnee_centre_image_m == pytest.approx(-8.555, abs=0.01)
+
+    from shapely.geometry import Point
+
+    longitudes = (un.longitude_origine, deux.longitude_origine)
+    try:
+        un.longitude_origine = deux.longitude_origine = 4.9993
+        origine_un = projeter(Point(0.0, 0.0), un)
+        origine_deux = projeter(Point(0.0, 0.0), deux)
+    finally:
+        un.longitude_origine, deux.longitude_origine = longitudes
+    assert origine_un.distance(origine_deux) < 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -702,13 +707,16 @@ def test_correction_nord_sud_annule_l_ecart_residuel(implantation):
     emprise = charger_emprise(EMPRISE_ISLETTES)
     corriger_nord_sud(implantation.calage, 0.0)
     avant = prepositionner(implantation, emprise.geometrie)
-    assert avant.ecart_nord_sud_m == pytest.approx(8.55, abs=0.5)
+    # 8,55 m avant que le calage ne tienne compte du centre de l'image de fond
+    # (+2,51 m), le 23/09/2026. Ce qui reste est l'écart entre le centre de la
+    # zone HelioScope, tracée à la main, et celui de l'emprise : l'ortho, elle,
+    # ne demande plus que −0,24 m.
+    assert avant.ecart_nord_sud_m == pytest.approx(6.05, abs=0.5)
 
     corriger_nord_sud(implantation.calage, -avant.ecart_nord_sud_m)
     apres = prepositionner(implantation, emprise.geometrie)
     assert apres.ecart_nord_sud_m == pytest.approx(0.0, abs=0.05)
-    # Le recouvrement gagne ce que la latitude du fichier lui coûtait.
-    assert apres.recouvrement > avant.recouvrement + 0.05
+    assert apres.recouvrement > avant.recouvrement
 
     corriger_nord_sud(implantation.calage, 0.0)
 
