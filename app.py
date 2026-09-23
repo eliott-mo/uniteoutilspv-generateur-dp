@@ -2548,6 +2548,11 @@ def _carte_photos_lue(octets: bytes):
 #: Nombre de vignettes par ligne dans la galerie du rapport de visite.
 VIGNETTES_PAR_LIGNE = 5
 
+#: Largeur de la vignette qui montre la couverture retenue, en pixels. Elle est
+#: là pour vérifier d'un coup d'œil laquelle monte en page de garde, pas pour
+#: la juger : le tableau des photographies la montre déjà en grand.
+LARGEUR_VIGNETTE_COUVERTURE_PX = 220
+
 
 @st.cache_data(show_spinner=False, max_entries=40)
 def _vignette_du_rapport(octets: bytes, rang_fichier: int):
@@ -2703,13 +2708,14 @@ if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
                         a_verser[point.identifiant] = (
                             propose
                             if st.checkbox(
-                                propose,
+                                "Verser",
                                 key=f"verser_{point.identifiant}",
-                                help="Sa distance au site suggère cette pièce ; "
-                                "vous pourrez en changer dans le tableau.",
+                                help="La photographie rejoint le tableau du "
+                                "projet. Sa pièce s'y choisit, et se corrige.",
                             )
                             else AFFECTATIONS[0]
                         )
+                        st.caption(f"↳ {propose} d'après sa distance au site")
 
             cochees = [c for c in a_verser.values() if c != AFFECTATIONS[0]]
             if st.button(
@@ -3124,15 +3130,23 @@ def _compte_des_pieces(photos_par_piece: dict) -> list:
     return etat
 
 
+def _octets_de(fichier) -> bytes:
+    """Le contenu d'une photographie, déposée ou déjà écrite sur le disque.
+
+    Streamlit ne sait rien faire d'un `_PhotoReprise` : il attend des octets,
+    un chemin ou une image Pillow. Lui passer l'objet levait
+    « '_PhotoReprise' object has no attribute 'format' » dès qu'une
+    photographie versée d'un rapport devait s'afficher (25/09/2026).
+    """
+    if isinstance(fichier, _PhotoReprise):
+        return Path(fichier.chemin).read_bytes()
+    return fichier.getvalue()
+
+
 def _montrer_l_image(fichier) -> None:
     """L'image telle quelle, tant qu'aucune pièce ne lui impose de format."""
     try:
-        octets = (
-            Path(fichier.chemin).read_bytes()
-            if isinstance(fichier, _PhotoReprise)
-            else fichier.getvalue()
-        )
-        st.image(octets, width="stretch")
+        st.image(_octets_de(fichier), width="stretch")
     except (OSError, ValueError) as erreur:
         st.caption(f"⚠️ aperçu indisponible ({erreur})")
 
@@ -3315,7 +3329,14 @@ def _controler_les_volets_dp6(fichiers) -> None:
     Ce refus était juste, mais il tombait à la génération, au bout du parcours,
     dans le rapport : « DP 6 n'est pas dedans, j'avais pourtant choisi une image
     brute et ajouté un angle de prise de vue » (22/09/2026). Il se dit
-    maintenant ici, où la photographie manquante peut encore être déposée.
+    maintenant sous la carte, où la position qui manque peut être posée.
+
+    **Sous la carte, et non dans le tableau d'entrée.** Ce qui se compte ici,
+    ce sont les photographies *placées* — une vue n'entre au projet qu'avec son
+    point de vue. Dans le tableau d'entrée, où rien n'est encore placé, le
+    contrôle reprochait une vue incomplète à qui venait d'en déposer les deux
+    images : « j'ai l'alerte alors que j'ai bien mis 2 photos pour DP 6 »
+    (25/09/2026). Le compteur du tableau, lui, compte les images déposées.
     """
     par_vue = {}
     for fichier in fichiers:
@@ -3516,9 +3537,6 @@ if toutes_les_photos:
         _ligne_de_choix(fichier, rapport, plusieurs_vues)
         st.divider()
 
-    for code in PIECES_PHOTOS:
-        if code == "DP 6":
-            _controler_les_volets_dp6(photos[code])
 else:
     st.caption(
         "Aucune photographie pour l'instant. Déposez vos fichiers, ou la carte "
@@ -3534,7 +3552,6 @@ pdfs_insertion = pdfs_par_piece["DP 6"]
 image_garde = None
 if len(insertions) == 1:
     image_garde = insertions[0]
-    st.caption(f"Page de garde : {image_garde.name}.")
 elif len(insertions) > 1:
     noms = [fichier.name for fichier in insertions]
     retenu = st.radio(
@@ -3545,23 +3562,20 @@ elif len(insertions) > 1:
     )
     image_garde = insertions[noms.index(retenu)]
 
-if insertions:
-    # Deux par rangée, et toutes : une seule insertion prenait la largeur entière
-    # de la page pour une vignette de contrôle, et au-delà de quatre la vignette
-    # manquante pouvait être celle de la couverture.
-    par_rangee = 2 if len(insertions) <= 2 else 4
-    for depart in range(0, len(insertions), par_rangee):
-        rangee = insertions[depart : depart + par_rangee]
-        colonnes = st.columns(par_rangee)
-        for colonne, fichier in zip(colonnes, rangee):
-            with colonne:
-                st.image(
-                    fichier,
-                    caption=("couverture — " if image_garde is fichier else "")
-                    + fichier.name,
-                    width="stretch",
-                )
-else:
+if image_garde is not None:
+    # Une vignette, et seulement celle qui monte en couverture. La mosaïque de
+    # toutes les insertions faisait doublon avec le tableau juste au-dessus,
+    # qui les montre déjà en grand : « elle est énorme et ce n'est pas utile »
+    # (retour d'usage du 25/09/2026).
+    try:
+        st.image(
+            _octets_de(image_garde),
+            caption=f"Page de garde : {image_garde.name}",
+            width=LARGEUR_VIGNETTE_COUVERTURE_PX,
+        )
+    except (OSError, ValueError) as erreur:
+        st.caption(f"⚠️ aperçu de la couverture indisponible ({erreur})")
+elif not insertions:
     if pdfs_insertion:
         st.warning(
             "L'insertion paysagère déposée est un PDF : la page de garde attend "

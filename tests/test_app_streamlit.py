@@ -1542,9 +1542,10 @@ def _cases_du_rapport(application):
 
     Depuis le 25/09/2026 la galerie sert à trier — verser ou non — et la pièce
     se choisit ensuite dans le tableau commun, avec les photographies déposées.
-    Son libellé porte la pièce que la distance suggère.
+    La case dit « Verser » et non la pièce : la nommer laissait croire qu'on ne
+    pouvait verser que celle-là (« je ne peux cocher que des DP 7 »).
     """
-    return [c for c in application.checkbox if c.label in ("DP 6", "DP 7", "DP 8")]
+    return [c for c in application.checkbox if c.label == "Verser"]
 
 
 def _carte_photos(points) -> bytes:
@@ -1656,9 +1657,12 @@ def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
     # doit pas en verser vingt-cinq au dossier parce que personne n'a rien dit.
     cases = _cases_du_rapport(application)
     assert [case.value for case in cases] == [False, False]
-    # La distance au site nomme en revanche la pièce, pour n'avoir à corriger
-    # que ce qui n'est pas évident.
-    assert [case.label for case in cases] == ["DP 7", "DP 8"]
+    # La distance au site nomme en revanche la pièce sous la vignette, pour
+    # n'avoir à corriger que ce qui n'est pas évident.
+    suggestions = [
+        c.value for c in application.caption if "d'après sa distance" in c.value
+    ]
+    assert "DP 7" in suggestions[0] and "DP 8" in suggestions[1], suggestions
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -2122,3 +2126,53 @@ def test_changer_une_photographie_de_piece_garde_son_placement(
     vues = application.session_state["vues_photo"]
     assert "visite.jpg" not in vues.get("DP 7", {})
     assert vues["DP 8"]["visite.jpg"]["x"] == pytest.approx(posee["x"])
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photographie_versee_du_rapport_s_affiche_sans_planter(
+    tmp_path, monkeypatch
+):
+    """« '_PhotoReprise' object has no attribute 'format' » — 25/09/2026.
+
+    Streamlit ne sait rien faire d'un `_PhotoReprise` : il attend des octets,
+    un chemin ou une image Pillow. La page plantait dès qu'une photographie
+    versée d'un rapport devait s'afficher en couverture — cas qu'aucun test
+    n'atteignait, les photographies versées n'ayant jamais été des DP 6.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    carte = _carte_photos([("insertion.jpeg", 47.85268, 1.96650, 212.0, True)])
+    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
+    application = application.run()
+    _cases_du_rapport(application)[0].check()
+    application = application.run()
+    _cliquer(application, "Verser ces")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    # Versée puis rangée en DP 6 : c'est elle qui monte en page de garde.
+    application.session_state["piece_de_la_photo"] = {"insertion.jpeg": "DP 6"}
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    legendes = [c.value for c in application.get("caption")]
+    assert any("Page de garde" in legende for legende in legendes), legendes
+
+
+def test_la_couverture_ne_montre_qu_une_vignette():
+    """« Elle est énorme et ce n'est pas utile » (25/09/2026).
+
+    Le tableau des photographies montre déjà chaque image en grand, cadre
+    compris : la mosaïque de toutes les insertions faisait doublon juste en
+    dessous. Ne reste que celle qui monte en couverture, en vignette.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("if image_garde is not None:")
+    fin = source.index("st.divider()", debut)
+    bloc = source[debut:fin]
+
+    assert "LARGEUR_VIGNETTE_COUVERTURE_PX" in bloc
+    assert 'width="stretch"' not in bloc
+    # Et elle passe par les octets, seul format que Streamlit sache lire pour
+    # une photographie versée d'un rapport.
+    assert "_octets_de(image_garde)" in bloc
