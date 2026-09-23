@@ -880,16 +880,18 @@ def masque_des_tables(fond: ImageDeFond) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def lire_plan_pdf(
-    chemin: str | Path, correspondance: dict[str, str | None] | None = None
-) -> PlanPDF:
-    """Lit la légende, les formes de la carte et l'image des tables d'un plan PDF.
+def lire_legende(chemin: str | Path) -> list[EntreeLegende]:
+    """Les entrées de la légende seules, pour en faire confirmer la correspondance.
 
-    `correspondance` remplace, libellé par libellé, la catégorie proposée par
-    `CORRESPONDANCE_LEGENDE` : un libellé peut ainsi être apparié à la main, ou
-    écarté en lui donnant None.
+    Rien n'y est encore exigé : un plan dont la clôture porte un nom que la
+    correspondance ne connaît pas doit pouvoir montrer sa légende, pour qu'on
+    l'apparie à la main avant l'import.
     """
-    chemin = Path(chemin)
+    return _page_du_plan(Path(chemin))[1]
+
+
+def _page_du_plan(chemin: Path):
+    """La page qui porte la légende : son rang, sa légende, ses formes, ses images."""
     document = _ouvrir(chemin)
     pages_lues = []
     for indice in range(len(document)):
@@ -915,7 +917,20 @@ def lire_plan_pdf(
             f"(pages {', '.join(str(p[0] + 1) for p in pages_lues)}) : impossible "
             "de savoir laquelle est le plan. Ne transmettez que la page du plan."
         )
-    indice, legende, objets, images = pages_lues[0]
+    return pages_lues[0]
+
+
+def lire_plan_pdf(
+    chemin: str | Path, correspondance: dict[str, str | None] | None = None
+) -> PlanPDF:
+    """Lit la légende, les formes de la carte et l'image des tables d'un plan PDF.
+
+    `correspondance` remplace, libellé par libellé, la catégorie proposée par
+    `CORRESPONDANCE_LEGENDE` : un libellé peut ainsi être apparié à la main, ou
+    écarté en lui donnant None.
+    """
+    chemin = Path(chemin)
+    indice, legende, objets, images = _page_du_plan(chemin)
     avertissements: list[str] = []
 
     if correspondance:

@@ -785,12 +785,44 @@ st.divider()
 #: bouton « Déplacer la coupe », dont la clé serait en double.
 carte_de_la_coupe = False
 
-st.subheader("2. Plan du bureau d'études")
-st.caption(
-    "Import du DXF et du tableau bilan fournis par le BE, recoupement des deux, "
-    "tracé de la ligne de coupe A-A' et profil du terrain. Produit "
-    "`geometries.gpkg` et `projet.json` pour le dessin des planches ; ne dessine "
-    "aucune planche."
+#: Les deux sources du plan, qui écrivent le même contrat (lot 2ter).
+#:
+#: Le plan du bureau d'études reste la source courante, et le choix par défaut.
+#: Un projet sans plan du BE — un plan projet PDF sur un export HelioScope, le
+#: cas de Gannay-sur-Loire en septembre 2026 — passe par la seconde. L'entrée
+#: HelioScope seule avait été retirée le 07/09/2026 pour ne pas offrir deux
+#: portes quand une seule servait ; elle revient ici avec son plan, parce que
+#: l'export seul ne porte que les tables.
+SOURCES_DU_PLAN = (
+    "Plan du bureau d'études — DXF géoréférencé et tableau bilan",
+    "Plan projet PDF sur un export HelioScope — sans plan du BE",
+)
+plan_du_be = st.session_state.get("source_plan", SOURCES_DU_PLAN[0]) == SOURCES_DU_PLAN[0]
+
+if plan_du_be:
+    st.subheader("2. Plan du bureau d'études")
+    st.caption(
+        "Import du DXF et du tableau bilan fournis par le BE, recoupement des "
+        "deux, tracé de la ligne de coupe A-A' et profil du terrain. Produit "
+        "`geometries.gpkg` et `projet.json` pour le dessin des planches ; ne "
+        "dessine aucune planche."
+    )
+else:
+    st.subheader("2. Plan projet PDF sur un export HelioScope")
+    st.caption(
+        "Les tables viennent de l'export HelioScope, placé en Lambert 93 ; le "
+        "reste — clôture, portail, haies, pistes, postes — vient du plan PDF, "
+        "calé sur ces tables. Produit le même `geometries.gpkg` et le même "
+        "`projet.json` qu'un plan du bureau d'études ; ne dessine aucune planche."
+    )
+st.radio(
+    "D'où vient le plan ?",
+    SOURCES_DU_PLAN,
+    key="source_plan",
+    horizontal=True,
+    help="Les deux sources produisent le même contrat, et les planches ne "
+    "savent pas laquelle les a nourries. Un plan PDF seul ne suffit pas : ses "
+    "formes ne sont pas à l'échelle, c'est l'export HelioScope qui la donne.",
 )
 
 for cle, defaut in (
@@ -803,22 +835,44 @@ for cle, defaut in (
         st.session_state[cle] = defaut
 
 
-colonne_dxf, colonne_tableau = st.columns(2)
-with colonne_dxf:
-    fichier_dxf = st.file_uploader(
-        "Plan BE (DXF géoréférencé en Lambert 93)",
-        type=["dxf"],
-        help="L'unité est déduite des coordonnées, jamais de l'en-tête $INSUNITS "
-        "— sur les fichiers du BE il annonce des millimètres alors que le plan "
-        "est en mètres. Un plan hors des bornes du Lambert 93 est refusé.",
-    )
-with colonne_tableau:
-    fichier_tableau = st.file_uploader(
-        "Tableau bilan (.xlsx)",
-        type=["xlsx"],
-        help="Onglets lus : « 2. Caractéristiques du projet », « Dimensions "
-        "postes et pieux », « Standards UNITe ».",
-    )
+fichier_dxf = fichier_tableau = None
+fichier_export_helioscope = fichier_plan_pdf = None
+if plan_du_be:
+    colonne_dxf, colonne_tableau = st.columns(2)
+    with colonne_dxf:
+        fichier_dxf = st.file_uploader(
+            "Plan BE (DXF géoréférencé en Lambert 93)",
+            type=["dxf"],
+            help="L'unité est déduite des coordonnées, jamais de l'en-tête "
+            "$INSUNITS — sur les fichiers du BE il annonce des millimètres alors "
+            "que le plan est en mètres. Un plan hors des bornes du Lambert 93 "
+            "est refusé.",
+        )
+    with colonne_tableau:
+        fichier_tableau = st.file_uploader(
+            "Tableau bilan (.xlsx)",
+            type=["xlsx"],
+            help="Onglets lus : « 2. Caractéristiques du projet », « Dimensions "
+            "postes et pieux », « Standards UNITe ».",
+        )
+else:
+    colonne_export, colonne_plan_pdf = st.columns(2)
+    with colonne_export:
+        fichier_export_helioscope = st.file_uploader(
+            "Export HelioScope (ZIP)",
+            type=["zip"],
+            help="Le ZIP téléchargé depuis HelioScope, ou le « Layout CAD » qu'il "
+            "contient : le DXF du calepinage et son image de fond. C'est lui qui "
+            "place les tables en Lambert 93, et le plan PDF avec elles.",
+        )
+    with colonne_plan_pdf:
+        fichier_plan_pdf = st.file_uploader(
+            "Plan projet (PDF)",
+            type=["pdf"],
+            help="Le plan monté sur une copie d'écran HelioScope, avec sa légende. "
+            "Les couleurs se relèvent sur les pastilles de la légende ; les tables "
+            "de la copie d'écran donnent l'échelle.",
+        )
 
 with st.container():
     fichier_altimetrie = st.file_uploader(
@@ -1543,6 +1597,323 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
         st.session_state.profil_be, coupe, plan.points_terrain, CALQUES_TERRAIN
     )
 
+# ---------------------------------------------------------------------------
+# Lot 2ter — un plan projet PDF sur un export HelioScope
+# ---------------------------------------------------------------------------
+
+#: Ce qu'un libellé de la légende du plan peut recevoir. Ni `voirie`, ni les
+#: tables : le plan ne donne d'une piste que son axe, et une voirie sans surface
+#: ne va sur aucune planche — lourde ou légère se tranche donc ici, sur le
+#: libellé ; les tables, elles, viennent de l'export HelioScope.
+CATEGORIES_DE_LEGENDE = tuple(
+    c for c in CATEGORIES if c not in ("voirie", "ligne_coupe", "tables_pv", "modules_pv")
+)
+
+
+@st.cache_data(show_spinner="Lecture de la légende du plan…", max_entries=4)
+def _legende_du_plan(chemin: str, taille: int):
+    """Libellé, couleur relevée et catégorie proposée de chaque entrée.
+
+    `taille` fait partie de la clé : un plan redéposé sous le même nom doit être
+    relu.
+    """
+    from dp_socle.plan_pdf import lire_legende
+
+    return [
+        (e.libelle, e.couleur, e.categorie, e.a_trancher) for e in lire_legende(chemin)
+    ]
+
+
+def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
+    """Fait confirmer la catégorie de chaque libellé, avant l'import.
+
+    Comme les calques du bureau d'études : proposée d'après les libellés connus,
+    modifiable, et un libellé laissé sur « (ignorer) » n'est pas importé. Les
+    libellés changent d'un plan à l'autre — « Réserve incendie » ici, « Citerne
+    incendie » là —, et deux de ceux de Bray ne disent pas si la piste est
+    lourde ou légère.
+    """
+    entrees = _legende_du_plan(str(chemin_pdf), chemin_pdf.stat().st_size)
+    options = ["(ignorer)"] + list(CATEGORIES_DE_LEGENDE)
+    a_decider = [e for e in entrees if e[2] is None]
+    choix = {}
+    with st.expander(
+        f"La légende du plan — {len(entrees)} entrée(s)"
+        + (f", dont {len(a_decider)} à apparier" if a_decider else "")
+        + " — modifiable",
+        expanded=bool(a_decider),
+    ):
+        st.caption(
+            "Chaque couleur est relevée sur la pastille qui précède son libellé : "
+            "rien n'est supposé. Une forme de la carte va à la pastille dont elle "
+            "porte la couleur."
+        )
+        for rang, (libelle, couleur, categorie, a_trancher) in enumerate(entrees):
+            colonne_teinte, colonne_libelle, colonne_categorie = st.columns([1, 6, 4])
+            with colonne_teinte:
+                st.color_picker(
+                    "Couleur",
+                    value="#{:02x}{:02x}{:02x}".format(*couleur),
+                    disabled=True,
+                    key=f"teinte_legende_{rang}_{libelle}",
+                    label_visibility="collapsed",
+                )
+            with colonne_libelle:
+                st.markdown(f"**{libelle}**" + (f" — {a_trancher}" if a_trancher else ""))
+            with colonne_categorie:
+                retenue = st.selectbox(
+                    "Catégorie",
+                    options,
+                    index=options.index(categorie) if categorie in options else 0,
+                    key=f"categorie_legende_{rang}_{libelle}",
+                    label_visibility="collapsed",
+                )
+            choix[libelle] = None if retenue == "(ignorer)" else retenue
+    return choix
+
+
+def _importer_le_plan_pdf(
+    commune: str, fichiers_emprise, fichier_export, fichier_pdf, fichier_altimetrie
+) -> None:
+    """Dépose l'export et le plan, fait confirmer la légende, importe et cale."""
+    from dp_socle.plan_pdf import importer_plan_pdf
+
+    if fichier_export is None or fichier_pdf is None:
+        manquants = [
+            libelle
+            for libelle, fichier in (
+                ("l'**export HelioScope (ZIP)**", fichier_export),
+                ("le **plan projet (PDF)**", fichier_pdf),
+            )
+            if fichier is None
+        ]
+        if any(f is not None for f in (fichier_export, fichier_pdf, fichier_altimetrie)):
+            st.warning(
+                f"Il manque {' et '.join(manquants)} : le bouton « Importer et "
+                "caler le plan » n'apparaît qu'une fois les deux déposés. Le plan "
+                "seul n'a pas d'échelle, l'export seul n'a que les tables.",
+                icon="⚠️",
+            )
+        return
+
+    chemin_export = _deposer(fichier_export, commune)
+    chemin_pdf = _deposer(fichier_pdf, commune)
+    chemin_altimetrie = _deposer(fichier_altimetrie, commune)
+    try:
+        correspondance = _correspondance_de_la_legende(chemin_pdf)
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+        return
+
+    if not st.button("Importer et caler le plan", type="primary", width="stretch"):
+        return
+    st.session_state.coupe_be = None
+    st.session_state.profil_be = None
+    st.session_state["couches_carte"] = None
+    st.session_state["couches_carte_sans_vegetation"] = None
+    st.session_state["origine_coupe"] = None
+    # Pas d'indice : il vient du tableau bilan, et il n'y en a pas.
+    nom_importe = identifiant_de_dossier(nom_de_projet(commune))
+    chemin_emprise = _enregistrer_fichiers(nom_importe, fichiers_emprise)
+    emprise_cadastrale = (
+        charger_emprise(chemin_emprise).geometrie if chemin_emprise is not None else None
+    )
+    try:
+        with st.spinner(
+            "Lecture de l'export HelioScope et du plan, calage du plan sur les "
+            "tables… (une dizaine de secondes)"
+        ):
+            resultat = importer_plan_pdf(
+                chemin_pdf,
+                chemin_export,
+                emprise_cadastrale=emprise_cadastrale,
+                correspondance=correspondance,
+            )
+    except ErreurDP as erreur:
+        st.error(f"{type(erreur).__name__} : {erreur}")
+        return
+    st.session_state.import_be = resultat
+    st.session_state["indice_tableau_bilan"] = None
+    st.session_state.emprise_cadastrale_be = emprise_cadastrale
+    st.session_state.chemin_altimetrie_be = (
+        str(chemin_altimetrie) if chemin_altimetrie else None
+    )
+    _reprendre_import_precedent(DOSSIER_SORTIE / nom_importe, resultat, emprise_cadastrale)
+    _proposer_la_coupe(resultat)
+
+
+def _oublier_la_carte_et_la_coupe(import_pdf) -> None:
+    """Le plan a bougé : les couches de la carte et la coupe ne valent plus."""
+    st.session_state["couches_carte"] = None
+    st.session_state["couches_carte_sans_vegetation"] = None
+    st.session_state.coupe_be = None
+    st.session_state.profil_be = None
+    import_pdf.ligne_coupe = None
+    import_pdf.profil = None
+
+
+def _regler_le_calage(import_pdf) -> None:
+    """Le placement en Lambert 93, réglé à l'œil sur l'ortho de la carte.
+
+    C'est le calage du lot 2 : pré-positionné sur l'emprise cadastrale, il n'est
+    bon qu'à quelques mètres, et la latitude déduite du fichier à une dizaine.
+    Le plan PDF suit les tables — il est calé sur elles dans le repère du DXF —,
+    et le régler ne demande donc pas de le recaler.
+    """
+    from dp_socle.helioscope import (
+        CORRECTION_NORD_SUD_MAX_M,
+        corriger_nord_sud,
+        decaler_longitude,
+    )
+
+    calage = import_pdf.implantation.calage
+    if import_pdf.prepositionnement is not None:
+        st.caption(import_pdf.prepositionnement.message)
+    with st.form("calage_plan_pdf"):
+        st.markdown(
+            "**Placement sur l'ortho** — la clôture et les tables doivent tomber "
+            "sur le terrain de la carte ci-dessous."
+        )
+        colonne_est, colonne_nord = st.columns(2)
+        decalage = colonne_est.number_input(
+            "Déplacer vers l'est (m) — négatif vers l'ouest",
+            value=0.0,
+            step=1.0,
+            format="%.1f",
+        )
+        correction = colonne_nord.number_input(
+            f"Correction nord-sud (m) — positive vers le nord, ±{CORRECTION_NORD_SUD_MAX_M:.0f} m",
+            min_value=-CORRECTION_NORD_SUD_MAX_M,
+            max_value=CORRECTION_NORD_SUD_MAX_M,
+            value=float(calage.correction_nord_sud_m),
+            step=1.0,
+            format="%.1f",
+        )
+        if st.form_submit_button("Recaler"):
+            try:
+                if decalage:
+                    decaler_longitude(calage, decalage)
+                corriger_nord_sud(calage, correction)
+            except ErreurDP as erreur:
+                st.error(f"{type(erreur).__name__} : {erreur}")
+                return
+            _oublier_la_carte_et_la_coupe(import_pdf)
+            _proposer_la_coupe(import_pdf)
+            st.rerun()
+
+
+def _trancher_les_ouvrages(import_pdf) -> None:
+    """Ce que le plan ne dit pas de ses ouvrages, et la correction qu'il appelle.
+
+    Aucune valeur par défaut : un volume de citerne ou une largeur de portail
+    supposés se dessineraient parfaitement et ne se verraient jamais. La
+    correction du poste (décision D8) se propose et ne s'applique que cochée.
+    """
+    from dp_socle.plan_pdf import VOLUMES_CITERNE_M3, ChoixDuPlan
+
+    lecture = import_pdf.lecture
+    volume = largeur = None
+    if lecture.elements_de("bache_incendie"):
+        volume = st.selectbox(
+            "Volume de la réserve incendie (m³)",
+            VOLUMES_CITERNE_M3,
+            index=None,
+            placeholder="à choisir — le plan ne le dit pas",
+            key="volume_citerne_plan_pdf",
+            help="Le catalogue UNITe en compte quatre, de 7,95 x 4,44 m à "
+            "10,4 x 18,5 m. Le plan situe la réserve, il ne la dimensionne pas.",
+        )
+    if lecture.elements_de("portail"):
+        largeur = st.number_input(
+            "Largeur du portail (m)",
+            min_value=1.0,
+            max_value=20.0,
+            value=None,
+            step=0.5,
+            placeholder="à saisir — le plan ne la dit pas",
+            key="largeur_portail_plan_pdf",
+            help="Aucun gabarit UNITe ne la donne ; les tableaux bilan de "
+            "Saint-Cyr et de Sarnois disent 7 m.",
+        )
+    corrections = []
+    for correction in import_pdf.corrections_proposees:
+        if st.checkbox(
+            f"Poser « {correction.libelle} » sur la clôture — correction du plan",
+            key=f"correction_plan_{correction.identifiant}",
+        ):
+            corrections.append(correction.identifiant)
+        st.caption(correction.raison)
+    choix = ChoixDuPlan(
+        volume_citerne_m3=volume,
+        largeur_portail_m=largeur,
+        corrections=tuple(corrections),
+    )
+    if choix.cle() != import_pdf.choix.cle():
+        import_pdf.changer_de_choix(choix)
+        st.session_state["couches_carte"] = None
+        st.session_state["couches_carte_sans_vegetation"] = None
+
+
+def _resumer_le_plan_pdf(import_pdf) -> None:
+    """Ce sur quoi le dossier est engagé, quand le plan vient d'un PDF."""
+    calage = import_pdf.calage
+    plan = import_pdf.plan
+    st.markdown("### Ce sur quoi le dossier est engagé")
+    colonnes = st.columns(4)
+    colonnes[0].metric("Rangées de tables", f"{plan.nb_tables}")
+    colonnes[1].metric(
+        "Échelle du plan",
+        f"{calage.m_par_px_reference:.4f} m/px".replace(".", ","),
+        help="À 300 dpi, mesurée sur le pas des rangées : "
+        f"{calage.pas_dxf_m:.3f} m dans le DXF.".replace(".", ","),
+    )
+    colonnes[2].metric(
+        "Recouvrement des tables", f"{calage.recouvrement:.1%}".replace(".", ",")
+    )
+    surface = plan.surface_cloturee_m2
+    colonnes[3].metric(
+        "Surface clôturée",
+        f"{surface / 1e4:.2f} ha".replace(".", ",") if surface else "—",
+    )
+    st.caption(
+        f"« {import_pdf.lecture.source} », page {import_pdf.lecture.page}, calé sur "
+        f"« {import_pdf.source_export} » : {calage.nb_rangees_plan} rangées relevées "
+        f"sur le plan pour {calage.nb_rangees_dxf} dans le DXF. Il n'y a pas de "
+        "tableau bilan : surfaces et puissance ne sont recoupées avec aucune "
+        "déclaration."
+    )
+    _regler_le_calage(import_pdf)
+    lecture = import_pdf.lecture
+    if (
+        lecture.elements_de("bache_incendie")
+        or lecture.elements_de("portail")
+        or import_pdf.corrections_proposees
+    ):
+        st.markdown("**Ce que le plan ne dit pas de ses ouvrages**")
+        _trancher_les_ouvrages(import_pdf)
+    with st.expander("Les ouvrages du plan, aux cotes de leur gabarit"):
+        st.caption(
+            "Le plan situe et oriente chaque ouvrage ; ses formes ne sont pas à "
+            "l'échelle. Les dimensions viennent du classeur des gabarits UNITe."
+        )
+        st.dataframe(
+            [
+                {
+                    "Ouvrage": o.libelle,
+                    "Gabarit": o.gabarit or "à trancher",
+                    "Au dossier (m)": (
+                        f"{o.longueur_m:g} x {o.largeur_m:g}" if o.longueur_m else "—"
+                    ),
+                    "Dessiné au plan (m)": "{:.1f} x {:.1f}".format(*o.dessine_m),
+                    "Orientation": o.orientation,
+                }
+                for o in import_pdf.construction.ouvrages
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+
 #: L'indice affiché par la liste déroulante, pour cette exécution seulement.
 #:
 #: Il n'est pas encore celui de l'import : tant qu'on n'a pas recliqué sur
@@ -1576,7 +1947,8 @@ _requis_manquants = [
     if fichier is None
 ]
 if (
-    commune.strip()
+    plan_du_be
+    and commune.strip()
     and _requis_manquants
     # Seulement une fois qu'un premier fichier est là : réclamer les deux à
     # l'ouverture de la section, alors que la liste des prérequis est encore à
@@ -1761,25 +2133,47 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
 
+if not plan_du_be and commune.strip():
+    _importer_le_plan_pdf(
+        commune,
+        fichiers_emprise,
+        fichier_export_helioscope,
+        fichier_plan_pdf,
+        fichier_altimetrie,
+    )
+
 
 import_be_courant = st.session_state.import_be
+# Un import de l'autre source ne vaut pas pour celle-ci : l'afficher sous un
+# titre qui n'est pas le sien laisserait croire qu'il vient de ces fichiers-là.
+# Un plan PDF est le seul import sans tableau bilan.
+if (
+    import_be_courant is not None
+    and (getattr(import_be_courant, "tableau", None) is None) == plan_du_be
+):
+    import_be_courant = None
 # La commune conditionne tout ce qui suit : les contrôles s'affichent, mais la
 # validation écrit, et sans commune elle n'a pas de dossier où écrire.
 if import_be_courant is not None and commune.strip():
+    tableau = getattr(import_be_courant, "tableau", None)
+    if tableau is None:
+        # Avant de lire le plan : les ouvrages tranchés et le calage réglé
+        # changent ce que la carte, plus bas, doit montrer.
+        _resumer_le_plan_pdf(import_be_courant)
     plan = import_be_courant.plan
-    tableau = import_be_courant.tableau
     emprise_cloturee = plan.polygone_cloture
 
-    st.markdown("### Ce sur quoi le dossier est engagé")
-    colonnes = st.columns(4)
-    colonnes[0].metric("Phase", tableau.generalites["phase"])
-    colonnes[1].metric(
-        "Date du tableau", tableau.generalites["date"].strftime("%d/%m/%Y")
-    )
-    colonnes[2].metric("Indice", tableau.indice)
-    colonnes[3].metric(
-        "Puissance", f"{tableau.modules['puissance_mwc']:.5f} MWc".replace(".", ",")
-    )
+    if tableau is not None:
+        st.markdown("### Ce sur quoi le dossier est engagé")
+        colonnes = st.columns(4)
+        colonnes[0].metric("Phase", tableau.generalites["phase"])
+        colonnes[1].metric(
+            "Date du tableau", tableau.generalites["date"].strftime("%d/%m/%Y")
+        )
+        colonnes[2].metric("Indice", tableau.indice)
+        colonnes[3].metric(
+            "Puissance", f"{tableau.modules['puissance_mwc']:.5f} MWc".replace(".", ",")
+        )
 
     # Les bloquants d'abord, seuls, et rien d'autre au premier plan : ce sont
     # les seuls contrôles sur lesquels le chef de projet ait quelque chose à
@@ -1797,60 +2191,71 @@ if import_be_courant is not None and commune.strip():
 
     with st.expander(
         f"Le détail des contrôles croisés ({len(import_be_courant.controles)} "
-        "recoupements entre le plan et le tableau)"
+        + (
+            "recoupements entre le plan et le tableau)"
+            if tableau is not None
+            else "recoupements entre le plan, le calepinage et le foncier)"
+        )
     ):
         st.caption(
             "Ce que le plan porte, ce que le tableau déclare, et l'écart admis. "
             "Rien à corriger ici : un écart se traite avec le bureau d'études, "
             "sur ses fichiers."
+            if tableau is not None
+            else "Ce que le plan PDF et l'export HelioScope permettent de "
+            "recouper, et ce qu'ils ne permettent pas : sans tableau bilan, "
+            "aucune déclaration ne les confronte."
         )
         _tableau_controles(import_be_courant.controles)
 
-    with st.expander("Paramètres extraits du tableau bilan"):
-        for titre, valeurs in (
-            ("Généralités", tableau.generalites),
-            ("Structures", tableau.structures),
-            ("Modules", tableau.modules),
-            ("Postes et locaux", tableau.postes),
-        ):
-            st.markdown(f"**{titre}**")
-            st.dataframe(
-                [
-                    {"Paramètre": cle, "Valeur": str(valeur)}
-                    for cle, valeur in valeurs.items()
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-        if tableau.standards:
-            st.markdown(
-                f"**Standards UNITe pour « {tableau.generalites['type_projet']} »** "
-                "— repère de vraisemblance, pas une contrainte."
-            )
-            st.dataframe(
-                [
-                    {"Référence": cle, "Standard": str(valeur)}
-                    for cle, valeur in tableau.standards.items()
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-        if tableau.cotes:
-            st.markdown("**Cotes normalisées** — pour la génération des DP 4 au lot 4.")
-            st.dataframe(
-                [
-                    {
-                        "Ouvrage": cote.ouvrage,
-                        "Dimensions": cote.dimensions,
-                        "Ordre des cotes": cote.ordre_cotes,
-                        "Surface (m²)": cote.surface_m2,
-                        "Plateforme (m²)": cote.surface_plateforme_m2,
-                    }
-                    for cote in tableau.cotes
-                ],
-                width="stretch",
-                hide_index=True,
-            )
+    if tableau is not None:
+        with st.expander("Paramètres extraits du tableau bilan"):
+            for titre, valeurs in (
+                ("Généralités", tableau.generalites),
+                ("Structures", tableau.structures),
+                ("Modules", tableau.modules),
+                ("Postes et locaux", tableau.postes),
+            ):
+                st.markdown(f"**{titre}**")
+                st.dataframe(
+                    [
+                        {"Paramètre": cle, "Valeur": str(valeur)}
+                        for cle, valeur in valeurs.items()
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+            if tableau.standards:
+                st.markdown(
+                    f"**Standards UNITe pour « {tableau.generalites['type_projet']} »** "
+                    "— repère de vraisemblance, pas une contrainte."
+                )
+                st.dataframe(
+                    [
+                        {"Référence": cle, "Standard": str(valeur)}
+                        for cle, valeur in tableau.standards.items()
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+            if tableau.cotes:
+                st.markdown(
+                    "**Cotes normalisées** — pour la génération des DP 4 au lot 4."
+                )
+                st.dataframe(
+                    [
+                        {
+                            "Ouvrage": cote.ouvrage,
+                            "Dimensions": cote.dimensions,
+                            "Ordre des cotes": cote.ordre_cotes,
+                            "Surface (m²)": cote.surface_m2,
+                            "Plateforme (m²)": cote.surface_plateforme_m2,
+                        }
+                        for cote in tableau.cotes
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
 
     with emplacement_avertissements:
         au_be, a_lire, routine = _trier_les_avertissements(
@@ -1966,6 +2371,16 @@ if import_be_courant is not None and commune.strip():
             "Des contrôles croisés bloquants subsistent : corrigez les fichiers "
             "d'entrée. Les assouplir reviendrait à déposer un dossier faux.",
             icon="🚫",
+        )
+    elif getattr(import_be_courant, "decisions_manquantes", None):
+        # Un plan PDF situe ses ouvrages sans les dimensionner : ce qu'il ne dit
+        # pas se tranche plus haut, et l'écriture le refuserait de toute façon.
+        st.warning(
+            "Tranchez d'abord, plus haut, "
+            f"{' et '.join(import_be_courant.decisions_manquantes)} : le plan "
+            "ne les donne pas, et les supposer dessinerait un ouvrage faux de "
+            "taille.",
+            icon="⚠️",
         )
     elif coupe is None:
         st.info(

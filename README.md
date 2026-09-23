@@ -1929,6 +1929,36 @@ et les tables. Le calage de Gannay vient du fond HelioScope corrélé à l'ortho
 IGN dans le dépôt `photomontage`, traduit dans les deux réglages du lot 2 :
 longitude 3,600487654°, correction nord-sud −6,26 m.
 
+### Dans l'application
+
+La section 2 a deux portes, choisies en tête de section : le plan du bureau
+d'études, par défaut, ou le plan projet PDF sur un export HelioScope. L'entrée
+HelioScope seule avait été retirée le 07/09/2026 pour ne pas offrir deux portes
+quand une seule servait ; elle revient avec son plan, parce que l'export seul
+ne porte que les tables. Les deux portes versent dans le même import en
+mémoire, et tout ce qui suit — la carte, la coupe, la validation, les
+photographies, la génération — les sert sans savoir laquelle a été prise.
+
+Le parcours de la seconde : déposer le ZIP HelioScope et le plan PDF ;
+confirmer la correspondance de la légende, dont chaque ligne montre la couleur
+relevée sur sa pastille ; importer et caler. Viennent ensuite ce sur quoi le
+dossier est engagé — échelle mesurée, recouvrement, surface clôturée —, le
+placement sur l'ortho, réglable à deux valeurs comme au lot 2, puis ce que le
+plan ne dit pas : volume de la réserve, largeur du portail, et la correction
+du poste quand elle se propose, jamais cochée d'office. La validation attend
+que ces choix soient faits. Le dossier se nomme sans indice : l'indice vient du
+tableau bilan, et il n'y en a pas.
+
+`tests/test_app_plan_pdf.py` joue ce parcours sur Gannay, sans service en
+ligne : un carré de 500 m tient lieu d'emprise, un relevé de synthèse de
+RGE ALTI.
+
+**Ce que la carte ne montre pas encore bien.** La carte de la section 2 prend
+ses couleurs de `apercu_be.STYLES`, où les pistes et les haies ont un aplat :
+Leaflet remplit alors l'axe d'une piste comme le faisait la planche, en
+fermant son chemin. Les planches sont corrigées ; la carte, sur laquelle le
+lot 6 travaille, ne l'est pas encore.
+
 ### Lecteur PDF
 
 `pypdfium2`, c'est-à-dire PDFium, le moteur PDF de Chrome : une roue de 3,7 Mo
