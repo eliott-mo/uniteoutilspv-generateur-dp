@@ -162,8 +162,39 @@ def _televersement(application, debut_du_libelle: str):
     )
 
 
-def _televerser(application, debut_du_libelle: str, fichiers):
-    """Dépose un fichier, ou plusieurs, dans le dépôt désigné."""
+def _televerser(application, debut_du_libelle: str, fichiers, remplacer=False):
+    """Dépose un fichier, ou plusieurs, dans le dépôt désigné.
+
+    Un code de pièce — « DP 6 », « DP 7 », « DP 8 » — désigne depuis le
+    25/09/2026 le dépôt unique des photographies, et l'affectation à la pièce
+    se pose en session : c'est ce que fait le chef de projet dans le tableau,
+    et le composant qui la reçoit n'est pas pilotable par `AppTest`.
+    """
+    if debut_du_libelle in ("DP 6", "DP 7", "DP 8"):
+        depot = _televersement(application, "Photographies et photomontages")
+        # Les dépôts s'accumulent : le dépôt est unique, et deux appels
+        # successifs pour deux pièces différentes doivent tout garder. On
+        # mémorise les triplets plutôt que de relire le widget, qui rend des
+        # `UploadedFile` que `set_value` ne sait pas reprendre.
+        deja = (
+            []
+            if remplacer
+            else [
+                triplet
+                for triplet in getattr(application, "_photos_deposees", [])
+                if triplet[0] not in {f[0] for f in fichiers}
+            ]
+        )
+        tous = deja + list(fichiers)
+        application._photos_deposees = tous
+        try:
+            choix = dict(application.session_state["piece_de_la_photo"])
+        except KeyError:
+            choix = {}
+        for fichier in fichiers:
+            choix[fichier[0]] = debut_du_libelle
+        application.session_state["piece_de_la_photo"] = choix
+        return depot.set_value(tous)
     return _televersement(application, debut_du_libelle).set_value(fichiers)
 
 
@@ -1404,7 +1435,12 @@ def test_une_photo_remplacee_par_une_autre_oublie_son_point_de_vue(
     assert "vue.jpg" in application.session_state["vues_photo"]["DP 7"]
 
     carte["point"] = None
-    _televerser(application, "DP 7", [("autre.jpg", _image_png(), "image/png")])
+    # Un nouveau dépôt remplace la sélection : c'est ce que fait le navigateur
+    # quand on redépose dans le même champ.
+    _televerser(
+        application, "DP 7", [("autre.jpg", _image_png(), "image/png")],
+        remplacer=True,
+    )
     application = application.run()
     assert "vue.jpg" not in application.session_state["vues_photo"]["DP 7"]
 
@@ -1501,9 +1537,14 @@ def test_l_image_se_clique_pour_choisir_ce_que_le_cadre_garde(tmp_path, monkeypa
 # ---------------------------------------------------------------------------
 
 
-def _affectations(application):
-    """Les listes déroulantes de la galerie du rapport, dans l'ordre."""
-    return [b for b in application.selectbox if b.label == "Affectation"]
+def _cases_du_rapport(application):
+    """Les cases à cocher de la galerie du rapport, dans l'ordre.
+
+    Depuis le 25/09/2026 la galerie sert à trier — verser ou non — et la pièce
+    se choisit ensuite dans le tableau commun, avec les photographies déposées.
+    Son libellé porte la pièce que la distance suggère.
+    """
+    return [c for c in application.checkbox if c.label in ("DP 6", "DP 7", "DP 8")]
 
 
 def _carte_photos(points) -> bytes:
@@ -1568,11 +1609,13 @@ def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkey
     # Les widgets sont reconstruits à chaque exécution : la liste se relit à
     # chaque tour, sinon la seconde référence pointe sur un objet périmé et son
     # choix se perd en silence.
-    for rang, piece_voulue in enumerate(("DP 7", "DP 8")):
-        _affectations(application)[rang].set_value(piece_voulue)
+    # Les widgets sont reconstruits à chaque exécution : la liste se relit à
+    # chaque tour, sinon la seconde référence pointe sur un objet périmé.
+    for rang in range(2):
+        _cases_du_rapport(application)[rang].check()
         application = application.run()
 
-    _cliquer(application, "Ajouter ces")
+    _cliquer(application, "Verser ces")
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1609,16 +1652,13 @@ def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
     _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
     application = application.run()
 
-    # Rien n'est choisi d'avance : une visite de vingt-cinq photographies ne
+    # Rien n'est coché d'avance : une visite de vingt-cinq photographies ne
     # doit pas en verser vingt-cinq au dossier parce que personne n'a rien dit.
-    assert [boite.value for boite in _affectations(application)] == [
-        "Ne pas retenir",
-        "Ne pas retenir",
-    ]
-    # La distance au site est en revanche affichée, pour n'avoir à corriger que
-    # ce qui n'est pas évident.
-    suggestions = [c.value for c in application.caption if "suggère" in c.value]
-    assert "**DP 7**" in suggestions[0] and "**DP 8**" in suggestions[1], suggestions
+    cases = _cases_du_rapport(application)
+    assert [case.value for case in cases] == [False, False]
+    # La distance au site nomme en revanche la pièce, pour n'avoir à corriger
+    # que ce qui n'est pas évident.
+    assert [case.label for case in cases] == ["DP 7", "DP 8"]
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -1840,9 +1880,9 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
     carte = _carte_photos([("proche.jpeg", 47.85268, 1.96650, 212.0, True)])
     _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
     application = application.run()
-    _affectations(application)[0].set_value("DP 7")
+    _cases_du_rapport(application)[0].check()
     application = application.run()
-    _cliquer(application, "Ajouter ces")
+    _cliquer(application, "Verser ces")
     application = application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1986,3 +2026,99 @@ def test_le_clic_agit_sur_l_axe_que_le_rognage_touche():
 
     # Une image déjà au format n'a aucun jeu : le clic ne décide de rien.
     assert calcul((900, 600), 1.5, {"x": 200, "y": 150}) is None
+
+
+# ---------------------------------------------------------------------------
+# Les deux portes, et le tableau unique
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_les_photographies_entrent_par_un_seul_depot(tmp_path, monkeypatch):
+    """« Pas très clair la différence entre l'ajout des photos avec le rapport
+    HTML et l'ajout en simple clic-drop. » Retour d'usage du 22/09/2026.
+
+    Il y avait trois dépôts — un par pièce — plus celui du rapport, et rien ne
+    disait qu'on pouvait les combiner. Il n'y a plus qu'un dépôt de fichiers et
+    un dépôt de rapport, et la pièce se choisit ensuite, la même façon pour les
+    deux.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+
+    libelles = [t.label for t in application.get("file_uploader")]
+    assert "Photographies et photomontages" in libelles, libelles
+    for code in ("DP 6 —", "DP 7 —", "DP 8 —"):
+        assert not any(l.startswith(code) for l in libelles), libelles
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_une_photographie_sans_piece_n_entre_dans_aucune(tmp_path, monkeypatch):
+    """« À choisir » fait le défaut : rien ne part au dossier sans décision.
+
+    Une pièce proposée d'emblée ferait entrer au dossier ce qu'on n'a pas
+    choisi — le même travers que la galerie du rapport avant le 17/09/2026.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    depot = _televersement(application, "Photographies et photomontages")
+    depot.set_value([("orpheline.jpg", _image_geolocalisee(), "image/jpeg")])
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    choix = [b for b in application.selectbox if b.label == "Pièce"]
+    assert choix and choix[0].value == "À choisir", [b.value for b in choix]
+    # Sans pièce, elle n'est pas à placer : elle n'est dans aucune.
+    try:
+        vues = application.session_state["vues_photo"]
+    except KeyError:
+        vues = {}
+    assert not vues.get("DP 7")
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_le_compte_de_chaque_piece_se_lit_avant_de_generer(tmp_path, monkeypatch):
+    """« En s'assurant bien d'avoir 2 images pour DP 7, 2 pour DP 8. »
+
+    Le contrôle vivait en avertissements dispersés sous chaque pièce ; il se lit
+    d'un coup, en tête du tableau, avant de descendre placer les prises de vue.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 7", [("seule.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+
+    compteurs = {m.label: m.value for m in application.get("metric")}
+    assert compteurs.get("DP 7") == "1 / 2", compteurs
+    assert compteurs.get("DP 8") == "0 / 2", compteurs
+    assert compteurs.get("DP 6") == "0 / 2 à 3", compteurs
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_changer_une_photographie_de_piece_garde_son_placement(
+    tmp_path, monkeypatch
+):
+    """Position, direction et cadrage tiennent à la photographie, pas à la pièce.
+
+    Les reperdre en corrigeant une affectation ferait tout replacer, alors que
+    l'erreur ne porte que sur la pièce.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application, "DP 7", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+    )
+    application = application.run()
+    posee = application.session_state["vues_photo"]["DP 7"]["visite.jpg"]
+    assert posee["x"] is not None
+
+    choix = [b for b in application.selectbox if b.label == "Pièce"]
+    choix[0].set_value("DP 8")
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    vues = application.session_state["vues_photo"]
+    assert "visite.jpg" not in vues.get("DP 7", {})
+    assert vues["DP 8"]["visite.jpg"]["x"] == pytest.approx(posee["x"])

@@ -1308,6 +1308,34 @@ relecture sur son champ `origine` : y chercher une ligne de coupe ne rendrait
 rien de bon. Une version de contrat plus récente que celle que l'outil sait lire
 est refusée aussi, plutôt que reprise à moitié.
 
+### Les photographies entrent par deux portes, dans un seul tableau
+
+L'écran présentait deux blocs qui faisaient la même chose sans le dire : le
+rapport de visite avec une liste déroulante par vignette, les fichiers avec
+**trois dépôts séparés**, un par pièce. Même décision — à quelle pièce
+appartient cette photographie — deux gestes différents, et rien ne disait
+qu'on pouvait les combiner. Or une DP 6 a besoin des deux : l'image brute peut
+venir du rapport, le photomontage vient forcément du disque.
+
+Il n'y a donc plus qu'un dépôt de fichiers et un dépôt de rapport, côte à côte,
+qui versent dans le **même tableau**. Chaque photographie y a sa ligne : son
+image en grand avec le cadre de sa planche, sa pièce, son volet si c'est une
+DP 6. La galerie du rapport ne sert plus qu'à trier — cocher ce qu'on verse —
+et la pièce que la distance au site suggère nomme la case.
+
+En tête du tableau, **où en est chaque pièce** : « DP 6 : 1 / 2 à 3 »,
+« DP 7 : 2 / 2 ». Le contrôle vivait en avertissements dispersés sous chaque
+pièce ; il se lit d'un coup, avant de descendre placer les prises de vue.
+
+« À choisir » fait le défaut : une pièce proposée d'emblée ferait entrer au
+dossier ce qu'on n'a pas décidé. Et changer une photographie de pièce garde son
+placement, sa direction et son cadrage — ils tiennent à la photographie, pas à
+la pièce, et les reperdre en corrigeant une affectation ferait tout replacer.
+
+Le contrat interne ne bouge pas : la suite de la page reçoit toujours un dict
+`{code de pièce: [fichiers]}`, composé à partir de ce que le chef de projet a
+choisi. C'est ce qui a permis de ne rien toucher en aval.
+
 ### Ce que la carte montre pendant qu'on vise
 
 Le bandeau annonce le geste armé, mais il est au-dessus de la carte : il ne dit

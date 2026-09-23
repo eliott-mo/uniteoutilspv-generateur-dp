@@ -2222,21 +2222,34 @@ def emprise_cloturee_du_projet():
     return import_be.plan.polygone_cloture
 
 
-st.markdown("**Rapport de visite photos-geoloc** — la voie courte")
-st.caption(
-    "Déposez la carte HTML de votre rapport de visite : les prises de vue y "
-    "sont déjà placées, et les directions que vous y avez corrigées sur fond "
-    "satellite sont reprises telles quelles. **Choisissez sous chaque vignette "
-    "la pièce à laquelle elle appartient** ; celles que vous laissez sur « Ne "
-    "pas retenir » ne partent pas au dossier. Les photographies retenues sont "
-    "écrites dans le dossier du projet ; le rapport, lui, n'est pas conservé."
-)
-fichier_carte = st.file_uploader(
-    "Carte du rapport de visite (.htm ou .html)",
-    type=["htm", "html"],
-    accept_multiple_files=False,
-    key="carte_photos_geoloc",
-)
+col_fichiers, col_rapport = st.columns(2)
+with col_fichiers:
+    st.markdown("**Depuis vos fichiers**")
+    st.caption(
+        "Les photographies de visite et les photomontages, toutes pièces "
+        "confondues. Vous direz plus bas à quelle pièce chacune appartient."
+    )
+    fichiers_photos = st.file_uploader(
+        "Photographies et photomontages",
+        type=["jpg", "jpeg", "png", "pdf"],
+        accept_multiple_files=True,
+        key="photos_deposees",
+        label_visibility="collapsed",
+    )
+with col_rapport:
+    st.markdown("**Depuis un rapport de visite photos-geoloc**")
+    st.caption(
+        "La carte HTML de votre rapport : les prises de vue y sont déjà "
+        "placées, et les directions corrigées sur fond satellite sont reprises "
+        "telles quelles. Le rapport lui-même n'est pas conservé."
+    )
+    fichier_carte = st.file_uploader(
+        "Carte du rapport de visite (.htm ou .html)",
+        type=["htm", "html"],
+        accept_multiple_files=False,
+        key="carte_photos_geoloc",
+        label_visibility="collapsed",
+    )
 
 if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
     octets_carte = fichier_carte.getvalue()
@@ -2245,87 +2258,66 @@ if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}", icon="🚫")
     else:
-        st.caption(
-            f"« {carte_rapport.titre} » — {len(carte_rapport.points)} prise(s) de "
-            f"vue, format v{carte_rapport.version}"
-            + (f", {carte_rapport.masques} en corbeille" if carte_rapport.masques else "")
-        )
-        for message in carte_rapport.avertissements:
-            st.warning(message, icon="⚠️")
-
-        emprise_site = emprise_cloturee_du_projet()
-        choix_affectation = {}
-        # Une galerie de vignettes, et non une liste de numéros : un numéro seul
-        # ne dit pas ce qu'une photographie montre. Chacune porte le numéro
-        # qu'elle a sur les marqueurs du rapport — le seul repère commun entre
-        # les deux écrans, et il est stable.
-        # Cinq par ligne, et non quatre : la vignette sert à reconnaître une
-        # photographie, pas à la juger, et une visite en compte vingt-cinq
-        # (retour d'usage du 24/09/2026).
-        for depart in range(0, len(carte_rapport.points), VIGNETTES_PAR_LIGNE):
-            for colonne, point in zip(
-                st.columns(VIGNETTES_PAR_LIGNE),
-                carte_rapport.points[depart : depart + VIGNETTES_PAR_LIGNE],
-            ):
-                with colonne:
-                    vignette = _vignette_du_rapport(octets_carte, point.rang_fichier)
-                    if vignette is not None:
-                        st.image(vignette, width="stretch")
-                    st.caption(f"**{point.numero}.** {point.nom}")
-                    propose = _piece_proposee(point, emprise_site)
-                    choix_affectation[point.identifiant] = st.selectbox(
-                        "Affectation",
-                        options=AFFECTATIONS,
-                        index=0,
-                        key=f"affectation_{point.identifiant}",
-                        label_visibility="collapsed",
-                    )
-                    st.caption(f"↳ sa distance au site suggère **{propose}**")
-
-        retenues = [
-            code for code in choix_affectation.values()
-            if code and code != AFFECTATIONS[0]
-        ]
-        if retenues:
-            st.caption(
-                f"**{len(retenues)} photographie(s) retenue(s)** : "
-                + ", ".join(
-                    f"{code} ({retenues.count(code)})"
-                    for code in sorted(set(retenues))
-                )
-            )
-        else:
-            st.caption(
-                "Aucune photographie retenue pour l'instant. Choisissez une "
-                "pièce sous celles qui doivent partir au dossier — les autres "
-                "restent sur « Ne pas retenir »."
-            )
-
-        # « Reprendre les photographies retenues » ne disait ni d'où ni vers
-        # où — « ce n'est pas clair » (22/09/2026). Le libellé nomme maintenant
-        # le geste, et compte ce qu'il emporte.
-        if st.button(
-            f"Ajouter ces {len(retenues)} photographie(s) au projet"
-            if retenues
-            else "Ajouter les photographies choisies au projet",
-            width="stretch",
-            disabled=not retenues,
-            help="Les images choisies sont copiées dans le dossier du projet, "
-            "avec la position et la direction que le rapport leur donne. Le "
-            "rapport lui-même n'est pas conservé.",
+        with st.expander(
+            f"« {carte_rapport.titre} » — {len(carte_rapport.points)} prise(s) "
+            "de vue : choisissez celles à verser au projet",
+            expanded=True,
         ):
-            reprises = _reprendre_du_rapport(
-                _nom_dossier(commune), octets_carte, carte_rapport,
-                choix_affectation,
+            st.caption(
+                "Cochez les photographies à verser. Leur pièce se choisit "
+                "ensuite dans le tableau, avec celles que vous avez déposées — "
+                "la distance au site en propose une."
             )
-            if reprises:
-                st.success(
-                    f"{reprises} photographie(s) reprises du rapport, avec leur "
-                    "point de vue. Vérifiez-les sur la carte de la section 2."
+            emprise_site = emprise_cloturee_du_projet()
+            a_verser = {}
+            # Cinq par ligne : la vignette sert à reconnaître une
+            # photographie, pas à la juger, et une visite en compte vingt-cinq.
+            for depart in range(0, len(carte_rapport.points), VIGNETTES_PAR_LIGNE):
+                for colonne, point in zip(
+                    st.columns(VIGNETTES_PAR_LIGNE),
+                    carte_rapport.points[depart : depart + VIGNETTES_PAR_LIGNE],
+                ):
+                    with colonne:
+                        vignette = _vignette_du_rapport(
+                            octets_carte, point.rang_fichier
+                        )
+                        if vignette is not None:
+                            st.image(vignette, width="stretch")
+                        st.caption(f"**{point.numero}.** {point.nom}")
+                        propose = _piece_proposee(point, emprise_site)
+                        a_verser[point.identifiant] = (
+                            propose
+                            if st.checkbox(
+                                propose,
+                                key=f"verser_{point.identifiant}",
+                                help="Sa distance au site suggère cette pièce ; "
+                                "vous pourrez en changer dans le tableau.",
+                            )
+                            else AFFECTATIONS[0]
+                        )
+
+            cochees = [c for c in a_verser.values() if c != AFFECTATIONS[0]]
+            if st.button(
+                f"Verser ces {len(cochees)} photographie(s) au projet"
+                if cochees
+                else "Verser les photographies cochées au projet",
+                width="stretch",
+                disabled=not cochees,
+                help="Les images cochées sont copiées dans le dossier du "
+                "projet, avec la position et la direction que le rapport leur "
+                "donne. Le rapport lui-même n'est pas conservé.",
+            ):
+                reprises = _reprendre_du_rapport(
+                    _nom_dossier(commune), octets_carte, carte_rapport, a_verser
                 )
-                st.rerun()
-            else:
-                st.info("Aucune photographie retenue : rien n'a été repris.")
+                if reprises:
+                    st.success(
+                        f"{reprises} photographie(s) versées au projet, avec "
+                        "leur point de vue."
+                    )
+                    st.rerun()
+                else:
+                    st.info("Aucune photographie cochée : rien n'a été versé.")
 elif fichier_carte is not None:
     st.warning(
         "Le plan du bureau d'études doit être importé avant de reprendre un "
@@ -2333,106 +2325,6 @@ elif fichier_carte is not None:
         "proche du paysage lointain.",
         icon="⚠️",
     )
-
-st.divider()
-st.markdown("**Photographies et photomontages**")
-st.info(
-    "Une photographie qui porte sa position GPS se place toute seule. Pour les "
-    "autres — un photomontage n'en a jamais — et pour régler la **direction** "
-    "de chacune, tout se passe sur la carte de la **section 3 bis, juste en "
-    "dessous** : elle liste vos photographies avec deux boutons, 📍 Placer et "
-    "🎯 Viser. Vous pouvez y corriger à tout moment une position ou un cap, y "
-    "compris ceux lus dans l'EXIF. Sans direction visée, la planche porte le "
-    "repère sans cône.",
-    icon="🗺️",
-)
-st.caption(
-    "Elles sont conservées dans le dossier du projet ; leur assemblage au "
-    "dossier et le **report de la position de prise de vue sur un plan de "
-    "repérage** restent à construire — le dossier de référence en met un par "
-    "vue, au 1/1 500 et au 1/2 500."
-)
-
-photos = {}
-for code in PIECES_PHOTOS:
-    photos[code] = st.file_uploader(
-        f"{code} — {piece(code).titre}",
-        type=["jpg", "jpeg", "png", "pdf"],
-        accept_multiple_files=True,
-        key=f"photos_{code.replace(' ', '_')}",
-        help=(
-            "Deux images par vue au minimum : l'état actuel et son "
-            "photomontage, que la planche met côte à côte. Une troisième "
-            "montre l'aménagement paysager quand il y en a un. Une vue à une "
-            "seule image n'est pas produite."
-            if code == "DP 6"
-            else None
-        ),
-    )
-st.caption(
-    "**DP 6 demande une paire par vue** : l'image brute et son photomontage. "
-    "Elles se rattachent l'une à l'autre par la lettre de vue, plus bas, au "
-    "moment de placer les prises de vue."
-)
-
-# La page de garde prend l'insertion paysagère : c'est la vue du projet fini,
-# et c'est elle que le dossier de référence met en couverture. Une seule le
-# plus souvent — on ne demande alors rien — mais le cas de plusieurs vues
-# existe, et il faut pouvoir désigner celle qui monte en couverture.
-insertions = [f for f in photos["DP 6"] if not f.name.lower().endswith(".pdf")]
-pdfs_insertion = [f for f in photos["DP 6"] if f.name.lower().endswith(".pdf")]
-image_garde = None
-if len(insertions) == 1:
-    image_garde = insertions[0]
-    st.caption(f"Page de garde : {image_garde.name}.")
-elif len(insertions) > 1:
-    noms = [fichier.name for fichier in insertions]
-    retenu = st.radio(
-        "Insertion paysagère à mettre en page de garde",
-        options=noms,
-        index=0,
-        horizontal=True,
-    )
-    image_garde = insertions[noms.index(retenu)]
-
-if insertions:
-    # Deux par rangée, et toutes : une seule insertion prenait la largeur entière
-    # de la page pour une vignette de contrôle, et au-delà de quatre la vignette
-    # manquante pouvait être celle de la couverture.
-    par_rangee = 2 if len(insertions) <= 2 else 4
-    for depart in range(0, len(insertions), par_rangee):
-        rangee = insertions[depart : depart + par_rangee]
-        colonnes = st.columns(par_rangee)
-        for colonne, fichier in zip(colonnes, rangee):
-            with colonne:
-                st.image(
-                    fichier,
-                    caption=("couverture — " if image_garde is fichier else "")
-                    + fichier.name,
-                    width="stretch",
-                )
-else:
-    if pdfs_insertion:
-        st.warning(
-            "L'insertion paysagère déposée est un PDF : la page de garde attend "
-            "une image et gardera son cadre tireté. Déposez aussi le JPG ou le "
-            "PNG de la vue.",
-            icon="⚠️",
-        )
-    st.caption(
-        "Sans insertion paysagère, un cadre tireté tient la place en page de "
-        "garde et la nomme."
-    )
-
-# ---------------------------------------------------------------------------
-# Les prises de vue, saisies sur la carte de la section 2
-# ---------------------------------------------------------------------------
-#
-# Le bloc se remplit ici, où les photographies viennent d'être déposées, mais
-# s'affiche là-haut, sous la carte : c'est elle qui reçoit les clics. Un seul
-# aller-retour, et toutes les prises se placent d'affilée.
-
-
 def _lire_exif_une_fois(code: str, fichier) -> None:
     """Pré-remplit la prise de vue avec ce que la photographie sait d'elle-même.
 
@@ -2691,26 +2583,249 @@ def _apercu_cliquable(code: str, fichier, rapport: float, vue: dict) -> float | 
     return perte
 
 
-def _fichiers_de_la_piece(code: str, photos_par_piece: dict) -> list:
-    """Les photographies d'une pièce, déposées et reprises d'un rapport.
+# ---------------------------------------------------------------------------
+# Les photographies entrent ici, par deux portes et dans un seul tableau
+# ---------------------------------------------------------------------------
+#
+# L'écran présentait deux blocs qui faisaient la même chose sans le dire : le
+# rapport de visite avec une liste déroulante par vignette, les fichiers avec
+# trois dépôts séparés — un par pièce. Même décision, deux gestes différents, et
+# rien ne disait qu'on pouvait les combiner. Or une DP 6 a besoin des deux :
+# l'image brute peut venir du rapport, le photomontage vient forcément du
+# disque. « Pas très clair la différence entre l'ajout des photos avec le
+# rapport HTML et l'ajout en simple clic-drop » (retour d'usage du 22/09/2026).
+#
+# Les deux portes versent donc dans le même tableau, où chaque photographie dit
+# à quelle pièce elle appartient. Le contrat interne ne change pas : la suite de
+# la page reçoit toujours un dict `{code de pièce: [fichiers]}`, composé ici à
+# partir de ce que le chef de projet a choisi.
 
-    Les deux se présentent pareil et se placent pareil : rien ne les distingue
-    une fois écrites, et ce bloc n'a pas à savoir d'où elles viennent.
+#: Ce qu'une photographie peut devenir. « À choisir » fait le défaut : une
+#: pièce proposée d'emblée ferait partir au dossier ce qu'on n'a pas décidé.
+SANS_PIECE = "À choisir"
+PIECES_AU_CHOIX = (SANS_PIECE, "DP 6", "DP 7", "DP 8", "Ne pas retenir")
+
+#: Nombre de photographies attendu par pièce : un minimum et un maximum. DP 6
+#: décline deux ou trois volets d'un même point de vue ; DP 7 et DP 8 en portent
+#: exactement deux, et leur planche a deux emplacements fixes.
+COMPTE_ATTENDU = {"DP 6": (2, 3), "DP 7": (2, 2), "DP 8": (2, 2)}
+
+
+def _pieces_choisies() -> dict:
+    """La pièce de chaque photographie, par nom de fichier.
+
+    En session : un choix doit survivre au redéploiement de la page, et le nom
+    du fichier est le seul identifiant qui traverse les exécutions.
     """
-    deposees = [
-        f for f in (photos_par_piece.get(code) or [])
-        if not f.name.lower().endswith(".pdf")
-    ]
-    reprises = [
+    return st.session_state.setdefault("piece_de_la_photo", {})
+
+
+def _piece_choisie(nom: str) -> str:
+    return _pieces_choisies().get(nom, SANS_PIECE)
+
+
+def _fichiers_repris() -> list:
+    """Les photographies déjà versées d'un rapport, toutes pièces confondues.
+
+    Elles n'ont pas de dépôt à l'écran — ce sont des fichiers déjà écrits — et
+    rejoignent les autres dans le tableau commun : « rien ne les distingue une
+    fois écrites ».
+    """
+    return [
         _PhotoReprise(nom, chemin)
-        for nom, chemin in sorted((_photos_reprises().get(code) or {}).items())
+        for par_nom in _photos_reprises().values()
+        for nom, chemin in sorted(par_nom.items())
     ]
-    return deposees + reprises
 
 
-def _source_image(fichier):
-    """De quoi ouvrir l'image, qu'elle soit déposée ou déjà sur le disque."""
-    return fichier.chemin if isinstance(fichier, _PhotoReprise) else fichier
+def _reprises_a_ranger() -> None:
+    """Donne sa pièce à chaque photographie versée d'un rapport.
+
+    Le versement la connaît déjà — c'est la case cochée dans la galerie — et
+    la pose ici pour que le tableau commun la traite comme n'importe quelle
+    autre. Une pièce déjà choisie à la main n'est pas écrasée : corriger une
+    affectation ne doit pas être défait au prochain passage.
+    """
+    choisies = _pieces_choisies()
+    for code, par_nom in _photos_reprises().items():
+        for nom in par_nom:
+            choisies.setdefault(nom, code)
+
+
+def _sans_doublon(fichiers) -> list:
+    """Une ligne par nom de fichier, la première rencontrée.
+
+    Deux fichiers de même nom s'écrasent sur le disque, et le message qui le
+    dit est juste au-dessus : le tableau n'a pas à en montrer deux lignes, dont
+    les boutons porteraient les mêmes clés — Streamlit les refuse. Le cas se
+    présente aussi quand une photographie versée d'un rapport est redéposée à
+    la main.
+    """
+    vus = set()
+    retenus = []
+    for fichier in fichiers:
+        if fichier.name in vus:
+            continue
+        vus.add(fichier.name)
+        retenus.append(fichier)
+    return retenus
+
+
+def _photos_par_piece(fichiers) -> dict:
+    """Les fichiers rangés par pièce, dans la forme que le reste de la page attend.
+
+    Déposées et reprises d'un rapport s'y mêlent : rien ne les distingue une
+    fois écrites, et ce qui suit n'a pas à savoir d'où elles viennent. Les PDF
+    sont écartés — ils se joignent au dossier sans aller sur une planche.
+    """
+    par_piece = {code: [] for code in PIECES_PHOTOS}
+    for fichier in fichiers or []:
+        if fichier.name.lower().endswith(".pdf"):
+            continue
+        code = _piece_choisie(fichier.name)
+        if code in par_piece:
+            par_piece[code].append(fichier)
+    return par_piece
+
+
+def _compte_des_pieces(photos_par_piece: dict) -> list:
+    """Où en est chaque pièce, dans l'ordre du dossier.
+
+    Rend des triplets `(code, nombre, message)` — le message est vide quand le
+    compte est bon. Le contrôle vivait en avertissements dispersés sous chaque
+    pièce ; il se lit ici d'un coup, avant de descendre placer les prises de vue.
+    """
+    etat = []
+    for code in PIECES_PHOTOS:
+        nombre = len(photos_par_piece.get(code) or [])
+        minimum, maximum = COMPTE_ATTENDU[code]
+        if nombre < minimum:
+            message = f"il en manque {minimum - nombre}"
+        elif nombre > maximum:
+            message = f"{nombre - maximum} de trop"
+        else:
+            message = ""
+        etat.append((code, nombre, message))
+    return etat
+
+
+def _montrer_l_image(fichier) -> None:
+    """L'image telle quelle, tant qu'aucune pièce ne lui impose de format."""
+    try:
+        octets = (
+            Path(fichier.chemin).read_bytes()
+            if isinstance(fichier, _PhotoReprise)
+            else fichier.getvalue()
+        )
+        st.image(octets, width="stretch")
+    except (OSError, ValueError) as erreur:
+        st.caption(f"⚠️ aperçu indisponible ({erreur})")
+
+
+def _changer_de_piece(nom: str, avant: str, apres: str) -> None:
+    """Déplace une photographie d'une pièce à l'autre, sans perdre son travail.
+
+    Position, direction et cadrage sont attachés à la photographie, pas à la
+    pièce : les reperdre en corrigeant une affectation ferait tout replacer.
+    """
+    _pieces_choisies()[nom] = apres
+    if avant not in PIECES_PHOTOS:
+        return
+    vue = _vues_photo().get(avant, {}).pop(nom, None)
+    if vue is not None and apres in PIECES_PHOTOS:
+        _vues_photo().setdefault(apres, {})[nom] = vue
+
+
+# ---------------------------------------------------------------------------
+# Les prises de vue, saisies sur la carte de la section 2
+# ---------------------------------------------------------------------------
+#
+# Le bloc se remplit ici, où les photographies viennent d'être déposées, mais
+# s'affiche là-haut, sous la carte : c'est elle qui reçoit les clics. Un seul
+# aller-retour, et toutes les prises se placent d'affilée.
+
+
+def _ligne_de_choix(fichier, rapport: float, plusieurs_vues: bool) -> None:
+    """Une photographie dans le tableau d'entrée : sa pièce, son cadre, son volet.
+
+    Ce qui se décide ici tient à l'image seule. Le placement et la visée, qui
+    demandent la carte, se font plus bas, sous elle.
+    """
+    # Le seuil de la planche, et non un second : deux seuils construits chacun
+    # de leur côté finissent par diverger, la voirie l'a montré le 19/09/2026.
+    from dp_socle.planches.photographies import ROGNAGE_SIGNALE
+
+    code = _piece_choisie(fichier.name)
+    vue = _vue_photo(code, fichier.name) if code in PIECES_PHOTOS else {}
+
+    apercu, champs = st.columns([2, 4])
+    with apercu:
+        if code in PIECES_PHOTOS:
+            perte = _apercu_cliquable(code, fichier, rapport, vue)
+        else:
+            # Sans pièce, pas de format d'emplacement : on montre l'image telle
+            # qu'elle est, et le cadre arrivera avec la pièce.
+            perte = None
+            _montrer_l_image(fichier)
+    with champs:
+        st.write(f"**{fichier.name}**")
+        choisie = st.selectbox(
+            "Pièce",
+            options=PIECES_AU_CHOIX,
+            index=PIECES_AU_CHOIX.index(code)
+            if code in PIECES_AU_CHOIX
+            else 0,
+            key=f"piece_de_{fichier.name}",
+        )
+        if choisie != code:
+            _changer_de_piece(fichier.name, code, choisie)
+            st.rerun()
+
+        if code == "DP 6":
+            vue["volet"] = st.selectbox(
+                "Ce que l'image montre",
+                options=list(range(len(INTITULES_DP6))),
+                index=min(vue.get("volet", 0), len(INTITULES_DP6) - 1),
+                format_func=lambda rang: f"{rang + 1}. {INTITULES_DP6[rang]}",
+                key=f"volet_de_{fichier.name}",
+            )
+            if plusieurs_vues:
+                vue["vue"] = st.selectbox(
+                    "Point de vue",
+                    options=[chr(ord("A") + i) for i in range(4)],
+                    index=[chr(ord("A") + i) for i in range(4)].index(
+                        vue.get("vue", "A")
+                    ),
+                    key=f"vue_de_{fichier.name}",
+                    help="Une planche par point de vue. Les volets d'une même "
+                    "vue partagent leur position : c'est la même prise.",
+                )
+            else:
+                vue["vue"] = "A"
+
+        if perte is not None and perte < RIEN_A_ROGNER:
+            st.caption(
+                "Rien à rogner : cette photographie a déjà le format de son "
+                "emplacement. Elle partira entière."
+            )
+        elif perte is not None:
+            st.caption(
+                f"**Cliquez sur l'image** pour choisir ce que le cadre garde. "
+                f"Il laisse de côté {perte:.0%} de la photographie"
+                + (
+                    " — c'est beaucoup. Une insertion paysagère se photographie "
+                    "en paysage large."
+                    if perte >= ROGNAGE_SIGNALE
+                    else "."
+                )
+            )
+        elif code == SANS_PIECE:
+            st.caption(
+                "Choisissez sa pièce : le cadre de la planche s'affichera "
+                "alors sur l'image, et se réglera d'un clic."
+            )
+
+
 
 #: Nombre d'emplacements de chaque pièce photographique, qui fixe le format des
 #: images : 3,11:1 pour les trois volets d'une DP 6, 1,92:1 pour les deux
@@ -2830,23 +2945,18 @@ def _controler_les_volets_dp6(fichiers) -> None:
             )
 
 
-def _ligne_de_prise(
-    code: str, fichier, rapport: float = 1.5, plusieurs_vues: bool = False
-) -> None:
-    """Une photographie : son aperçu recadré, son état, et ses deux boutons."""
-    # Le seuil de la planche, et non un second : deux seuils construits chacun
-    # de leur côté finissent par diverger, la voirie l'a montré le 19/09/2026.
-    from dp_socle.planches.photographies import ROGNAGE_SIGNALE
+def _ligne_de_prise(code: str, fichier) -> None:
+    """Une photographie sous la carte : où elle est, ce qu'elle regarde.
 
+    Ne reste ici que ce qui demande la carte. La pièce, le volet et le cadrage
+    se décident en section 3, dans le tableau d'entrée, où l'on voit l'image en
+    grand — « une partie choix des photos », puis le placement (retour d'usage
+    du 22/09/2026).
+    """
     vue = _vue_photo(code, fichier.name)
-    # Un tiers de la largeur pour l'image, le reste pour les champs : « il
-    # faudrait que l'image soit affichée en plus grand » (23/09/2026). À la
-    # taille d'une vignette on ne voyait pas ce que le cadre retenait.
-    vignette, libelle = st.columns([2, 4])
-    with vignette:
-        perte = _apercu_cliquable(code, fichier, rapport, vue)
+    libelle, placer, viser = st.columns([4, 1, 1])
     with libelle:
-        st.write(f"{fichier.name}")
+        st.write(f"**{fichier.name}**")
         st.caption(_etat_de_la_prise(vue))
         # Le reproche de n'avoir pas de position se tait dès qu'elle est
         # posée : il s'affichait sous une ligne annonçant « placée sur la
@@ -2856,80 +2966,26 @@ def _ligne_de_prise(
             vue.get("exif_sans_position") and vue.get("x") is not None
         ):
             st.caption(f"⚠️ {vue['exif_message']}")
-        if code == "DP 6":
-            # Deux choses distinctes, et le sélecteur n'en disait qu'une.
-            #
-            # Le **volet** dit ce que l'image montre — l'état actuel, le
-            # photomontage, le photomontage avec les mesures paysagères — et
-            # c'est l'ordre des trois cadres de la planche. Il se déduisait de
-            # l'ordre de dépôt, ce qui ne se voyait nulle part.
-            #
-            # La **vue** dit de quel point de vue il s'agit : « Vue A » et
-            # « Vue B » sont deux planches, comme aux pages 12 et 13 du dossier
-            # de référence, où les trois volets d'une planche portent tous la
-            # même lettre. Elle ne se demande que s'il y a de quoi faire une
-            # seconde planche (retour d'usage du 23/09/2026 : les deux étaient
-            # confondues).
-            vue["volet"] = st.selectbox(
-                "Ce que l'image montre",
-                options=list(range(len(INTITULES_DP6))),
-                index=min(vue.get("volet", 0), len(INTITULES_DP6) - 1),
-                format_func=lambda rang: f"{rang + 1}. {INTITULES_DP6[rang]}",
-                key=f"volet_de_{code}_{fichier.name}",
-            )
-            if plusieurs_vues:
-                vue["vue"] = st.selectbox(
-                    "Point de vue",
-                    options=[chr(ord("A") + i) for i in range(4)],
-                    index=[chr(ord("A") + i) for i in range(4)].index(
-                        vue.get("vue", "A")
-                    ),
-                    key=f"vue_de_{code}_{fichier.name}",
-                    help="Une planche par point de vue. Les volets d'une même "
-                    "vue partagent leur position : c'est la même prise.",
-                )
-            else:
-                vue["vue"] = "A"
-        # Le cadrage se fait sur l'image, au clic : plus de curseur à pousser à
-        # l'aveugle. Ne reste ici que ce qu'il en coûte.
-        if perte is not None and perte < RIEN_A_ROGNER:
-            st.caption(
-                "Rien à rogner : cette photographie a déjà le format de son "
-                "emplacement. Elle partira entière."
-            )
-        elif perte is not None:
-            st.caption(
-                f"**Cliquez sur l'image** pour choisir ce que le cadre garde. "
-                f"Il laisse de côté {perte:.0%} de la photographie"
-                + (" — c'est beaucoup. Une insertion paysagère se "
-                   "photographie en paysage large."
-                   if perte >= ROGNAGE_SIGNALE else ".")
-            )
-
-        placer, viser = st.columns(2)
-        with placer:
-            if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}",
-                         width="stretch"):
-                _armer_sur_photo("placer_vue", code, fichier.name)
-                st.rerun()
-            # Sous le bouton, et non dans la ligne d'état : « si une photo a
-            # déjà été placée, alors l'écrire sous le bouton pour facilement
-            # l'identifier » (retour d'usage du 24/09/2026). Ce qui reste à
-            # faire se lit alors colonne par colonne.
-            st.caption(
-                "✅ placée" if vue.get("x") is not None else "⬜ à placer"
-            )
-        with viser:
-            if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
-                         disabled=vue.get("x") is None, width="stretch"):
-                _armer_sur_photo("viser_vue", code, fichier.name)
-                st.rerun()
-            if vue.get("cap_confirme"):
-                st.caption(f"✅ visée {vue['cap_deg']:.0f}°")
-            elif vue.get("cap_deg") is not None:
-                st.caption(f"⬜ {vue['cap_deg']:.0f}° proposés, à confirmer")
-            else:
-                st.caption("⬜ à viser")
+    with placer:
+        if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}",
+                     width="stretch"):
+            _armer_sur_photo("placer_vue", code, fichier.name)
+            st.rerun()
+        # Sous le bouton, et non dans la ligne d'état : « si une photo a déjà
+        # été placée, alors l'écrire sous le bouton pour facilement
+        # l'identifier » (retour d'usage du 24/09/2026).
+        st.caption("✅ placée" if vue.get("x") is not None else "⬜ à placer")
+    with viser:
+        if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
+                     disabled=vue.get("x") is None, width="stretch"):
+            _armer_sur_photo("viser_vue", code, fichier.name)
+            st.rerun()
+        if vue.get("cap_confirme"):
+            st.caption(f"✅ visée {vue['cap_deg']:.0f}°")
+        elif vue.get("cap_deg") is not None:
+            st.caption(f"⬜ {vue['cap_deg']:.0f}° proposés, à confirmer")
+        else:
+            st.caption("⬜ à viser")
 
 
 def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
@@ -2947,12 +3003,12 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
     # photographie » à un chef de projet qui venait d'en reprendre douze : ni
     # bouton pour les placer, ni curseur pour les recadrer (17/09/2026).
     par_piece = {
-        code: _fichiers_de_la_piece(code, photos_par_piece) for code in PIECES_PHOTOS
+        code: list(photos_par_piece.get(code) or []) for code in PIECES_PHOTOS
     }
     if not any(par_piece.values()):
         st.caption(
-            "Aucune photographie, ni déposée ni reprise d'un rapport : rien à "
-            "placer sur la carte. Les dépôts sont juste au-dessus, en section 3."
+            "Aucune photographie à placer. Ajoutez-en en section 3 — par vos "
+            "fichiers ou par un rapport de visite — et donnez-leur une pièce."
         )
         return
     st.caption(
@@ -2966,22 +3022,28 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
         if not fichiers:
             continue
         st.markdown(f"**{code}** — {piece(code).titre}")
-        # Le rapport de l'emplacement, celui que la planche retiendra : c'est à
-        # lui que l'aperçu recadre, pour que ce qu'on voit ici soit ce qu'on
-        # aura. Voir `planches.photographies`.
-        rapport = _rapport_des_emplacements(code)
-        # Au-delà de trois volets, il y a forcément un second point de vue :
-        # une planche n'en décline pas davantage.
-        plusieurs_vues = code == "DP 6" and len(fichiers) > len(INTITULES_DP6)
         for fichier in fichiers:
-            if not isinstance(fichier, _PhotoReprise):
-                _lire_exif_une_fois(code, fichier)
-            _ligne_de_prise(code, fichier, rapport, plusieurs_vues)
+            _ligne_de_prise(code, fichier)
         if code == "DP 6":
             _controler_les_volets_dp6(fichiers)
         else:
             _controler_le_compte(code, fichiers)
 
+
+# Le tableau commun : ce que les deux portes ont versé, et la pièce de chacune.
+_reprises_a_ranger()
+photos_deposees = list(fichiers_photos or []) + _fichiers_repris()
+toutes_les_photos = _sans_doublon(photos_deposees)
+photos = _photos_par_piece(toutes_les_photos)
+# Les PDF ne vont sur aucune planche, mais la page de garde doit savoir qu'on
+# en a déposé un en DP 6 : sans cela elle rendrait son cadre tireté sans un mot.
+pdfs_par_piece = {
+    code: [
+        f for f in photos_deposees
+        if _piece_choisie(f.name) == code and f.name.lower().endswith(".pdf")
+    ]
+    for code in PIECES_PHOTOS
+}
 
 #: Les pièces où deux fichiers portent le même nom, avec les noms en cause.
 #:
@@ -2989,8 +3051,12 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
 #: le second est perdu sans un mot. Le chef de projet renomme, ou retire : ce
 #: n'est pas à l'outil de choisir lequel des deux survit.
 photos_en_double = {}
-for code, fichiers in photos.items():
-    noms_deposes = [fichier.name for fichier in fichiers or []]
+for code in PIECES_PHOTOS:
+    noms_deposes = [
+        fichier.name
+        for fichier in photos_deposees
+        if _piece_choisie(fichier.name) == code
+    ]
     doubles = sorted({nom for nom in noms_deposes if noms_deposes.count(nom) > 1})
     if doubles:
         photos_en_double[code] = doubles
@@ -3000,6 +3066,97 @@ for code, doubles in photos_en_double.items():
         "Le second écraserait le premier dans le dossier du projet — renommez-en "
         "un avant de générer.",
         icon="🚫",
+    )
+
+
+
+if toutes_les_photos:
+    st.markdown("### Les photographies du projet")
+    st.caption(
+        "Une ligne par photographie, d'où qu'elle vienne. Dites à quelle pièce "
+        "chacune appartient, et cliquez sur l'image pour choisir ce que son "
+        "cadre garde. Le placement et la direction se règlent plus bas, sur la "
+        "carte."
+    )
+    compte = _compte_des_pieces(photos)
+    colonnes_compte = st.columns(len(compte))
+    for colonne, (code, nombre, manque) in zip(colonnes_compte, compte):
+        minimum, maximum = COMPTE_ATTENDU[code]
+        attendu = f"{minimum}" if minimum == maximum else f"{minimum} à {maximum}"
+        colonne.metric(
+            code,
+            f"{nombre} / {attendu}",
+            delta=manque or "au compte",
+            delta_color="inverse" if manque else "off",
+        )
+
+    plusieurs_vues = len(photos["DP 6"]) > len(INTITULES_DP6)
+    for fichier in toutes_les_photos:
+        code = _piece_choisie(fichier.name)
+        if not isinstance(fichier, _PhotoReprise) and code in PIECES_PHOTOS:
+            _lire_exif_une_fois(code, fichier)
+        rapport = (
+            _rapport_des_emplacements(code) if code in PIECES_PHOTOS else 1.5
+        )
+        _ligne_de_choix(fichier, rapport, plusieurs_vues)
+        st.divider()
+
+    for code in PIECES_PHOTOS:
+        if code == "DP 6":
+            _controler_les_volets_dp6(photos[code])
+else:
+    st.caption(
+        "Aucune photographie pour l'instant. Déposez vos fichiers, ou la carte "
+        "d'un rapport de visite — les deux se retrouvent dans le même tableau."
+    )
+
+# La page de garde prend l'insertion paysagère : c'est la vue du projet fini,
+# et c'est elle que le dossier de référence met en couverture. Une seule le
+# plus souvent — on ne demande alors rien — mais le cas de plusieurs vues
+# existe, et il faut pouvoir désigner celle qui monte en couverture.
+insertions = list(photos["DP 6"])
+pdfs_insertion = pdfs_par_piece["DP 6"]
+image_garde = None
+if len(insertions) == 1:
+    image_garde = insertions[0]
+    st.caption(f"Page de garde : {image_garde.name}.")
+elif len(insertions) > 1:
+    noms = [fichier.name for fichier in insertions]
+    retenu = st.radio(
+        "Insertion paysagère à mettre en page de garde",
+        options=noms,
+        index=0,
+        horizontal=True,
+    )
+    image_garde = insertions[noms.index(retenu)]
+
+if insertions:
+    # Deux par rangée, et toutes : une seule insertion prenait la largeur entière
+    # de la page pour une vignette de contrôle, et au-delà de quatre la vignette
+    # manquante pouvait être celle de la couverture.
+    par_rangee = 2 if len(insertions) <= 2 else 4
+    for depart in range(0, len(insertions), par_rangee):
+        rangee = insertions[depart : depart + par_rangee]
+        colonnes = st.columns(par_rangee)
+        for colonne, fichier in zip(colonnes, rangee):
+            with colonne:
+                st.image(
+                    fichier,
+                    caption=("couverture — " if image_garde is fichier else "")
+                    + fichier.name,
+                    width="stretch",
+                )
+else:
+    if pdfs_insertion:
+        st.warning(
+            "L'insertion paysagère déposée est un PDF : la page de garde attend "
+            "une image et gardera son cadre tireté. Déposez aussi le JPG ou le "
+            "PNG de la vue.",
+            icon="⚠️",
+        )
+    st.caption(
+        "Sans insertion paysagère, un cadre tireté tient la place en page de "
+        "garde et la nomme."
     )
 
 
@@ -3121,14 +3278,11 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
 
     photographies = {}
     for code in PIECES_PHOTOS:
-        fichiers = [
-            f for f in (photos_par_piece.get(code) or [])
-            if not f.name.lower().endswith(".pdf")
-        ]
-        fichiers += [
-            _PhotoReprise(nom, chemin)
-            for nom, chemin in sorted((_photos_reprises().get(code) or {}).items())
-        ]
+        # Déposées et versées d'un rapport y sont déjà mêlées, et les PDF
+        # écartés : `_photos_par_piece` est la seule source depuis le
+        # 25/09/2026. Les réunir une seconde fois ici doublait chaque
+        # photographie reprise.
+        fichiers = list(photos_par_piece.get(code) or [])
         if not fichiers:
             continue
         dossier = DOSSIER_PROJETS / nom_projet / code.replace(" ", "_")
