@@ -45,7 +45,7 @@ from dp_socle.import_be import (
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "exemples"
 
-ISLETTES = EXEMPLES / "les-islettes-HELIO"
+ISLETTES = EXEMPLES / "les-islettes-PDF"
 EXPORT = ISLETTES / "HelioScope ABO_55_Les Islettes Export.zip"
 EMPRISE = ISLETTES / "abo_55_les-islettes-geoperso-1-02_09_2026_13_35.zip"
 

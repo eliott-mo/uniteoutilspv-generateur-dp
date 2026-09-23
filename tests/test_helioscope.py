@@ -32,18 +32,18 @@ from dp_socle.helioscope import (
 EXEMPLES = Path(__file__).resolve().parent.parent / "exemples"
 
 #: Design complet : Les Islettes (55), section électrique terminée.
-EXPORT_COMPLET = EXEMPLES / "les-islettes-HELIO" / "HelioScope ABO_55_Les Islettes Export.zip"
+EXPORT_COMPLET = EXEMPLES / "les-islettes-PDF" / "HelioScope ABO_55_Les Islettes Export.zip"
 EMPRISE_ISLETTES = (
-    EXEMPLES / "les-islettes-HELIO" / "abo_55_les-islettes-geoperso-1-02_09_2026_13_35.zip"
+    EXEMPLES / "les-islettes-PDF" / "abo_55_les-islettes-geoperso-1-02_09_2026_13_35.zip"
 )
 #: Second design du même projet, en pose paysage : sert à confronter les deux
 #: latitudes déduites, et à couvrir le cas où le rampant est le petit côté.
 EXPORT_COMPLET_2 = (
-    EXEMPLES / "les-islettes-HELIO" / "HelioScope ABO_55_Les Islettes Export_2.zip"
+    EXEMPLES / "les-islettes-PDF" / "HelioScope ABO_55_Les Islettes Export_2.zip"
 )
 #: Design exporté avant la fin de la section électrique : aucun module, alors
 #: que la zone, les reculs et les zones évitées sont bien là.
-EXPORT_SANS_MODULES = EXEMPLES / "bray-saint-aignan-HELIO" / "helioscope_export.zip"
+EXPORT_SANS_MODULES = EXEMPLES / "bray-saint-aignan-PDF" / "helioscope_export.zip"
 
 besoin_export_complet = pytest.mark.skipif(
     not EXPORT_COMPLET.exists(), reason=f"export de référence absent : {EXPORT_COMPLET}"
