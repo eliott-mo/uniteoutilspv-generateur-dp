@@ -300,7 +300,7 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
     1/10 000, où ses traits se confondraient en un aplat tout en pesant leur
     poids dans le PDF. Le contour des rangées suffit à la lecture.
     """
-    from .palette import STYLES, objets_a_dessiner
+    from .palette import objets_a_dessiner, style_de
 
     messages: list[str] = []
     if contrat is None:
@@ -312,7 +312,6 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
             "lui a été transmis. Seul le contour du site y figure."
         ]
     for categorie, geometries in objets_a_dessiner(contrat, messages):
-        style = STYLES[categorie].style
         for geometrie in geometries:
             # Découpé, et non pas seulement écarté s'il est dehors : un objet à
             # cheval sur le bord du panneau était dessiné en entier et débordait
@@ -320,7 +319,7 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
             # sa zone de dessin, dont le panneau n'est qu'une part.
             visible = geometrie.intersection(fenetre)
             if not visible.is_empty:
-                planche.ajouter_geometrie(visible, style)
+                planche.ajouter_geometrie(visible, style_de(categorie, geometrie))
     return messages
 
 

@@ -36,7 +36,7 @@ from .commun import Sortie, nouvelle_planche
 from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
 from .legende import dessiner_legende
 from .modules import tracer_trame, trame_du_projet
-from .palette import STYLES, construire_legende, objets_a_dessiner
+from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
 from .primitives import TRAIT_AXE, repere_coupe
 
 NUMERO = "DP 2"
@@ -115,12 +115,11 @@ def generer(
     hors_cadre = []
     tables_visibles = []
     for categorie, geometries in objets:
-        style = STYLES[categorie].style
         for geometrie in geometries:
             if not cadre_planche.intersects(geometrie):
                 hors_cadre.append(categorie)
                 continue
-            planche.ajouter_geometrie(geometrie, style)
+            planche.ajouter_geometrie(geometrie, style_de(categorie, geometrie))
             if categorie == "tables_pv":
                 tables_visibles.append(geometrie)
 

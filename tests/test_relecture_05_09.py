@@ -78,6 +78,47 @@ def test_un_contour_minuscule_n_est_pas_un_ouvrage():
     assert not messages
 
 
+def test_un_axe_qui_boucle_n_est_pas_une_surface():
+    """Le cercle de piste existante du plan de Gannay est un axe, pas un disque.
+
+    Un plan projet PDF (lot 2ter) ne donne d'une piste que son axe. Mesuré le
+    23/09/2026 : cet axe de 189 m, fermé sur lui-même, était recousu en un
+    disque de voie lourde de 2 828 m². Un contour que la CAO a laissé ouvert
+    arrive en morceaux ; une ligne qui se referme d'un seul tenant est un axe.
+    """
+    from shapely.geometry import Point
+
+    cercle = LineString(Point(0.0, 0.0).buffer(30.0).exterior.coords)
+    messages = []
+    assert fermer_les_contours([cercle], "piste_lourde_existante", messages) == [cercle]
+    assert not messages
+    # Les morceaux d'un contour, eux, se recousent toujours.
+    morceaux = _contour_en_morceaux(11.7, 9.3)
+    recousu = fermer_les_contours(morceaux + [cercle], "citerne_refroidissement", messages)
+    assert cercle in recousu
+    assert sum(1 for g in recousu if g.geom_type == "Polygon") == 1
+
+
+def test_un_axe_se_dessine_en_trait_dans_la_teinte_de_l_aplat():
+    """Une ligne tracée avec un style à aplat se remplit : le moteur la ferme.
+
+    La piste à créer de Gannay longe trois côtés du site : dessinée avec le
+    style de la voie lourde, elle devenait un aplat gris de tout l'intérieur.
+    Elle se dessine en trait, dans la teinte que montre la légende.
+    """
+    from dp_socle.planches.palette import STYLES, style_de
+
+    piste = LineString([(0.0, 0.0), (100.0, 0.0), (100.0, 80.0), (0.0, 80.0)])
+    aplat = STYLES["piste_lourde_a_creer"].style
+    trait = style_de("piste_lourde_a_creer", piste)
+    assert 'fill="none"' in trait.attributs()
+    assert trait.trait == aplat.remplissage
+    # Une surface garde le style de sa catégorie, et un linéaire par nature —
+    # la clôture — le sien.
+    assert style_de("piste_lourde_a_creer", piste.buffer(2.0)) is aplat
+    assert style_de("cloture", piste) is STYLES["cloture"].style
+
+
 # ---------------------------------------------------------------------------
 # La maille du grillage est une dimension, pas un figuré
 # ---------------------------------------------------------------------------

@@ -765,10 +765,21 @@ def fermer_les_contours(geometries, categorie: str, messages: list) -> list:
 
     Ce qui reste ouvert est rendu tel quel, et la recomposition est écrite au
     rapport : ce n'est pas la géométrie du calque.
+
+    Une ligne **déjà fermée sur elle-même** n'est pas un contour laissé ouvert :
+    un producteur qui ferme un contour écrit un polygone — le lot 2bis le fait
+    de toute polyligne fermée du DXF. C'est un axe qui boucle, et il le reste.
+    Mesuré le 23/09/2026 sur le contrat du plan PDF de Gannay (lot 2ter) : le
+    cercle de piste existante, un axe de 189 m, devenait un disque de voie
+    lourde de 2 828 m².
     """
     if STYLES[categorie].style.remplissage in (None, "none"):
         return geometries
-    lignes = [g for g in geometries if g.geom_type in ("LineString", "LinearRing")]
+    lignes = [
+        g
+        for g in geometries
+        if g.geom_type in ("LineString", "LinearRing") and not _fermee(g)
+    ]
     if not lignes:
         return geometries
 
@@ -787,10 +798,10 @@ def fermer_les_contours(geometries, categorie: str, messages: list) -> list:
     # part : leur tracé est devenu le filet du polygone.
     recomposee = unary_union(surfaces)
     contour = recomposee.buffer(TOLERANCE_CONTOUR_M)
+    ouvertes = {id(g) for g in lignes}
     restantes = [
         g for g in geometries
-        if g.geom_type not in ("LineString", "LinearRing")
-        or not contour.contains(g)
+        if id(g) not in ouvertes or not contour.contains(g)
     ]
     messages.append(
         f"« {categorie} » : {len(lignes)} contour(s) ouvert(s) du calque "
@@ -798,3 +809,36 @@ def fermer_les_contours(geometries, categorie: str, messages: list) -> list:
         "total, pour que l'ouvrage se lise comme un aplat et non comme un trait."
     )
     return restantes + surfaces
+
+
+def _fermee(ligne) -> bool:
+    coords = list(ligne.coords)
+    return len(coords) > 3 and coords[0][:2] == coords[-1][:2]
+
+
+#: Épaisseur sur le papier, en millimètres, du tracé linéaire d'une catégorie
+#: dessinée en aplat — une piste ou une haie dont le contrat ne donne que l'axe.
+#:
+#: Un plan projet PDF (lot 2ter) ne donne pas autre chose : la largeur qu'il
+#: dessine n'est pas à l'échelle, et on ne la suppose pas. L'axe se dessine donc
+#: en trait, dans la teinte de l'aplat — celle que montre la légende —, à une
+#: épaisseur de symbole et non de terrain. Tracé avec le style de la surface, il
+#: se remplissait : le moteur ferme implicitement un chemin rempli, et la piste
+#: à créer de Gannay, qui longe trois côtés du site, devenait un aplat gris de
+#: tout son intérieur (mesuré le 23/09/2026).
+EPAISSEUR_TRACE_MM = 0.8
+
+_LINEAIRES = ("LineString", "LinearRing", "MultiLineString")
+
+
+def style_de(categorie: str, geometrie) -> Style:
+    """Style d'un objet : l'aplat de sa catégorie, ou un trait s'il n'est qu'un axe."""
+    style = STYLES[categorie].style
+    if style.remplissage in (None, "none") or geometrie.geom_type not in _LINEAIRES:
+        return style
+    return Style(
+        trait=style.remplissage,
+        epaisseur_mm=max(style.epaisseur_mm, EPAISSEUR_TRACE_MM),
+        remplissage="none",
+        tirets=style.tirets,
+    )

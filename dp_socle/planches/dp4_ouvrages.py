@@ -39,7 +39,7 @@ from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
-from .palette import STYLES, construire_legende, objets_a_dessiner
+from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
 from .standards import (
     ESPACEMENT_POTEAUX_M,
     HAUTEUR_CLOTURE_M,
@@ -957,9 +957,8 @@ def _plan_de_reperage(planche, contrat, panneau, categories):
     # entière : sans découpe, la clôture d'un site de 5 ha traversait le
     # panneau des ouvrages et passait par-dessus la légende.
     for categorie, geometries in visibles:
-        style = STYLES[categorie].style
         for geometrie in geometries:
-            _tracer_decoupe(planche, geometrie, style, fenetre)
+            _tracer_decoupe(planche, geometrie, style_de(categorie, geometrie), fenetre)
         if categorie == "tables_pv":
             _tracer_tables(planche, contrat, geometries, fenetre, avertissements)
 

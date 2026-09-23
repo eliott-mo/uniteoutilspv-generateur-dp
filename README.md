@@ -2397,6 +2397,29 @@ avec deux garde-fous mesurés le même jour :
 Ce qui reste ouvert est dessiné tel quel, et la recomposition est écrite au
 rapport : ce n'est pas la géométrie du calque.
 
+### Et un axe n'est pas un contour
+
+Le plan projet PDF du lot 2ter ne donne d'une piste ou d'une haie que son axe :
+la largeur qu'il dessine n'est pas à l'échelle, et on ne la suppose pas. Deux
+choses le faisaient mal dessiner, mesurées le 23/09/2026 sur le contrat de
+Gannay :
+
+- **une ligne fermée sur elle-même était recousue en surface.** Le cercle de
+  piste existante, un axe de 189 m, devenait un disque de voie lourde de
+  2 828 m². Un contour laissé ouvert par la CAO arrive en morceaux ; une ligne
+  qui se referme d'un seul tenant est un axe — le lot 2bis écrit de toute façon
+  en polygone une polyligne fermée du DXF ;
+- **un axe tracé avec le style d'une surface se remplissait** : le moteur ferme
+  implicitement un chemin rempli, et la piste à créer, qui longe trois côtés du
+  site, devenait un aplat gris de tout son intérieur.
+
+Un objet linéaire d'une catégorie à aplat se dessine donc en trait, dans la
+teinte de l'aplat — celle que montre la légende —, à 0,8 mm : une épaisseur de
+symbole, pas de terrain (`palette.style_de`). Le plan de masse, le plan de
+repérage des DP 4 et ceux des pièces photographiques passent tous par là. Un
+reste de contour que la recomposition n'a pas refermé en profite aussi : il
+remplissait sa corde de la même façon.
+
 ### Une emprise de projet épouse le parcellaire
 
 L'emprise est une **donnée d'entrée** : c'est le shapefile que le chef de projet
