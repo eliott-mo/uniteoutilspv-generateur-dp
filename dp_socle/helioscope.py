@@ -28,12 +28,13 @@ from functools import lru_cache
 from pathlib import Path
 
 import ezdxf
+import numpy as np
+import shapely
 from ezdxf.document import Drawing
 from ezdxf.layouts import Modelspace
 from pyproj import CRS, Transformer
 from shapely.geometry import LineString, Polygon, mapping
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import transform as transformer_geom
 from shapely.ops import polygonize, unary_union
 
 from .erreurs import ErreurCalage, ErreurHelioScope, ErreurModulesAbsents
@@ -252,6 +253,9 @@ class Implantation:
     avertissements: list[str] = field(default_factory=list)
     #: L'image de fond, quand l'export la porte : de quoi caler sur l'ortho.
     fond: FondHelioScope | None = None
+    #: Les rangées reconstituées dans le repère du DXF, avec les tables et
+    #: l'orientation dont elles viennent : voir `rangees_locales`.
+    _rangees: tuple | None = field(default=None, init=False, repr=False, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1022,22 +1026,43 @@ def _transformateur_local(latitude: float, longitude: float) -> Transformer:
     return Transformer.from_crs(local, CRS.from_epsg(2154), always_xy=True)
 
 
-def projeter(geometrie: BaseGeometry, calage: Calage) -> BaseGeometry:
-    """Passe une géométrie du repère DXF local au Lambert 93."""
+def _vers_l93_du_calage(calage: Calage):
+    """La projection du calage, sur un tableau (N, 2) de coordonnées du DXF."""
     longitude = calage.exige_origine()
     transformateur = _transformateur_local(calage.latitude_origine, longitude)
 
     decalage = calage.correction_nord_sud_m - calage.ordonnee_centre_image_m
 
-    def _vers_l93(x, y, z=None):
+    def _vers_l93(coordonnees):
         # Le repère métrique local est centré sur la latitude du fichier, qui
         # est celle du centre de l'image de fond : on y ramène ce centre, puis
         # on ajoute la correction nord-sud. Le repère est orienté nord à
         # l'origine, une translation en y est donc exactement un déplacement
         # vers le nord.
-        return transformateur.transform(x, y + decalage)
+        x, y = transformateur.transform(coordonnees[:, 0], coordonnees[:, 1] + decalage)
+        return np.column_stack((x, y))
 
-    return transformer_geom(_vers_l93, geometrie)
+    return _vers_l93
+
+
+def projeter(geometrie: BaseGeometry, calage: Calage) -> BaseGeometry:
+    """Passe une géométrie du repère DXF local au Lambert 93, en deux dimensions."""
+    return shapely.transform(geometrie, _vers_l93_du_calage(calage))
+
+
+def projeter_tout(geometries, calage: Calage) -> list[BaseGeometry]:
+    """`projeter` sur une liste, en un seul appel au transformateur.
+
+    Une à une, par `shapely.ops.transform`, les 4 752 modules de Gannay se
+    projetaient en 1,10 s à chaque recalage ; ensemble, en 0,03 s, pour des
+    coordonnées identiques au bit près (mesuré le 23/09/2026).
+    """
+    geometries = list(geometries)
+    if not geometries:
+        return []
+    tableau = np.empty(len(geometries), dtype=object)
+    tableau[:] = geometries
+    return list(shapely.transform(tableau, _vers_l93_du_calage(calage)))
 
 
 @dataclass
@@ -1126,11 +1151,11 @@ def geometries_l93(implantation: Implantation) -> dict[str, list[BaseGeometry]]:
     """Toutes les couches, projetées en Lambert 93."""
     calage = implantation.calage
     return {
-        "tables": [projeter(g, calage) for g in implantation.tables],
-        "modules": [projeter(g, calage) for g in implantation.modules],
+        "tables": projeter_tout(implantation.tables, calage),
+        "modules": projeter_tout(implantation.modules, calage),
         "zone_implantation": [projeter(implantation.zone_implantation, calage)],
-        "reculs": [projeter(g, calage) for g in implantation.reculs],
-        "zones_evitees": [projeter(g, calage) for g in implantation.zones_evitees],
+        "reculs": projeter_tout(implantation.reculs, calage),
+        "zones_evitees": projeter_tout(implantation.zones_evitees, calage),
     }
 
 
@@ -1219,7 +1244,31 @@ def rangees_locales(implantation: Implantation) -> tuple[list[Polygon], float]:
     (fermeture morphologique de rayon demi-jeu, à angles vifs) : un vide plus
     large — une rangée interrompue par une zone évitée — reste un vide, et la
     rangée sort en deux morceaux.
+
+    Le résultat ne dépend que des tables et de l'orientation, pas du calage :
+    il se garde sur l'implantation. Refait à chaque lecture, il coûtait 1,26 s
+    à Gannay, et la section 2 du plan PDF le demandait dix fois par
+    affichage de la page (mesuré le 23/09/2026). Des tables remplacées ou une
+    orientation changée le font refaire.
     """
+    tables = implantation.tables
+    orientation = implantation.calepinage.orientation_deg
+    memoire = implantation._rangees
+    if (
+        memoire is not None
+        and memoire[0] == orientation
+        and len(memoire[1]) == len(tables)
+        and all(gardee is table for gardee, table in zip(memoire[1], tables))
+    ):
+        lignes, jeu = memoire[2]
+        return list(lignes), jeu
+    lignes, jeu = _reconstituer_les_rangees(implantation)
+    implantation._rangees = (orientation, tuple(tables), (tuple(lignes), jeu))
+    return lignes, jeu
+
+
+def _reconstituer_les_rangees(implantation: Implantation) -> tuple[list[Polygon], float]:
+    """Le calcul de `rangees_locales`, sans mémoire."""
     bornes = _dans_le_repere_du_calepinage(implantation)
     ordre = sorted(range(len(bornes)), key=lambda i: (bornes[i][1] + bornes[i][3]) / 2)
     groupes: list[list[int]] = []
@@ -1261,8 +1310,7 @@ def rangees(implantation: Implantation) -> list[Polygon]:
     que l'aperçu de calage cerne de noir. Voir `rangees_locales` pour la façon
     de la reconstituer quand les tables ne se touchent pas.
     """
-    calage = implantation.calage
-    return [projeter(ligne, calage) for ligne in rangees_locales(implantation)[0]]
+    return projeter_tout(rangees_locales(implantation)[0], implantation.calage)
 
 
 def azimut_rangees(implantation: Implantation) -> float:

@@ -27,6 +27,8 @@ from dp_socle.helioscope import (
     ouvrir_export,
     prepositionner,
     projeter,
+    projeter_tout,
+    rangees_locales,
 )
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "exemples"
@@ -784,3 +786,50 @@ def test_l_ancien_chemin_geojson_a_disparu():
         assert not hasattr(helioscope, disparu), disparu
     assert hasattr(helioscope, "ecrire_sortie")
     assert hasattr(helioscope, "parametres_contrat")
+
+
+# ---------------------------------------------------------------------------
+# Ce qui se garde d'un recalage à l'autre
+# ---------------------------------------------------------------------------
+
+
+@besoin_export_complet
+def test_les_modules_se_projettent_ensemble_comme_un_a_un(implantation):
+    """Un seul appel au transformateur pour toute une couche, les mêmes coordonnées au bit près.
+
+    Une à une, les projections des 4 752 modules de Gannay coûtaient 1,10 s à
+    chaque recalage ; ensemble, 0,03 s (mesuré le 23/09/2026).
+    """
+    prepositionner(implantation, charger_emprise(EMPRISE_ISLETTES).geometrie)
+    calage = implantation.calage
+    geometries = (
+        implantation.modules[:400] + [implantation.zone_implantation] + list(implantation.reculs)
+    )
+    ensemble = projeter_tout(geometries, calage)
+    assert len(ensemble) == len(geometries)
+    assert all(a.equals_exact(projeter(g, calage), 0.0) for a, g in zip(ensemble, geometries))
+    assert projeter_tout([], calage) == []
+
+
+@besoin_export_complet
+def test_les_rangees_se_gardent_et_se_refont_quand_les_tables_changent(implantation):
+    """Les rangées ne dépendent pas du calage : reconstituées une fois, elles se gardent.
+
+    Gardées sur des tables qui ne sont plus celles de l'implantation, elles
+    dessineraient un calepinage qui n'existe plus : des tables remplacées les
+    font refaire.
+    """
+    lignes, jeu = rangees_locales(implantation)
+    encore, _ = rangees_locales(implantation)
+    assert all(a is b for a, b in zip(encore, lignes))
+    encore.clear()  # la liste rendue n'est pas celle que l'implantation garde
+    assert len(rangees_locales(implantation)[0]) == len(lignes)
+
+    tables = implantation.tables
+    try:
+        implantation.tables = tables[: len(tables) // 2]
+        moitie, _ = rangees_locales(implantation)
+        assert sum(r.area for r in moitie) < 0.75 * sum(r.area for r in lignes)
+    finally:
+        implantation.tables = tables
+    assert [r.wkb for r in rangees_locales(implantation)[0]] == [r.wkb for r in lignes]

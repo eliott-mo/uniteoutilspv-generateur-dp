@@ -2129,6 +2129,20 @@ des calages mesurés indépendamment — dans le dépôt `photomontage` pour Gan
 avec OpenCV pour Bray. Il faut une dizaine de secondes, dont sept pour
 télécharger l'ortho.
 
+**Recaler sans attendre.** Chaque geste relance le script entier, et la page
+du plan PDF mettait 13,7 s à se réafficher à Gannay, 18,9 s après un
+« Recaler » (mesuré le 23/09/2026, au profileur, dans le fil du script) :
+l'application lit les contrôles cinq fois par affichage, et chaque lecture
+reconstituait les rangées — 1,26 s, deux fois — puis refaisait les
+recoupements ; un recalage reprojetait en outre les 4 752 modules un à un,
+1,10 s. Les contrôles se gardent désormais pour un calage et des choix donnés,
+comme le plan ; les rangées, qui ne dépendent pas du calage, se gardent sur
+l'implantation du lot 2 ; une couche se projette d'un seul appel au
+transformateur, au bit près la même. Seul l'état courant est gardé : chaque
+réglage essayé retenait sinon un plan entier. Résultat : 0,8 s pour
+réafficher, 1,6 s pour recaler, dont 0,5 s pour reposer la coupe et relever
+son profil.
+
 `tests/test_app_plan_pdf.py` joue ce parcours sur Gannay, sans service en
 ligne : un carré de 500 m tient lieu d'emprise, un relevé de synthèse de
 RGE ALTI, et la mesure sur l'ortho est remplacée par son résultat ;

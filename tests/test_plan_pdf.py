@@ -840,3 +840,41 @@ def test_la_cloture_se_referme_au_droit_des_ouvrages_qui_l_interrompent(import_b
     assert ponts[1]["ouvrages"] == ["Portail", "Poste de Livraison/transfo"]
     assert import_bray.plan.surface_cloturee_m2 == pytest.approx(48_655, rel=0.01)
     assert any("interrompue" in a for a in import_bray.avertissements)
+
+
+# ---------------------------------------------------------------------------
+# Ce qui se garde d'un affichage de la page à l'autre
+# ---------------------------------------------------------------------------
+
+
+@besoin_bray
+def test_les_controles_se_gardent_et_suivent_le_calage(import_bray):
+    """Lus cinq fois à chaque affichage de la page, les contrôles ne se refont qu'au recalage.
+
+    Et un recalage les refait : gardés au-delà, ils diraient d'une clôture
+    qu'elle tient dans son emprise alors qu'elle en est sortie. Ne sont gardés
+    que ceux du calage courant — chaque réglage essayé retenait sinon un plan
+    entier, modules compris.
+    """
+    from dp_socle.helioscope import decaler_longitude
+
+    def lus():
+        return [(c.libelle, c.statut, c.message) for c in import_bray.controles]
+
+    def emprise():
+        return next(m for l, _, m in lus() if l == "Clôture dans l'emprise cadastrale")
+
+    calage = import_bray.implantation.calage
+    longitude = calage.longitude_origine
+    premiers = import_bray.controles
+    assert all(a is b for a, b in zip(import_bray.controles, premiers))
+    avant = lus()
+    try:
+        decaler_longitude(calage, 400.0)
+        assert emprise() != dict((l, m) for l, _, m in avant)["Clôture dans l'emprise cadastrale"]
+    finally:
+        calage.longitude_origine = longitude
+    assert lus() == avant
+    for nom in ("controles", "plan", "entites"):
+        gardes = [k for k in import_bray._memoire if isinstance(k, tuple) and k[0] == nom]
+        assert len(gardes) == 1, nom

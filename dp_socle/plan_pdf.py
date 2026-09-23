@@ -2715,6 +2715,21 @@ class ImportPlanPDF:
         calage = self.implantation.calage
         return (calage.longitude_origine, calage.correction_nord_sud_m, self.choix.cle())
 
+    def _garder(self, nom: str, cle: tuple, valeur):
+        """Retient `valeur` pour ce calage et ces choix, et oublie les précédents.
+
+        Chaque recalage change la clé : garder chaque état essayé accumulerait
+        un plan entier — les milliers de modules projetés — par réglage, ce que
+        le bouton « Caler sur l'ortho » et les recalages successifs rendent
+        fréquent.
+        """
+        for ancienne in [
+            k for k in self._memoire if isinstance(k, tuple) and k[0] == nom and k[1] != cle
+        ]:
+            del self._memoire[ancienne]
+        self._memoire[(nom, cle)] = valeur
+        return valeur
+
     @property
     def catalogue(self) -> tuple[dict, list[str]]:
         if "catalogue" not in self._memoire:
@@ -2797,8 +2812,7 @@ class ImportPlanPDF:
         for libelle, entites_portail in construction.portails:
             for ligne in entites_portail:
                 ajouter("portail", libelle, ligne)
-        self._memoire[cle] = entites
-        return entites
+        return self._garder(*cle, entites)
 
     @property
     def plan(self):
@@ -2825,8 +2839,7 @@ class ImportPlanPDF:
             source=f"{self.lecture.source} sur {self.source_export}",
             avertissements=self._avertissements_du_plan(),
         )
-        self._memoire[cle] = plan
-        return plan
+        return self._garder(*cle, plan)
 
     def _avertissements_du_plan(self) -> list[str]:
         construction = self.construction
@@ -2881,6 +2894,25 @@ class ImportPlanPDF:
 
     @property
     def controles(self) -> list:
+        """Les recoupements du plan, du calepinage et du foncier.
+
+        Gardés pour un calage et des choix donnés, comme le plan : l'application
+        les lit cinq fois à chaque affichage de la page — bloquants, titre du
+        détail, tableau, avertissements, validation —, et chaque lecture
+        refaisait rangées et recoupements, 2,6 s à Gannay : 12,8 s sur les
+        13,7 s d'un affichage (mesuré le 23/09/2026). L'emprise cadastrale,
+        fixée à l'import, est retenue avec eux : une autre les ferait refaire.
+        """
+        cle = self._cle()
+        gardes = self._memoire.get(("controles", cle))
+        if gardes is None or gardes[0] is not self.emprise_cadastrale:
+            gardes = self._garder(
+                "controles", cle, (self.emprise_cadastrale, self._recouper())
+            )
+        return list(gardes[1])
+
+    def _recouper(self) -> list:
+        """Le calcul de `controles`, sans mémoire."""
         from .helioscope import limites_helioscope, rangees
         from .import_be import (
             AVERTISSEMENT,
