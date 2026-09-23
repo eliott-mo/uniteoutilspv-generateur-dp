@@ -212,12 +212,29 @@ def test_une_quatrieme_image_dp6_est_refusee(tmp_path):
 
 
 def test_dp7_refuse_plus_de_deux_photographies(tmp_path):
+    """La planche a deux emplacements fixes : une troisième n'a pas de place."""
     prises = [
         (place_a_la_main(f"v{i}", X0 - 200.0 * i, Y0 + 100.0, 90.0),
          _photo(tmp_path / f"{i}.jpg"))
         for i in range(1, 4)
     ]
-    with pytest.raises(ErreurComposition, match="au plus"):
+    with pytest.raises(ErreurComposition, match="pour 2 attendues"):
+        dp7_environnement_proche.generer(
+            _projet(), prises, EMPRISE, tmp_path, fond_ign=False
+        )
+
+
+def test_dp7_refuse_une_seule_photographie(tmp_path):
+    """Une seule laissait un cadre vide sur la planche (23/09/2026).
+
+    La pièce en porte deux, comme le dossier de référence. Le refus se lit au
+    rapport de génération : le dossier sort quand même, et dit ce qui manque.
+    """
+    prises = [
+        (place_a_la_main("v1", X0 - 300.0, Y0 + 140.0, 95.0),
+         _photo(tmp_path / "1.jpg"))
+    ]
+    with pytest.raises(ErreurComposition, match="1 photographie"):
         dp7_environnement_proche.generer(
             _projet(), prises, EMPRISE, tmp_path, fond_ign=False
         )
@@ -238,7 +255,7 @@ def test_dp7_produit_sa_planche_et_numerote_ses_prises(tmp_path):
 
 
 def test_une_piece_sans_photographie_ne_se_produit_pas(tmp_path):
-    with pytest.raises(ErreurComposition, match="ne se produit pas vide"):
+    with pytest.raises(ErreurComposition, match="0 photographie"):
         dp7_environnement_proche.generer(
             _projet(), [], EMPRISE, tmp_path, fond_ign=False
         )

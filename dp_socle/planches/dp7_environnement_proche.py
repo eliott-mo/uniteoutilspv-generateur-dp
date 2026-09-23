@@ -31,7 +31,13 @@ INTITULE = "Photographie de l'environnement proche"
 
 #: Au-delà, la planche ne les logerait plus à une taille lisible — et la pièce
 #: n'en demande pas davantage.
-PRISES_MAXIMALES = 2
+#: Nombre de photographies de la pièce — exactement, et non au plus.
+#:
+#: Le dossier de référence en porte deux, et la planche a deux emplacements
+#: fixes. Une seule y laissait un cadre vide, constaté sur une planche produite
+#: le 23/09/2026 ; trois n'auraient pas de place. Le refus se lit au rapport de
+#: génération, comme les autres pièces manquantes, et n'arrête pas le dossier.
+PRISES_ATTENDUES = 2
 
 
 def generer(
@@ -50,16 +56,12 @@ def generer(
     les repères doivent être numérotés.
     """
     prises = list(prises)
-    if not prises:
+    if len(prises) != PRISES_ATTENDUES:
         raise ErreurComposition(
-            "DP 7 : aucune photographie déposée. La pièce ne se produit pas vide."
-        )
-    if len(prises) > PRISES_MAXIMALES:
-        raise ErreurComposition(
-            f"{CODE} : {len(prises)} photographies déposées, pour "
-            f"{PRISES_MAXIMALES} "
-            "au plus sur une planche. Retirez-en, ou traitez le surplus dans une "
-            "pièce jointe libre."
+            f"{CODE} : {len(prises)} photographie(s) avec un point de vue "
+            f"placé, pour {PRISES_ATTENDUES} attendues. La pièce en porte deux, "
+            "comme le dossier de référence : une seule laisserait un cadre vide "
+            "sur la planche, une troisième n'aurait pas de place."
         )
 
     points_de_vue = [prise[0] for prise in prises]
@@ -79,7 +81,7 @@ def generer(
         emprise,
         "DP 7 — plan de repérage",
         contrat,
-        emplacements=PRISES_MAXIMALES,
+        emplacements=PRISES_ATTENDUES,
         fond_ign=fond_ign,
     )
 

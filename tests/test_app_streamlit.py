@@ -1253,8 +1253,22 @@ def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypa
 
     carte = _carte_cliquable(monkeypatch)
     application = _import_valide(tmp_path, monkeypatch)
+    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
+    # place seule par son EXIF. C'est la première que le parcours éprouve.
     _televerser(
-        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+        application,
+        "DP 7",
+        [
+            ("vue-proche.jpg", _image_png(), "image/png"),
+            (
+                "vue-seconde.jpg",
+                # Au bord du site de Saint-Cyr, dont le centre est à
+                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
+                # refuser le plan de repérage, qui se cadre sur le site.
+                _image_geolocalisee(lat=47.8540, lon=1.9670),
+                "image/jpeg",
+            ),
+        ],
     )
     application = application.run()
 
@@ -1278,8 +1292,22 @@ def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypa
     # y survit. C'est une limite du harnais, pas du parcours — le même nom de
     # fichier conserve le point de vue déjà placé.
     carte["point"] = None
+    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
+    # place seule par son EXIF. C'est la première que le parcours éprouve.
     _televerser(
-        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+        application,
+        "DP 7",
+        [
+            ("vue-proche.jpg", _image_png(), "image/png"),
+            (
+                "vue-seconde.jpg",
+                # Au bord du site de Saint-Cyr, dont le centre est à
+                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
+                # refuser le plan de repérage, qui se cadre sur le site.
+                _image_geolocalisee(lat=47.8540, lon=1.9670),
+                "image/jpeg",
+            ),
+        ],
     )
     application = application.run()
 
@@ -1296,8 +1324,22 @@ def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypa
     assert vue["cap_deg"] == pytest.approx(90.0, abs=1.0)
 
     carte["point"] = None
+    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
+    # place seule par son EXIF. C'est la première que le parcours éprouve.
     _televerser(
-        application, "DP 7", [("vue-proche.jpg", _image_png(), "image/png")]
+        application,
+        "DP 7",
+        [
+            ("vue-proche.jpg", _image_png(), "image/png"),
+            (
+                "vue-seconde.jpg",
+                # Au bord du site de Saint-Cyr, dont le centre est à
+                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
+                # refuser le plan de repérage, qui se cadre sur le site.
+                _image_geolocalisee(lat=47.8540, lon=1.9670),
+                "image/jpeg",
+            ),
+        ],
     )
     application = application.run()
     _cliquer(application, "Générer le dossier")
@@ -1306,7 +1348,10 @@ def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypa
 
     genere = application.session_state["dossier_genere"]
     noms = zipfile.ZipFile(_io.BytesIO(genere["archive"])).namelist()
-    assert "planches/DP_7_environnement_proche.pdf" in noms, noms
+    assert "planches/DP_7_environnement_proche.pdf" in noms, (
+        [m for m in genere["rapport"].avertissements if "DP 7" in m] or noms
+    )
+    assert "planches/DP_7_environnement_proche.pdf" in noms
     assert any(entree["numero"] == "DP 7" for entree in genere["rapport"].sommaire)
 
 

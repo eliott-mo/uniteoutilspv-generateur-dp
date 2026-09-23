@@ -25,6 +25,7 @@ preparer_cairo()
 # les mêmes noms de fonctions : ceux du lot 2bis sont renommés ici, plutôt que
 # dans leur module, pour ne pas toucher au lot 2.
 from dp_socle.planches.palette import EXCLUES
+from dp_socle.planches.dp6_insertions import INTITULES as INTITULES_DP6
 from dp_socle.planches.reperage_vues import OUVERTURE_CONE_DEG
 from dp_socle.carte_photos import depuis_carte, image_de, lire_carte
 from dp_socle.lecture_exif import etat_heic, lire_metadonnees
@@ -2652,6 +2653,37 @@ def _rapport_des_emplacements(fichiers) -> float:
 
 
 
+def _controler_le_compte(code: str, fichiers) -> None:
+    """Dit, avant de générer, si DP 7 ou DP 8 n'a pas son compte.
+
+    Les deux pièces portent **exactement deux** photographies, comme le dossier
+    de référence : la planche a deux emplacements fixes, et une seule prise de
+    vue y laisse un cadre vide — constaté sur une planche produite le
+    23/09/2026. Le refus tombait à la génération ; il se dit ici, où la
+    photographie manquante peut encore être déposée.
+    """
+    from dp_socle.planches.dp7_environnement_proche import PRISES_ATTENDUES
+
+    places = [f for f in fichiers if _vue_photo(code, f.name).get("x") is not None]
+    if len(places) == PRISES_ATTENDUES:
+        return
+    if not places:
+        # Rien de placé : chaque ligne le dit déjà pour elle-même, et le
+        # répéter ici ferait du bruit sur un écran qu'on vient d'ouvrir.
+        return
+    st.warning(
+        f"**{code} : {len(places)} photographie(s) placée(s)**, pour "
+        f"{PRISES_ATTENDUES} attendues. "
+        + (
+            "Déposez-en une seconde et placez-la."
+            if len(places) < PRISES_ATTENDUES
+            else "La planche n'a que deux emplacements : retirez le surplus."
+        )
+        + " **En l'état, la planche ne sera pas produite.**",
+        icon="⚠️",
+    )
+
+
 def _controler_les_volets_dp6(fichiers) -> None:
     """Dit, avant de générer, quelles vues DP 6 n'iront pas au dossier.
 
@@ -2664,8 +2696,6 @@ def _controler_les_volets_dp6(fichiers) -> None:
     brute et ajouté un angle de prise de vue » (22/09/2026). Il se dit
     maintenant ici, où la photographie manquante peut encore être déposée.
     """
-    from dp_socle.planches.dp6_insertions import INTITULES
-
     par_vue = {}
     for fichier in fichiers:
         vue = _vue_photo("DP 6", fichier.name)
@@ -2679,6 +2709,16 @@ def _controler_les_volets_dp6(fichiers) -> None:
     if not par_vue:
         return
     for lettre, noms in sorted(par_vue.items()):
+        volets = [_vue_photo("DP 6", nom).get("volet", 0) for nom in noms]
+        doubles = sorted({v for v in volets if volets.count(v) > 1})
+        if doubles:
+            st.warning(
+                f"**Vue {lettre} : deux photographies sur le même cadre** "
+                + ", ".join(f"« {INTITULES_DP6[v]} »" for v in doubles)
+                + ". La planche a un cadre par volet : l'une des deux en "
+                "chasserait l'autre. Corrigez « Ce que l'image montre ».",
+                icon="⚠️",
+            )
         if len(noms) == 1:
             st.warning(
                 f"**Vue {lettre} : une seule photographie placée** "
@@ -2689,17 +2729,19 @@ def _controler_les_volets_dp6(fichiers) -> None:
                 "planche ne sera pas produite.**",
                 icon="⚠️",
             )
-        elif len(noms) > len(INTITULES):
+        elif len(noms) > len(INTITULES_DP6):
             st.warning(
                 f"**Vue {lettre} : {len(noms)} photographies** pour une même "
-                f"vue, alors que la pièce en décline {len(INTITULES)} au plus "
-                f"({', '.join(INTITULES)}). Une vue de plus est une planche de "
+                f"vue, alors que la pièce en décline {len(INTITULES_DP6)} au plus "
+                f"({', '.join(INTITULES_DP6)}). Une vue de plus est une planche de "
                 f"plus : donnez la lettre suivante aux images en trop.",
                 icon="⚠️",
             )
 
 
-def _ligne_de_prise(code: str, fichier, rapport: float = 1.5) -> None:
+def _ligne_de_prise(
+    code: str, fichier, rapport: float = 1.5, plusieurs_vues: bool = False
+) -> None:
     """Une photographie : son aperçu recadré, son état, et ses deux boutons."""
     # Le seuil de la planche, et non un second : deux seuils construits chacun
     # de leur côté finissent par diverger, la voirie l'a montré le 19/09/2026.
@@ -2715,18 +2757,39 @@ def _ligne_de_prise(code: str, fichier, rapport: float = 1.5) -> None:
         if vue.get("exif_message"):
             st.caption(f"⚠️ {vue['exif_message']}")
         if code == "DP 6":
-            # Les volets d'une même vue partagent un point de vue : c'est la
-            # même prise (D3). Le sélecteur dit lesquels vont ensemble, et
-            # l'ordre de dépôt donne l'ordre des volets.
-            vue["vue"] = st.selectbox(
-                "Vue",
-                options=[chr(ord("A") + i) for i in range(4)],
-                index=[chr(ord("A") + i) for i in range(4)].index(
-                    vue.get("vue", "A")
-                ),
-                key=f"vue_de_{code}_{fichier.name}",
-                label_visibility="collapsed",
+            # Deux choses distinctes, et le sélecteur n'en disait qu'une.
+            #
+            # Le **volet** dit ce que l'image montre — l'état actuel, le
+            # photomontage, le photomontage avec les mesures paysagères — et
+            # c'est l'ordre des trois cadres de la planche. Il se déduisait de
+            # l'ordre de dépôt, ce qui ne se voyait nulle part.
+            #
+            # La **vue** dit de quel point de vue il s'agit : « Vue A » et
+            # « Vue B » sont deux planches, comme aux pages 12 et 13 du dossier
+            # de référence, où les trois volets d'une planche portent tous la
+            # même lettre. Elle ne se demande que s'il y a de quoi faire une
+            # seconde planche (retour d'usage du 23/09/2026 : les deux étaient
+            # confondues).
+            vue["volet"] = st.selectbox(
+                "Ce que l'image montre",
+                options=list(range(len(INTITULES_DP6))),
+                index=min(vue.get("volet", 0), len(INTITULES_DP6) - 1),
+                format_func=lambda rang: f"{rang + 1}. {INTITULES_DP6[rang]}",
+                key=f"volet_de_{code}_{fichier.name}",
             )
+            if plusieurs_vues:
+                vue["vue"] = st.selectbox(
+                    "Point de vue",
+                    options=[chr(ord("A") + i) for i in range(4)],
+                    index=[chr(ord("A") + i) for i in range(4)].index(
+                        vue.get("vue", "A")
+                    ),
+                    key=f"vue_de_{code}_{fichier.name}",
+                    help="Une planche par point de vue. Les volets d'une même "
+                    "vue partagent leur position : c'est la même prise.",
+                )
+            else:
+                vue["vue"] = "A"
         # Un seul curseur pour les deux axes : le rognage n'en touche qu'un —
         # la largeur d'une photographie plus panoramique que son emplacement, sa
         # hauteur sinon — et donner la même valeur aux deux laisse le réglage
@@ -2811,12 +2874,17 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
         # lui que l'aperçu recadre, pour que ce qu'on voit ici soit ce qu'on
         # aura. Voir `planches.photographies`.
         rapport = _rapport_des_emplacements(fichiers)
+        # Au-delà de trois volets, il y a forcément un second point de vue :
+        # une planche n'en décline pas davantage.
+        plusieurs_vues = code == "DP 6" and len(fichiers) > len(INTITULES_DP6)
         for fichier in fichiers:
             if not isinstance(fichier, _PhotoReprise):
                 _lire_exif_une_fois(code, fichier)
-            _ligne_de_prise(code, fichier, rapport)
+            _ligne_de_prise(code, fichier, rapport, plusieurs_vues)
         if code == "DP 6":
             _controler_les_volets_dp6(fichiers)
+        else:
+            _controler_le_compte(code, fichiers)
 
 
 #: Les pièces où deux fichiers portent le même nom, avec les noms en cause.
@@ -2943,6 +3011,12 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
 
         prises = []
         for _, membres in sorted(groupes.items()):
+            if code == "DP 6":
+                # L'ordre des volets est celui que le chef de projet a choisi,
+                # et non celui du dépôt : les cadres de la planche sont
+                # « emplacement », « environnement », « mesures paysagères »,
+                # dans cet ordre, et c'est le sélecteur qui le dit.
+                membres.sort(key=lambda membre: membre[1].get("volet", 0))
             premier = membres[0][1]
             prises.append(
                 prise_en_json(
