@@ -52,6 +52,7 @@ def generer(
     images,
     emprise,
     dossier: str | Path,
+    contrat=None,
     rang: int = 1,
     numero: str | None = None,
     cadrages=None,
@@ -91,6 +92,7 @@ def generer(
         [repere],
         emprise,
         f"{repere} — plan de repérage",
+        contrat,
         emplacements=len(INTITULES),
         fond_ign=fond_ign,
     )

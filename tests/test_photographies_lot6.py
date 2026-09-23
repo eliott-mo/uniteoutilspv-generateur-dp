@@ -38,8 +38,11 @@ def _projet() -> Projet:
 def _planche(images, emplacements, reperes=("Vue A",), vues=(VUE,)):
     planche = Planche(titre="Essai", numero="DP 6", projet="Essai",
                       date="16/09/2026")
+    # Sans contrat : ces tests mesurent les emplacements d'images, pas le plan
+    # de masse. L'absence est signalée au rapport plutôt que tue, et c'est
+    # justement ce qu'on vérifie ici.
     retenu = composer(planche, images, list(vues), list(reperes), EMPRISE,
-                      "essai", emplacements=emplacements, fond_ign=False)
+                      "essai", None, emplacements=emplacements, fond_ign=False)
     return planche.svg(), retenu
 
 
@@ -239,3 +242,86 @@ def test_une_piece_sans_photographie_ne_se_produit_pas(tmp_path):
         dp7_environnement_proche.generer(
             _projet(), [], EMPRISE, tmp_path, fond_ign=False
         )
+
+
+# ---------------------------------------------------------------------------
+# Le plan de masse sous les repères
+# ---------------------------------------------------------------------------
+
+
+def _contrat_d_essai(tmp_path):
+    """Le contrat synthétique du lot 4, écrit puis relu par son producteur."""
+    from dp_socle.contrat import charger_contrat
+
+    from . import contrat_synthetique as synthese
+
+    synthese.ecrire(tmp_path, avec_voirie=True)
+    return charger_contrat(tmp_path, voirie="piste_legere")
+
+
+def test_le_plan_de_reperage_porte_le_plan_de_masse(tmp_path):
+    """« Avec juste le contour du site on ne se rend pas bien compte. »
+
+    Retour d'usage du 23/09/2026, capture du dossier de référence à l'appui :
+    son plan de repérage porte l'implantation entière, le nôtre n'avait que
+    l'emprise. Mesuré dans le SVG produit : la teinte des tables y est.
+    """
+    from dp_socle.planches.palette import STYLES
+
+    contrat = _contrat_d_essai(tmp_path)
+    emprise = contrat.geometries("cloture")[0]
+    sommet = list(emprise.exterior.coords)[0]
+    vue = place_a_la_main("vue", sommet[0], sommet[1], 95.0)
+
+    planche = Planche(titre="Essai", numero="DP 7", projet="Essai",
+                      date="23/09/2026")
+    images = [ImagePlanche(_photo(tmp_path / "a.jpg"), "PC7-1", (0.0, 0.0))]
+    retenu = composer(
+        planche, images, [vue], ["PC7-1"], emprise, "essai", contrat,
+        emplacements=2, fond_ign=False,
+    )
+    svg = planche.svg()
+
+    assert STYLES["tables_pv"].style.remplissage in svg
+    # Et rien ne se plaint d'un contrat manquant, puisqu'il est là.
+    assert not any("sans le plan de masse" in m for m in retenu["avertissements"])
+
+
+def test_un_plan_de_reperage_sans_contrat_le_dit_au_rapport(tmp_path):
+    """Aucun repli silencieux : une planche appauvrie doit s'annoncer.
+
+    Sans contrat la planche sort avec le seul contour du site — exactement ce
+    que l'usage a signalé comme insuffisant. L'appelant qui l'oublie doit le
+    lire, plutôt que de livrer un plan de repérage muet.
+    """
+    from dp_socle.planches.palette import STYLES
+
+    planche = Planche(titre="Essai", numero="DP 7", projet="Essai",
+                      date="23/09/2026")
+    images = [ImagePlanche(_photo(tmp_path / "a.jpg"), "PC7-1", (0.0, 0.0))]
+    retenu = composer(
+        planche, images, [VUE], ["PC7-1"], EMPRISE, "essai", None,
+        emplacements=2, fond_ign=False,
+    )
+
+    assert any("sans le plan de masse" in m for m in retenu["avertissements"])
+    assert STYLES["tables_pv"].style.remplissage not in planche.svg()
+
+
+def test_le_plan_de_masse_du_reperage_vient_du_meme_endroit_que_dp2():
+    """Une règle appliquée à deux endroits finit par y différer.
+
+    `objets_a_dessiner` applique les trois règles qui décident de ce qui figure
+    au dossier — catégories exclues, catégories vides, voiries tranchées. Le
+    plan de repérage doit passer par lui, comme DP 2 et comme les repérages du
+    lot 4, et non redresser sa propre liste.
+    """
+    import inspect
+
+    from dp_socle.planches import photographies
+
+    source = inspect.getsource(photographies._poser_le_plan)
+    assert "objets_a_dessiner(contrat, messages)" in source
+    # La trame des modules n'y est pas : au 1/10 000 ses traits se
+    # confondraient en un aplat tout en pesant leur poids dans le PDF.
+    assert "trame" not in source.lower().replace("trame des modules", "")

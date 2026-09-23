@@ -95,6 +95,7 @@ def composer(
     reperes,
     emprise,
     libelle_reperage: str,
+    contrat,
     emplacements: int | None = None,
     fond_ign: bool = True,
     dpi: int | None = None,
@@ -148,6 +149,7 @@ def composer(
     messages = messages_images + list(reperage.avertissements)
     if fond_ign:
         _poser_fond(planche, interieur, reperage)
+    messages.extend(_poser_le_plan(planche, contrat, reperage))
     _poser_emprise(planche, emprise)
     messages.extend(dessiner_points_de_vue(planche, points_de_vue, reperes))
     return {
@@ -220,6 +222,47 @@ def _poser_fond(planche: Planche, interieur, reperage) -> None:
         dpi=DPI_DEFAUT, format_image="image/jpeg",
     )
     planche.ajouter_fond_raster(fond.image, fond.bbox)
+
+
+def _poser_le_plan(planche: Planche, contrat, reperage) -> list:
+    """Le plan de masse sous les repères : tables, pistes, postes, clôture.
+
+    « Avec juste le contour du site on ne se rend pas bien compte de ce qu'on
+    regarde » (retour d'usage du 23/09/2026). Le plan de repérage du dossier de
+    référence porte l'implantation entière ; le nôtre n'avait que l'emprise, et
+    un contour seul ne dit ni où sont les rangées ni par où l'on entre.
+
+    Les objets viennent de `objets_a_dessiner`, comme pour DP 2 et pour les
+    plans de repérage du lot 4 : une règle appliquée à deux endroits finit par
+    y différer, et c'est à cela que sert ce point d'entrée unique.
+
+    La **trame des modules** n'est pas reprise, elle. DP 2 la trace au 1/2 000
+    pour faire lire une table comme un panneau ; ici l'échelle va jusqu'au
+    1/10 000, où ses traits se confondraient en un aplat tout en pesant leur
+    poids dans le PDF. Le contour des rangées suffit à la lecture.
+    """
+    from shapely.geometry import box
+
+    from .palette import STYLES, objets_a_dessiner
+
+    messages: list[str] = []
+    if contrat is None:
+        # Jamais en silence : sans contrat la planche sort avec le seul contour
+        # du site, et c'est précisément ce que l'usage a signalé comme
+        # insuffisant. L'appelant qui ne le passe pas doit le lire au rapport.
+        return [
+            "Plan de repérage dessiné sans le plan de masse : aucun contrat ne "
+            "lui a été transmis. Seul le contour du site y figure."
+        ]
+    cadre = box(*reperage.cadre)
+    for categorie, geometries in objets_a_dessiner(contrat, messages):
+        style = STYLES[categorie].style
+        for geometrie in geometries:
+            # Hors cadre : le plan de repérage se cadre sur le site et ses
+            # points de vue, pas sur les abords lointains du plan du BE.
+            if cadre.intersects(geometrie):
+                planche.ajouter_geometrie(geometrie, style)
+    return messages
 
 
 def _poser_emprise(planche: Planche, emprise) -> None:

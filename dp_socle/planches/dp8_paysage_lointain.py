@@ -41,6 +41,7 @@ def generer(
     prises,
     emprise,
     dossier: str | Path,
+    contrat=None,
     numero: str | None = None,
     cadrages=None,
     fond_ign: bool = True,
@@ -79,6 +80,7 @@ def generer(
         reperes,
         emprise,
         "DP 8 — plan de repérage",
+        contrat,
         emplacements=PRISES_MAXIMALES,
         fond_ign=fond_ign,
     )

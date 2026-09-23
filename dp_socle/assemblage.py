@@ -399,7 +399,7 @@ def _planches_photographies(projet, contrat, dossier, avertissements, rang_depar
             try:
                 sortie = _generer_piece_photo(
                     module, projet, lot, emprise_cloturee, dossier, code,
-                    rang_prise, str(rang),
+                    rang_prise, str(rang), contrat,
                 )
             except ErreurDP as exc:
                 avertissements.append(f"{code} n'est pas produite : {exc}")
@@ -411,19 +411,23 @@ def _planches_photographies(projet, contrat, dossier, avertissements, rang_depar
 
 
 def _generer_piece_photo(module, projet, prises, emprise, dossier, code,
-                         rang_prise, numero):
-    """Appelle la pièce avec la forme d'arguments qu'elle attend."""
+                         rang_prise, numero, contrat):
+    """Appelle la pièce avec la forme d'arguments qu'elle attend.
+
+    `contrat` porte le plan de masse que le plan de repérage dessine sous les
+    repères : les mêmes objets que DP 2, par le même point d'entrée.
+    """
     if code == "DP 6":
         prise = prises[0]
         return module.generer(
             projet, prise.point_de_vue, prise.images, emprise, dossier,
-            rang=rang_prise, numero=numero,
+            contrat=contrat, rang=rang_prise, numero=numero,
             cadrages=[prise.cadrage_de(i) for i in range(len(prise.images))],
         )
     return module.generer(
         projet,
         [(prise.point_de_vue, prise.images[0]) for prise in prises],
-        emprise, dossier, numero=numero,
+        emprise, dossier, contrat=contrat, numero=numero,
         cadrages=[prise.cadrage_de(0) for prise in prises],
     )
 
