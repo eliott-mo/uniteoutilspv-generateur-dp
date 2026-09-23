@@ -81,6 +81,19 @@ DEVIATION_FUSION_MAX_DEG = 160.0
 #: Déviation en deçà de laquelle un sommet est tenu pour aligné, en radians.
 ALIGNE_RAD = 1e-6
 
+#: Jeu entre le bord d'une piste serrée contre la clôture et la clôture, en
+#: mètres : « plus près de la clôture, sans la toucher », demande du chef de
+#: projet du 23/09/2026 pour la boucle de Gannay. Un demi-mètre laisse la place
+#: des poteaux et de leurs massifs.
+JEU_CLOTURE_M = 0.5
+
+#: Une piste longe la clôture quand au moins cette part de son axe court à
+#: moins de `LONGE_M` d'elle, du côté de l'enceinte. La boucle de Gannay y est
+#: tout entière, à 2,1-5,5 m ; la bretelle du portail, qui la franchit, et
+#: l'anneau, dehors, n'y sont pas.
+PART_LE_LONG = 0.8
+LONGE_M = 10.0
+
 
 @dataclass(frozen=True)
 class AxePiste:
@@ -205,6 +218,29 @@ class _Chemin:
         del self.troncons[a]
 
 
+def _sans_sommet_confondu(sommets: list, troncons: list, ferme: bool) -> _Chemin:
+    """Un chemin sans deux sommets consécutifs confondus.
+
+    Deux tracés serrés contre la clôture se raccordent sur le même alignement :
+    le sommet de raccord tombe alors sur le premier sommet du tracé suivant, et
+    un segment de longueur nulle n'a pas de direction. Le segment disparaît ;
+    celui qui suit garde son tracé d'origine.
+    """
+    sommets, troncons = list(sommets), list(troncons)
+    k = 1
+    while k < len(sommets):
+        if math.dist(sommets[k - 1], sommets[k]) < 0.01:
+            del sommets[k]
+            del troncons[k - 1]
+        else:
+            k += 1
+    if ferme and len(sommets) > 1 and math.dist(sommets[0], sommets[-1]) < 0.01:
+        # Le segment nul est celui qui refermait le chemin : le dernier.
+        sommets.pop()
+        troncons.pop()
+    return _Chemin(sommets, troncons, ferme)
+
+
 def _tangentes(chemin: _Chemin, rayon: float) -> list[float]:
     """Longueur prise sur chaque segment voisin par l'arc de chaque sommet."""
     return [
@@ -272,14 +308,43 @@ def _arc(centre, rayon: float, depart: float, balayage: float) -> list:
     ]
 
 
-def _arrondir(chemin: _Chemin, rayon: float) -> tuple[dict, dict, list[str]]:
-    """Arrondit chaque virage du chemin, au rayon voulu ou au plus grand qui tient.
+#: Déviation en deçà de laquelle un sommet n'est qu'un point de l'alignement,
+#: en radians : 0,1°. Un raccord entre deux tracés qui tombe là n'est pas un
+#: virage.
+ALIGNE_RACCORD_RAD = math.radians(0.1)
 
-    Rend, pour chaque tracé d'origine, les points de son axe arrondi dans
-    l'ordre du chemin, les rayons appliqués à ses virages, et les notes. Un
-    virage entre deux tracés se partage en son milieu.
-    """
-    notes = _fusionner_les_virages_serres(chemin, rayon)
+
+def _raccords(chemin: _Chemin) -> list:
+    """Les points où le chemin passe d'un tracé à l'autre, dans son ordre."""
+    n = len(chemin.sommets)
+    indices = range(n) if chemin.ferme else range(1, n - 1)
+    return [
+        (chemin.sommets[i], chemin.troncons[i - 1], chemin.troncons[i])
+        for i in indices
+        if chemin.troncons[i - 1] != chemin.troncons[i]
+    ]
+
+
+def _geometrie_seule(chemin: _Chemin) -> _Chemin:
+    """Le chemin sans ses sommets alignés, et sans distinction de tracé."""
+    sommets = list(chemin.sommets)
+    minimum = 3 if chemin.ferme else 2
+    retire = True
+    while retire and len(sommets) > minimum:
+        retire = False
+        n = len(sommets)
+        for i in range(n) if chemin.ferme else range(1, n - 1):
+            a, b, c = sommets[(i - 1) % n], sommets[i], sommets[(i + 1) % n]
+            if abs(_deviation(_direction(a, b), _direction(b, c))) < ALIGNE_RACCORD_RAD:
+                del sommets[i]
+                retire = True
+                break
+    nb_segments = len(sommets) if chemin.ferme else len(sommets) - 1
+    return _Chemin(sommets, [0] * nb_segments, chemin.ferme)
+
+
+def _polyligne_arrondie(chemin: _Chemin, rayon: float) -> tuple[list, list]:
+    """Les points du chemin, chaque virage remplacé par son arc, et ces arcs."""
     sommets, n = chemin.sommets, len(chemin.sommets)
     voulues = _tangentes(chemin, rayon)
     # Ce qui n'a pas pu se fondre se réduit : sur un segment trop court, les deux
@@ -292,11 +357,12 @@ def _arrondir(chemin: _Chemin, rayon: float) -> tuple[dict, dict, list[str]]:
             permises[a] = min(permises[a], voulues[a] * longueur / besoin)
             permises[b] = min(permises[b], voulues[b] * longueur / besoin)
 
-    arcs: list = [None] * n
-    rayons: list = [None] * n
-    for i in range(n):
+    points = [] if chemin.ferme else [sommets[0]]
+    arcs = []
+    for i in range(n) if chemin.ferme else range(1, n - 1):
         deviation = chemin.deviation(i)
         if abs(deviation) < ALIGNE_RAD or permises[i] <= 1e-9:
+            points.append(sommets[i])
             continue
         avant, _ = chemin._voisins(i)
         entree = _direction(sommets[avant], sommets[i])
@@ -308,80 +374,82 @@ def _arrondir(chemin: _Chemin, rayon: float) -> tuple[dict, dict, list[str]]:
         normale = (-entree[1] * cote, entree[0] * cote)
         centre = (debut[0] + normale[0] * rayon_ici, debut[1] + normale[1] * rayon_ici)
         depart = math.atan2(debut[1] - centre[1], debut[0] - centre[0])
-        arcs[i] = _arc(centre, rayon_ici, depart, deviation)
-        rayons[i] = rayon_ici
+        arc = _arc(centre, rayon_ici, depart, deviation)
+        points.extend(arc)
+        arcs.append((rayon_ici, arc))
+    points = _sans_doublons(points if chemin.ferme else points + [sommets[-1]], ferme=False)
+    if chemin.ferme:
+        # Un anneau se referme exactement, sans quoi sa bande garderait une
+        # coupure là où il commence.
+        if math.dist(points[0], points[-1]) < 0.01:
+            points[-1] = points[0]
+        else:
+            points.append(points[0])
+    return points, arcs
 
-    def points_du_sommet(i):
-        return arcs[i] if arcs[i] is not None else [sommets[i]]
 
-    def moities(i):
-        """Les deux moitiés du virage i, se recouvrant sur le point milieu."""
-        points = points_du_sommet(i)
-        milieu = len(points) // 2
-        return points[: milieu + 1], points[milieu:]
+def _entre(position: float, debut: float, fin: float) -> bool:
+    """Vrai si une abscisse tombe entre deux autres, en passant l'origine s'il le faut."""
+    if debut <= fin:
+        return debut - 1e-9 <= position <= fin + 1e-9
+    return position >= debut - 1e-9 or position <= fin + 1e-9
+
+
+def _arrondir(chemin: _Chemin, rayon: float) -> tuple[dict, dict, list[str]]:
+    """Arrondit chaque virage du chemin, au rayon voulu ou au plus grand qui tient.
+
+    Rend, pour chaque tracé d'origine, les points de son axe arrondi dans
+    l'ordre du chemin, les rayons appliqués à ses virages, et les notes.
+
+    L'arrondi se fait sur la géométrie seule, sans ses sommets alignés, et le
+    chemin arrondi se recoupe ensuite à ses raccords. Un raccord entre deux
+    tracés qui tombe sur un alignement n'est pas un virage : gardé comme
+    sommet, il empêchait l'arc de l'angle voisin de le franchir. À Gannay, une
+    fois les pistes serrées contre la clôture, un raccord tombé à 4,6 m d'un
+    angle se prenait pour un décrochement, et l'angle se déplaçait de 2,3 m.
+    Un raccord qui tombe dans un virage le partage.
+    """
+    from shapely.ops import substring
+
+    raccords = _raccords(chemin)
+    geometrie = _geometrie_seule(chemin)
+    notes = _fusionner_les_virages_serres(geometrie, rayon)
+    points, arcs = _polyligne_arrondie(geometrie, rayon)
+    if not raccords:
+        troncon = chemin.troncons[0]
+        return {troncon: points}, {troncon: [r for r, _ in arcs]}, notes
+
+    ligne = LineString(points)
+    longueur = ligne.length
+    positions = [(ligne.project(Point(p)), entrant, sortant) for p, entrant, sortant in raccords]
+    etendues: dict = {}
+    if chemin.ferme:
+        positions.sort(key=lambda position: position[0])
+        for k, (debut, _, sortant) in enumerate(positions):
+            etendues[sortant] = (debut, positions[(k + 1) % len(positions)][0])
+    else:
+        bornes = [0.0] + [p for p, _, _ in positions] + [longueur]
+        suite = [positions[0][1]] + [sortant for _, _, sortant in positions]
+        for k, troncon in enumerate(suite):
+            etendues[troncon] = (bornes[k], bornes[k + 1])
 
     morceaux: dict = {}
+    for troncon, (debut, fin) in etendues.items():
+        if debut <= fin:
+            coords = list(substring(ligne, debut, fin).coords)
+        else:
+            coords = (
+                list(substring(ligne, debut, longueur).coords)
+                + list(substring(ligne, 0.0, fin).coords)[1:]
+            )
+        morceaux[troncon] = _sans_doublons(coords, ferme=False)
+
     rayons_par_troncon: dict = {}
-
-    def noter_rayon(troncon, i):
-        if rayons[i] is not None:
-            rayons_par_troncon.setdefault(troncon, []).append(rayons[i])
-
-    def ajouter(troncon, points):
-        morceaux.setdefault(troncon, []).extend(points)
-
-    if not chemin.ferme:
-        ajouter(chemin.troncons[0], [sommets[0]])
-        for i in range(1, n - 1):
-            entrant, sortant = chemin.troncons[i - 1], chemin.troncons[i]
-            if entrant == sortant:
-                ajouter(entrant, points_du_sommet(i))
-                noter_rayon(entrant, i)
-            else:
-                premiere, seconde = moities(i)
-                ajouter(entrant, premiere)
-                ajouter(sortant, seconde)
-                noter_rayon(entrant, i)
-                noter_rayon(sortant, i)
-        ajouter(chemin.troncons[-1], [sommets[-1]])
-    elif len(set(chemin.troncons)) == 1:
-        troncon = chemin.troncons[0]
-        for i in range(n):
-            ajouter(troncon, points_du_sommet(i))
-            noter_rayon(troncon, i)
-        ajouter(troncon, [morceaux[troncon][0]])
-    else:
-        # Un chemin fermé fait de plusieurs tracés : on part d'un raccord.
-        depart = next(i for i in range(n) if chemin.troncons[i - 1] != chemin.troncons[i])
-        ordre = [(depart + k) % n for k in range(n)]
-        premiere, seconde = moities(depart)
-        ajouter(chemin.troncons[depart], seconde)
-        noter_rayon(chemin.troncons[depart], depart)
-        for i in ordre[1:]:
-            entrant, sortant = chemin.troncons[i - 1], chemin.troncons[i]
-            if entrant == sortant:
-                ajouter(entrant, points_du_sommet(i))
-                noter_rayon(entrant, i)
-            else:
-                avant, apres = moities(i)
-                ajouter(entrant, avant)
-                ajouter(sortant, apres)
-                noter_rayon(entrant, i)
-                noter_rayon(sortant, i)
-        ajouter(chemin.troncons[depart - 1], premiere)
-        noter_rayon(chemin.troncons[depart - 1], depart)
-
-    ferme_seul = chemin.ferme and len(set(chemin.troncons)) == 1
-    for troncon, points in morceaux.items():
-        propres = _sans_doublons(points, ferme=False)
-        if ferme_seul:
-            # Un anneau se referme exactement, sans quoi sa bande garderait
-            # une coupure là où il commence.
-            if math.dist(propres[0], propres[-1]) < 0.01:
-                propres[-1] = propres[0]
-            else:
-                propres.append(propres[0])
-        morceaux[troncon] = propres
+    for rayon_arc, arc in arcs:
+        abscisses = [ligne.project(Point(q)) for q in (arc[0], arc[len(arc) // 2], arc[-1])]
+        for troncon, (debut, fin) in etendues.items():
+            if any(_entre(s, debut, fin) for s in abscisses):
+                rayons_par_troncon.setdefault(troncon, []).append(rayon_arc)
     return morceaux, rayons_par_troncon, notes
 
 
@@ -514,7 +582,9 @@ def _raccorder(
     vus = set()
     for i in range(len(axes)):
         if fermes[i]:
-            chemins.append(_Chemin(coords[i][:-1], [i] * (len(coords[i]) - 1), ferme=True))
+            chemins.append(
+                _sans_sommet_confondu(coords[i][:-1], [i] * (len(coords[i]) - 1), ferme=True)
+            )
             vus.add(i)
     for i in range(len(axes)):
         if i in vus:
@@ -571,7 +641,7 @@ def _raccorder(
             # segment, déjà compté, devient celui qui referme la boucle.
             sommets[0] = sommet
             sommets.pop()
-        chemins.append(_Chemin(sommets, troncons, ferme))
+        chemins.append(_sans_sommet_confondu(sommets, troncons, ferme))
     return chemins, raccords, coords, notes
 
 
@@ -666,6 +736,59 @@ def _evasements(
             evasements.append(forme)
             rayons.append(rayon)
     return evasements, rayons
+
+
+# ---------------------------------------------------------------------------
+# Une piste serrée contre la clôture
+# ---------------------------------------------------------------------------
+
+
+def longe(axe: LineString, enceinte: Polygon) -> bool:
+    """Vrai quand la piste court le long de la clôture, du côté de l'enceinte."""
+    bande = enceinte.exterior.buffer(LONGE_M).intersection(enceinte)
+    return axe.intersection(bande).length >= PART_LE_LONG * axe.length
+
+
+def serrer_contre(
+    axe: LineString, enceinte: Polygon, jeu: float = JEU_CLOTURE_M
+) -> LineString | None:
+    """L'axe d'une piste qui longe la clôture, reporté pour que sa bande passe à `jeu` d'elle.
+
+    C'est la clôture décalée vers l'intérieur de la demi-largeur de la piste et
+    du jeu, prise entre les points où l'axe du plan commence et finit, dans le
+    sens qui le suit. Les virages s'arrondissent ensuite comme ceux de toute
+    piste ; deux pistes serrées bout à bout restent raccordées. None si la
+    piste ne longe pas la clôture.
+    """
+    from shapely.ops import substring
+
+    if not longe(axe, enceinte):
+        return None
+    decale = enceinte.buffer(-(LARGEUR_PISTE_M / 2.0 + jeu), join_style="mitre")
+    if decale.is_empty:
+        return None
+    if decale.geom_type == "MultiPolygon":
+        decale = max(decale.geoms, key=lambda g: g.area)
+    anneau = LineString(decale.exterior.coords)
+    coords = list(axe.coords)
+    if _est_ferme(coords):
+        return anneau
+    longueur = anneau.length
+    debut = anneau.project(Point(coords[0]))
+    fin = anneau.project(Point(coords[-1]))
+
+    def arc(a: float, b: float) -> LineString:
+        """De a à b dans le sens de l'anneau, en passant son origine s'il le faut."""
+        if a <= b:
+            return substring(anneau, a, b)
+        return LineString(
+            list(substring(anneau, a, longueur).coords)
+            + list(substring(anneau, 0.0, b).coords)[1:]
+        )
+
+    aller = arc(debut, fin)
+    retour = LineString(list(arc(fin, debut).coords)[::-1])
+    return min((aller, retour), key=lambda ligne: ligne.hausdorff_distance(axe))
 
 
 # ---------------------------------------------------------------------------

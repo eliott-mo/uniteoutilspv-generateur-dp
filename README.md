@@ -1965,6 +1965,8 @@ alors qu'il en tient lieu sur sa longueur. L'import le **propose**, avec sa
 raison, et ne l'applique que si on le lui demande : le poste est alors posé
 long pan sur la clôture, côté intérieur, et la correction figure au contrat
 sous `corrections_plan`, sa longueur parmi les interruptions de l'enceinte.
+Les pistes qui longent la clôture se proposent de même, serrées contre elle
+(voir « Une piste se dessine comme sur un vrai plan »).
 
 ### Le portail se dessine comme sa légende
 
@@ -2008,11 +2010,33 @@ bretelle du portail de Gannay, 11,4 m entre la boucle et l'anneau, n'offre
 que 3,2 m à chacun de ses quatre arrondis.
 
 Le trait du plan passe au ras de ce qu'il longe ; la piste de 5 m menée
-dessus peut le recouvrir. On ne la déplace pas, parce que ce serait corriger
-le plan : un contrôle dit ce qu'elle recouvre. À Gannay, la piste à créer
-couvre 21 m² de tables et 2 m² d'ouvrages, et la clôture sur 113 m, son
+dessus peut le recouvrir. On ne la déplace pas d'office, parce que ce serait
+corriger le plan : un contrôle dit ce qu'elle recouvre. À Gannay, la piste à
+créer couvre 21 m² de tables et 2 m² d'ouvrages, et la clôture sur 113 m, son
 axe passant à 2,1 m de celle-ci. À Bray, rien. `projet.json` garde la
 largeur, les rayons et leur source sous `pistes_plan`.
+
+**Serrer les pistes contre la clôture** est une correction de plan, proposée
+comme celle du poste (D8) — demande du chef de projet du 23/09/2026 pour
+Gannay : « plus près de la clôture, sans la toucher », pour dégager les
+tables. Une piste qui longe la clôture — 80 % de son axe à moins de 10 m
+d'elle, côté enceinte — est reportée sur la clôture décalée vers l'intérieur
+de sa demi-largeur et d'un jeu de 0,5 m, entre les points où elle commençait
+et finissait ; deux pistes qui se raccordaient restent raccordées, et les
+virages s'arrondissent comme les autres. À Gannay, la boucle passe alors à
+0,5 m de la clôture, la piste existante ne touche plus aucune table, la piste
+à créer n'en recouvre plus que 5,8 m² : les bouts de quatre rangées sont à
+3,7-4,9 m de la clôture, et une piste de 5 m ne peut y passer sans les toucher
+— ce que la raison de la correction dit. Reste à raccourcir ces rangées, ou à
+élargir l'enceinte, sur le plan. Cette correction et celle du poste ne vont
+pas ensemble : le poste posé sur la clôture occuperait la bande où la piste
+passe, et le contrôle le dirait.
+
+Le calcul avait d'abord échoué aux angles : un raccord entre deux pistes
+reportées tombait sur l'alignement, à 4,6 m d'un angle, et restait sommet du
+chemin ; l'arc de l'angle ne pouvait le franchir, et il se prenait pour un
+décrochement à effacer. Le chemin s'arrondit désormais sur sa seule géométrie,
+sans sommets alignés, et se recoupe ensuite à ses raccords.
 
 ### Ce que le lot 2ter ne peut pas fournir
 

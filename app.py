@@ -1897,7 +1897,7 @@ def _trancher_les_ouvrages(import_pdf) -> None:
     corrections = []
     for correction in import_pdf.corrections_proposees:
         if st.checkbox(
-            f"Poser « {correction.libelle} » sur la clôture — correction du plan",
+            f"{correction.intitule} — correction du plan",
             key=f"correction_plan_{correction.identifiant}",
         ):
             corrections.append(correction.identifiant)

@@ -478,9 +478,9 @@ def test_la_correction_du_poste_est_proposee_et_pas_appliquee(import_gannay, con
     Son centre est à 7,8 m du tracé — les 7,7 m du brief —, son long pan à
     6,3 m une fois le poste à ses cotes. L'import le propose, et ne le fait pas.
     """
-    proposees = import_gannay.corrections_proposees
-    assert [c.identifiant for c in proposees] == ["poste_sur_cloture:pdl_ptr:1"]
-    assert proposees[0].retrait_m == pytest.approx(6.3, abs=0.2)
+    proposees = {c.identifiant: c for c in import_gannay.corrections_proposees}
+    assert set(proposees) == {"poste_sur_cloture:pdl_ptr:1", "pistes_contre_cloture"}
+    assert proposees["poste_sur_cloture:pdl_ptr:1"].retrait_m == pytest.approx(6.3, abs=0.2)
     assert contrat_gannay.donnees["corrections_plan"] == []
     poste = contrat_gannay.geometries("pdl_ptr")[0]
     enceinte = contrat_gannay.geometries("cloture")[0]
@@ -616,6 +616,60 @@ def test_les_pistes_sortent_en_bandes_de_5_m_aux_virages_arrondis(contrat_gannay
 
 
 @besoin_gannay
+def test_les_pistes_se_serrent_contre_la_cloture_sur_demande(
+    import_gannay, export_gannay, tmp_path
+):
+    """Demande du chef de projet du 23/09/2026 : dégager les tables sans toucher la clôture.
+
+    La correction est proposée, pas appliquée. Appliquée, les deux pistes de
+    la boucle passent à 0,5 m de la clôture, la boucle reste fermée, et il ne
+    reste sous elles que les bouts des quatre rangées venues à moins de 5,5 m
+    de la clôture — une piste de 5 m ne peut y passer sans les toucher. Le
+    contrat inscrit la correction avec sa raison.
+    """
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    from dp_socle.contrat import charger_contrat
+
+    correction = next(
+        c for c in import_gannay.corrections_proposees if c.identifiant == "pistes_contre_cloture"
+    )
+    assert "correction du plan" in correction.raison
+    assert "5,8 m²" in correction.raison
+
+    serre = importer_plan_pdf(
+        PLAN_GANNAY,
+        export_gannay,
+        longitude_origine=LONGITUDE_GANNAY,
+        correction_nord_sud_m=NORD_SUD_GANNAY_M,
+        choix=replace(CHOIX_GANNAY, corrections=("pistes_contre_cloture",)),
+    )
+    construction = serre.construction
+    anneau = construction.enceinte.polygone.exterior
+    tables = unary_union(list(serre.implantation.tables))
+    # Les deux pistes de la boucle intérieure ; l'anneau, dehors, est fermé.
+    boucle = [p for p in construction.pistes if p.axe.length > 150 and not p.axe.is_ring]
+    assert len(boucle) == 2
+    for piste in boucle:
+        assert piste.surface.distance(anneau) == pytest.approx(0.5, abs=0.02)
+    recouvert = unary_union([p.surface for p in boucle]).intersection(tables).area
+    assert recouvert == pytest.approx(5.8, abs=0.5)
+    fermee = unary_union([p.surface for p in boucle])
+    centre_des_tables = tables.centroid
+    assert any(Polygon(i).contains(centre_des_tables) for i in fermee.interiors)
+    # Le contrôle ne dit plus que les pistes suivent le trait du plan.
+    controle = next(c for c in serre.controles if c.libelle.startswith("Pistes de 5 m"))
+    assert controle.message.startswith("Serrées contre la clôture")
+    assert "clôture sur" not in controle.message
+
+    serre.ecrire(tmp_path)
+    corrections = charger_contrat(tmp_path).donnees["corrections_plan"]
+    assert [c["identifiant"] for c in corrections] == ["pistes_contre_cloture"]
+    assert corrections[0]["retrait_m"] == 0.5
+
+
+@besoin_gannay
 def test_une_piste_qui_recouvre_tables_et_cloture_est_signalee(import_gannay):
     """Le trait du plan passe au ras des tables et de la clôture ; la piste de 5 m non.
 
@@ -695,6 +749,10 @@ def test_les_pistes_de_bray_perdent_leur_decrochement_et_gardent_deux_acces(impo
         c for c in import_bray.controles if c.libelle == "Pistes de 5 m sur le tracé du plan"
     )
     assert controle.statut == "ok"
+    # Rien à dégager : la correction des pistes n'a pas lieu d'être proposée.
+    assert not any(
+        c.identifiant == "pistes_contre_cloture" for c in import_bray.corrections_proposees
+    )
 
 
 @besoin_bray

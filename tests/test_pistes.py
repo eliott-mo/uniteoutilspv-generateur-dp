@@ -155,6 +155,53 @@ def test_un_virage_sans_place_se_resserre_et_le_rapport_le_dit():
     assert any("5.0 m de rayon" in n and "en deçà" in n for n in notes)
 
 
+def test_une_piste_qui_longe_la_cloture_se_reporte_a_un_demi_metre_d_elle():
+    """Demande du chef de projet du 23/09/2026 : plus près de la clôture, sans la toucher.
+
+    Un tracé en U à 2 m de la clôture d'un carré : la piste de 5 m menée
+    dessus la chevaucherait. Serrée, son axe court à 3 m de la clôture — la
+    demi-largeur et le jeu —, sur les mêmes trois côtés, et sa bande passe à
+    0,5 m d'elle.
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.pistes import JEU_CLOTURE_M, serrer_contre
+
+    enceinte = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    trace = LineString([(2, 98), (2, 2), (98, 2), (98, 98)])
+    serre = serrer_contre(trace, enceinte)
+    assert serre is not None
+    decalage = LARGEUR_PISTE_M / 2.0 + JEU_CLOTURE_M
+    assert serre.hausdorff_distance(
+        LineString([(decalage, 98), (decalage, decalage), (100 - decalage, decalage), (100 - decalage, 98)])
+    ) < decalage
+    (piste,), _ = _pistes(("piste_lourde_a_creer", "U", list(serre.coords)))
+    assert piste.surface.distance(enceinte.exterior) == pytest.approx(JEU_CLOTURE_M, abs=0.01)
+    # Une piste qui traverse l'enceinte ne longe pas la clôture : rien à serrer.
+    assert serrer_contre(LineString([(50, 0), (50, 100)]), enceinte) is None
+
+
+def test_un_raccord_sur_un_alignement_n_est_pas_un_virage():
+    """Deux tracés mis bout à bout sur une même droite, près d'un angle.
+
+    Le raccord tombe à 4 m de l'angle : l'arc de 13,5 m de l'angle doit le
+    franchir. Gardé comme sommet, il se prenait pour un décrochement, et
+    l'angle se déplaçait (mesuré à Gannay le 23/09/2026).
+    """
+    pistes, notes = _pistes(
+        ("piste_lourde_existante", "existante", [(0, 100), (0, 0), (4, 0)]),
+        ("piste_lourde_a_creer", "à créer", [(4, 0), (100, 0)]),
+    )
+    assert not any("décrochement" in n or "fondus" in n for n in notes)
+    union = unary_union([p.surface for p in pistes])
+    centre = Point(RAYON_AXE_M, RAYON_AXE_M)
+    assert union.distance(centre) == pytest.approx(RAYON_INTERIEUR_M, abs=0.02)
+    assert {p.libelle: p.rayons_axe_m for p in pistes} == {
+        "existante": [13.5],
+        "à créer": [13.5],
+    }
+
+
 def test_deux_bouts_proches_sans_raccord_le_disent():
     """À Bray, deux pistes finissent au local technique à 3,6 m l'une de l'autre.
 

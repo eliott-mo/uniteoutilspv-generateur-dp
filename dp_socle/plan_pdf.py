@@ -56,11 +56,13 @@ from .erreurs import (
 )
 from .import_be import normaliser
 from .pistes import (
+    JEU_CLOTURE_M,
     LARGEUR_PISTE_M,
     RAYON_AXE_M,
     RAYON_INTERIEUR_M,
     AxePiste,
     dessiner_pistes,
+    serrer_contre,
 )
 
 # ---------------------------------------------------------------------------
@@ -2022,6 +2024,137 @@ class CorrectionProposee:
     #: Direction de la clôture qu'il longe, en degrés dans le repère du DXF.
     direction_deg: float
 
+    @property
+    def intitule(self) -> str:
+        return f"Poser « {self.libelle} » sur la clôture"
+
+
+@dataclass(frozen=True)
+class CorrectionDesPistes:
+    """Les pistes qui longent la clôture, serrées contre elle (décision D8).
+
+    À Gannay, le trait du plan passe à 2,1 m de la clôture sur trois côtés et à
+    5,5 m sur le quatrième : la piste de 5 m menée dessus chevauche la clôture
+    et mord sur 21 m² de tables. Demande du chef de projet du 23/09/2026 : la
+    serrer plus près de la clôture, sans la toucher, pour dégager les tables.
+    C'est une correction du plan : proposée, jamais appliquée d'office, et
+    inscrite au contrat avec sa raison quand elle l'est.
+    """
+
+    identifiant: str
+    categorie: str
+    libelle: str
+    #: Jeu laissé entre le bord des pistes et la clôture, en mètres.
+    retrait_m: float
+    raison: str
+
+    @property
+    def intitule(self) -> str:
+        return f"Serrer les pistes contre la clôture, à {nombre_fr(self.retrait_m)} m"
+
+
+def nombre_fr(valeur: float) -> str:
+    """Un nombre écrit à la française, sans zéro inutile."""
+    return f"{valeur:g}".replace(".", ",")
+
+
+def _bouts_raccordes_confondus(axes: list) -> list:
+    """Les tracés, leurs bouts mis bout à bout ramenés à un même point.
+
+    Serrés chacun de son côté, deux bouts voisins d'un angle de la clôture se
+    projetaient de part et d'autre de l'angle : 4,4 m les séparaient à Gannay,
+    au-delà d'un raccord (`pistes.JONCTION_M`), et la boucle s'ouvrait. Ramenés
+    d'abord à leur milieu, ils se projettent au même point.
+    """
+    from .pistes import JONCTION_M
+
+    coords = [list(axe.ligne.coords) for axe in axes]
+    ouverts = [
+        i for i, c in enumerate(coords) if len(c) > 1 and math.dist(c[0], c[-1]) > 0.01
+    ]
+    for rang, i in enumerate(ouverts):
+        for j in ouverts[rang + 1 :]:
+            for bout_i in (0, -1):
+                for bout_j in (0, -1):
+                    p, q = coords[i][bout_i], coords[j][bout_j]
+                    if math.dist(p, q) < JONCTION_M:
+                        milieu = ((p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0)
+                        coords[i][bout_i] = coords[j][bout_j] = milieu
+    return [
+        AxePiste(axe.categorie, axe.libelle, LineString(c)) for axe, c in zip(axes, coords)
+    ]
+
+
+def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tuple:
+    """La correction qui serre contre la clôture les pistes qui la longent, s'il y a lieu.
+
+    Elle n'est proposée que si ces pistes, menées sur le trait du plan,
+    chevauchent la clôture ou mordent sur des tables. Sa raison dit ce qu'elle
+    règle et ce qu'elle ne peut pas régler : une table à moins de 5,5 m de la
+    clôture reste sous une piste de 5 m, où qu'on la pose.
+    """
+    if enceinte is None or not axes:
+        return None, axes
+    serres = []
+    for axe, net in zip(axes, _bouts_raccordes_confondus(axes)):
+        ligne = serrer_contre(net.ligne, enceinte)
+        serres.append(axe if ligne is None else AxePiste(axe.categorie, axe.libelle, ligne))
+    deplaces = [i for i, (axe, serre) in enumerate(zip(axes, serres)) if serre is not axe]
+    if not deplaces:
+        return None, axes
+    anneau = enceinte.exterior
+    toutes_les_tables = unary_union(list(tables))
+
+    def bilan(dessinees):
+        surface = unary_union([dessinees[i].surface for i in deplaces])
+        sur_tables = float(surface.intersection(toutes_les_tables).area) if tables else 0.0
+        touchees = sum(1 for t in tables if t.intersection(surface).area > 0.01)
+        return sur_tables, touchees, float(anneau.intersection(surface).length)
+
+    tables_avant, _, cloture_avant = bilan(pistes)
+    if tables_avant <= 0.5 and cloture_avant <= 0.5:
+        return None, axes
+    apres, _ = dessiner_pistes(serres)
+    tables_apres, touchees_apres, cloture_apres = bilan(apres)
+
+    avant = []
+    if cloture_avant > 0.5:
+        avant.append(f"chevauchent la clôture sur {cloture_avant:.0f} m")
+    if tables_avant > 0.5:
+        avant.append(f"recouvrent {tables_avant:.0f} m² de tables")
+    ensuite = [
+        "ne touchent plus la clôture"
+        if cloture_apres < 0.01
+        else f"la touchent encore sur {cloture_apres:.0f} m"
+    ]
+    if tables_apres > 0.05:
+        ensuite.append(
+            f"ne recouvrent plus que {nombre_fr(round(tables_apres, 1))} m² de tables, "
+            f"les bouts de {touchees_apres} rangée(s) venus à moins de "
+            f"{nombre_fr(LARGEUR_PISTE_M + JEU_CLOTURE_M)} m de la clôture : une piste "
+            f"de {nombre_fr(LARGEUR_PISTE_M)} m ne peut y passer sans les toucher"
+        )
+    else:
+        ensuite.append("ne recouvrent plus aucune table")
+    libelles = sorted({axes[i].libelle for i in deplaces})
+    correction = CorrectionDesPistes(
+        identifiant="pistes_contre_cloture",
+        categorie=", ".join(sorted({axes[i].categorie for i in deplaces})),
+        libelle="Pistes le long de la clôture",
+        retrait_m=JEU_CLOTURE_M,
+        raison=(
+            "Menées sur le trait du plan, les pistes qui longent la clôture ("
+            + ", ".join(f"« {l} »" for l in libelles)
+            + ") "
+            + " et ".join(avant)
+            + f". Serrées à {nombre_fr(JEU_CLOTURE_M)} m de la clôture — correction du "
+            "plan —, elles "
+            + " et ".join(ensuite)
+            + "."
+        ),
+    )
+    return correction, serres
+
 
 @dataclass
 class OuvragePlace:
@@ -2337,9 +2470,17 @@ def _gabarit_de(categorie: str, catalogue: dict, choix: ChoixDuPlan, cote: dict 
 
 
 def construire(
-    lecture: PlanPDF, calage: CalagePlan, choix: ChoixDuPlan, catalogue: dict
+    lecture: PlanPDF,
+    calage: CalagePlan,
+    choix: ChoixDuPlan,
+    catalogue: dict,
+    tables: tuple = (),
 ) -> Construction:
-    """Les tracés, l'enceinte, les ouvrages et les portails, en mètres du DXF."""
+    """Les tracés, l'enceinte, les ouvrages et les portails, en mètres du DXF.
+
+    `tables` sont celles du lot 2, dans le même repère : ce que les pistes
+    recouvrent se mesure sur elles.
+    """
     notes: list[str] = []
     traces_dxf: list = []
     cloture: list = []
@@ -2356,9 +2497,9 @@ def construire(
             else:
                 traces_dxf.append((trace.categorie, trace.libelle, ligne))
     # Le plan donne le tracé et le type de chaque piste ; la piste elle-même
-    # se dessine comme sur un vrai plan : 5 m de large, virages arrondis.
+    # se dessine comme sur un vrai plan : 5 m de large, virages arrondis. Ses
+    # notes attendent de savoir si la correction des pistes est appliquée.
     pistes, notes_pistes = dessiner_pistes(axes_de_pistes)
-    notes.extend(notes_pistes)
 
     reperes_par_categorie = {c: reperes(lecture, c) for c in CATEGORIES_OUVRAGES}
     centres = []
@@ -2447,6 +2588,15 @@ def construire(
                         "origine": "correction D8",
                     }
                 )
+    correction_pistes, axes_serres = _pistes_contre_la_cloture(
+        axes_de_pistes, pistes, enceinte.polygone if enceinte is not None else None, tables
+    )
+    if correction_pistes is not None:
+        proposees.append(correction_pistes)
+        if correction_pistes.identifiant in choix.corrections:
+            appliquees.append(correction_pistes)
+            pistes, notes_pistes = dessiner_pistes(axes_serres)
+    notes.extend(notes_pistes)
     inconnues = set(choix.corrections) - {c.identifiant for c in proposees}
     if inconnues:
         raise ErreurPlanPDF(
@@ -2576,7 +2726,11 @@ class ImportPlanPDF:
         cle = ("construction", self.choix.cle())
         if cle not in self._memoire:
             self._memoire[cle] = construire(
-                self.lecture, self.calage, self.choix, self.catalogue[0]
+                self.lecture,
+                self.calage,
+                self.choix,
+                self.catalogue[0],
+                tables=tuple(self.implantation.tables),
             )
         return self._memoire[cle]
 
@@ -2854,21 +3008,38 @@ class ImportPlanPDF:
             constats.append(f"{sur_ouvrages:.0f} m² d'ouvrages")
         if sur_cloture > 1.0:
             constats.append(f"la clôture sur {sur_cloture:.0f} m hors portails")
+        serrees = any(
+            c.identifiant == "pistes_contre_cloture"
+            for c in self.construction.corrections_appliquees
+        )
+        if not constats:
+            message = (
+                f"Les pistes de {LARGEUR_PISTE_M:.0f} m ne recouvrent ni table, ni "
+                "ouvrage, ni la clôture hors des portails."
+            )
+        elif serrees:
+            # Le trait n'est plus celui du plan : le dire, et dire ce qu'aucun
+            # placement de la piste ne peut régler.
+            message = (
+                f"Serrées contre la clôture, les pistes de {LARGEUR_PISTE_M:.0f} m "
+                f"recouvrent encore {', '.join(constats)} : ce qui s'avance à moins "
+                f"de {nombre_fr(LARGEUR_PISTE_M + JEU_CLOTURE_M)} m de la clôture ne "
+                "leur laisse pas la place. C'est au plan de la leur faire."
+            )
+        else:
+            message = (
+                f"Menées sur le tracé du plan, les pistes de {LARGEUR_PISTE_M:.0f} m "
+                f"recouvrent {', '.join(constats)} : le trait du plan passe trop près. "
+                "Elles sont dessinées là où le plan les place ; c'est au plan de "
+                "leur faire la place."
+            )
         return Controle(
             "Pistes de 5 m sur le tracé du plan",
             round(sur_tables, 1),
             None,
             "m²",
             AVERTISSEMENT if constats else OK,
-            (
-                f"Menées sur le tracé du plan, les pistes de {LARGEUR_PISTE_M:.0f} m "
-                f"recouvrent {', '.join(constats)} : le trait du plan passe trop près. "
-                "Elles sont dessinées là où le plan les place ; c'est au plan de "
-                "leur faire la place."
-            )
-            if constats
-            else f"Les pistes de {LARGEUR_PISTE_M:.0f} m ne recouvrent ni table, ni "
-            "ouvrage, ni la clôture hors des portails.",
+            message,
         )
 
     @property
