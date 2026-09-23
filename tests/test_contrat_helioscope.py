@@ -176,18 +176,16 @@ def _sortie_plan_pdf(dossier: Path):
     from dp_socle.coupe import coupe_par_defaut
     from dp_socle.plan_pdf import ChoixDuPlan, importer_plan_pdf
     from tests.jeux_plan_pdf import (
-        DXF_GANNAY,
-        FOND_GANNAY,
+        EXPORT_GANNAY,
         LONGITUDE_GANNAY,
         NORD_SUD_GANNAY_M,
         PLAN_GANNAY,
-        layout_cad,
     )
 
     dossier.mkdir(parents=True, exist_ok=True)
     resultat = importer_plan_pdf(
         PLAN_GANNAY,
-        layout_cad(dossier, DXF_GANNAY, FOND_GANNAY),
+        EXPORT_GANNAY,
         longitude_origine=LONGITUDE_GANNAY,
         correction_nord_sud_m=NORD_SUD_GANNAY_M,
         choix=ChoixDuPlan(volume_citerne_m3=120, largeur_portail_m=7.0),
@@ -353,12 +351,11 @@ def test_les_rangees_et_non_les_tables_brutes_alimentent_tables_pv(implantation)
 
 
 @pytest.fixture(scope="module")
-def implantation_gannay(tmp_path_factory):
+def implantation_gannay():
     """Le design 10465241 de Gannay-sur-Loire, où rien ne se touche."""
-    from tests.jeux_plan_pdf import DXF_GANNAY, FOND_GANNAY, layout_cad
+    from tests.jeux_plan_pdf import EXPORT_GANNAY
 
-    dossier = tmp_path_factory.mktemp("gannay")
-    return importer(layout_cad(dossier, DXF_GANNAY, FOND_GANNAY))
+    return importer(EXPORT_GANNAY)
 
 
 @pytest.mark.skipif(

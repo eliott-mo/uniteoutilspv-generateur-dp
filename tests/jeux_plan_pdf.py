@@ -1,9 +1,9 @@
 """Jeux d'essai du lot 2ter : un plan PDF et le DXF HelioScope qu'il couvre.
 
 Le lot 2 lit un export HelioScope en ZIP — le « Layout CAD », qui porte le DXF
-du calepinage et son image de fond. Les jeux d'essai sont versionnés en
-fichiers séparés, tels qu'ils ont été reçus ; le ZIP se recompose ici, à
-l'identique de ce que HelioScope livre.
+du calepinage et son image de fond. Celui de Gannay est versionné tel que
+HelioScope le livre, en ZIP (regroupé le 23/09/2026) ; celui de Bray l'est en
+fichiers séparés, tels qu'ils ont été reçus, et le ZIP se recompose ici.
 """
 
 from __future__ import annotations
@@ -18,16 +18,19 @@ EXEMPLES = Path(__file__).resolve().parent.parent / "exemples"
 GANNAY = EXEMPLES / "gannay-PDF"
 PLAN_GANNAY = GANNAY / "Annexe5_CasXCas_PlanProjet_2026-09-21.pdf"
 PLAN_GANNAY_SANS_CLOTURE = GANNAY / "Annexe5_CasXCas_PlanProjet_2026-08-28.pdf"
-DXF_GANNAY = GANNAY / "helioscope_design_10465241.dxf"
-FOND_GANNAY = GANNAY / "design_10465241_baseimage.jpg"
+#: L'export HelioScope, tel qu'HelioScope le livre : le DXF du calepinage et
+#: son image de fond, dans un ZIP.
+EXPORT_GANNAY = GANNAY / "helioscope_design_10465241.zip"
+#: L'emprise cadastrale du site, un seul polygone de 4,35 ha, déposée le
+#: 23/09/2026.
+EMPRISE_GANNAY = GANNAY / "tme-gannay-sur-loire-geoperso-1-23_09_2026_22_49.zip"
 
 #: Calage de l'export de Gannay, validé sur l'ortho IGN : le fond HelioScope y
 #: a été corrélé dans le dépôt `photomontage` le 21/09/2026 (`ancrage.json`,
 #: dE = 745 855,87, dN = 6 625 785,12), puis traduit le 23/09/2026 dans les
 #: deux réglages du lot 2. La correction nord-sud valait −6,26 m, dont −5,22 m
 #: venaient du centre de l'image de fond, que le calage compte lui-même depuis
-#: le même jour : il en reste −1,04 m, pour le même placement. Le projet n'a
-#: pas d'emprise cadastrale au dépôt.
+#: le même jour : il en reste −1,04 m, pour le même placement.
 LONGITUDE_GANNAY = 3.600487654
 NORD_SUD_GANNAY_M = -1.04
 
@@ -64,7 +67,7 @@ def layout_cad(dossier: Path, dxf: Path, fond: Path) -> Path:
 
 
 def gannay_present() -> bool:
-    return all(p.exists() for p in (PLAN_GANNAY, DXF_GANNAY, FOND_GANNAY))
+    return all(p.exists() for p in (PLAN_GANNAY, EXPORT_GANNAY))
 
 
 def bray_present() -> bool:

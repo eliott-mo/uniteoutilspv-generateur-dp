@@ -18,11 +18,9 @@ import json
 import pytest
 
 from tests.jeux_plan_pdf import (
-    DXF_GANNAY,
-    FOND_GANNAY,
+    EXPORT_GANNAY,
     PLAN_GANNAY,
     gannay_present,
-    layout_cad,
 )
 from tests.test_app_streamlit import _application, _cliquer, _televerser, _titres
 
@@ -76,8 +74,11 @@ def _plan_pdf_importe(tmp_path, monkeypatch):
     application = application.run()
     application.radio(key="source_plan").set_value(SOURCE_PLAN_PDF)
     application = application.run()
-    export = layout_cad(donnees, DXF_GANNAY, FOND_GANNAY)
-    _televerser(application, "Export HelioScope", (export.name, export.read_bytes(), "application/zip"))
+    _televerser(
+        application,
+        "Export HelioScope",
+        (EXPORT_GANNAY.name, EXPORT_GANNAY.read_bytes(), "application/zip"),
+    )
     _televerser(
         application, "Plan projet (PDF)", (PLAN_GANNAY.name, PLAN_GANNAY.read_bytes(), "application/pdf")
     )

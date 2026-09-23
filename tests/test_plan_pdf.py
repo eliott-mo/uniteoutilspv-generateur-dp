@@ -30,12 +30,11 @@ from dp_socle.plan_pdf import (
 )
 from tests.jeux_plan_pdf import (
     DXF_BRAY,
-    DXF_GANNAY,
     EMPRISE_BRAY,
     EMPRISE_SITE_BRAY,
     EXEMPLES,
+    EXPORT_GANNAY,
     FOND_BRAY,
-    FOND_GANNAY,
     LONGITUDE_BRAY,
     LONGITUDE_GANNAY,
     NORD_SUD_BRAY_M,
@@ -63,8 +62,8 @@ def lecture_gannay():
 
 
 @pytest.fixture(scope="module")
-def export_gannay(tmp_path_factory):
-    return layout_cad(tmp_path_factory.mktemp("gannay"), DXF_GANNAY, FOND_GANNAY)
+def export_gannay():
+    return EXPORT_GANNAY
 
 
 @pytest.fixture(scope="module")
