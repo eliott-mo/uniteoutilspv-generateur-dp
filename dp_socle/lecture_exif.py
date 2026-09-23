@@ -58,6 +58,15 @@ _DATE_FICHIER = 306
 #: Extensions que Pillow ne sait ouvrir qu'avec `pillow-heif` enregistré.
 EXTENSIONS_HEIC = (".heic", ".heif", ".heics", ".heifs", ".hif")
 
+#: Ce qui reconnaît, parmi les avertissements, le seul qu'un placement à la main
+#: rend caduc. Les autres — cap magnétique, date illisible, incertitude GPS
+#: illisible — restent vrais quoi qu'on fasse ensuite.
+#:
+#: L'écran de saisie affichait tout le lot tant que la photographie vivait :
+#: « placez son point de vue sur la carte » se lisait sous une ligne annonçant
+#: « placée sur la carte, visée 215° » (retour d'usage du 24/09/2026).
+MARQUE_SANS_POSITION = "n'est pas géolocalisée"
+
 
 @dataclass(frozen=True)
 class EtatHeic:
@@ -204,7 +213,7 @@ def lire_metadonnees(source, nom: str | None = None) -> MetadonneesPhoto:
 
     if not gps or _GPS_LAT not in gps or _GPS_LON not in gps:
         avertissements.append(
-            f"« {nom} » n'est pas géolocalisée : placez son point de vue sur la "
+            f"« {nom} » {MARQUE_SANS_POSITION} : placez son point de vue sur la "
             "carte."
         )
         return MetadonneesPhoto(

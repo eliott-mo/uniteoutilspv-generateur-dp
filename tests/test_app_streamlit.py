@@ -274,7 +274,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     assert _titres(application) == [
         "1. Métadonnées du projet",
         "2. Plan du bureau d'études",
-        "3. Pièces fournies",
+        "3. Ajout de photographies et photomontages",
         "3 bis. La carte : placer et viser les prises de vue",
         "4. Génération",
     ]
@@ -282,11 +282,17 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
 
 
 def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
-    """Le chef de projet sait ce qu'il doit rassembler avant de commencer."""
+    """Le chef de projet sait ce qu'il doit rassembler avant de commencer.
+
+    Replié depuis le 24/09/2026 : qui connaît l'outil n'a pas à le relire à
+    chaque ouverture, et qui ne le connaît pas le déplie. Le contenu, lui,
+    ne change pas — c'est lui qu'on mesure ici.
+    """
     application = _application(tmp_path, monkeypatch).run()
 
-    annonce = "\n".join(information.value for information in application.info)
-    assert "À rassembler avant de commencer" in annonce
+    annonce = "\n".join(bloc.value for bloc in application.get("markdown"))
+    titres = "".join(bloc.label for bloc in application.get("expander"))
+    assert "À rassembler avant de commencer" in titres, titres
     for attendu in (
         "Emprise cadastrale",
         "Plan du bureau d'études",

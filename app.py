@@ -28,7 +28,7 @@ from dp_socle.planches.palette import EXCLUES
 from dp_socle.planches.dp6_insertions import INTITULES as INTITULES_DP6
 from dp_socle.planches.reperage_vues import OUVERTURE_CONE_DEG
 from dp_socle.carte_photos import depuis_carte, image_de, lire_carte
-from dp_socle.lecture_exif import etat_heic, lire_metadonnees
+from dp_socle.lecture_exif import MARQUE_SANS_POSITION, etat_heic, lire_metadonnees
 from dp_socle.points_de_vue import (
     ORIGINE_CARTE,
     ORIGINE_EXIF,
@@ -99,10 +99,9 @@ st.caption(
 # Les quatre sections n'apparaissent qu'au fur et à mesure : rassembler les
 # fichiers d'abord évite de découvrir en cours de route qu'il en manque un, et
 # de repartir avec un dossier incomplet.
-st.info(
-    """**À rassembler avant de commencer.**
-
-**Obligatoire pour tout dossier**
+with st.expander("🗂️ À rassembler avant de commencer", expanded=False):
+    st.markdown(
+        """**Obligatoire pour tout dossier**
 - **Emprise cadastrale** — le shapefile du géomètre : `.shp` + `.shx` + `.dbf`
   + `.prj`, ou le ZIP qui les contient. Le `.prj` en fait partie : sans lui, le
   système de coordonnées est inconnu et la génération est refusée.
@@ -126,9 +125,8 @@ ouvrages techniques, c'est-à-dire l'essentiel du dossier
 - **Plan du BE en PDF** — pour comparer l'aperçu à ce que le BE a dessiné.
 - **Photographies** — DP 6 insertion paysagère (en JPG ou PNG si elle doit
   monter en page de garde), DP 7 environnement proche, DP 8 paysage lointain.
-""",
-    icon="🗂️",
-)
+""" 
+    )
 
 
 @st.cache_resource
@@ -2064,42 +2062,13 @@ if not contrat_present:
 PIECES_PHOTOS = ("DP 6", "DP 7", "DP 8")
 
 st.divider()
-st.subheader("3. Pièces fournies")
+st.subheader("3. Ajout de photographies et photomontages")
 st.caption(
-    "Ce que l'outil ne dessine pas : la notice DP 11, qu'il intègre au dossier, "
-    "puis les photographies et photomontages, qu'il conserve sans les assembler."
+    "Les photographies des pièces DP 6, DP 7 et DP 8. L'outil les conserve "
+    "dans le dossier du projet et les pose sur ses planches ; la notice DP 11 "
+    "se dépose plus bas, juste avant la génération."
 )
 
-# La notice ouvre la section : c'est la seule pièce obligatoire qu'on y dépose,
-# et la seule que l'outil intègre au dossier assemblé — chacune de ses pages
-# devient une planche, sous le cadre et le cartouche communs. C'est le lot 5.
-st.markdown("**Notice — attendue de tout dossier déposable**")
-st.caption(
-    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
-    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
-    "texte y reste du texte. Le format est lu dans le fichier, rien n'est "
-    "supposé : une A4 paysage, le cas courant, est agrandie au facteur 124 % "
-    "pour remplir le cadre A3 ; une A4 portrait y est réduite à 88 %. Sous "
-    f"{dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par mégarde — "
-    "la notice est refusée plutôt que rendue illisible."
-)
-fichier_notice = st.file_uploader(
-    f"DP 11 — {piece('DP 11').titre}",
-    type=["pdf"],
-    accept_multiple_files=False,
-    key="notice_dp11",
-    help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
-)
-if fichier_notice is None and contrat_present:
-    # Pas de refus : le dépôt est en phase de mise au point, et bloquer sur une
-    # pièce manquante empêcherait d'éprouver le reste de la chaîne (décision du
-    # 14/09/2026). Le dossier sort quand même, et il le dit — ici, et au
-    # rapport de génération.
-    st.warning(
-        "Aucune notice DP 11 déposée : le dossier sera produit sans elle, et "
-        "il sera **incomplet pour le dépôt**. L'outil ne l'exige pas encore.",
-        icon="⚠️",
-    )
 
 # ---------------------------------------------------------------------------
 # Reprendre un rapport de visite photos-geoloc
@@ -2159,6 +2128,10 @@ def _carte_photos_lue(octets: bytes):
     dépôt voisin par son hébergeur.
     """
     return lire_carte(octets)
+
+
+#: Nombre de vignettes par ligne dans la galerie du rapport de visite.
+VIGNETTES_PAR_LIGNE = 5
 
 
 @st.cache_data(show_spinner=False, max_entries=40)
@@ -2286,9 +2259,13 @@ if fichier_carte is not None and emprise_cloturee_du_projet() is not None:
         # ne dit pas ce qu'une photographie montre. Chacune porte le numéro
         # qu'elle a sur les marqueurs du rapport — le seul repère commun entre
         # les deux écrans, et il est stable.
-        for depart in range(0, len(carte_rapport.points), 4):
+        # Cinq par ligne, et non quatre : la vignette sert à reconnaître une
+        # photographie, pas à la juger, et une visite en compte vingt-cinq
+        # (retour d'usage du 24/09/2026).
+        for depart in range(0, len(carte_rapport.points), VIGNETTES_PAR_LIGNE):
             for colonne, point in zip(
-                st.columns(4), carte_rapport.points[depart : depart + 4]
+                st.columns(VIGNETTES_PAR_LIGNE),
+                carte_rapport.points[depart : depart + VIGNETTES_PAR_LIGNE],
             ):
                 with colonne:
                     vignette = _vignette_du_rapport(octets_carte, point.rang_fichier)
@@ -2493,6 +2470,10 @@ def _lire_exif_une_fois(code: str, fichier) -> None:
         vue["cap_confirme"] = False
     if metadonnees.avertissements:
         vue["exif_message"] = " ".join(metadonnees.avertissements)
+        vue["exif_sans_position"] = any(
+            MARQUE_SANS_POSITION in message
+            for message in metadonnees.avertissements
+        )
 
 
 @dataclass(frozen=True)
@@ -2803,7 +2784,13 @@ def _ligne_de_prise(
     with libelle:
         st.write(f"{fichier.name}")
         st.caption(_etat_de_la_prise(vue))
-        if vue.get("exif_message"):
+        # Le reproche de n'avoir pas de position se tait dès qu'elle est
+        # posée : il s'affichait sous une ligne annonçant « placée sur la
+        # carte, visée 215° » (retour d'usage du 24/09/2026). Les autres
+        # avertissements de l'EXIF, eux, restent vrais quoi qu'on fasse.
+        if vue.get("exif_message") and not (
+            vue.get("exif_sans_position") and vue.get("x") is not None
+        ):
             st.caption(f"⚠️ {vue['exif_message']}")
         if code == "DP 6":
             # Deux choses distinctes, et le sélecteur n'en disait qu'une.
@@ -2881,11 +2868,24 @@ def _ligne_de_prise(
                          width="stretch"):
                 _armer_sur_photo("placer_vue", code, fichier.name)
                 st.rerun()
+            # Sous le bouton, et non dans la ligne d'état : « si une photo a
+            # déjà été placée, alors l'écrire sous le bouton pour facilement
+            # l'identifier » (retour d'usage du 24/09/2026). Ce qui reste à
+            # faire se lit alors colonne par colonne.
+            st.caption(
+                "✅ placée" if vue.get("x") is not None else "⬜ à placer"
+            )
         with viser:
             if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
                          disabled=vue.get("x") is None, width="stretch"):
                 _armer_sur_photo("viser_vue", code, fichier.name)
                 st.rerun()
+            if vue.get("cap_confirme"):
+                st.caption(f"✅ visée {vue['cap_deg']:.0f}°")
+            elif vue.get("cap_deg") is not None:
+                st.caption(f"⬜ {vue['cap_deg']:.0f}° proposés, à confirmer")
+            else:
+                st.caption("⬜ à viser")
 
 
 def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
@@ -2999,6 +2999,41 @@ else:
         "La carte s'ouvre une fois le plan du bureau d'études importé : c'est "
         "lui qui porte les tables, la clôture et l'emprise sur lesquelles se "
         "posent la coupe et les prises de vue."
+    )
+
+# La notice ferme le parcours : elle est la DP 11, la dernière pièce du
+# dossier, et la seule que l'outil intègre à l'assemblage — chacune de ses
+# pages devient une planche, sous le cadre et le cartouche communs (lot 5).
+#
+# Elle ouvrait la section des pièces fournies, qui portait de ce fait deux
+# objets sans rapport. Descendue ici, la section 3 ne parle plus que de
+# photographies (retour d'usage du 24/09/2026).
+st.markdown("**Notice — attendue de tout dossier déposable**")
+st.caption(
+    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
+    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
+    "texte y reste du texte. Le format est lu dans le fichier, rien n'est "
+    "supposé : une A4 paysage, le cas courant, est agrandie au facteur 124 % "
+    "pour remplir le cadre A3 ; une A4 portrait y est réduite à 88 %. Sous "
+    f"{dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par mégarde — "
+    "la notice est refusée plutôt que rendue illisible."
+)
+fichier_notice = st.file_uploader(
+    f"DP 11 — {piece('DP 11').titre}",
+    type=["pdf"],
+    accept_multiple_files=False,
+    key="notice_dp11",
+    help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
+)
+if fichier_notice is None and contrat_present:
+    # Pas de refus : le dépôt est en phase de mise au point, et bloquer sur une
+    # pièce manquante empêcherait d'éprouver le reste de la chaîne (décision du
+    # 14/09/2026). Le dossier sort quand même, et il le dit — ici, et au
+    # rapport de génération.
+    st.warning(
+        "Aucune notice DP 11 déposée : le dossier sera produit sans elle, et "
+        "il sera **incomplet pour le dépôt**. L'outil ne l'exige pas encore.",
+        icon="⚠️",
     )
 
 st.divider()
