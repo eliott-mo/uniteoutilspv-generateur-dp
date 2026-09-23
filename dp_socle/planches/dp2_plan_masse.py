@@ -204,7 +204,9 @@ def _tramer_les_tables(planche: Planche, contrat: Contrat, tables) -> list:
 
     trame, raison = trame_du_projet(contrat, tables, rampant)
     if trame is None:
-        return [raison]
+        # Sans raison, il n'y a rien à dire : les modules du contrat sont
+        # dessinés tels quels.
+        return [raison] if raison else []
 
     tramees, comptes = tracer_trame(
         planche, tables, trame, STYLES["tables_pv"].style,

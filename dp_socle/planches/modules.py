@@ -75,7 +75,18 @@ def trame_du_projet(contrat, tables=None, rampant_declare_m=None):
     dessinées (4,62 m) donne 4,78 m de rampant et un module de 2,39 x 1,13 m —
     un G12R, le module que le tableau bilan nomme par ailleurs. Ce sont les
     hauteurs déclarées qui sont des bornes d'enveloppe, pas la géométrie.
+
+    **Aucune trame quand le contrat porte les modules eux-mêmes** — un
+    calepinage HelioScope, que le lot 2 lit au module : ils se dessinent tels
+    quels, et c'est (None, None), rien à signaler. Une trame posée par-dessus
+    les doublait, en pas régulier sur toute la rangée quand les modules
+    s'arrêtent à chaque table. À Gannay, où les tables sont séparées de 0,5 m,
+    les deux grilles se décalaient d'une table à l'autre, et une table sur deux
+    paraissait deux fois plus dense que sa voisine (relevé par le chef de
+    projet le 23/09/2026).
     """
+    if contrat.presente("modules_pv"):
+        return None, None
     modules = contrat.modules or {}
     structures = contrat.structures or {}
     nb_rampant = _nb_rampant(structures)

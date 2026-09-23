@@ -2250,6 +2250,15 @@ Un objet du plan qui tombe hors du cadre est **signalé**. Le contenu
 cartographique est découpé sur la zone de dessin : il disparaîtrait sans rien
 dire, et c'est le genre d'absence que personne ne rattrape à la relecture.
 
+Les tables portent la **trame de leurs modules** (`planches/modules.py`). Le
+plan du BE ne descend pas au module : la trame s'y reconstruit, en pas
+régulier sur chaque rangée. Un calepinage HelioScope, lui, porte les modules
+eux-mêmes, et ils se dessinent tels quels, **sans trame par-dessus**. Relevé
+par le chef de projet le 23/09/2026 sur Gannay : la trame en pas régulier
+doublait des modules qui s'arrêtent à chaque table, les tables étant séparées
+de 0,5 m ; les deux grilles se décalaient d'une table à l'autre, et une table
+sur deux paraissait deux fois plus dense que sa voisine.
+
 ### DP 3 — Deux coupes, deux échelles, deux sources de hauteur
 
 Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une

@@ -127,6 +127,22 @@ def test_le_calepinage_helioscope_donne_les_deux_cotes(tmp_path):
     assert "calepinage" in trame.origine
 
 
+def test_des_modules_au_contrat_ne_se_doublent_pas_d_une_trame(tmp_path):
+    """Les modules du contrat se dessinent tels quels : pas de trame par-dessus.
+
+    Posée en pas régulier sur toute la rangée, la trame doublait les modules
+    d'un calepinage HelioScope, qui s'arrêtent à chaque table. À Gannay, où les
+    tables sont séparées de 0,5 m, les deux grilles se décalaient d'une table à
+    l'autre (relevé le 23/09/2026). Rien n'est à signaler pour autant : ce
+    n'est pas une trame manquante.
+    """
+    synthese.ecrire(tmp_path)
+    contrat = charger_contrat(tmp_path)
+    contrat.donnees["parametres"]["modules"]["largeur_m"] = LARGEUR_G12R_M
+    contrat.couches["modules_pv"] = contrat.couches["tables_pv"]
+    assert trame_du_projet(contrat, contrat.geometries("tables_pv"), None) == (None, None)
+
+
 # ---------------------------------------------------------------------------
 # Ce sont les formats déclarés qui commandent le découpage
 # ---------------------------------------------------------------------------

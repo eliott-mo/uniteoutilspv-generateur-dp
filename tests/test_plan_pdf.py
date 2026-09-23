@@ -555,6 +555,28 @@ def test_le_contrat_porte_les_tables_du_lot_2_et_le_reste_du_plan(contrat_gannay
 
 
 @besoin_gannay
+def test_les_modules_de_gannay_se_dessinent_sans_trame_par_dessus(contrat_gannay):
+    """264 tables de 18 modules, séparées de 0,5 m : la trame les doublait mal.
+
+    Relevé par le chef de projet le 23/09/2026 : une table sur deux paraissait
+    deux fois plus dense. Les modules du calepinage se dessinent tels quels, et
+    le plan de masse n'a rien à en dire.
+    """
+    from dp_socle.planches.dp2_plan_masse import _tramer_les_tables
+    from dp_socle.planches.modules import trame_du_projet
+
+    assert len(contrat_gannay.geometries("modules_pv")) == 4752
+    tables = contrat_gannay.geometries("tables_pv")
+    assert trame_du_projet(contrat_gannay, tables, None) == (None, None)
+
+    class PlancheQuiRefuse:
+        def ajouter_geometrie(self, *_):
+            raise AssertionError("aucune trame ne doit être tracée")
+
+    assert _tramer_les_tables(PlancheQuiRefuse(), contrat_gannay, tables) == []
+
+
+@besoin_gannay
 def test_le_portail_est_dessine_comme_au_calque_du_be(contrat_gannay):
     """L'ouverture sur la clôture, deux vantaux ouverts vers l'intérieur, leurs arcs.
 
