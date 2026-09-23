@@ -1332,6 +1332,32 @@ L'angle de l'aperçu est calculé **en pixels de l'écran**, ce dont Leaflet
 dispose et ce que l'œil voit. Le cap retenu, lui, est recalculé en Lambert 93
 par `cap_vers` une fois le clic remonté : l'aperçu montre, il ne mesure pas.
 
+### Le format des images, et ce qu'il coûte
+
+Les emplacements d'une planche photographique sont **fixes** : trois cadres
+empilés sur une A3 paysage imposent un format de 3,11:1, deux cadres 1,92:1.
+Ce sont les bandeaux du dossier de référence, et les images y sont rognées pour
+les remplir.
+
+Le lot 6 avait d'abord retenu l'inverse — le rapport **médian des images** —
+pour une raison mesurée le 16/09/2026 et qui reste vraie : sur trois
+emplacements, une photographie d'iPhone perd 57 % de sa hauteur, et ce qui
+disparaît est le ciel et le premier plan. Mais le remède était pire que le mal.
+Des photographies d'un même appareil partagent leur rapport, l'emplacement
+prenait ce rapport, et la planche ne ressemblait plus au dossier de référence :
+une DP 7 produite le 23/09/2026 portait une image portrait dans une colonne
+étroite, à côté d'un plan de repérage qui occupait toute la page.
+
+La perte n'est donc pas niée, elle est **rendue choisissable**. L'écran de
+saisie montre l'image entière avec le cadre du format dessiné dessus : ce qui
+partira au dossier est en clair, le reste assombri, et le curseur fait glisser
+le cadre. Le cadre vient de `fenetre_de_cadrage`, la fonction même que la
+planche emploie — les deux ne peuvent pas montrer des choses différentes. Au
+delà de `ROGNAGE_SIGNALE`, le rapport de génération dit ce qui a été retiré.
+
+La conséquence pratique, à dire aux chefs de projet : **une insertion paysagère
+se photographie en paysage large**, et non en portrait.
+
 ### Le clic armé sur la carte
 
 Le mécanisme est écrit une fois pour tous les gestes de la carte : le lot 6 y

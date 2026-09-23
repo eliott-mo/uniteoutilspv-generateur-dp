@@ -2558,6 +2558,47 @@ def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
                 del par_nom[nom]
 
 
+#: Ce que la part écartée garde de sa luminosité sur l'aperçu. Assez sombre pour
+#: que le cadre saute aux yeux, assez claire pour qu'on voie ce qu'on perd — et
+#: c'est bien là-dessus qu'on décide de le perdre.
+VOILE_HORS_CADRE = 0.35
+
+#: Épaisseur du trait du cadre, en part de la plus petite dimension de l'aperçu.
+TRAIT_DU_CADRE = 0.006
+
+
+def _dessiner_le_cadre(source, rapport: float, cadrage: float):
+    """L'image entière, la part gardée en clair, le reste assombri.
+
+    « Il faudrait qu'on voie le cadre au bon format bouger sur l'image pour
+    pouvoir sélectionner la partie que l'on garde » (retour d'usage du
+    23/09/2026). L'aperçu ne montrait que le résultat du rognage : on voyait ce
+    qui restait, jamais ce qu'on perdait ni de combien on pouvait encore
+    glisser.
+
+    Le cadre vient de `fenetre_de_cadrage`, la fonction même que la planche
+    emploie : les deux ne peuvent pas diverger.
+    """
+    from dp_socle.planches.photographies import fenetre_de_cadrage
+    from PIL import Image, ImageDraw
+
+    boite, _ = fenetre_de_cadrage(source.size, rapport, (cadrage, cadrage))
+    image = source.convert("RGB")
+    # La part écartée, assombrie sur place : composer une couche noire
+    # semi-opaque puis remettre la fenêtre par-dessus coûte moins qu'un masque.
+    voilee = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)),
+                         1.0 - VOILE_HORS_CADRE)
+    gauche, haut, droite, bas = (int(round(v)) for v in boite)
+    voilee.paste(image.crop((gauche, haut, droite, bas)), (gauche, haut))
+
+    trait = max(2, int(round(min(image.size) * TRAIT_DU_CADRE)))
+    dessin = ImageDraw.Draw(voilee)
+    dessin.rectangle(
+        (gauche, haut, droite - 1, bas - 1), outline=(255, 255, 255), width=trait
+    )
+    return voilee
+
+
 @st.cache_data(show_spinner=False, max_entries=24)
 def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
     """La vignette telle que la planche la portera, rognage compris.
@@ -2567,12 +2608,13 @@ def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
     """
     import io as _io
 
-    from dp_socle.planches.photographies import _recadrer
+    from dp_socle.planches.photographies import fenetre_de_cadrage
     from PIL import Image
 
     with Image.open(_io.BytesIO(octets)) as source:
-        recadree, perte = _recadrer(source, rapport, (cadrage, cadrage), 30.0)
-    return recadree, perte
+        image = _dessiner_le_cadre(source, rapport, cadrage)
+        _, perte = fenetre_de_cadrage(source.size, rapport, (cadrage, cadrage))
+    return image, perte
 
 
 def _montrer_apercu(fichier, rapport: float, cadrage: float) -> float | None:
@@ -2625,28 +2667,32 @@ def _source_image(fichier):
     """De quoi ouvrir l'image, qu'elle soit déposée ou déjà sur le disque."""
     return fichier.chemin if isinstance(fichier, _PhotoReprise) else fichier
 
-def _rapport_des_emplacements(fichiers) -> float:
-    """Largeur sur hauteur de l'emplacement que la planche donnera à ces images.
+#: Nombre d'emplacements de chaque pièce photographique, qui fixe le format des
+#: images : 3,11:1 pour les trois volets d'une DP 6, 1,92:1 pour les deux
+#: photographies d'une DP 7 ou d'une DP 8. Ce sont les bandeaux du dossier de
+#: référence, et ils ne dépendent pas de ce qu'on y dépose.
+EMPLACEMENTS_DE_LA_PIECE = {"DP 6": 3, "DP 7": 2, "DP 8": 2}
 
-    Le même calcul que `planches.photographies` : le rapport **médian** des
-    images de la planche, pour que des photographies de même format ne soient
-    pas rognées du tout. L'aperçu montre donc ce que la planche portera.
+
+@st.cache_data(show_spinner=False)
+def _rapport_des_emplacements(code: str) -> float:
+    """Largeur sur hauteur de l'emplacement que la planche donnera aux images.
+
+    Le même calcul que `planches.photographies`, et par la même fonction : ce
+    que l'écran montre est ce que la planche portera. Il ne dépend plus des
+    images depuis le 23/09/2026 — voir l'en-tête de ce module-là pour ce que ce
+    choix coûte et pourquoi il a été fait.
+
+    Caché parce qu'il construit une planche vide pour lire sa zone de dessin, et
+    que Streamlit rejoue le script à chaque interaction.
     """
-    from statistics import median
+    from dp_socle.planche import Planche
+    from dp_socle.planches.photographies import rapport_de_l_emplacement
 
-    from PIL import Image
-
-    rapports = []
-    for fichier in fichiers:
-        try:
-            with Image.open(_source_image(fichier)) as image:
-                rapports.append(image.width / image.height)
-        except (OSError, ZeroDivisionError):
-            continue
-        finally:
-            if not isinstance(fichier, _PhotoReprise):
-                fichier.seek(0)
-    return median(rapports) if rapports else 1.5
+    return rapport_de_l_emplacement(
+        Planche(titre="mesure", numero=code, projet="mesure", date="01/01/2026"),
+        EMPLACEMENTS_DE_LA_PIECE[code],
+    )
 
 
 
@@ -2748,7 +2794,10 @@ def _ligne_de_prise(
     from dp_socle.planches.photographies import ROGNAGE_SIGNALE
 
     vue = _vue_photo(code, fichier.name)
-    vignette, libelle, bouton_placer, bouton_viser = st.columns([1, 3, 1, 1])
+    # Un tiers de la largeur pour l'image, le reste pour les champs : « il
+    # faudrait que l'image soit affichée en plus grand » (23/09/2026). À la
+    # taille d'une vignette on ne voyait pas ce que le cadre retenait.
+    vignette, libelle = st.columns([2, 4])
     with vignette:
         perte = _montrer_apercu(fichier, rapport, vue.get("cadrage", 0.0))
     with libelle:
@@ -2807,33 +2856,36 @@ def _ligne_de_prise(
             )
         else:
             cadrage = st.slider(
-                "Recadrage",
+                "Ce que le cadre garde",
                 min_value=-50, max_value=50,
                 value=int(vue.get("cadrage", 0.0) * 100),
                 step=5, format="%d %%",
                 key=f"cadrage_{code}_{fichier.name}",
-                help="La photographie est rognée pour remplir son emplacement. "
-                "Déplacez ce curseur si le rognage retire ce qu'il fallait "
-                "montrer : vers la gauche pour garder le haut ou la gauche de "
-                "l'image, vers la droite pour l'inverse.",
+                help="Le cadre blanc sur l'image montre ce qui partira au "
+                "dossier ; le reste est assombri. Déplacez-le vers la gauche "
+                "pour garder le haut ou la gauche de la photographie, vers la "
+                "droite pour l'inverse.",
             )
             vue["cadrage"] = cadrage / 100.0
             if perte is not None:
                 st.caption(
-                    f"Rognage : {perte:.0%} du plus grand côté"
-                    + (" — c'est beaucoup, vérifiez ce qui disparaît."
+                    f"Le cadre laisse de côté {perte:.0%} de la photographie"
+                    + (" — c'est beaucoup. Une insertion paysagère se "
+                       "photographie en paysage large."
                        if perte >= ROGNAGE_SIGNALE else ".")
                 )
 
-    with bouton_placer:
-        if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}"):
-            _armer_sur_photo("placer_vue", code, fichier.name)
-            st.rerun()
-    with bouton_viser:
-        if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
-                     disabled=vue.get("x") is None):
-            _armer_sur_photo("viser_vue", code, fichier.name)
-            st.rerun()
+        placer, viser = st.columns(2)
+        with placer:
+            if st.button("📍 Placer", key=f"placer_{code}_{fichier.name}",
+                         width="stretch"):
+                _armer_sur_photo("placer_vue", code, fichier.name)
+                st.rerun()
+        with viser:
+            if st.button("🎯 Viser", key=f"viser_{code}_{fichier.name}",
+                         disabled=vue.get("x") is None, width="stretch"):
+                _armer_sur_photo("viser_vue", code, fichier.name)
+                st.rerun()
 
 
 def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
@@ -2873,7 +2925,7 @@ def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
         # Le rapport de l'emplacement, celui que la planche retiendra : c'est à
         # lui que l'aperçu recadre, pour que ce qu'on voit ici soit ce qu'on
         # aura. Voir `planches.photographies`.
-        rapport = _rapport_des_emplacements(fichiers)
+        rapport = _rapport_des_emplacements(code)
         # Au-delà de trois volets, il y a forcément un second point de vue :
         # une planche n'en décline pas davantage.
         plusieurs_vues = code == "DP 6" and len(fichiers) > len(INTITULES_DP6)

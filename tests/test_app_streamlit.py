@@ -943,7 +943,10 @@ def test_la_coupe_ne_se_trace_plus_a_la_main():
     remontait pour chasser le trait résiduel, et le mode manuel.
     """
     source = (RACINE / "app.py").read_text(encoding="utf-8")
-    bloc = source[source.index("### Le plan importé, et la ligne de coupe"):]
+    debut = source.index("### Le plan importé, et la ligne de coupe")
+    # Jusqu'à la fin de _carte_du_plan, et pas jusqu'au bout du fichier : la
+    # suite porte du dessin d'image qui n'a rien à voir avec la carte.
+    bloc = source[debut : source.index(chr(10) + "def ", debut)]
 
     for disparu in ("Draw(", "trace_l93", "tour_carte", "manuel="):
         assert disparu not in bloc, disparu
@@ -1462,7 +1465,7 @@ def test_le_curseur_de_recadrage_se_retrouve_dans_le_projet(tmp_path, monkeypatc
     )
     application = application.run()
 
-    curseurs = [c for c in application.slider if "Recadrage" in c.label]
+    curseurs = [c for c in application.slider if "cadre garde" in c.label]
     assert curseurs, "le curseur de recadrage manque"
     curseurs[0].set_value(-30)
     application = application.run()
@@ -1829,7 +1832,7 @@ def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypat
     # à rogner, et c'est ce que la ligne dit à la place du curseur. L'un ou
     # l'autre prouve que la photographie reprise est bien rendue.
     legendes = [c.value for c in application.get("caption")]
-    curseurs = [c for c in application.slider if "Recadrage" in c.label]
+    curseurs = [c for c in application.slider if "cadre garde" in c.label]
     assert curseurs or any("Rien à rogner" in legende for legende in legendes), (
         legendes
     )
@@ -1848,12 +1851,17 @@ def test_un_curseur_de_recadrage_ne_s_affiche_que_s_il_peut_rogner(
     """
     _carte_cliquable(monkeypatch)
     application = _import_valide(tmp_path, monkeypatch)
+    # Au format de l'emplacement — 1,92:1 pour les deux cadres d'une DP 8 —
+    # il n'y a rien à retirer. Toute autre photographie sera rognée, et le
+    # curseur sert alors à choisir ce qu'on garde.
     _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
+        application,
+        "DP 8",
+        [("visite.jpg", _image_geolocalisee(taille=(1924, 1000)), "image/jpeg")],
     )
     application = application.run()
 
-    assert not [c for c in application.slider if "Recadrage" in c.label]
+    assert not [c for c in application.slider if "cadre garde" in c.label]
     legendes = [c.value for c in application.get("caption")]
     assert any("Rien à rogner" in legende for legende in legendes), legendes
 

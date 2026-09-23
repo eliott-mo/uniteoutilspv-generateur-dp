@@ -35,6 +35,27 @@ def _projet() -> Projet:
                   date="2026-09-16", emprise="x")
 
 
+def _rapport_de_l_emplacement(emplacements: int) -> float:
+    """Le bandeau qu'impose la planche, largeur sur hauteur.
+
+    Recalculé depuis les constantes plutôt qu'écrit en dur : c'est la garantie
+    que le test suit la planche si ses marges changent.
+    """
+    from dp_socle.planches.photographies import LARGEUR_COLONNE_IMAGES_MM
+    from dp_socle.planches.primitives import (
+        BLANC_TOURNANT_MM,
+        MARGE_SOUS_CADRE_MM,
+        hauteur_titre_cadre,
+    )
+
+    planche = Planche(titre="x", numero="DP 6", projet="x", date="23/09/2026")
+    _, _, _, zone_h = planche.zone_dessin()
+    hauteur_utile = zone_h - 2 * BLANC_TOURNANT_MM
+    blancs = BLANC_TOURNANT_MM * (emplacements - 1)
+    hauteur_image = (hauteur_utile - blancs) / emplacements - hauteur_titre_cadre()
+    return (LARGEUR_COLONNE_IMAGES_MM - 2 * MARGE_SOUS_CADRE_MM) / hauteur_image
+
+
 def _planche(images, emplacements, reperes=("Vue A",), vues=(VUE,)):
     planche = Planche(titre="Essai", numero="DP 6", projet="Essai",
                       date="16/09/2026")
@@ -136,14 +157,36 @@ def test_un_rognage_important_est_signale(tmp_path):
     assert any("rognée de" in message for message in retenu["avertissements"])
 
 
-def test_des_formats_voisins_ne_declenchent_aucune_alerte(tmp_path):
-    """4:3 et 3:2 se rejoignent à moins de 6 % : le cas courant reste muet."""
+def test_une_image_deja_au_format_de_l_emplacement_ne_perd_rien(tmp_path):
+    """Le seul cas muet : une photographie au bandeau de son emplacement.
+
+    Le format vient de l'emplacement depuis le 23/09/2026, et non plus du
+    rapport médian des images. Une 4:3 y perd donc 31 % de sa hauteur sur deux
+    emplacements — c'est dit, c'est réglable, et ce n'est plus tu.
+    """
+    rapport = _rapport_de_l_emplacement(2)
     images = [
-        ImagePlanche(_photo(tmp_path / "a.jpg", 2000, 1500), "A"),
-        ImagePlanche(_photo(tmp_path / "b.jpg", 2400, 1600), "B"),
+        ImagePlanche(_photo(tmp_path / "a.jpg", 2400, round(2400 / rapport)), "A"),
+        ImagePlanche(_photo(tmp_path / "b.jpg", 3000, round(3000 / rapport)), "B"),
     ]
     _, retenu = _planche(images, emplacements=2)
     assert not any("rognée de" in message for message in retenu["avertissements"])
+
+
+def test_une_photographie_courante_perd_de_la_hauteur_et_le_dit(tmp_path):
+    """Une 4:3 dans un bandeau : la perte est réelle, et elle s'annonce.
+
+    C'est le prix du format imposé, assumé le 23/09/2026 contre la planche du
+    dossier de référence. Le taire serait exactement ce que ce dépôt refuse.
+    """
+    images = [
+        ImagePlanche(_photo(tmp_path / "a.jpg", 2000, 1500), "A"),
+        ImagePlanche(_photo(tmp_path / "b.jpg", 2000, 1500), "B"),
+    ]
+    _, retenu = _planche(images, emplacements=2)
+    rognages = [m for m in retenu["avertissements"] if "rognée de" in m]
+    assert len(rognages) == 2, retenu["avertissements"]
+    assert "de sa hauteur" in rognages[0]
 
 
 def test_le_cadrage_decale_la_fenetre_retenue(tmp_path):

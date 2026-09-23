@@ -18,21 +18,29 @@ Chaque photographie est **rognée** pour remplir son emplacement, jamais
 déformée ni bordée de blanc. Le rognage se fait au centre par défaut, et
 `ImagePlanche.cadrage` permet de le décaler quand le sujet n'est pas centré.
 
-LE FORMAT EST COMMUN AUX IMAGES, IL N'EST PAS ABSOLU
------------------------------------------------------
-Mesuré le 16/09/2026 : trois emplacements empilés sur une A3 paysage imposent un
-format de **3,11:1**, où une photographie d'iPhone perdrait 57 % de sa hauteur et
-un panoramique 2:1 encore 36 %. Sur une insertion paysagère, c'est le ciel et le
-premier plan qui disparaissent — précisément ce qui montre l'insertion.
+LE FORMAT EST CELUI DE L'EMPLACEMENT, ET LE CHEF DE PROJET CHOISIT CE QU'IL GARDE
+---------------------------------------------------------------------------------
+Trois emplacements empilés sur une A3 paysage imposent un format de **3,11:1**,
+deux emplacements **1,92:1**. Ce sont les bandeaux du dossier de référence, et
+c'est ce format que les images prennent.
 
-Le format retenu est donc celui des images elles-mêmes : leur rapport médian.
-Les emplacements restent identiques entre eux, ce qui était le but, mais des
-photographies qui partagent déjà un rapport — le cas courant, même appareil ou
-même prestataire — ne sont pas rognées du tout. La largeur des emplacements
-suit, sans jamais dépasser la colonne.
+Le lot 6 avait d'abord retenu l'inverse — le rapport **médian des images** — pour
+une raison mesurée le 16/09/2026 et qui reste vraie : sur trois emplacements, une
+photographie d'iPhone y perd 57 % de sa hauteur, un panoramique 2:1 encore 36 %,
+et ce qui disparaît est le ciel et le premier plan. Mais le remède était pire :
+des photographies d'un même appareil partagent leur rapport, l'emplacement
+prenait ce rapport, et la planche ne ressemblait plus au dossier de référence —
+une image portrait y occupait une colonne étroite (constaté sur une DP 7
+produite le 23/09/2026).
 
-Au-delà de `ROGNAGE_SIGNALE`, le rapport de génération dit ce qui a été retiré :
-une photographie amputée sans un mot est exactement ce que ce dépôt refuse.
+La perte n'est donc pas niée, elle est **rendue choisissable** : le cadrage dit
+quelle part de l'image est gardée, et l'écran de saisie montre le cadre sur
+l'image entière avant de générer. Au-delà de `ROGNAGE_SIGNALE`, le rapport de
+génération dit ce qui a été retiré — une photographie amputée sans un mot est
+exactement ce que ce dépôt refuse.
+
+La conséquence pratique, à dire aux chefs de projet : **une insertion paysagère
+se photographie en paysage large**, et non en portrait.
 """
 
 from __future__ import annotations
@@ -282,8 +290,6 @@ def _poser_images(
     une DP 6 sans mesures paysagères garde ses trois emplacements et en laisse
     un vide, plutôt que d'étirer les deux autres.
     """
-    from statistics import median
-
     if len(images) > emplacements:
         raise ErreurComposition(
             f"{len(images)} images pour {emplacements} emplacement(s) sur la "
@@ -304,10 +310,10 @@ def _poser_images(
             "de se lire."
         )
 
-    # Le format commun : celui des images elles-mêmes, et non un rapport absolu
-    # qui les amputerait. Voir l'en-tête du module.
-    largeur_sur_hauteur = median(1.0 / rapport for rapport in rapports)
-    largeur_image = min(largeur_utile, hauteur_image * largeur_sur_hauteur)
+    # Le format de l'emplacement, et non celui des images : c'est le bandeau du
+    # dossier de référence, et il ne dépend pas de ce qu'on y dépose. Voir
+    # l'en-tête du module pour ce que ce choix coûte, et comment il se règle.
+    largeur_image = largeur_utile
     largeur_cadre = largeur_image + 2 * MARGE_SOUS_CADRE_MM
     x_cadre = x_mm + (largeur_mm - largeur_cadre) / 2.0
 
@@ -356,6 +362,50 @@ def _poser_une_image(planche: Planche, image: ImagePlanche, x_mm: float,
     return perte
 
 
+def fenetre_de_cadrage(taille: tuple, rapport_cible: float, cadrage: tuple):
+    """Part de l'image que la planche garde, et part qu'elle retire.
+
+    Rend `((gauche, haut, droite, bas), perte)`, en pixels de l'image d'origine.
+
+    **Un seul calcul, pour la planche et pour l'écran.** L'écran de saisie
+    dessine ce cadre sur l'image entière pour que le chef de projet voie ce
+    qu'il garde ; s'il le recalculait de son côté, les deux finiraient par
+    montrer des choses différentes — c'est ce qui est arrivé aux deux listes de
+    types de voirie, le 19/09/2026.
+
+    Le rognage ne touche qu'un axe : la largeur d'une photographie plus
+    panoramique que son emplacement, sa hauteur sinon.
+    """
+    largeur, hauteur = taille
+    if largeur / hauteur > rapport_cible:
+        # Plus panoramique que le cadre : on retire de la largeur.
+        gardee = hauteur * rapport_cible
+        perte = 1.0 - gardee / largeur
+        depart = (largeur - gardee) * (0.5 + _borne(cadrage[0]))
+        return (depart, 0.0, depart + gardee, float(hauteur)), perte
+    gardee = largeur / rapport_cible
+    perte = 1.0 - gardee / hauteur
+    depart = (hauteur - gardee) * (0.5 + _borne(cadrage[1]))
+    return (0.0, depart, float(largeur), depart + gardee), perte
+
+
+def rapport_de_l_emplacement(planche: Planche, emplacements: int) -> float:
+    """Le bandeau qu'impose la planche, largeur sur hauteur.
+
+    L'écran de saisie en a besoin pour dessiner le bon cadre avant de générer :
+    c'est le format que la photographie prendra, et il ne dépend pas d'elle.
+    """
+    _, _, _, zone_h = planche.zone_dessin()
+    hauteur_utile = zone_h - 2 * BLANC_TOURNANT_MM
+    blancs = BLANC_TOURNANT_MM * (emplacements - 1)
+    hauteur_image = (hauteur_utile - blancs) / emplacements - hauteur_titre_cadre()
+    if hauteur_image <= 0:
+        raise ErreurComposition(
+            f"{emplacements} emplacements ne laissent aucune hauteur d'image."
+        )
+    return (LARGEUR_COLONNE_IMAGES_MM - 2 * MARGE_SOUS_CADRE_MM) / hauteur_image
+
+
 def _recadrer(source, rapport_cible: float, cadrage: tuple, hauteur_mm: float):
     """Image rognée au rapport voulu, et part retirée à son plus grand côté.
 
@@ -365,19 +415,7 @@ def _recadrer(source, rapport_cible: float, cadrage: tuple, hauteur_mm: float):
     """
     from PIL import Image
 
-    largeur, hauteur = source.size
-    if largeur / hauteur > rapport_cible:
-        # Plus panoramique que le cadre : on retire de la largeur.
-        gardee = hauteur * rapport_cible
-        perte = 1.0 - gardee / largeur
-        depart = (largeur - gardee) * (0.5 + _borne(cadrage[0]))
-        boite = (depart, 0.0, depart + gardee, float(hauteur))
-    else:
-        gardee = largeur / rapport_cible
-        perte = 1.0 - gardee / hauteur
-        depart = (hauteur - gardee) * (0.5 + _borne(cadrage[1]))
-        boite = (0.0, depart, float(largeur), depart + gardee)
-
+    boite, perte = fenetre_de_cadrage(source.size, rapport_cible, cadrage)
     image = source.crop(tuple(int(round(valeur)) for valeur in boite))
     # Aplatir une éventuelle transparence sur blanc AVANT la conversion : un
     # convert("RGB") direct remplirait de noir.
