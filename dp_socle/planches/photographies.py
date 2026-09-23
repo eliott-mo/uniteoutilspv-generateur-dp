@@ -45,8 +45,11 @@ se photographie en paysage large**, et non en portrait.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
+
+from shapely.geometry import box
 
 from ..erreurs import ErreurComposition
 from ..planche import Planche
@@ -155,9 +158,10 @@ def composer(
     _centrer_sur_le_panneau(planche, interieur, reperage.centre)
 
     messages = messages_images + list(reperage.avertissements)
+    fenetre = box(*fenetre_du_panneau(planche, interieur, reperage))
     if fond_ign:
         _poser_fond(planche, interieur, reperage)
-    messages.extend(_poser_le_plan(planche, contrat, reperage))
+    messages.extend(_poser_le_plan(planche, contrat, reperage, fenetre))
     _poser_emprise(planche, emprise)
     messages.extend(dessiner_points_de_vue(planche, points_de_vue, reperes))
     return {
@@ -203,6 +207,59 @@ def _centrer_sur_le_panneau(planche: Planche, interieur, centre_cadre) -> None:
     )
 
 
+def fenetre_du_panneau(planche: Planche, interieur, reperage) -> tuple:
+    """Ce que le panneau du plan de repérage montre, en Lambert 93.
+
+    Le cadre du `Reperage` est ce qu'il **faut** montrer — le site et ses points
+    de vue ; la fenêtre est ce qu'on **voit**, c'est-à-dire ce cadre élargi à la
+    forme du panneau, à l'échelle retenue. Les deux diffèrent toujours, puisque
+    l'échelle est prise dans une liste.
+
+    C'est elle qui borne le fond IGN, et elle qui découpe le plan de masse : la
+    zone de dessin de la planche est clippée, mais le panneau ne l'est pas, et
+    un objet à cheval sur son bord débordait dans la colonne d'images (retour
+    d'usage du 23/09/2026, sur une DP 6 où les arbres sortaient du cadre).
+    """
+    _, _, interieur_l, interieur_h = interieur
+    facteur = planche.echelle / 1000.0
+    centre = reperage.centre
+    return (
+        centre[0] - interieur_l * facteur / 2.0,
+        centre[1] - interieur_h * facteur / 2.0,
+        centre[0] + interieur_l * facteur / 2.0,
+        centre[1] + interieur_h * facteur / 2.0,
+    )
+
+
+#: Résolution au sol au-delà de laquelle le Plan IGN v2 cesse de dessiner le
+#: parcellaire, en mètres par pixel.
+#:
+#: Mesuré le 24/09/2026 sur le service : à 0,315 m/px les limites de parcelles
+#: et leurs numéros sont là, à 0,318 ils ont disparu. C'est une bascule de
+#: niveau de zoom du WMS-R, pas un réglage que nous tenons.
+#:
+#: Le piège est étroit et il a mordu : le plan de repérage d'une DP 7 au
+#: 1/2 500, demandé aux 200 dpi habituels, tombe à 0,3175 m/px — deux
+#: millièmes au-dessus du seuil. La planche sortait sans cadastre, à côté
+#: d'une DP 6 au 1/2 000 qui l'avait (retour d'usage du 24/09/2026).
+RESOLUTION_PARCELLAIRE_M = 0.30
+
+
+def _dpi_du_parcellaire(echelle: int) -> int:
+    """Résolution d'image qui garde le parcellaire du Plan IGN v2, en dpi.
+
+    La résolution au sol vaut `echelle x 25,4 / (1000 x dpi)` : demander plus de
+    pixels pour la même surface de papier fait descendre sous le seuil. L'image
+    est ensuite affichée à la taille du panneau, donc plus fine — seul son poids
+    augmente.
+
+    Aux petites échelles le compte dépasse ce que le WMS accepte ; `ign`
+    plafonne alors la taille, et le parcellaire y serait de toute façon
+    illisible.
+    """
+    return int(math.ceil(echelle * 0.0254 / RESOLUTION_PARCELLAIRE_M))
+
+
 def _poser_fond(planche: Planche, interieur, reperage) -> None:
     """Plan IGN v2 sous le repérage, demandé à la fenêtre du seul panneau.
 
@@ -217,22 +274,16 @@ def _poser_fond(planche: Planche, interieur, reperage) -> None:
     from ..ign import COUCHE_PLAN, DPI_DEFAUT, telecharger_fond
 
     _, _, interieur_l, interieur_h = interieur
-    facteur = planche.echelle / 1000.0
-    centre = reperage.centre
-    fenetre = (
-        centre[0] - interieur_l * facteur / 2.0,
-        centre[1] - interieur_h * facteur / 2.0,
-        centre[0] + interieur_l * facteur / 2.0,
-        centre[1] + interieur_h * facteur / 2.0,
-    )
+    fenetre = fenetre_du_panneau(planche, interieur, reperage)
+    dpi = max(DPI_DEFAUT, _dpi_du_parcellaire(planche.echelle))
     fond = telecharger_fond(
         COUCHE_PLAN, fenetre, interieur_l, interieur_h,
-        dpi=DPI_DEFAUT, format_image="image/jpeg",
+        dpi=dpi, format_image="image/jpeg",
     )
     planche.ajouter_fond_raster(fond.image, fond.bbox)
 
 
-def _poser_le_plan(planche: Planche, contrat, reperage) -> list:
+def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
     """Le plan de masse sous les repères : tables, pistes, postes, clôture.
 
     « Avec juste le contour du site on ne se rend pas bien compte de ce qu'on
@@ -249,8 +300,6 @@ def _poser_le_plan(planche: Planche, contrat, reperage) -> list:
     1/10 000, où ses traits se confondraient en un aplat tout en pesant leur
     poids dans le PDF. Le contour des rangées suffit à la lecture.
     """
-    from shapely.geometry import box
-
     from .palette import STYLES, objets_a_dessiner
 
     messages: list[str] = []
@@ -262,14 +311,16 @@ def _poser_le_plan(planche: Planche, contrat, reperage) -> list:
             "Plan de repérage dessiné sans le plan de masse : aucun contrat ne "
             "lui a été transmis. Seul le contour du site y figure."
         ]
-    cadre = box(*reperage.cadre)
     for categorie, geometries in objets_a_dessiner(contrat, messages):
         style = STYLES[categorie].style
         for geometrie in geometries:
-            # Hors cadre : le plan de repérage se cadre sur le site et ses
-            # points de vue, pas sur les abords lointains du plan du BE.
-            if cadre.intersects(geometrie):
-                planche.ajouter_geometrie(geometrie, style)
+            # Découpé, et non pas seulement écarté s'il est dehors : un objet à
+            # cheval sur le bord du panneau était dessiné en entier et débordait
+            # dans la colonne d'images. Le clip SVG de la planche ne protège que
+            # sa zone de dessin, dont le panneau n'est qu'une part.
+            visible = geometrie.intersection(fenetre)
+            if not visible.is_empty:
+                planche.ajouter_geometrie(visible, style)
     return messages
 
 
