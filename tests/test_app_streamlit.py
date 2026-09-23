@@ -1526,9 +1526,12 @@ def test_une_photo_geolocalisee_se_place_seule(tmp_path, monkeypatch):
     vue = application.session_state["vues_photo"]["DP 8"]["visite.jpg"]
     assert vue["x"] is not None and vue["y"] is not None
     assert vue["origine_position"] == "exif"
-    # Le cap est lu et proposé, mais il ne fait autorité pour personne.
+    # Le cap est lu et fait un cône — « si le chef de projet a déjà fait
+    # l'effort de le placer, c'est désagréable d'avoir à le refaire »
+    # (26/09/2026) — mais la ligne dit qu'il sort de l'appareil.
     assert vue["cap_deg"] == pytest.approx(212.0, abs=0.5)
-    assert vue["cap_confirme"] is False
+    assert vue["cap_confirme"] is True
+    assert vue["cap_verifie"] is False
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -1905,7 +1908,7 @@ def test_une_vue_dp6_a_une_seule_image_est_signalee_avant_de_generer(
     # L'EXIF l'a placée : elle compte, et il en manque donc une.
     assert application.session_state["vues_photo"]["DP 6"]["brute.jpg"]["x"]
     alertes = [a.value for a in application.warning]
-    assert any("une seule photographie placée" in a for a in alertes), alertes
+    assert any("une seule photographie" in a for a in alertes), alertes
     assert any("photomontage" in a for a in alertes), alertes
 
 
@@ -1927,7 +1930,7 @@ def test_une_vue_dp6_complete_ne_se_fait_rien_reprocher(tmp_path, monkeypatch):
 
     # Les deux sont sur la vue A par défaut : c'est la même prise de vue.
     alertes = [a.value for a in application.warning]
-    assert not any("une seule photographie placée" in a for a in alertes), alertes
+    assert not any("une seule photographie" in a for a in alertes), alertes
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -2236,3 +2239,88 @@ def test_la_couverture_ne_montre_qu_une_vignette():
     # Et elle passe par les octets, seul format que Streamlit sache lire pour
     # une photographie versée d'un rapport.
     assert "_octets_de(image_garde)" in bloc
+
+
+# ---------------------------------------------------------------------------
+# Ce que l'écran transmet au navigateur
+# ---------------------------------------------------------------------------
+
+
+def test_un_apercu_est_reduit_avant_d_etre_transmis():
+    """« Ça rame vraiment beaucoup à chaque action » — 26/09/2026.
+
+    Le cadre se dessinait sur l'image pleine — 4 032 px pour une photographie
+    de visite — puis Streamlit la renvoyait entière au navigateur, qui
+    l'affichait à 460 px. Mesuré : 35 Mo transmis par image et par exécution du
+    script, contre 18 Ko une fois réduite. Avec six photographies à l'écran,
+    c'est ce qui figeait la page plusieurs secondes à chaque geste.
+    """
+    import io
+
+    from PIL import Image
+
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _dessiner_le_cadre(")
+    fin = source.index(chr(10) + "@st.cache_data", debut)
+    espace = {"LARGEUR_APERCU_PX": 460, "VOILE_HORS_CADRE": 0.35,
+              "TRAIT_DU_CADRE": 0.006}
+    exec(source[debut:fin], espace)  # noqa: S102 — code du dépôt
+
+    grande = Image.new("RGB", (4032, 3024), (120, 150, 180))
+    apercu = espace["_dessiner_le_cadre"](grande, 1.92, 0.0)
+    assert apercu.width <= 460, apercu.size
+
+    tampon = io.BytesIO()
+    apercu.save(tampon, format="JPEG", quality=80)
+    assert len(tampon.getvalue()) < 200_000, len(tampon.getvalue())
+
+
+def test_le_composant_de_cadrage_transmet_du_jpeg():
+    """PNG sans compression par défaut : 465 Ko là où le JPEG rend 18 Ko.
+
+    À l'œil, aucune différence sur un aperçu de cadrage.
+    """
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _apercu_cliquable(")
+    fin = source.index(chr(10) + "def ", debut + 1)
+    bloc = source[debut:fin]
+
+    assert 'image_format="JPEG"' in bloc
+    assert "jpeg_quality" in bloc
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_volet_dp6_n_a_ni_a_etre_place_ni_a_etre_vise(tmp_path, monkeypatch):
+    """« Elle hérite de la position de l'image brute » — 26/09/2026.
+
+    Un photomontage n'a été nulle part : il montre le même point de vue que
+    l'image brute. Lui demander de se placer, c'est demander deux fois la même
+    chose.
+    """
+    _carte_cliquable(monkeypatch)
+    application = _import_valide(tmp_path, monkeypatch)
+    _televerser(
+        application,
+        "DP 6",
+        [
+            ("brute.jpg", _image_geolocalisee(), "image/jpeg"),
+            ("montage.jpg", _image_png(), "image/png"),
+        ],
+    )
+    application = application.run()
+
+    # Le second volet, désigné comme tel, perd ses deux boutons. Le choix
+    # passe par le sélecteur : un widget réécrit sa valeur à chaque exécution,
+    # et la poser en session serait effacé au tour suivant.
+    volets = [b for b in application.selectbox if b.key == "volet_de_montage.jpg"]
+    assert volets, [b.key for b in application.selectbox]
+    volets[0].set_value(1)
+    application = application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    assert not [b for b in application.button if b.key == "placer_DP 6_montage.jpg"]
+    assert not [b for b in application.button if b.key == "viser_DP 6_montage.jpg"]
+    # L'image brute, elle, garde les siens.
+    assert [b for b in application.button if b.key == "placer_DP 6_brute.jpg"]
+    legendes = [c.value for c in application.get("caption")]
+    assert any("hérite du point de vue" in legende for legende in legendes), legendes

@@ -1394,6 +1394,25 @@ L'angle de l'aperçu est calculé **en pixels de l'écran**, ce dont Leaflet
 dispose et ce que l'œil voit. Le cap retenu, lui, est recalculé en Lambert 93
 par `cap_vers` une fois le clic remonté : l'aperçu montre, il ne mesure pas.
 
+### Ce que l'écran transmet, et pourquoi il ramait
+
+Streamlit rejoue le script à chaque interaction, et renvoie au navigateur tout
+ce que la page affiche. Une photographie de visite fait 4 032 px de large ;
+l'aperçu de cadrage la montre à 460. Le cadre se dessinait sur l'image pleine,
+et l'image pleine partait au navigateur — **35 Mo par photographie et par
+geste**, en PNG sans compression. Avec six photographies à l'écran, la page se
+figeait plusieurs secondes à chaque clic.
+
+Mesuré le 26/09/2026 sur une photographie de 12 Mpx :
+
+| | Durée | Poids transmis |
+|---|---|---|
+| image pleine, PNG | 0,56 s | 35 Mo |
+| réduite à 460 px, JPEG | 0,36 s | **18 Ko** |
+
+Toute vignette est donc réduite **avant** d'être travaillée, et le composant de
+cadrage transmet du JPEG. C'est un facteur deux mille sur le transfert.
+
 ### Le format des images, et ce qu'il coûte
 
 Les emplacements d'une planche photographique sont **fixes** : trois cadres

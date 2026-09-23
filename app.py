@@ -328,6 +328,20 @@ def _enregistrer_photos(nom_projet: str, par_piece: dict, retenu) -> str | None:
         dossier = DOSSIER_PROJETS / nom_projet / code.replace(" ", "_")
         dossier.mkdir(parents=True, exist_ok=True)
         for fichier in fichiers:
+            deja_ecrite = getattr(fichier, "chemin", None)
+            if deja_ecrite is not None:
+                # Versée d'un rapport : le fichier est déjà sur le disque, et
+                # la réécrire par-dessus elle-même n'apporterait rien. Elle
+                # n'est pas un dépôt et n'a pas de tampon à recopier — d'où
+                # « '_PhotoReprise' object has no attribute 'getbuffer' » à la
+                # génération (25/09/2026).
+                #
+                # Reconnue à son attribut plutôt qu'à sa classe : cette
+                # fonction vit tout en haut du script, et `_PhotoReprise` est
+                # déclarée bien plus bas, avec le reste de la saisie.
+                if fichier is retenu:
+                    couverture = Path(deja_ecrite)
+                continue
             cible = dossier / Path(fichier.name).name
             _ecrire_depose(cible, fichier.getbuffer())
             if fichier is retenu:
@@ -409,6 +423,28 @@ fichiers_emprise = st.file_uploader(
     accept_multiple_files=True,
     help="Le fichier .prj est obligatoire : sans lui le CRS est inconnu et la "
     "génération est refusée.",
+)
+
+# La notice se dépose avec les autres pièces d'entrée : c'est un fichier
+# qu'on rassemble avant de commencer, au même titre que l'emprise ou le
+# plan. Elle fermait le parcours, où « on la noyait à la fin » (retour
+# d'usage du 26/09/2026) ; l'assemblage, lui, la met toujours en DP 11.
+st.markdown("**Notice — attendue de tout dossier déposable**")
+st.caption(
+    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
+    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
+    "texte y reste du texte. Le format est lu dans le fichier, rien n'est "
+    "supposé : une A4 paysage, le cas courant, est agrandie au facteur 124 % "
+    "pour remplir le cadre A3 ; une A4 portrait y est réduite à 88 %. Sous "
+    f"{dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par mégarde — "
+    "la notice est refusée plutôt que rendue illisible."
+)
+fichier_notice = st.file_uploader(
+    f"DP 11 — {piece('DP 11').titre}",
+    type=["pdf"],
+    accept_multiple_files=False,
+    key="notice_dp11",
+    help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
 )
 
 # ---------------------------------------------------------------------------
@@ -1527,6 +1563,7 @@ def _carte_du_plan(import_be_courant, regler_la_coupe: bool) -> None:
             vue["cap_deg"] = cap_vers(vue["x"], vue["y"], clic.x, clic.y)
             vue["origine_cap"] = ORIGINE_MAIN
             vue["cap_confirme"] = True
+            vue["cap_verifie"] = True
         _desarmer_geste()
         st.rerun()
     elif _geste_arme() == "translation_coupe" and clic is not None:
@@ -2680,7 +2717,14 @@ def _reprendre_du_rapport(nom_projet: str, octets: bytes, carte, choix: dict) ->
             "origine_position": ORIGINE_CARTE,
             "cap_deg": vue_depuis_carte.cap_deg,
             "origine_cap": vue_depuis_carte.origine_cap,
-            "cap_confirme": vue_depuis_carte.cap_confirme,
+            # Un cap connu fait un cône, d'où qu'il vienne. La règle voulait
+            # qu'un cap non **regardé** dans le rapport — EXIF brut, sans
+            # calibration ni correction à la main — soit reposé ici : « si le
+            # chef de projet a déjà fait l'effort de le placer dans sa carto
+            # HTML, c'est désagréable d'avoir à le refaire » (26/09/2026). La
+            # ligne dit d'où il vient, et il se corrige toujours en visant.
+            "cap_confirme": vue_depuis_carte.cap_deg is not None,
+            "cap_verifie": vue_depuis_carte.cap_confirme,
             "precision_m": vue_depuis_carte.precision_m,
             "exif_lu": True,
         })
@@ -2839,7 +2883,12 @@ def _lire_exif_une_fois(code: str, fichier) -> None:
     if metadonnees.cap_deg is not None:
         vue["cap_deg"] = metadonnees.cap_deg
         vue["origine_cap"] = ORIGINE_EXIF
-        vue["cap_confirme"] = False
+        # Voir la reprise d'un rapport : un cap connu fait un cône, et la ligne
+        # dit qu'il sort de l'EXIF sans avoir été regardé. La boussole d'un
+        # téléphone se trompe de 10 à 20°, ce que le chef de projet sait, et
+        # viser reste à un clic.
+        vue["cap_confirme"] = True
+        vue["cap_verifie"] = False
     if metadonnees.avertissements:
         vue["exif_message"] = " ".join(metadonnees.avertissements)
         vue["exif_sans_position"] = any(
@@ -2875,14 +2924,15 @@ def _etat_de_la_prise(vue: dict) -> str:
     )
     if vue.get("precision_m") and vue["precision_m"] > SEUIL_PRECISION_M:
         origine += f" — incertitude annoncée {vue['precision_m']:.0f} m"
-    if vue.get("cap_confirme"):
-        return f"{origine}, visée {vue['cap_deg']:.0f}°"
-    if vue.get("cap_deg") is not None:
-        return (
-            f"{origine} — direction EXIF de {vue['cap_deg']:.0f}° **proposée**, "
-            "à confirmer en visant : aucun cône sans cela"
-        )
-    return f"{origine}, sans direction"
+    if vue.get("cap_deg") is None:
+        return f"{origine}, sans direction"
+    direction = f"{origine}, visée {vue['cap_deg']:.0f}°"
+    if vue.get("cap_verifie"):
+        return direction
+    # Le cône est dessiné quand même — c'est l'arbitrage du 26/09/2026 — mais
+    # une direction qui n'a jamais été regardée reste une direction de boussole
+    # de téléphone, à 10 ou 20° près. Le dire, et laisser viser.
+    return f"{direction} d'après l'appareil, jamais vérifiée"
 
 
 def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
@@ -2916,6 +2966,10 @@ def _oublier_les_photos_remplacees(photos_par_piece: dict) -> None:
 #: en flottants et tombe rarement juste.
 RIEN_A_ROGNER = 0.005
 
+#: Largeur de l'aperçu cliquable, en pixels. Assez grand pour qu'on voie ce que
+#: le cadre retient, assez petit pour que l'image traverse vite.
+LARGEUR_APERCU_PX = 460
+
 #: Ce que la part écartée garde de sa luminosité sur l'aperçu. Assez sombre pour
 #: que le cadre saute aux yeux, assez claire pour qu'on voie ce qu'on perd — et
 #: c'est bien là-dessus qu'on décide de le perdre.
@@ -2940,8 +2994,17 @@ def _dessiner_le_cadre(source, rapport: float, cadrage: float):
     from dp_socle.planches.photographies import fenetre_de_cadrage
     from PIL import Image, ImageDraw
 
-    boite, _ = fenetre_de_cadrage(source.size, rapport, (cadrage, cadrage))
     image = source.convert("RGB")
+    # Réduite d'abord, et de loin le geste qui compte. Le cadre se dessinait
+    # sur l'image pleine — 4 032 px pour une photographie de visite — puis
+    # Streamlit la renvoyait entière au navigateur, qui l'affichait à 460 px.
+    # Mesuré le 26/09/2026 sur une photographie de 12 Mpx : 35 Mo transmis par
+    # image et par exécution du script, contre 18 Ko une fois réduite. Avec six
+    # photographies à l'écran, c'est ce qui figeait la page plusieurs secondes
+    # à chaque geste.
+    if image.width > LARGEUR_APERCU_PX:
+        image.thumbnail((LARGEUR_APERCU_PX, image.height), Image.LANCZOS)
+    boite, _ = fenetre_de_cadrage(image.size, rapport, (cadrage, cadrage))
     # La part écartée, assombrie sur place : composer une couche noire
     # semi-opaque puis remettre la fenêtre par-dessus coûte moins qu'un masque.
     voilee = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)),
@@ -2974,10 +3037,6 @@ def _apercu_recadre(cle: tuple, octets: bytes, rapport: float, cadrage: float):
         _, perte = fenetre_de_cadrage(source.size, rapport, (cadrage, cadrage))
     return image, perte
 
-
-#: Largeur de l'aperçu cliquable, en pixels. Assez grand pour qu'on voie ce que
-#: le cadre retient, assez petit pour que l'image traverse vite.
-LARGEUR_APERCU_PX = 460
 
 
 def _cadrage_depuis_le_clic(taille, rapport: float, clic: dict) -> float | None:
@@ -3045,6 +3104,10 @@ def _apercu_cliquable(code: str, fichier, rapport: float, vue: dict) -> float | 
         width=LARGEUR_APERCU_PX,
         key=f"cadre_{code}_{fichier.name}",
         cursor="crosshair",
+        # PNG sans compression par défaut : 465 Ko pour une vignette que le
+        # JPEG rend en 18 Ko, à l'œil identique sur un aperçu de cadrage.
+        image_format="JPEG",
+        jpeg_quality=80,
     )
     if clic is not None and clic != vue.get("dernier_clic_cadre"):
         # `streamlit_image_coordinates` rend le dernier clic tant que le
@@ -3202,10 +3265,30 @@ def _octets_de(fichier) -> bytes:
     return fichier.getvalue()
 
 
+@st.cache_data(show_spinner=False, max_entries=24)
+def _vignette_seule(cle: tuple, octets: bytes):
+    """L'image réduite à la largeur de l'aperçu, sans cadre.
+
+    Même motif que `_apercu_recadre` : transmettre la photographie entière au
+    navigateur pour l'afficher à 460 px coûtait des mégaoctets par exécution du
+    script (mesuré le 26/09/2026).
+    """
+    import io as _io
+
+    from PIL import Image
+
+    with Image.open(_io.BytesIO(octets)) as source:
+        image = source.convert("RGB")
+        if image.width > LARGEUR_APERCU_PX:
+            image.thumbnail((LARGEUR_APERCU_PX, image.height), Image.LANCZOS)
+    return image
+
+
 def _montrer_l_image(fichier) -> None:
     """L'image telle quelle, tant qu'aucune pièce ne lui impose de format."""
     try:
-        st.image(_octets_de(fichier), width="stretch")
+        octets = _octets_de(fichier)
+        st.image(_vignette_seule((fichier.name, len(octets)), octets))
     except (OSError, ValueError) as erreur:
         st.caption(f"⚠️ aperçu indisponible ({erreur})")
 
@@ -3398,14 +3481,15 @@ def _controler_les_volets_dp6(fichiers) -> None:
     (25/09/2026). Le compteur du tableau, lui, compte les images déposées.
     """
     par_vue = {}
+    sans_position = {}
     for fichier in fichiers:
         vue = _vue_photo("DP 6", fichier.name)
-        if vue.get("x") is None:
-            # Non placée : elle n'entrera pas au projet, et l'état de sa ligne
-            # le dit déjà. La compter ici annoncerait une vue complète qui ne
-            # le serait pas.
-            continue
-        par_vue.setdefault(vue.get("vue", "A"), []).append(fichier.name)
+        lettre = vue.get("vue", "A")
+        par_vue.setdefault(lettre, []).append(fichier.name)
+        # Seule l'image brute porte la position : les autres volets en
+        # héritent, et n'ont rien à placer.
+        if vue.get("volet", 0) == 0 and vue.get("x") is None:
+            sans_position[lettre] = fichier.name
 
     if not par_vue:
         return
@@ -3420,9 +3504,17 @@ def _controler_les_volets_dp6(fichiers) -> None:
                 "chasserait l'autre. Corrigez « Ce que l'image montre ».",
                 icon="⚠️",
             )
-        if len(noms) == 1:
+        if lettre in sans_position:
             st.warning(
-                f"**Vue {lettre} : une seule photographie placée** "
+                f"**Vue {lettre} : son image brute n'est pas placée** "
+                f"({sans_position[lettre]}). C'est elle qui porte le point de "
+                "vue, dont les autres volets héritent : sans elle, la planche "
+                "n'a rien à repérer. **En l'état, elle ne sera pas produite.**",
+                icon="⚠️",
+            )
+        elif len(noms) == 1:
+            st.warning(
+                f"**Vue {lettre} : une seule photographie** "
                 f"({noms[0]}). DP 6 compare l'état actuel et le projet — il "
                 "faut au moins deux images pour cette vue : l'image brute et "
                 "son photomontage. Déposez le photomontage en section 3, "
@@ -3449,6 +3541,17 @@ def _ligne_de_prise(code: str, fichier) -> None:
     du 22/09/2026).
     """
     vue = _vue_photo(code, fichier.name)
+    if code == "DP 6" and vue.get("volet", 0) > 0:
+        # Un photomontage n'a été nulle part : il montre le **même** point de
+        # vue que l'image brute, dont il hérite position et direction. Lui
+        # demander de se placer, c'est demander deux fois la même chose —
+        # « elle hérite de la position de l'image brute » (26/09/2026).
+        st.write(f"**{fichier.name}**")
+        st.caption(
+            f"↳ {INTITULES_DP6[vue['volet']].lower()} — hérite du point de vue "
+            "de l'image brute de sa vue, puisque c'est la même prise."
+        )
+        return
     libelle, placer, viser = st.columns([4, 1, 1])
     with libelle:
         st.write(f"**{fichier.name}**")
@@ -3475,12 +3578,12 @@ def _ligne_de_prise(code: str, fichier) -> None:
                      disabled=vue.get("x") is None, width="stretch"):
             _armer_sur_photo("viser_vue", code, fichier.name)
             st.rerun()
-        if vue.get("cap_confirme"):
-            st.caption(f"✅ visée {vue['cap_deg']:.0f}°")
-        elif vue.get("cap_deg") is not None:
-            st.caption(f"⬜ {vue['cap_deg']:.0f}° proposés, à confirmer")
-        else:
+        if vue.get("cap_deg") is None:
             st.caption("⬜ à viser")
+        elif vue.get("cap_verifie"):
+            st.caption(f"✅ visée {vue['cap_deg']:.0f}°")
+        else:
+            st.caption(f"✅ {vue['cap_deg']:.0f}° — de l'appareil")
 
 
 def _saisir_les_prises_de_vue(photos_par_piece: dict) -> None:
@@ -3627,8 +3730,9 @@ if image_garde is not None:
     # qui les montre déjà en grand : « elle est énorme et ce n'est pas utile »
     # (retour d'usage du 25/09/2026).
     try:
+        octets_garde = _octets_de(image_garde)
         st.image(
-            _octets_de(image_garde),
+            _vignette_seule((image_garde.name, len(octets_garde)), octets_garde),
             caption=f"Page de garde : {image_garde.name}",
             width=LARGEUR_VIGNETTE_COUVERTURE_PX,
         )
@@ -3690,30 +3794,6 @@ else:
         "posent la coupe et les prises de vue."
     )
 
-# La notice ferme le parcours : elle est la DP 11, la dernière pièce du
-# dossier, et la seule que l'outil intègre à l'assemblage — chacune de ses
-# pages devient une planche, sous le cadre et le cartouche communs (lot 5).
-#
-# Elle ouvrait la section des pièces fournies, qui portait de ce fait deux
-# objets sans rapport. Descendue ici, la section 3 ne parle plus que de
-# photographies (retour d'usage du 24/09/2026).
-st.markdown("**Notice — attendue de tout dossier déposable**")
-st.caption(
-    "L'outil ne rédige pas la notice : il reprend le PDF déposé, page par page, "
-    "sous le cadre et le cartouche du dossier, et la pagine au sommaire. Le "
-    "texte y reste du texte. Le format est lu dans le fichier, rien n'est "
-    "supposé : une A4 paysage, le cas courant, est agrandie au facteur 124 % "
-    "pour remplir le cadre A3 ; une A4 portrait y est réduite à 88 %. Sous "
-    f"{dp11_notice.FACTEUR_MINIMAL:.0%} — un plan A1 déposé ici par mégarde — "
-    "la notice est refusée plutôt que rendue illisible."
-)
-fichier_notice = st.file_uploader(
-    f"DP 11 — {piece('DP 11').titre}",
-    type=["pdf"],
-    accept_multiple_files=False,
-    key="notice_dp11",
-    help="Le PDF de la notice, dans le format où vous l'avez rédigée.",
-)
 if fichier_notice is None and contrat_present:
     # Pas de refus : le dépôt est en phase de mise au point, et bloquer sur une
     # pièce manquante empêcherait d'éprouver le reste de la chaîne (décision du
@@ -3724,6 +3804,7 @@ if fichier_notice is None and contrat_present:
         "il sera **incomplet pour le dépôt**. L'outil ne l'exige pas encore.",
         icon="⚠️",
     )
+
 
 st.divider()
 st.subheader("4. Génération")
@@ -3777,7 +3858,12 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
         groupes = {}
         for fichier in fichiers:
             vue = _vue_photo(code, fichier.name)
-            if vue.get("x") is None:
+            # Pour DP 6, on regroupe avant de filtrer : les volets d'une même
+            # vue **partagent** le point de vue de l'image brute, puisque c'est
+            # la même prise. Un photomontage n'a été nulle part et n'a aucune
+            # position à lui — l'écarter ici sortait la planche à un seul volet
+            # (retour d'usage du 26/09/2026).
+            if code != "DP 6" and vue.get("x") is None:
                 continue
             cle = vue.get("vue", "A") if code == "DP 6" else fichier.name
             groupes.setdefault(cle, []).append((fichier, vue))
@@ -3790,6 +3876,10 @@ def _photographies_du_projet(nom_projet: str, photos_par_piece: dict) -> dict:
                 # « emplacement », « environnement », « mesures paysagères »,
                 # dans cet ordre, et c'est le sélecteur qui le dit.
                 membres.sort(key=lambda membre: membre[1].get("volet", 0))
+                # Le point de vue est celui de l'image brute. Sans elle placée,
+                # la vue n'a aucune position : elle ne se produit pas.
+                if membres[0][1].get("x") is None:
+                    continue
             premier = membres[0][1]
             prises.append(
                 prise_en_json(
