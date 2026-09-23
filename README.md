@@ -2006,11 +2006,35 @@ la clôture et les tables contre le foncier.
 
 Le géoréférencement reste celui du lot 2 : pré-positionnement sur l'emprise
 cadastrale, puis réglage à l'œil. L'emprise « geoperso-3 » déposée pour Bray
-le 23/09/2026 ne s'y prête pas — 147 ha en quatre morceaux sur 13 km, son
-centre à 2,3 km du site ; celle du lot 1, 27,99 ha, contient bien la clôture
-et les tables. Le calage de Gannay vient du fond HelioScope corrélé à l'ortho
-IGN dans le dépôt `photomontage`, traduit dans les deux réglages du lot 2 :
-longitude 3,600487654°, correction nord-sud −6,26 m.
+le 23/09/2026 comptait quatre morceaux sur 13 km, 147 ha ; instruction du chef
+de projet du même jour, seul reste celui du site — 5,08 ha, les « 5,1 ha »
+d'emprise cadastrale que le tableau du plan annonce. Le calage de Gannay vient
+du fond HelioScope corrélé à l'ortho IGN dans le dépôt `photomontage`, traduit
+dans les deux réglages du lot 2 : longitude 3,600487654°, correction nord-sud
+−6,26 m.
+
+**Bray ne se cale pas dans l'application, et la cause est au lot 2.** Mesuré
+le 23/09/2026 en corrélant le fond HelioScope de cinq exports avec l'ortho
+IGN : la latitude que le lot 2 tire de la résolution du fond est celle du
+**centre de l'image**, qu'il attribue à l'origine du DXF. Le décalage nord-sud
+à rattraper vaut donc l'ordonnée de ce centre, au signe près — à 0,7 m près
+sur quatre exports, 4 m sur le cinquième :
+
+| Export | Centre de l'image | Décalage mesuré |
+|---|---|---|
+| Les Islettes, `Export.zip` | +2,51 m | −2,75 m |
+| Les Islettes, `Export_2.zip` | −8,56 m | +8,50 m |
+| Bray, `helioscope_export.zip` du 01/09 | −90,98 m | +86,88 m |
+| Gannay, design 10465241 | +5,22 m | −5,58 m |
+| Bray, design 10482797 | −134,97 m | +134,31 m |
+
+À Bray, le projet sort ainsi 134 m trop au sud, et le réglage nord-sud du
+lot 2, borné à ±30 m, refuse de l'y ramener. Les 11 m d'écart de latitude
+entre les deux designs des Islettes, que la section « Précision de la
+latitude » attribue à la précision de la recette, sont l'écart de leurs deux
+centres d'image. La correction relève du lot 2 et de sa propre conversation ;
+les dossiers d'essai de Bray du 23/09/2026 ont été produits avec le calage
+mesuré, posé à la main hors de l'application.
 
 ### Dans l'application
 
