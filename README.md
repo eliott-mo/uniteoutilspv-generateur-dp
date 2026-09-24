@@ -2040,9 +2040,20 @@ elle fait un coude de 2,6° sous lui, et un alignement sur le seul segment
 voisin le faisait déborder. L'enceinte le rejoint alors à ses pignons, à angle
 droit, sur la seule longueur du poste : une enveloppe convexe partait en biais
 dans l'angle de la clôture et avalait l'ouverture du portail voisin. La
-surface clôturée gagne 72 m² à Bray, et `enceinte_plan` consigne le poste
+surface clôturée gagne 67 m² à Bray, et `enceinte_plan` consigne le poste
 parmi les interruptions de la clôture. Le portail voisin garde la place que le
 plan lui donne, et le rapport demande de le vérifier sur la planche.
+
+Calé contre la limite, le poste de Bray se tenait entre la voie et ce portail
+(retour du chef de projet du 24/09/2026). Un poste ne se pose pas dans le
+couloir d'accès d'un portail : l'ouverture élargie d'1 m de part et d'autre,
+sur 10 m vers l'extérieur de l'enceinte. Il glisse alors le long de la limite,
+à l'écart du portail, par pas de 25 cm et jusqu'à 40 m, en se recalant à
+chaque pas : 2,8 m à Bray, et le portail reste sur la clôture. Le sens se lit
+sur les centres du poste et du couloir, projetés sur la limite : comparer les
+distances au couloir ne départageait rien tant que le poste y empiétait des
+deux côtés, et il glissait vers l'angle où se tient le portail. Sans place à
+moins de 40 m, rien ne se propose, et le rapport le dit.
 
 La correction se calcule sur l'emprise cadastrale, en Lambert 93, donc au
 calage courant, et non dans la construction, qui ne connaît que le repère du

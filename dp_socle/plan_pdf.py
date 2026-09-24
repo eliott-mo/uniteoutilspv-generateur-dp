@@ -2088,6 +2088,17 @@ PREFIXE_EN_LIMITE = "poste_en_limite"
 #: plan : rien ne se propose, et le rapport le dit.
 SUR_LA_LIMITE_M = 0.1
 
+#: Le couloir d'accès d'un portail, où un poste calé en limite ne se pose
+#: pas : l'ouverture, élargie de `MARGE_PORTAIL_M` de part et d'autre, sur
+#: `DEGAGEMENT_PORTAIL_M` vers l'extérieur de l'enceinte, d'où l'on arrive. À
+#: Bray, le poste calé contre la limite se tenait entre la voie et le portail
+#: (retour du chef de projet du 24/09/2026) : il glisse alors le long de la
+#: limite, par pas de `PAS_GLISSEMENT_M`, jusqu'à `GLISSEMENT_MAX_M`.
+DEGAGEMENT_PORTAIL_M = 10.0
+MARGE_PORTAIL_M = 1.0
+PAS_GLISSEMENT_M = 0.25
+GLISSEMENT_MAX_M = 40.0
+
 
 @dataclass
 class ChoixDuPlan:
@@ -2497,49 +2508,22 @@ class CorrectionEnLimite:
         return f"Caler « {self.libelle} » en limite de propriété, dans l'enceinte"
 
 
-def _correction_en_limite(
-    poste_l93: Polygon, emprise: BaseGeometry, ouvrage, rang: int, enceinte_l93=None
-):
-    """La mise en limite de propriété d'un poste, en Lambert 93, et ce qu'il faut en dire.
+def _contre_la_limite(poste: Polygon, limite, emprise: BaseGeometry):
+    """Le poste tourné pour longer la limite, puis poussé jusqu'à la toucher.
 
-    Le poste tourne pour longer la limite, puis glisse vers elle jusqu'au
-    dernier point où il reste entièrement dans l'emprise : il la touche sans
-    la franchir. La limite se prend sur la longueur du poste, et non sur un
-    seul segment : à Bray, elle fait un coude de 2,6° sous le poste, et un
-    alignement sur le seul segment voisin le faisait dépasser de l'emprise.
-    Rend la correction, ou None, et une note quand le poste n'est pas en limite
-    sans pouvoir y être calé d'office.
+    La limite se prend sur la longueur du poste, et non sur un seul segment : à
+    Bray, elle fait un coude de 2,6° sous le poste, et un alignement sur le seul
+    segment voisin le faisait déborder de l'emprise. Le poste glisse vers elle
+    jusqu'au dernier point où il reste entier dans l'emprise. Rend le poste
+    calé, ou None s'il n'y tient pas, et l'écart d'orientation en degrés.
     """
-    limite = min(
-        (polygone.exterior for polygone in getattr(emprise, "geoms", [emprise])),
-        key=lambda anneau: anneau.distance(poste_l93),
-    )
-    retrait = poste_l93.distance(limite)
-    dedans = poste_l93.intersection(emprise).area / poste_l93.area
-    dans_l_enceinte = enceinte_l93 is None or poste_l93.within(enceinte_l93.buffer(0.01))
-    if retrait <= SUR_LA_LIMITE_M and dedans >= 0.999 and dans_l_enceinte:
-        return None, None
-    nom = f"« {ouvrage.libelle} »"
-    if retrait > RETRAIT_CORRIGEABLE_M:
-        return None, (
-            f"{nom} est à {retrait:.1f} m de la limite de propriété : un poste de "
-            "livraison s'y pose, entièrement dans l'emprise. Trop loin pour l'y "
-            "caler d'office : c'est au plan de le placer."
-        )
-    _, direction_poste, longueur, _ = _rectangle_minimal(poste_l93)
-    # La limite au droit du poste : sa corde sur la longueur du poste. Les
-    # abscisses se prennent modulo le tour de l'anneau, qui est fermé.
-    abscisse = limite.project(poste_l93.centroid)
+    _, direction_poste, longueur, _ = _rectangle_minimal(poste)
+    # Les abscisses se prennent modulo le tour de l'anneau, qui est fermé.
+    abscisse = limite.project(poste.centroid)
     a = limite.interpolate((abscisse - longueur / 2.0) % limite.length)
     b = limite.interpolate((abscisse + longueur / 2.0) % limite.length)
     ecart = _dans_demi_tour(math.degrees(math.atan2(b.y - a.y, b.x - a.x)) - direction_poste)
-    if abs(ecart) > PARALLELISME_DEG:
-        return None, (
-            f"{nom} est tourné de {abs(ecart):.0f}° par rapport à la limite de "
-            "propriété qu'il borde : il ne la longe pas, et ne s'y cale pas "
-            "d'office. C'est au plan de le placer."
-        )
-    tourne = affinity.rotate(poste_l93, ecart, origin="centroid")
+    tourne = affinity.rotate(poste, ecart, origin="centroid")
     # La normale à la corde, tournée vers la limite.
     corde = math.hypot(b.x - a.x, b.y - a.y)
     nx, ny = -(b.y - a.y) / corde, (b.x - a.x) / corde
@@ -2551,28 +2535,140 @@ def _correction_en_limite(
     def place(pas: float):
         return affinity.translate(tourne, pas * nx, pas * ny)
 
-    # Par dichotomie : `dedans` reste dans l'emprise, `dehors` en déborde.
-    dedans_m, dehors_m = (0.0, retrait + longueur) if emprise.contains(place(0.0)) else (
+    # Par dichotomie : `dedans_m` reste dans l'emprise, `dehors_m` en déborde.
+    ecart_limite = poste.distance(limite)
+    dedans_m, dehors_m = (0.0, ecart_limite + longueur) if emprise.contains(place(0.0)) else (
         -(longueur + RETRAIT_CORRIGEABLE_M),
         0.0,
     )
     if not emprise.contains(place(dedans_m)) or emprise.contains(place(dehors_m)):
-        return None, (
-            f"{nom} n'est pas en limite de propriété, et ne tient pas entier dans "
-            "l'emprise en la longeant : le poste est au droit d'un angle, ou la "
-            "limite trop courte. C'est au plan de le placer."
-        )
+        return None, ecart
     for _ in range(40):
         milieu = (dedans_m + dehors_m) / 2.0
         if emprise.contains(place(milieu)):
             dedans_m = milieu
         else:
             dehors_m = milieu
+    return place(dedans_m), ecart
+
+
+def _couloir_de_portail(ouverture: LineString, enceinte=None) -> Polygon:
+    """Ce qui s'étend devant un portail, du côté d'où l'on arrive.
+
+    L'ouverture, élargie de `MARGE_PORTAIL_M` de part et d'autre, sur
+    `DEGAGEMENT_PORTAIL_M` vers l'extérieur de l'enceinte ; des deux côtés
+    quand l'enceinte ne se referme pas.
+    """
+    (x0, y0), (x1, y1) = ouverture.coords[0], ouverture.coords[-1]
+    longueur = math.hypot(x1 - x0, y1 - y0)
+    ux, uy = (x1 - x0) / longueur, (y1 - y0) / longueur
+    m = MARGE_PORTAIL_M
+    debut, fin = (x0 - m * ux, y0 - m * uy), (x1 + m * ux, y1 + m * uy)
+
+    def cote(nx: float, ny: float) -> Polygon:
+        d = DEGAGEMENT_PORTAIL_M
+        return Polygon(
+            [debut, fin, (fin[0] + d * nx, fin[1] + d * ny), (debut[0] + d * nx, debut[1] + d * ny)]
+        )
+
+    nx, ny = -uy, ux
+    if enceinte is None:
+        return cote(nx, ny).union(cote(-nx, -ny))
+    milieu = Point((x0 + x1) / 2.0 + 0.5 * nx, (y0 + y1) / 2.0 + 0.5 * ny)
+    return cote(-nx, -ny) if enceinte.contains(milieu) else cote(nx, ny)
+
+
+def _correction_en_limite(
+    poste_l93: Polygon, emprise: BaseGeometry, ouvrage, rang: int, enceinte_l93=None, couloirs=()
+):
+    """La mise en limite de propriété d'un poste, en Lambert 93, et ce qu'il faut en dire.
+
+    Le poste se cale contre la limite (`_contre_la_limite`). S'il se tient alors
+    dans le couloir d'accès d'un portail, il glisse le long de la limite, à
+    l'écart du portail, jusqu'à le dégager. `couloirs` porte, pour chaque
+    portail, son libellé et son couloir (`_couloir_de_portail`). Rend la
+    correction, ou None, et une note quand le poste n'est pas en limite sans
+    pouvoir y être calé d'office.
+    """
+    limite = min(
+        (polygone.exterior for polygone in getattr(emprise, "geoms", [emprise])),
+        key=lambda anneau: anneau.distance(poste_l93),
+    )
+    retrait = poste_l93.distance(limite)
+    dedans = poste_l93.intersection(emprise).area / poste_l93.area
+    dans_l_enceinte = enceinte_l93 is None or poste_l93.within(enceinte_l93.buffer(0.01))
+    devant = [libelle for libelle, couloir in couloirs if poste_l93.intersects(couloir)]
+    if retrait <= SUR_LA_LIMITE_M and dedans >= 0.999 and dans_l_enceinte and not devant:
+        return None, None
+    nom = f"« {ouvrage.libelle} »"
+    if retrait > RETRAIT_CORRIGEABLE_M:
+        return None, (
+            f"{nom} est à {retrait:.1f} m de la limite de propriété : un poste de "
+            "livraison s'y pose, entièrement dans l'emprise. Trop loin pour l'y "
+            "caler d'office : c'est au plan de le placer."
+        )
+    cale, ecart = _contre_la_limite(poste_l93, limite, emprise)
+    if abs(ecart) > PARALLELISME_DEG:
+        return None, (
+            f"{nom} est tourné de {abs(ecart):.0f}° par rapport à la limite de "
+            "propriété qu'il borde : il ne la longe pas, et ne s'y cale pas "
+            "d'office. C'est au plan de le placer."
+        )
+    if cale is None:
+        return None, (
+            f"{nom} n'est pas en limite de propriété, et ne tient pas entier dans "
+            "l'emprise en la longeant : le poste est au droit d'un angle, ou la "
+            "limite trop courte. C'est au plan de le placer."
+        )
+
+    glissement, degages = 0.0, []
+    genants = [(libelle, couloir) for libelle, couloir in couloirs if cale.intersects(couloir)]
+    if genants:
+        degages = [libelle for libelle, _ in genants]
+        genant = unary_union([couloir for _, couloir in genants])
+        # La tangente à la limite au droit du poste, tournée à l'écart du portail.
+        abscisse = limite.project(cale.centroid)
+        a = limite.interpolate((abscisse - 1.0) % limite.length)
+        b = limite.interpolate((abscisse + 1.0) % limite.length)
+        norme = math.hypot(b.x - a.x, b.y - a.y)
+        tx, ty = (b.x - a.x) / norme, (b.y - a.y) / norme
+        # Le sens se lit sur les centres : comparer les distances au couloir ne
+        # départage rien tant que le poste y empiète des deux côtés — à Bray, il
+        # glissait vers l'angle, et le portail qui s'y tient.
+        centre, milieu_couloir = cale.centroid, genant.centroid
+        if (centre.x - milieu_couloir.x) * tx + (centre.y - milieu_couloir.y) * ty < 0:
+            tx, ty = -tx, -ty
+        for rang_pas in range(1, int(GLISSEMENT_MAX_M / PAS_GLISSEMENT_M) + 1):
+            pas = rang_pas * PAS_GLISSEMENT_M
+            candidat, ecart_candidat = _contre_la_limite(
+                affinity.translate(cale, pas * tx, pas * ty), limite, emprise
+            )
+            if (
+                candidat is not None
+                and abs(ecart_candidat) <= PARALLELISME_DEG
+                and not any(candidat.intersects(couloir) for _, couloir in couloirs)
+            ):
+                cale, glissement = candidat, pas
+                break
+        else:
+            return None, (
+                f"{nom}, calé en limite de propriété, se tiendrait devant "
+                + ", ".join(f"« {libelle} »" for libelle in degages)
+                + f", sans place pour s'en écarter à moins de {GLISSEMENT_MAX_M:.0f} m "
+                "le long de la limite. C'est au plan de le placer."
+            )
+
     etat = (
         f"à {retrait:.1f} m de la limite de propriété"
         if dedans >= 0.999
         else f"à {100 * (1 - dedans):.0f} % hors de l'emprise"
     ) + ("" if dans_l_enceinte else ", hors de l'enceinte")
+    degagement = (
+        f" Il glisse de {glissement:.1f} m le long de la limite pour ne pas se tenir "
+        "devant " + ", ".join(f"« {libelle} »" for libelle in degages) + "."
+        if glissement
+        else ""
+    )
     return CorrectionEnLimite(
         identifiant=f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}",
         categorie=ouvrage.categorie,
@@ -2583,10 +2679,11 @@ def _correction_en_limite(
             "la limite. Un poste de livraison se pose en limite de propriété, à "
             "l'intérieur de la clôture, et tient lui-même lieu de clôture sur sa "
             "longueur (instructions du 24/09/2026) : calé, il longe la limite, "
-            "et l'enceinte le rejoint à ses pignons. C'est une correction du "
-            "plan, pas une lecture."
+            "et l'enceinte le rejoint à ses pignons."
+            + degagement
+            + " C'est une correction du plan, pas une lecture."
         ),
-        geometrie_l93=place(dedans_m),
+        geometrie_l93=cale,
     ), None
 
 
@@ -3104,6 +3201,12 @@ class ImportPlanPDF:
             if enceinte is not None and enceinte.anneau is not None
             else None
         )
+        # Le couloir d'accès de chaque portail : un poste calé en limite ne
+        # s'y pose pas (retour du chef de projet du 24/09/2026).
+        couloirs = [
+            (libelle, _couloir_de_portail(projeter(entites_portail[0], calage), enceinte_l93))
+            for libelle, entites_portail in self.construction.portails
+        ]
         if emprise is not None and not emprise.is_empty:
             for rang, ouvrage in enumerate(self.construction.ouvrages, start=1):
                 if ouvrage.categorie not in POSTES_EN_LIMITE:
@@ -3112,7 +3215,7 @@ class ImportPlanPDF:
                 if geometrie is None:
                     continue
                 correction, note = _correction_en_limite(
-                    projeter(geometrie, calage), emprise, ouvrage, rang, enceinte_l93
+                    projeter(geometrie, calage), emprise, ouvrage, rang, enceinte_l93, couloirs
                 )
                 if correction is not None:
                     corrections.append(correction)

@@ -1019,8 +1019,12 @@ def test_le_poste_se_cale_en_limite_de_propriete_dans_l_enceinte(import_bray_2):
     elle, le poste de Bray se voit proposer d'y être calé ; coché, il touche la
     limite sans la franchir, malgré le coude de 2,6° qu'elle fait sous lui, et
     l'enceinte le rejoint à ses pignons : il tient lieu de clôture sur sa
-    longueur, comme à Gannay.
+    longueur, comme à Gannay. Calé là, il se tenait entre la voie et le
+    portail voisin : il glisse le long de la limite jusqu'à dégager son
+    couloir d'accès, et le portail reste sur la clôture.
     """
+    from dp_socle.helioscope import projeter
+    from dp_socle.plan_pdf import _couloir_de_portail
     from dp_socle.geometrie import charger_emprise
 
     emprise = charger_emprise(EMPRISE_SITE_BRAY).geometrie
@@ -1037,6 +1041,10 @@ def test_le_poste_se_cale_en_limite_de_propriete_dans_l_enceinte(import_bray_2):
         "Caler « Poste de Livraison/transfo » en limite de propriété, dans l'enceinte"
     )
     assert "hors de l'enceinte" in proposee.raison
+    assert (
+        "Il glisse de 2.8 m le long de la limite pour ne pas se tenir devant "
+        "« Portail (7 m) »" in proposee.raison
+    )
     assert poste().distance(limite) == pytest.approx(1.78, abs=0.05)
     assert not poste().within(import_bray_2.plan.polygone_cloture.buffer(0.01))
     surface = import_bray_2.plan.surface_cloturee_m2
@@ -1048,6 +1056,17 @@ def test_le_poste_se_cale_en_limite_de_propriete_dans_l_enceinte(import_bray_2):
         assert cale.intersection(emprise).area / cale.area > 0.9999
         assert cale.area == pytest.approx(36.0, rel=0.005)
         assert cale.within(enceinte.buffer(0.01))
+        calage = import_bray_2.implantation.calage
+        enceinte_plan = projeter(import_bray_2.construction.enceinte.polygone, calage)
+        for _, portail in import_bray_2.construction.portails:
+            ouverture = projeter(portail[0], calage)
+            assert not cale.intersects(_couloir_de_portail(ouverture, enceinte_plan))
+        # Le portail reste sur la clôture : l'enceinte prolongée ne l'avale pas.
+        assert all(
+            e.geometrie.distance(enceinte.exterior) < 0.01
+            for e in import_bray_2.entites()
+            if e.categorie == "portail"
+        )
         # Le poste et la bande qui le sépare de la clôture, sur sa longueur.
         assert import_bray_2.plan.surface_cloturee_m2 - surface == pytest.approx(72, abs=15)
         parametres = import_bray_2.parametres()
