@@ -129,6 +129,13 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
     assert application.checkbox(
         key="correction_plan_poste_sur_cloture:pdl_ptr:1"
     ).value is False
+    # La légende ne propose que ce qu'un plan PDF sait importer : une plateforme
+    # choisie ici ne sortait pas du plan, et rien ne le disait (24/09/2026).
+    options = next(
+        s.options for s in application.selectbox if (s.key or "").startswith("categorie_legende_")
+    )
+    assert "arbre_existant" in options
+    assert "plateforme" not in options
 
     # La carte se lit sous les réglages qui la changent — le calage, puis les
     # choix du plan —, et non sous les alertes, qui la repoussaient à plusieurs

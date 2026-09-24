@@ -89,6 +89,14 @@ CORRESPONDANCE_LEGENDE = {
     # Le libellé d'origine reste au contrat, dans la colonne `calque`.
     "Haie à renforcer": "haie",
     "Haie existante": "haie_existante",
+    # Végétation en place, ajoutée au plan de Bray le 24/09/2026 : une surface
+    # dont l'étendue dessinée est l'information. Elle rejoint les houppiers du
+    # plan du BE (« PVcase Trees »), que le dossier légende « Arbres existants »
+    # et que la coupe DP 3 dessine à hauteur d'arbre.
+    "Zone boisée": "arbre_existant",
+    "Zone boisée existante": "arbre_existant",
+    "Boisement existant": "arbre_existant",
+    "Arbres existants": "arbre_existant",
     "Poste combiné de Livraison/transformation": "pdl_ptr",
     "Poste de Livraison/transfo": "pdl_ptr",
     "Poste de livraison et de transformation": "pdl_ptr",
@@ -160,6 +168,19 @@ CATEGORIES_OUVRAGES = (
     "bess",
     "bac_retention",
 )
+
+#: Catégories dont le plan donne la surface telle qu'elle est dessinée : de la
+#: végétation en place, dont l'étendue est l'information — ni un trait dont on
+#: garde l'axe, ni un ouvrage aux cotes du catalogue. Le bois de Bray est ainsi
+#: tracé à main levée sur la copie d'écran HelioScope (plan du 24/09/2026).
+CATEGORIES_SURFACES = ("arbre_existant", "espace_vert")
+
+#: Ce qu'un plan PDF sait importer. Une autre catégorie du contrat, appariée à
+#: la main, ne sortirait pas du plan : la zone boisée de Bray, appariée aux
+#: arbres existants avant qu'ils ne s'importent, disparaissait ainsi sans un
+#: mot (24/09/2026). L'application ne propose donc que celles-ci, et
+#: `construire` dit ce qu'il laisse de côté si on lui en passe une autre.
+CATEGORIES_IMPORTABLES = CATEGORIES_TRACEES + CATEGORIES_OUVRAGES + CATEGORIES_SURFACES
 
 #: Ce que la légende doit porter pour que le plan serve à quelque chose. Sans
 #: clôture, le plan ne délimite pas le projet : la version du 28/08/2026 du
@@ -841,13 +862,35 @@ def _rattacher(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegend
     La couleur décide ; le liseré et le motif départagent deux pastilles de
     même couleur ; une forme qui hésite entre deux couleurs n'est rangée nulle
     part.
+
+    Une forme se range parmi les pastilles de sa nature, aplat ou trait. Si
+    aucune n'a sa couleur, elle peut rejoindre une catégorie tracée de l'autre
+    nature — clôture, haie, piste —, dont on ne garde que l'axe : PowerPoint
+    exporte un même trait en contour rempli ou en trait selon l'outil qui l'a
+    dessiné. Le segment qui fermait la clôture de Bray (plan du 24/09/2026),
+    une droite, était un trait quand le reste était rempli : refusé, il
+    laissait l'enceinte ouverte. Le repli rend alors, en second, ce qu'il faut
+    en dire.
     """
-    candidates = []
-    for entree in legende:
-        pastille = entree.pastille
-        if pastille.nature != objet.nature:
-            continue
-        candidates.append((_distance(objet.couleur, pastille.couleur), entree))
+    meme_nature = [e for e in legende if e.pastille.nature == objet.nature]
+    if any(_distance(objet.couleur, e.pastille.couleur) <= ECART_COULEUR_MAX for e in meme_nature):
+        return _choisir(objet, meme_nature)
+    tracees = [
+        e for e in legende if e.pastille.nature != objet.nature and e.categorie in CATEGORIES_TRACEES
+    ]
+    repli, _ = _choisir(objet, tracees)
+    if repli is not None:
+        return repli, (
+            f"un {objet.nature} de sa couleur, là où sa pastille est un "
+            f"{repli.pastille.nature}, lui est rattaché : on n'en garde que l'axe"
+        )
+    # La raison d'origine : aucune pastille de sa nature, ou aucune assez proche.
+    return _choisir(objet, meme_nature)
+
+
+def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende | None, str]:
+    """Parmi ces entrées, celle dont la forme porte la couleur, ou None et pourquoi."""
+    candidates = [(_distance(objet.couleur, e.pastille.couleur), e) for e in legende]
     if not candidates:
         return None, "aucune pastille de même nature (aplat ou trait)"
     candidates.sort(key=lambda c: c[0])
@@ -1116,6 +1159,11 @@ def lire_plan_pdf(
         if entree is None:
             non_reconnus.append((objet, raison))
             continue
+        if raison:
+            avertissements.append(
+                f"« {entree.libelle} » : {raison} — vers "
+                f"({(b[0] + b[2]) / 2:.0f}, {(b[1] + b[3]) / 2:.0f}) pt."
+            )
         elements.append(ElementPlan(entree=entree, objet=objet))
 
     if non_reconnus:
@@ -2496,6 +2544,32 @@ def construire(
                 axes_de_pistes.append(AxePiste(trace.categorie, trace.libelle, ligne))
             else:
                 traces_dxf.append((trace.categorie, trace.libelle, ligne))
+    for categorie in CATEGORIES_SURFACES:
+        for element in lecture.elements_de(categorie):
+            forme = _polygone_de(element.objet.principal)
+            if forme is None:
+                centre = MultiPoint(
+                    [p for c in element.objet.principal.sous_chemins for p in c]
+                ).centroid
+                notes.append(
+                    f"« {element.entree.libelle} » : une forme vers ({centre.x:.0f}, "
+                    f"{centre.y:.0f}) "
+                    "pt n'est pas fermée et ne délimite aucune surface : elle n'est "
+                    "pas importée. Refermez-la sur le plan."
+                )
+                continue
+            for morceau in getattr(forme, "geoms", [forme]):
+                traces_dxf.append((categorie, element.entree.libelle, calage.vers_dxf(morceau)))
+    importables = set(CATEGORIES_IMPORTABLES)
+    for entree in lecture.legende:
+        formes = [x for x in lecture.elements if x.entree is entree]
+        if entree.categorie and entree.categorie not in importables and formes:
+            notes.append(
+                f"« {entree.libelle} » est apparié à « {entree.categorie} », qu'un "
+                f"plan PDF ne sait pas importer : ses {len(formes)} forme(s) ne sont "
+                "pas au contrat. S'importent d'un plan PDF la clôture, les haies, "
+                "les pistes, les ouvrages et la végétation en place."
+            )
     # Le plan donne le tracé et le type de chaque piste ; la piste elle-même
     # se dessine comme sur un vrai plan : 5 m de large, virages arrondis. Ses
     # notes attendent de savoir si la correction des pistes est appliquée.

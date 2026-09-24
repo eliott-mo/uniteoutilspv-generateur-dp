@@ -39,6 +39,11 @@ NORD_SUD_GANNAY_M = -1.04
 #: toutes différentes de celles de Gannay.
 BRAY = EXEMPLES / "bray-saint-aignan-PDF"
 PLAN_BRAY = BRAY / "Plan implantation_Bray-Saint-Aignan.pdf"
+#: Le plan de Bray du 24/09/2026, sur le même design : une zone boisée
+#: existante ajoutée, volume et largeur portés en légende, et un segment de
+#: clôture tracé d'une droite — exporté en trait quand le reste de la clôture
+#: l'est en contour rempli.
+PLAN_BRAY_ZONE_BOISEE = BRAY / "Plan implantation_Bray-Saint-Aignan_2026-09-24.pdf"
 DXF_BRAY = BRAY / "helioscope_design_10482797.dxf"
 FOND_BRAY = BRAY / "design_10482797_baseimage.jpg"
 #: L'emprise réelle du projet, celle du lot 1 : 27,99 ha.

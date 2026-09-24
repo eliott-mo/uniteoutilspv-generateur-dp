@@ -16,6 +16,7 @@ exemples/**/*.pdf
 # pèsent de 250 à 460 Ko.
 !exemples/gannay-PDF/*.pdf
 !exemples/bray-saint-aignan-PDF/Plan implantation_Bray-Saint-Aignan.pdf
+!exemples/bray-saint-aignan-PDF/Plan implantation_Bray-Saint-Aignan_2026-09-24.pdf
 
 # Sources AutoCAD des plans du BE : seul le DXF exporté est lu par l'outil.
 # Le DWG pèse dix fois plus lourd, et les fichiers de verrou n'ont aucun sens

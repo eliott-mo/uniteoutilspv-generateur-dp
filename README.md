@@ -1866,7 +1866,7 @@ technique un aplat rouge (255, 0, 0), le poste de livraison noir. Il n'est pas
 non plus exporté de la même façon : ses traits y sont des contours remplis — un
 trait épais devient une capsule, dont on lit l'axe.
 
-Une forme de la carte va à la pastille dont elle porte la couleur, à trois
+Une forme de la carte va à la pastille dont elle porte la couleur, à quatre
 règles près, toutes mesurées :
 
 - la couleur n'est pas toujours exacte : les pistes à créer de Gannay sont
@@ -1879,7 +1879,16 @@ règles près, toutes mesurées :
   **motif** : à Bray, la citerne incendie et la citerne de refroidissement
   portent le même cyan, et seul le liseré noir de la seconde les distingue ; à
   Gannay, la clôture et le portail portent le même magenta, en points pour
-  l'une, en ellipse pleine pour l'autre.
+  l'une, en ellipse pleine pour l'autre ;
+- une forme se range parmi les pastilles de sa **nature**, aplat ou trait. Si
+  aucune n'a sa couleur, elle peut rejoindre une catégorie tracée de l'autre
+  nature — clôture, haie, piste —, dont on ne garde que l'axe : PowerPoint
+  exporte un même trait en contour rempli ou en trait selon l'outil qui l'a
+  dessiné, sans que rien ne le montre à l'écran. Le plan de Bray du 24/09/2026
+  fermait sa clôture au nord-ouest d'une droite, exportée en trait quand le
+  reste l'était en contours remplis. Refusée, elle laissait l'enceinte
+  ouverte : pas de surface clôturée, et les deux portails « à plus de 10 m de
+  la clôture ». Rattachée, elle le dit au rapport.
 
 Une forme qu'aucune pastille n'explique n'est rangée nulle part, et le rapport
 le dit ; une entrée de légende sans rien sur la carte aussi.
@@ -1889,6 +1898,17 @@ Les libellés, eux, changent d'un plan à l'autre comme les calques du BE :
 faute. La correspondance est proposée, puis modifiable. Deux libellés de Bray
 ne se rangent nulle part d'office : « Piste existante » et « Piste à créer » ne
 disent pas si la piste est lourde ou légère.
+
+**La végétation en place s'importe telle que dessinée.** Le plan de Bray du
+24/09/2026 ajoute une « Zone boisée ». Elle se range d'office avec les arbres
+existants du plan du BE (`arbre_existant`) : « Arbres existants » au dossier, à
+hauteur d'arbre dans la coupe DP 3. Sa forme passe au contrat telle que
+dessinée et calée — ni un axe, ni un gabarit —, 6 360 m² à Bray. Jusque-là, un
+plan PDF ne savait tirer que des tracés et des ouvrages. Inconnue, la zone
+n'était pas importée ; appariée à la main aux arbres existants, elle ne
+l'était pas davantage, et rien ne le disait. L'application ne propose plus que
+les catégories qu'un plan PDF sait importer (`plan_pdf.CATEGORIES_IMPORTABLES`),
+et l'import dit ce qu'il laisse de côté si on lui en passe une autre.
 
 **Sans clôture en légende, le plan est refusé** (`ErreurLegendeIntrouvable`) :
 c'est le cas de la version du 28/08/2026 du plan de Gannay, antérieure à celle

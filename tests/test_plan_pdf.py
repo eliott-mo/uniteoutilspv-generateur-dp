@@ -40,6 +40,7 @@ from tests.jeux_plan_pdf import (
     NORD_SUD_BRAY_M,
     NORD_SUD_GANNAY_M,
     PLAN_BRAY,
+    PLAN_BRAY_ZONE_BOISEE,
     PLAN_GANNAY,
     PLAN_GANNAY_SANS_CLOTURE,
     bray_present,
@@ -878,3 +879,101 @@ def test_les_controles_se_gardent_et_suivent_le_calage(import_bray):
     for nom in ("controles", "plan", "entites"):
         gardes = [k for k in import_bray._memoire if isinstance(k, tuple) and k[0] == nom]
         assert len(gardes) == 1, nom
+
+
+# ---------------------------------------------------------------------------
+# Bray, plan du 24/09/2026 : une zone boisée, un segment de clôture en trait
+# ---------------------------------------------------------------------------
+
+besoin_bray_2 = pytest.mark.skipif(
+    not (bray_present() and PLAN_BRAY_ZONE_BOISEE.exists()), reason="plan de Bray du 24/09 absent"
+)
+
+
+@pytest.fixture(scope="module")
+def import_bray_2(tmp_path_factory):
+    """Le plan du 24/09, calé comme la mesure du 23/09 l'a placé.
+
+    « Plateforme existante » y est appariée à une catégorie qu'un plan PDF ne
+    sait pas importer : c'est ce que permettait l'application avant d'en réduire
+    la liste, et l'import doit le dire.
+    """
+    from dp_socle.geometrie import charger_emprise
+
+    export = layout_cad(tmp_path_factory.mktemp("bray_2"), DXF_BRAY, FOND_BRAY)
+    return importer_plan_pdf(
+        PLAN_BRAY_ZONE_BOISEE,
+        export,
+        emprise_cadastrale=charger_emprise(EMPRISE_SITE_BRAY).geometrie,
+        longitude_origine=LONGITUDE_BRAY,
+        correction_nord_sud_m=NORD_SUD_BRAY_M,
+        correspondance={
+            "Piste existante": "piste_lourde_existante",
+            "Piste à créer": "piste_lourde_a_creer",
+            "Plateforme existante": "plateforme",
+        },
+        choix=ChoixDuPlan(),
+    )
+
+
+@besoin_bray_2
+def test_la_zone_boisee_arrive_au_contrat_telle_que_dessinee(import_bray_2, tmp_path):
+    """« Zone boisée » se range d'office avec les arbres existants, et sa surface passe.
+
+    Inconnue le 24/09/2026, elle n'était pas importée ; appariée à la main aux
+    arbres existants, elle ne l'était pas davantage — et rien ne le disait.
+    """
+    from dp_socle.contrat import charger_contrat
+    from dp_socle.coupe import coupe_par_defaut
+    from dp_socle.plan_pdf import _polygone_de
+
+    entree = next(e for e in import_bray_2.lecture.legende if e.libelle == "Zone boisée")
+    assert entree.categorie == "arbre_existant"
+    arbres = [e for e in import_bray_2.entites() if e.categorie == "arbre_existant"]
+    assert [e.calque for e in arbres] == ["Zone boisée"]
+    dessinee = sum(
+        _polygone_de(x.objet.principal).area
+        for x in import_bray_2.lecture.elements
+        if x.entree is entree
+    )
+    # La forme du plan, à l'échelle du plan : à l'altération du Lambert 93 près.
+    attendue = dessinee * import_bray_2.calage.echelle_m_par_pt**2
+    assert arbres[0].geometrie.area == pytest.approx(attendue, rel=0.005)
+    assert arbres[0].geometrie.area == pytest.approx(6_360, rel=0.02)
+
+    plan = import_bray_2.plan
+    import_bray_2.ligne_coupe = coupe_par_defaut(
+        plan.azimut_tables_deg, plan.polygone_cloture, plan.tables
+    )
+    import_bray_2.ecrire(tmp_path)
+    assert charger_contrat(tmp_path).presente("arbre_existant")
+
+
+@besoin_bray_2
+def test_une_categorie_que_le_plan_pdf_ne_sait_pas_importer_le_dit(import_bray_2):
+    assert not [e for e in import_bray_2.entites() if e.categorie == "plateforme"]
+    assert any(
+        "« Plateforme existante » est apparié à « plateforme », qu'un plan PDF ne sait "
+        "pas importer : ses 4 forme(s) ne sont pas au contrat" in a
+        for a in import_bray_2.avertissements
+    )
+
+
+@besoin_bray_2
+def test_un_segment_de_cloture_trace_en_trait_ferme_l_enceinte(import_bray_2):
+    """Une droite PowerPoint exportée en trait, là où la pastille est un contour rempli.
+
+    Refusée, elle laissait la clôture ouverte au nord-ouest : pas de surface
+    clôturée, les deux portails « à plus de 10 m de la clôture ». Rattachée par
+    sa couleur, et dit.
+    """
+    plan = import_bray_2.plan
+    assert plan.polygone_cloture is not None
+    assert plan.surface_cloturee_m2 == pytest.approx(48_700, rel=0.01)
+    avertissements = import_bray_2.avertissements
+    assert any(
+        a.startswith("« Clôture » : un trait de sa couleur, là où sa pastille est un aplat")
+        for a in avertissements
+    )
+    assert not any("Clôture ouverte" in a for a in avertissements)
+    assert not any("à plus de 10 m de la clôture" in a for a in avertissements)

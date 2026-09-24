@@ -1694,8 +1694,12 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
     incendie » là —, et deux de ceux de Bray ne disent pas si la piste est
     lourde ou légère.
     """
+    from dp_socle.plan_pdf import CATEGORIES_IMPORTABLES
+
     entrees = _legende_du_plan(str(chemin_pdf), chemin_pdf.stat().st_size)
-    options = ["(ignorer)"] + list(CATEGORIES_DE_LEGENDE)
+    # Seulement ce qu'un plan PDF sait importer : une autre catégorie, choisie
+    # ici, ne sortait pas du plan, et rien ne le disait (24/09/2026).
+    options = ["(ignorer)"] + [c for c in CATEGORIES_DE_LEGENDE if c in CATEGORIES_IMPORTABLES]
     a_decider = [e for e in entrees if e[2] is None]
     choix = {}
     with st.expander(
