@@ -3354,6 +3354,17 @@ class ImportPlanPDF:
         self.choix = choix
 
     @property
+    def etat(self) -> tuple:
+        """Ce qui, réglé à l'écran, change les géométries écrites.
+
+        Le calage du lot 2, les choix du plan et la correspondance de la
+        légende. L'écran le compare à ce qu'il a écrit pour savoir si la sortie
+        sur le disque est encore celle de l'import en mémoire, et garder la
+        carte sous les réglages tant qu'elle ne l'est pas.
+        """
+        return self._cle() + (tuple(sorted(self.lecture.correspondance.items())),)
+
+    @property
     def corrections_proposees(self) -> list:
         return self.construction.corrections_proposees + self._en_limite()[0]
 

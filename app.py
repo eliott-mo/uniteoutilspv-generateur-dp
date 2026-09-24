@@ -2096,6 +2096,15 @@ def _resumer_le_plan_pdf(import_pdf) -> None:
         )
 
 
+def _etat_de_l_import(import_courant):
+    """Ce qui, réglé à l'écran, change les géométries écrites.
+
+    Rien — `None` — pour un plan du bureau d'études, qui n'a ni calage ni
+    couche à régler une fois importé : son écran ne change plus après l'import.
+    """
+    return getattr(import_courant, "etat", None)
+
+
 def _montrer_la_coupe(import_be_courant) -> bool:
     """L'annonce de la coupe retenue, puis la carte où elle se règle.
 
@@ -2152,9 +2161,14 @@ def _montrer_la_coupe(import_be_courant) -> bool:
     # L'annonce au-dessus dit « Tracez sur la carte si vous voulez la déplacer » :
     # elle s'affichait alors qu'aucune carte n'existait encore, et rien ne
     # permettait d'agir (retour d'usage du 19/09/2026).
-    carte_de_la_coupe = not (
-        DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
-    ).exists()
+    # Et elle y reste tant que ce qui est à l'écran n'a pas été écrit : une
+    # fois la première validation faite, un recalage ou un changement de couche
+    # renvoyait la carte tout en bas, en section 3 bis, à deux écrans des
+    # boutons de recalage (retour d'usage du 24/09/2026).
+    carte_de_la_coupe = (
+        not (DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE).exists()
+        or _etat_de_l_import(import_be_courant) != st.session_state.get("etat_ecrit")
+    )
     if carte_de_la_coupe:
         _carte_du_plan(import_be_courant, regler_la_coupe=True)
     return carte_de_la_coupe
@@ -2596,6 +2610,9 @@ if import_be_courant is not None and commune.strip():
         except ErreurDP as erreur:
             st.error(f"{type(erreur).__name__} : {erreur}")
         else:
+            # Ce qui vient d'être écrit : la carte ne redescend que tant que
+            # l'écran ne s'en écarte pas.
+            st.session_state["etat_ecrit"] = _etat_de_l_import(import_be_courant)
             # Rejoué aussitôt : la carte change de place à la validation, et
             # sans cette relance la page finissait son exécution avec la carte
             # encore en haut, sous une annonce disant qu'elle était descendue.
@@ -3890,9 +3907,14 @@ if (
     _saisir_les_prises_de_vue(photos)
 elif import_be_courant is not None and commune.strip():
     st.caption(
-        "La carte est plus haut, sous les contrôles croisés : c'est là que la "
-        "coupe A-A' se règle, avant la validation. Elle redescend ici une fois "
-        "l'import validé, pour placer les prises de vue."
+        "La carte est plus haut, sous les réglages du plan : le calage ou les "
+        "couches ont changé depuis la dernière validation, et c'est là qu'on en "
+        "juge. Revalidez l'import pour qu'elle redescende ici, avec les prises "
+        "de vue."
+        if contrat_present
+        else "La carte est plus haut, sous les contrôles croisés : c'est là que "
+        "la coupe A-A' se règle, avant la validation. Elle redescend ici une "
+        "fois l'import validé, pour placer les prises de vue."
     )
 else:
     st.caption(

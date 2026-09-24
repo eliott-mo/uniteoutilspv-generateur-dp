@@ -141,34 +141,19 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
     # choix du plan —, et non sous les alertes, qui la repoussaient à plusieurs
     # écrans (retour d'usage du 23/09/2026).
     ordre = _dans_l_ordre_de_la_page(application)
-
-    def rang(predicat, quoi):
-        for i, element in enumerate(ordre):
-            if predicat(element):
-                return i
-        raise AssertionError(f"{quoi} n'est pas sur la page")
-
-    def texte(element) -> str:
-        """Le texte d'un élément, ou rien : la valeur d'un tableau n'en est pas un."""
-        for attribut in ("value", "label"):
-            valeur = getattr(element, attribut, None)
-            if isinstance(valeur, str) and valeur:
-                return valeur
-        return ""
-
-    recaler = rang(lambda e: texte(e) == "Recaler", "le bouton « Recaler »")
-    choix = rang(
-        lambda e: "Ce que le plan ne dit pas de ses ouvrages" in texte(e),
+    recaler = _rang(ordre, lambda e: _texte(e) == "Recaler", "le bouton « Recaler »")
+    choix = _rang(
+        ordre,
+        lambda e: "Ce que le plan ne dit pas de ses ouvrages" in _texte(e),
         "le titre des choix du plan",
     )
-    carte = rang(
-        lambda e: "Le plan importé, et la ligne de coupe" in texte(e), "le titre de la carte"
-    )
-    alerte = rang(
-        lambda e: e.type == "warning" and texte(e).startswith("Pistes de 5 m"),
+    carte = _rang(ordre, _est_la_carte_de_la_coupe, "le titre de la carte")
+    alerte = _rang(
+        ordre,
+        lambda e: e.type == "warning" and _texte(e).startswith("Pistes de 5 m"),
         "l'alerte des pistes",
     )
-    validation = rang(lambda e: texte(e) == "### Validation", "le titre de la validation")
+    validation = _rang(ordre, lambda e: _texte(e) == "### Validation", "le titre de la validation")
     assert recaler < choix < carte < alerte < validation
 
 
@@ -248,6 +233,30 @@ def _dans_l_ordre_de_la_page(application) -> list:
 
     parcourir(application.main)
     return elements
+
+
+def _texte(element) -> str:
+    """Le texte d'un élément, ou rien : la valeur d'un tableau n'en est pas un."""
+    for attribut in ("value", "label"):
+        valeur = getattr(element, attribut, None)
+        if isinstance(valeur, str) and valeur:
+            return valeur
+    return ""
+
+
+def _rang(ordre: list, predicat, quoi: str) -> int:
+    for i, element in enumerate(ordre):
+        if predicat(element):
+            return i
+    raise AssertionError(f"{quoi} n'est pas sur la page")
+
+
+def _est_la_carte_de_la_coupe(element) -> bool:
+    return "Le plan importé, et la ligne de coupe" in _texte(element)
+
+
+def _est_la_carte_des_vues(element) -> bool:
+    return "Le plan, pour placer les prises de vue" in _texte(element)
 
 
 def _annonces_de_l_ortho(application) -> list:
@@ -402,3 +411,45 @@ def test_un_recalage_garde_les_choix_deja_faits(tmp_path, monkeypatch):
     assert [c.identifiant for c in application.session_state["import_be"].corrections_appliquees] == [
         "poste_sur_cloture:pdl_ptr:1"
     ]
+
+
+def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypatch):
+    """Validé puis recalé, l'import reprend la carte sous ses réglages.
+
+    Elle descend en section 3 bis à la validation, pour placer les prises de
+    vue. Un recalage la ramène sous les boutons qui la changent : elle restait
+    en bas, à deux écrans de défilement de ceux-ci, dès lors qu'un contrat avait
+    été écrit une fois (retour d'usage du 24/09/2026).
+    """
+    application = _plan_pdf_importe(tmp_path, monkeypatch)
+    application.selectbox(key="volume_citerne_plan_pdf").set_value(120)
+    application.number_input(key="largeur_portail_plan_pdf").set_value(7.0)
+    application = application.run()
+    _cliquer(application, "Valider l'import")
+    application = application.run()
+    assert not application.exception, application.exception
+
+    # Validée, la carte est descendue en 3 bis, avec les prises de vue.
+    ordre = _dans_l_ordre_de_la_page(application)
+    assert any(_est_la_carte_des_vues(e) for e in ordre)
+    assert not any(_est_la_carte_de_la_coupe(e) for e in ordre)
+
+    # Recalé, l'écran n'est plus celui qui a été écrit : elle remonte.
+    _decalage_est(application).set_value(_decalage_est(application).value + 2.0)
+    _cliquer(application, "Recaler")
+    application = application.run()
+    assert not application.exception, application.exception
+    ordre = _dans_l_ordre_de_la_page(application)
+    assert _rang(ordre, _est_la_carte_de_la_coupe, "la carte de la coupe") < _rang(
+        ordre, lambda e: _texte(e) == "### Validation", "le titre de la validation"
+    )
+    assert not any(_est_la_carte_des_vues(e) for e in ordre)
+    assert any("Revalidez l'import pour qu'elle redescende ici" in _texte(e) for e in ordre)
+
+    # Revalidé, elle redescend.
+    _cliquer(application, "Valider l'import")
+    application = application.run()
+    assert not application.exception, application.exception
+    ordre = _dans_l_ordre_de_la_page(application)
+    assert any(_est_la_carte_des_vues(e) for e in ordre)
+    assert not any(_est_la_carte_de_la_coupe(e) for e in ordre)

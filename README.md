@@ -83,6 +83,16 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    sur « Valider » — qui écrit le contrat au milieu de la page — en faisait
    dessiner deux, et Streamlit refusait le second bouton « Déplacer la coupe ».
 
+   « Validé » se compte sur ce qui est à l'écran, et non sur la présence du
+   contrat sur le disque : après une première validation, un recalage ou un
+   changement de couche renvoyait la carte tout en bas, à deux écrans des
+   boutons de recalage (retour d'usage du 24/09/2026). Elle reste donc en
+   haut tant que le calage, les choix du plan et la correspondance de la
+   légende ne sont pas ceux de la dernière écriture — c'est
+   `ImportPlanPDF.etat`, comparé à ce que la validation a retenu. Un plan du
+   bureau d'études n'a rien de tout cela à régler une fois importé : son état
+   est `None`, et il redescend dès la première validation, comme avant.
+
    Les deux cartes ne portent pas tout à fait la même chose. Celle des prises
    de vue laisse de côté les **arbres existants** : 290 des 504 objets du plan
    de Sarnois, 43 % des 308 Ko envoyés au navigateur à chaque exécution, et
