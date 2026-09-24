@@ -109,32 +109,27 @@ coordonnées. On n'en revient pas à l'état de travail.
 
 ---
 
-## À corriger avant tout : les chemins Windows dans `projet.json`
+## Les chemins de `projet.json` — corrigé le 24/09/2026 (95b6637)
 
-**Défaut mesuré le 24/09/2026, qui casse la reprise et probablement déjà le
-déploiement.** Les chemins y sont écrits avec des antislashs :
+Le défaut est traité avant l'ouverture du lot, mais il faut le connaître : les
+chemins y étaient écrits avec des antislashs, que Linux lit comme des
+caractères du nom et non comme des séparateurs. Un `projet.json` écrit sous
+Windows était illisible sur la cible de déploiement.
 
-```json
-"images": ["projets\PV-SARNOIS-IND10B\DP_7\IMG_6945.jpg"]
-```
+`_declarer_les_chemins` (`dp_socle/projet.py`) tient l'invariant à l'écriture :
+**relatifs au dossier du fichier, en barres obliques**. C'est cette forme-là
+que le ZIP de reprise transporte, et c'est elle qui lui permet d'être déplié
+ailleurs.
 
-Sous Linux, `PurePosixPath` n'y voit pas un chemin mais **un seul nom de
-fichier** :
+Ce qu'il en reste à savoir : les `projet.json` **écrits avant cette date**
+portent des chemins relatifs au dossier de lancement. Ils se relisent là où ils
+ont été écrits, et repassent au format portable à la première réécriture.
+Aucune tolérance n'a été ajoutée en lecture — elle ne rattrapait aucun de ces
+fichiers, et le docstring de `_chemin_resolu` dit pourquoi ne pas la rajouter.
 
-```python
-PureWindowsPath(x).parts  # ('projets', 'PV-SARNOIS-IND10B', 'DP_7', 'IMG_6945.jpg')
-PurePosixPath(x).parts    # ('projets\PV-SARNOIS-IND10B\DP_7\IMG_6945.jpg',)
-```
-
-`_resoudre_photographies` (`dp_socle/projet.py:325`) teste alors
-`(base / image).exists()`, qui est faux, garde la chaîne telle quelle, et
-`valider_photographies` lève « image introuvable ». Un `projet.json` écrit sous
-Windows est illisible sous Linux.
-
-Écrire les chemins en **relatif au dossier du `projet.json`, séparés par des
-`/`** — `as_posix()` — et vérifier par un test qui relit un `projet.json` avec
-`PurePosixPath`, sans quoi le défaut ne se verra pas davantage en
-développement qu'aujourd'hui.
+Reste ouvert, et hors du correctif : `sortie/ABO_55_Les-Islettes/projet.json`
+porte un chemin absolu vers le poste de son auteur, sous `sources`. Ce bloc
+n'est jamais relu — c'est une note de provenance — mais il entrera dans le ZIP.
 
 ---
 
