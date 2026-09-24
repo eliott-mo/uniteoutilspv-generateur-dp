@@ -280,10 +280,8 @@ class Projet:
         base = chemin.parent
         for champ in ("emprise", "image_garde", "helioscope", "notice"):
             valeur = donnees.get(champ)
-            if valeur and not Path(valeur).is_absolute():
-                candidat = (base / valeur).resolve()
-                if candidat.exists():
-                    donnees[champ] = str(candidat)
+            if valeur:
+                donnees[champ] = _chemin_resolu(valeur, base)
         _resoudre_photographies(donnees.get("photographies"), base)
 
         projet = cls(**donnees)
@@ -316,10 +314,76 @@ class Projet:
         chemin = Path(chemin)
         chemin.parent.mkdir(parents=True, exist_ok=True)
         donnees = {c: v for c, v in asdict(self).items() if v is not None}
+        _declarer_les_chemins(donnees, chemin.parent)
         chemin.write_text(
             json.dumps(donnees, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         return chemin
+
+
+#: Champs de `projet.json` qui désignent un fichier. Les images des prises de
+#: vue sont traitées à part : elles vivent d'un cran plus bas dans la structure.
+CHAMPS_FICHIERS = ("emprise", "image_garde", "helioscope", "notice")
+
+
+def _chemin_declare(valeur: str, base: Path) -> str:
+    """Le chemin tel qu'il s'écrit : relatif au `projet.json`, en barres obliques.
+
+    `str(Path)` rend des antislashs sous Windows, et Linux n'y voit pas des
+    séparateurs mais des caractères ordinaires du nom — `PurePosixPath` lit
+    « DP_7\\vue.jpg » comme le nom d'un seul fichier. Un `projet.json` écrit
+    sous Windows était donc illisible sur la cible de déploiement, et la
+    validation levait « image introuvable » sur un fichier bien présent
+    (mesuré le 24/09/2026).
+
+    Relatif au dossier du fichier, et non au dossier de lancement : c'est ce qui
+    laisse déplacer un dossier de projet, et déplier ailleurs le ZIP de reprise.
+    Un chemin qui sort du dossier reste absolu — il n'y a rien de mieux à en
+    faire — mais passe lui aussi en barres obliques.
+    """
+    chemin = Path(valeur)
+    try:
+        return chemin.resolve().relative_to(base.resolve()).as_posix()
+    except (ValueError, OSError):
+        return chemin.as_posix()
+
+
+def _chemin_resolu(valeur: str, base: Path) -> str:
+    r"""Le chemin absolu d'un fichier déclaré, relatif au dossier du `projet.json`.
+
+    Aucune tolérance aux antislashs ici, et c'est délibéré : les `projet.json`
+    écrits avant le 24/09/2026 portent des chemins relatifs au dossier de
+    **lancement** (« projets\X\DP_7\vue.jpg »), que convertir ne suffirait pas
+    à résoudre depuis le dossier du fichier. Ils continuent de se relire là où
+    ils ont été écrits, par ce même dossier de lancement, et repassent au format
+    portable à la première réécriture. Ajouter une conversion aurait couvert un
+    cas que rien ne produit, et pérennisé la résolution par le dossier courant.
+    """
+    if Path(valeur).is_absolute():
+        return valeur
+    candidat = (base / valeur).resolve()
+    if candidat.exists():
+        return str(candidat)
+    # Inchangé : `valider()` dira lequel manque, avec son nom tel qu'il est écrit.
+    return valeur
+
+
+def _declarer_les_chemins(donnees: dict, base: Path) -> None:
+    """Réécrit en place les chemins du dictionnaire sérialisé.
+
+    Sur la copie que produit `asdict`, et non sur le `Projet` : l'objet en
+    mémoire garde les chemins absolus dont le reste de l'application se sert.
+    """
+    for champ in CHAMPS_FICHIERS:
+        valeur = donnees.get(champ)
+        if valeur:
+            donnees[champ] = _chemin_declare(valeur, base)
+    for prises in (donnees.get("photographies") or {}).values():
+        for prise in prises:
+            prise["images"] = [
+                _chemin_declare(image, base) if image else image
+                for image in prise.get("images") or []
+            ]
 
 
 def _resoudre_photographies(photographies, base: Path) -> None:
@@ -337,9 +401,5 @@ def _resoudre_photographies(photographies, base: Path) -> None:
             if not images:
                 continue
             prise["images"] = [
-                str((base / image).resolve())
-                if image and not Path(image).is_absolute()
-                and (base / image).exists()
-                else image
-                for image in images
+                _chemin_resolu(image, base) if image else image for image in images
             ]

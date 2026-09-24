@@ -8,6 +8,7 @@ lot 4 qui décrit le plan du bureau d'études et rien d'autre.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -159,9 +160,79 @@ def test_les_chemins_d_images_sont_relatifs_au_projet_json(tmp_path):
     )
     projet = Projet.charger(dossier / "projet.json")
     image = projet.prises_de("DP 7")[0].images[0]
-    from pathlib import Path
-
     assert Path(image).is_absolute() and Path(image).exists()
+
+
+# ---------------------------------------------------------------------------
+# Ce que le fichier écrit porte, et non ce qu'on souhaiterait qu'il porte
+# ---------------------------------------------------------------------------
+
+
+def _projet_ecrit(tmp_path):
+    """Un projet complet, écrit comme l'application l'écrit. Rend (json, dossier)."""
+    dossier = tmp_path / "projets" / "sarnois"
+    (dossier / "DP_7").mkdir(parents=True)
+    image = _image(dossier / "DP_7" / "vue.jpg")
+    emprise = dossier / "emprise.geojson"
+    emprise.write_text(
+        json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8"
+    )
+    (dossier / "DP_11").mkdir()
+    notice = dossier / "DP_11" / "notice.pdf"
+    notice.write_bytes(b"%PDF-1.4")
+
+    projet = Projet(
+        nom="sarnois", commune="Sarnois", code_postal="60210",
+        date="2026-09-16",
+        # `str(Path)` est ce que l'application passe : c'est lui qu'on teste.
+        emprise=str(emprise),
+        notice=str(notice),
+        photographies={
+            "DP 7": [
+                prise_en_json(
+                    PriseDeVue(
+                        point_de_vue=place_a_la_main("vue.jpg", X0, Y0, 95.0),
+                        images=(str(image),),
+                        cadrages=((0.0, 0.0),),
+                    )
+                )
+            ]
+        },
+    )
+    return projet.ecrire(dossier / "projet.json"), dossier
+
+
+def test_le_fichier_ecrit_ne_porte_aucun_separateur_windows(tmp_path):
+    """Mesuré le 24/09/2026 : `projet.json` était illisible sur la cible Linux.
+
+    `str(Path)` rend des antislashs sous Windows. Le test voisin, qui écrivait
+    lui-même le fichier avec des barres obliques, validait le format souhaité et
+    jamais celui que `ecrire()` produit : le défaut a traversé tout le lot 6 sans
+    se voir, et aurait bloqué la reprise d'un dossier au lot 7.
+    """
+    chemin, _ = _projet_ecrit(tmp_path)
+    brut = chemin.read_text(encoding="utf-8")
+    assert "\\" not in brut, brut
+
+
+def test_les_chemins_ecrits_sont_relatifs_au_dossier_du_fichier(tmp_path):
+    """Un dossier se déplace, et le ZIP de reprise du lot 7 le dépliera ailleurs.
+
+    Des chemins absolus survivraient au déplacement sous Windows et nulle part
+    ailleurs ; des chemins relatifs au dossier de lancement dépendraient de
+    l'endroit d'où l'application a été lancée.
+    """
+    chemin, _ = _projet_ecrit(tmp_path)
+    donnees = json.loads(chemin.read_text(encoding="utf-8"))
+
+    assert donnees["emprise"] == "emprise.geojson"
+    assert donnees["notice"] == "DP_11/notice.pdf"
+    assert donnees["photographies"]["DP 7"][0]["images"] == ["DP_7/vue.jpg"]
+
+    # Et le fichier écrit se relit, ce qui est tout l'objet de l'opération.
+    projet = Projet.charger(chemin)
+    relue = Path(projet.prises_de("DP 7")[0].images[0])
+    assert relue.exists() and relue.is_absolute()
 
 
 def test_un_projet_sans_photographies_reste_valide(tmp_path):
