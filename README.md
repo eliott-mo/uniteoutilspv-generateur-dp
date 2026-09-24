@@ -637,6 +637,14 @@ que la valeur du fichier reste lisible et que toute retouche se voie. Avec
 `longitude_calage`, elle est écrite dans `projet.json` : une régénération ne
 redemande jamais le calage.
 
+Un recalage relance le script par `st.rerun()`, qui s'arrête avant les champs
+des choix du plan — volume de la réserve, largeur du portail, corrections
+cochées : Streamlit oublie la valeur d'un widget qu'une exécution n'a pas
+rendu, et il fallait tout retrancher à chaque passe, ce que le calage sur
+l'ortho, qui s'affine en plusieurs clics, rend fréquent. Ces champs se
+réamorcent donc sur le `ChoixDuPlan` déjà retenu, qui, lui, survit à la
+relance.
+
 Les deux se saisissent en **valeur absolue**, comptées depuis le point de
 départ : le pré-positionnement pour l'est-ouest — `Calage.longitude_reference`,
 posée là, et par la longitude reprise d'un import validé —, la latitude du

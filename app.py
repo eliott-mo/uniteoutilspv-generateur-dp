@@ -1957,6 +1957,13 @@ def _trancher_les_ouvrages(import_pdf) -> None:
             if any(x.entree is e for x in lecture.elements)
         }
 
+    # Un recalage relance le script par `st.rerun()`, qui s'arrête avant ces
+    # champs : Streamlit oublie la valeur d'un widget qu'une exécution n'a pas
+    # rendu, et il fallait tout retrancher à chaque passe de calage (mesuré le
+    # 24/09/2026). Ce qui a déjà été tranché vit dans `choix`, et c'est lui qui
+    # les réamorce.
+    tranche = import_pdf.choix
+
     # Le volume et la largeur se portent en légende (instruction du chef de
     # projet du 23/09/2026) : lus, ils se montrent ; absents, ils se choisissent
     # ici, et l'écran dit où ils auraient dû être.
@@ -1972,7 +1979,11 @@ def _trancher_les_ouvrages(import_pdf) -> None:
         volume = st.selectbox(
             "Volume de la réserve incendie (m³)",
             VOLUMES_CITERNE_M3,
-            index=None,
+            index=(
+                VOLUMES_CITERNE_M3.index(tranche.volume_citerne_m3)
+                if tranche.volume_citerne_m3 in VOLUMES_CITERNE_M3
+                else None
+            ),
             placeholder="à choisir — la légende ne le dit pas",
             key="volume_citerne_plan_pdf",
             help="Le catalogue UNITe en compte quatre, de 7,95 x 4,44 m à "
@@ -1994,7 +2005,7 @@ def _trancher_les_ouvrages(import_pdf) -> None:
             "Largeur du portail (m)",
             min_value=1.0,
             max_value=20.0,
-            value=None,
+            value=tranche.largeur_portail_m,
             step=0.5,
             placeholder="à saisir — la légende ne la dit pas",
             key="largeur_portail_plan_pdf",
@@ -2009,6 +2020,7 @@ def _trancher_les_ouvrages(import_pdf) -> None:
     for correction in import_pdf.corrections_proposees:
         if st.checkbox(
             f"{correction.intitule} — correction du plan",
+            value=correction.identifiant in tranche.corrections,
             key=f"correction_plan_{correction.identifiant}",
         ):
             corrections.append(correction.identifiant)

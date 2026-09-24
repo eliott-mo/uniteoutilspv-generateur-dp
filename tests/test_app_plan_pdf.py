@@ -371,3 +371,34 @@ def test_le_contrat_ecrit_est_d_origine_plan_pdf(tmp_path, monkeypatch):
     assert (dossier / "geometries.gpkg").exists()
     # Les sections suivantes s'ouvrent sur ce contrat comme sur un autre.
     assert "3. Ajout de photographies et photomontages" in _titres(application)
+
+
+def test_un_recalage_garde_les_choix_deja_faits(tmp_path, monkeypatch):
+    """Volume, largeur et correction cochée survivent à un recalage.
+
+    « Recaler » et « Caler sur l'ortho » relancent le script par `st.rerun()`,
+    qui s'arrête avant les champs des choix : Streamlit oublie la valeur d'un
+    widget qu'une exécution n'a pas rendu, et il fallait tout retrancher à
+    chaque passe de calage — ce que le calage sur l'ortho, qui s'affine en
+    plusieurs clics, rend fréquent.
+    """
+    correction = "correction_plan_poste_sur_cloture:pdl_ptr:1"
+    application = _plan_pdf_importe(tmp_path, monkeypatch)
+    application.selectbox(key="volume_citerne_plan_pdf").set_value(120)
+    application.number_input(key="largeur_portail_plan_pdf").set_value(7.0)
+    application.checkbox(key=correction).set_value(True)
+    application = application.run()
+    assert not application.exception, application.exception
+    assert not application.session_state["import_be"].decisions_manquantes
+
+    _decalage_est(application).set_value(_decalage_est(application).value + 2.0)
+    _cliquer(application, "Recaler")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert application.selectbox(key="volume_citerne_plan_pdf").value == 120
+    assert application.number_input(key="largeur_portail_plan_pdf").value == 7.0
+    assert application.checkbox(key=correction).value is True
+    assert not application.session_state["import_be"].decisions_manquantes
+    assert [c.identifiant for c in application.session_state["import_be"].corrections_appliquees] == [
+        "poste_sur_cloture:pdl_ptr:1"
+    ]
