@@ -605,7 +605,7 @@ def test_profil_recupere_en_une_requete_et_concorde_avec_les_z_du_dxf(plan, empr
 
 
 class _ReponseFeinte:
-    """Ce que `requests.get` rend, réduit à ce que le module en lit."""
+    """Ce que la session du module rend, réduit à ce que le module en lit."""
 
     def __init__(self, status_code: int, altitudes=None, text: str = ""):
         self.status_code = status_code
@@ -618,6 +618,8 @@ class _ReponseFeinte:
 
 def _service_altimetrique_feint(monkeypatch, reponses):
     """Remplace le transport du service. Rend la liste des appels effectués."""
+    from types import SimpleNamespace
+
     import dp_socle.ign as ign
 
     appels = []
@@ -630,7 +632,7 @@ def _service_altimetrique_feint(monkeypatch, reponses):
             raise reponse
         return reponse
 
-    monkeypatch.setattr(ign.requests, "get", faux_get)
+    monkeypatch.setattr(ign, "_session", lambda: SimpleNamespace(get=faux_get))
     # Sans cela, trois tentatives feraient attendre le test quatre secondes.
     monkeypatch.setattr(ign.time, "sleep", lambda _: None)
     return appels

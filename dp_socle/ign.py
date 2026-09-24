@@ -26,14 +26,19 @@ signale. Rien n'est substitué.
 
 from __future__ import annotations
 
+import http.cookiejar
 import io
+import ssl
 import time
 import warnings
 from dataclasses import dataclass
+from functools import lru_cache
 
 import requests
 from PIL import Image
 from pyproj import Transformer
+from requests.adapters import HTTPAdapter
+from requests.utils import DEFAULT_CA_BUNDLE_PATH
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
@@ -56,6 +61,59 @@ TAILLE_MAX_PX = 5010
 DPI_DEFAUT = 200
 
 _ENTETES = {"User-Agent": "generateur-dp-unite/1.0 (dossier DP photovoltaique)"}
+
+
+class _AdaptateurTLS(HTTPAdapter):
+    """Un adaptateur HTTPS dont le contexte TLS porte déjà ses autorités.
+
+    requests 2.33 confie à urllib3 2.6 le chemin du magasin de certificats de
+    certifi, et urllib3 le recharge à chaque nouvelle connexion : de 0,3 à 4 s
+    sur un poste Windows, mesuré le 24/09/2026 — jusqu'au tiers du calage sur
+    l'ortho. Une session seule n'y suffit pas : la Géoplateforme ferme une
+    connexion inactive en moins de 15 s, et deux clics sont d'ordinaire plus
+    espacés. Ce contexte-ci est chargé une fois, des mêmes autorités que
+    requests, et garde la même exigence : certificat et nom d'hôte vérifiés.
+    """
+
+    def __init__(self):
+        # Avant `super().__init__`, qui crée déjà le gestionnaire de connexions.
+        self._contexte = ssl.create_default_context(cafile=DEFAULT_CA_BUNDLE_PATH)
+        super().__init__()
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = self._contexte
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        # Derrière un proxy aussi : sans lui, urllib3 prendrait le magasin du
+        # système, en silence, puisque le chemin de certifi ne lui est plus
+        # transmis.
+        proxy_kwargs["ssl_context"] = self._contexte
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        super().cert_verify(conn, url, verify, cert)
+        # Laissé au pool, le chemin des autorités les ferait recharger par
+        # urllib3 à chaque connexion : elles sont déjà dans le contexte.
+        conn.ca_certs = None
+        conn.ca_cert_dir = None
+
+
+@lru_cache(maxsize=1)
+def _session() -> requests.Session:
+    """La session de toutes les requêtes à la Géoplateforme.
+
+    Créée au premier appel et non à l'import : charger les certificats ne coûte
+    qu'à qui interroge un service. Elle réutilise aussi la connexion ouverte
+    pour les requêtes qui se suivent à moins de quelques secondes — pages du
+    cadastre, paquets du RGE ALTI, fonds d'un même dossier. Partagée par toutes
+    les sessions de l'application, elle ne garde aucun cookie.
+    """
+    session = requests.Session()
+    session.mount("https://", _AdaptateurTLS())
+    session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    return session
+
 
 #: Nombre de tentatives d'une requête GetMap, et attente entre deux essais.
 #:
@@ -145,7 +203,7 @@ def telecharger_fond(
     while True:
         tentatives += 1
         try:
-            reponse = requests.get(
+            reponse = _session().get(
                 URL_WMS, params=parametres, headers=_ENTETES, timeout=timeout
             )
         except requests.RequestException as exc:
@@ -247,7 +305,7 @@ def _interroger_wfs(
             "STARTINDEX": str(index),
         }
         try:
-            reponse = requests.get(
+            reponse = _session().get(
                 URL_WFS, params=parametres, headers=_ENTETES, timeout=timeout
             )
         except requests.RequestException as exc:
@@ -316,7 +374,7 @@ def telecharger_parcelles(
 def verifier_couches(couches=(COUCHE_PLAN, COUCHE_ORTHO), timeout: int = 120) -> dict:
     """Confronte les identifiants câblés au GetCapabilities du WMS-R."""
     try:
-        reponse = requests.get(
+        reponse = _session().get(
             URL_WMS,
             params={"SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetCapabilities"},
             headers=_ENTETES,
@@ -448,7 +506,7 @@ def _reponse_altimetrie(parametres: dict, timeout: int, points: int):
         tentatives += 1
         rejouable = True
         try:
-            reponse = requests.get(
+            reponse = _session().get(
                 URL_ALTIMETRIE, params=parametres, headers=_ENTETES, timeout=timeout
             )
         except requests.RequestException as exc:

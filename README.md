@@ -551,6 +551,19 @@ fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne p
 équivalente à l'impression : 200 dpi est le défaut. La barre latérale de l'application permet de reconfronter
 les identifiants au GetCapabilities.
 
+**Une session, un contexte TLS.** Toutes les requêtes passent par une même
+session (`ign._session`), dont l'adaptateur HTTPS porte un contexte TLS chargé
+une fois. requests 2.33 et urllib3 2.6 rechargeaient le magasin de certificats
+de certifi à chaque nouvelle connexion, de 0,3 à 4 s sur un poste Windows ; et
+la Géoplateforme ferme une connexion inactive en moins de 15 s, si bien qu'une
+session seule ne servait qu'entre requêtes rapprochées, jamais d'un clic à
+l'autre (mesuré le 24/09/2026). Le contexte prend les mêmes autorités que
+requests et vérifie certificat et nom d'hôte : un certificat expiré,
+auto-signé, d'une racine inconnue ou d'un autre hôte reste refusé. Partagée par
+toutes les sessions de l'application, la session ne garde aucun cookie. Le
+calage sur l'ortho de Gannay passe de 10,8 s à 9 s ; le reste est le temps de
+réponse de l'IGN, très variable.
+
 ## Comparaison au dossier de référence
 
 Le critère de validation n°2 du brief demande de comparer le dossier produit à
