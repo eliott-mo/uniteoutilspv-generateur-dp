@@ -2040,6 +2040,70 @@ def _resumer_le_plan_pdf(import_pdf) -> None:
         )
 
 
+def _montrer_la_coupe(import_be_courant) -> bool:
+    """L'annonce de la coupe retenue, puis la carte où elle se règle.
+
+    La carte ne s'affiche ici que tant que le contrat n'est pas écrit, et la
+    fonction rend `True` quand elle l'affiche. Appelée sous les choix d'un
+    plan PDF, sous les alertes d'un plan du BE : un bloc réellement déplacé,
+    et non un conteneur réservé puis rempli plus bas, dont `AppTest` garde
+    les enfants d'une exécution à l'autre quand un `st.rerun()` les enchaîne.
+    """
+    coupe = st.session_state.coupe_be
+    profil = st.session_state.profil_be
+    # Une ligne, et rien de plus. La figure du profil était tracée sans respecter
+    # le rapport entre les abscisses et les altitudes — 350 m de long pour 3 m de
+    # dénivelée — et donnait à lire une colline là où le terrain est plat. Ses
+    # chiffres n'engagent rien : ce qui compte, la cohérence de la pente et le
+    # contrôle des altitudes du DXF, remonte déjà en avertissement quand il
+    # cloche. La coupe se juge sur la carte et sur la planche DP 3.
+    if coupe is not None:
+        origine_profil = (
+            f", profil relevé sur {profil.origine}" if profil is not None else ""
+        )
+        annonces = {
+            "defaut": (
+                "**Coupe par défaut** : perpendiculaire aux rangées, posée là "
+                f"où elle traverse le plus de tables{origine_profil}. Tracez sur "
+                "la carte si vous voulez la déplacer."
+            ),
+            "deplacee": (
+                "**Coupe déplacée** : elle passe par le point que vous avez "
+                "cliqué, perpendiculairement aux rangées"
+                f"{origine_profil}. Recliquez sur « Déplacer la coupe » pour la "
+                "reposer ailleurs."
+            ),
+            "tracee": (
+                "**Coupe personnalisée** : redressée perpendiculairement aux "
+                f"rangées à partir de votre tracé{origine_profil}."
+            ),
+            "reprise": (
+                "**Coupe reprise de l'import précédent** de ce projet, telle "
+                f"qu'elle avait été retenue{origine_profil}. Tracez sur la carte "
+                "si vous voulez la déplacer."
+            ),
+        }
+        st.success(
+            annonces.get(st.session_state.get("origine_coupe"), annonces["tracee"]),
+            icon="📐",
+        )
+
+    # La carte, ici et pas plus bas, tant que le contrat n'est pas écrit : c'est
+    # le moment où la coupe se règle, et la validation la fige. Elle redescend
+    # sous les dépôts une fois l'import validé, pour les prises de vue — une
+    # seule carte à l'écran à chaque instant, jamais deux.
+    #
+    # L'annonce au-dessus dit « Tracez sur la carte si vous voulez la déplacer » :
+    # elle s'affichait alors qu'aucune carte n'existait encore, et rien ne
+    # permettait d'agir (retour d'usage du 19/09/2026).
+    carte_de_la_coupe = not (
+        DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
+    ).exists()
+    if carte_de_la_coupe:
+        _carte_du_plan(import_be_courant, regler_la_coupe=True)
+    return carte_de_la_coupe
+
+
 #: L'indice affiché par la liste déroulante, pour cette exécution seulement.
 #:
 #: Il n'est pas encore celui de l'import : tant qu'on n'a pas recliqué sur
@@ -2286,6 +2350,12 @@ if import_be_courant is not None and commune.strip():
         # Avant de lire le plan : les ouvrages tranchés et le calage réglé
         # changent ce que la carte, plus bas, doit montrer.
         _resumer_le_plan_pdf(import_be_courant)
+        # La carte d'un plan PDF vient ici, sous le calage et les choix du plan,
+        # et non sous les alertes : c'est sur elle que se lit l'effet d'un
+        # recalage ou d'une correction, et les alertes la repoussaient à
+        # plusieurs écrans des réglages (retour d'usage du 23/09/2026). Le plan
+        # du BE, qui n'a ni calage ni choix à suivre, la garde plus bas.
+        carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
     plan = import_be_courant.plan
     emprise_cloturee = plan.polygone_cloture
 
@@ -2430,57 +2500,8 @@ if import_be_courant is not None and commune.strip():
                     st.caption(f"· {message}")
 
     coupe = st.session_state.coupe_be
-    profil = st.session_state.profil_be
-    # Une ligne, et rien de plus. La figure du profil était tracée sans respecter
-    # le rapport entre les abscisses et les altitudes — 350 m de long pour 3 m de
-    # dénivelée — et donnait à lire une colline là où le terrain est plat. Ses
-    # chiffres n'engagent rien : ce qui compte, la cohérence de la pente et le
-    # contrôle des altitudes du DXF, remonte déjà en avertissement quand il
-    # cloche. La coupe se juge sur la carte et sur la planche DP 3.
-    if coupe is not None:
-        origine_profil = (
-            f", profil relevé sur {profil.origine}" if profil is not None else ""
-        )
-        annonces = {
-            "defaut": (
-                "**Coupe par défaut** : perpendiculaire aux rangées, posée là "
-                f"où elle traverse le plus de tables{origine_profil}. Tracez sur "
-                "la carte si vous voulez la déplacer."
-            ),
-            "deplacee": (
-                "**Coupe déplacée** : elle passe par le point que vous avez "
-                "cliqué, perpendiculairement aux rangées"
-                f"{origine_profil}. Recliquez sur « Déplacer la coupe » pour la "
-                "reposer ailleurs."
-            ),
-            "tracee": (
-                "**Coupe personnalisée** : redressée perpendiculairement aux "
-                f"rangées à partir de votre tracé{origine_profil}."
-            ),
-            "reprise": (
-                "**Coupe reprise de l'import précédent** de ce projet, telle "
-                f"qu'elle avait été retenue{origine_profil}. Tracez sur la carte "
-                "si vous voulez la déplacer."
-            ),
-        }
-        st.success(
-            annonces.get(st.session_state.get("origine_coupe"), annonces["tracee"]),
-            icon="📐",
-        )
-
-    # La carte, ici et pas plus bas, tant que le contrat n'est pas écrit : c'est
-    # le moment où la coupe se règle, et la validation la fige. Elle redescend
-    # sous les dépôts une fois l'import validé, pour les prises de vue — une
-    # seule carte à l'écran à chaque instant, jamais deux.
-    #
-    # L'annonce au-dessus dit « Tracez sur la carte si vous voulez la déplacer » :
-    # elle s'affichait alors qu'aucune carte n'existait encore, et rien ne
-    # permettait d'agir (retour d'usage du 19/09/2026).
-    carte_de_la_coupe = not (
-        DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
-    ).exists()
-    if carte_de_la_coupe:
-        _carte_du_plan(import_be_courant, regler_la_coupe=True)
+    if tableau is not None:
+        carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
 
     st.markdown("### Validation")
     if indice_choisi is not None and indice_choisi != tableau.indice:

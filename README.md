@@ -2108,6 +2108,16 @@ du poste quand elle se propose, jamais cochée d'office. La validation attend
 que ces choix soient faits. Le dossier se nomme sans indice : l'indice vient du
 tableau bilan, et il n'y en a pas.
 
+La carte vient aussitôt après ces réglages, avant les alertes de l'import :
+c'est sur elle que se lit l'effet d'un recalage ou d'une correction, et les
+alertes la repoussaient à plusieurs écrans des réglages (retour d'usage du
+23/09/2026). L'annonce de la coupe et la carte (`_montrer_la_coupe`) s'appellent
+sous les choix d'un plan PDF, sous les alertes d'un plan du BE, qui n'a ni
+calage ni choix à suivre. Le bloc est réellement déplacé : placé dans un
+conteneur, il laissait sous `AppTest` le bouton « Déplacer la coupe » survivre
+à la validation, les enfants d'un conteneur passant d'une exécution à l'autre
+quand un `st.rerun()` les enchaîne.
+
 **Caler sur l'ortho.** Le placement se réglait à l'œil. Le bouton « Caler sur
 l'ortho », au-dessus des deux réglages, le mesure : l'image de fond de l'export
 HelioScope est une photographie aérienne du site, qui se projette avec le

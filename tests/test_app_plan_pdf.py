@@ -130,6 +130,56 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
         key="correction_plan_poste_sur_cloture:pdl_ptr:1"
     ).value is False
 
+    # La carte se lit sous les réglages qui la changent — le calage, puis les
+    # choix du plan —, et non sous les alertes, qui la repoussaient à plusieurs
+    # écrans (retour d'usage du 23/09/2026).
+    ordre = _dans_l_ordre_de_la_page(application)
+
+    def rang(predicat, quoi):
+        for i, element in enumerate(ordre):
+            if predicat(element):
+                return i
+        raise AssertionError(f"{quoi} n'est pas sur la page")
+
+    def texte(element) -> str:
+        """Le texte d'un élément, ou rien : la valeur d'un tableau n'en est pas un."""
+        for attribut in ("value", "label"):
+            valeur = getattr(element, attribut, None)
+            if isinstance(valeur, str) and valeur:
+                return valeur
+        return ""
+
+    recaler = rang(lambda e: texte(e) == "Recaler", "le bouton « Recaler »")
+    choix = rang(
+        lambda e: "Ce que le plan ne dit pas de ses ouvrages" in texte(e),
+        "le titre des choix du plan",
+    )
+    carte = rang(
+        lambda e: "Le plan importé, et la ligne de coupe" in texte(e), "le titre de la carte"
+    )
+    alerte = rang(
+        lambda e: e.type == "warning" and texte(e).startswith("Pistes de 5 m"),
+        "l'alerte des pistes",
+    )
+    validation = rang(lambda e: texte(e) == "### Validation", "le titre de la validation")
+    assert recaler < choix < carte < alerte < validation
+
+
+def _dans_l_ordre_de_la_page(application) -> list:
+    """Les éléments de la page principale, dans l'ordre où ils s'affichent."""
+    elements = []
+
+    def parcourir(noeud):
+        enfants = getattr(noeud, "children", None)
+        if enfants is None:
+            elements.append(noeud)
+            return
+        for indice in sorted(enfants):
+            parcourir(enfants[indice])
+
+    parcourir(application.main)
+    return elements
+
 
 def _annonces_de_l_ortho(application) -> list:
     """Ce que le calage sur l'ortho dit avoir fait — l'annonce de la coupe est à part."""
