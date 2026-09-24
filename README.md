@@ -562,7 +562,9 @@ requests et vérifie certificat et nom d'hôte : un certificat expiré,
 auto-signé, d'une racine inconnue ou d'un autre hôte reste refusé. Partagée par
 toutes les sessions de l'application, la session ne garde aucun cookie. Le
 calage sur l'ortho de Gannay passe de 10,8 s à 9 s ; le reste est le temps de
-réponse de l'IGN, très variable.
+réponse de l'IGN, très variable. Une reprise après un échec repart d'une
+connexion neuve, comme avant : sur une connexion réutilisée, le 24/09/2026,
+les trois tentatives d'un GetMap ont reçu le même « LayerNotDefined ».
 
 ## Comparaison au dossier de référence
 

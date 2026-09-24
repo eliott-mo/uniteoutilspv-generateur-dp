@@ -115,6 +115,18 @@ def _session() -> requests.Session:
     return session
 
 
+def _connexion_neuve() -> None:
+    """Ferme les connexions ouvertes de la session : la suivante sera neuve.
+
+    Pour les reprises. Avant la session partagée, chaque tentative ouvrait sa
+    propre connexion, et c'est ainsi qu'une reprise passait là où un nœud du
+    WMS-R répondait `LayerNotDefined` (constaté le 02/09/2026). Sur une même
+    connexion, le 24/09/2026, les trois tentatives ont échoué de même. Le
+    contexte TLS reste chargé : la connexion neuve ne recharge rien.
+    """
+    _session().close()
+
+
 #: Nombre de tentatives d'une requête GetMap, et attente entre deux essais.
 #:
 #: Le WMS-R est réparti sur plusieurs nœuds et l'un d'eux répond parfois
@@ -234,6 +246,7 @@ def telecharger_fond(
             RuntimeWarning,
             stacklevel=2,
         )
+        _connexion_neuve()
         time.sleep(ATTENTE_REPRISE_S)
 
     try:
@@ -539,6 +552,7 @@ def _reponse_altimetrie(parametres: dict, timeout: int, points: int):
             RuntimeWarning,
             stacklevel=2,
         )
+        _connexion_neuve()
         time.sleep(ATTENTE_REPRISE_S)
 
 

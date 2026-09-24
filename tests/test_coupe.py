@@ -632,7 +632,8 @@ def _service_altimetrique_feint(monkeypatch, reponses):
             raise reponse
         return reponse
 
-    monkeypatch.setattr(ign, "_session", lambda: SimpleNamespace(get=faux_get))
+    session = SimpleNamespace(get=faux_get, close=lambda: None)
+    monkeypatch.setattr(ign, "_session", lambda: session)
     # Sans cela, trois tentatives feraient attendre le test quatre secondes.
     monkeypatch.setattr(ign.time, "sleep", lambda _: None)
     return appels
