@@ -19,6 +19,7 @@ import pytest
 from PIL import Image
 
 from dp_socle.calage_ortho import (
+    PAS_GROSSIER_M,
     _affine_vers_l93,
     caler_sur_ortho,
     correlation_normalisee,
@@ -108,17 +109,52 @@ def test_le_decalage_mesure_est_celui_du_site_dans_l_ortho():
     decaler_longitude(vrai, 12.0)
     corriger_nord_sud(vrai, vrai.correction_nord_sud_m - 7.0)
     fond = implantation.fond
+    demandes = []
 
     def site_deplace(_couche, cadre, largeur_mm, hauteur_mm, dpi):
         taille = (round(largeur_mm / 25.4 * dpi), round(hauteur_mm / 25.4 * dpi))
         pas = (cadre[2] - cadre[0]) / taille[0]
-        pixels = fond_sur_grille(fond, _affine_vers_l93(vrai, fond), (cadre[0], cadre[3]), pas, taille)
+        demandes.append((pas, taille))
+        pixels = fond_sur_grille(
+            fond, _affine_vers_l93(vrai, fond), (cadre[0], cadre[3]), pas, taille, adoucir=True
+        )
         return _Fond(Image.fromarray(pixels.clip(0, 255).astype(np.uint8)))
 
     mesure = mesurer_sur_ortho(implantation, telecharger=site_deplace)
     assert mesure.decalage_est_m == pytest.approx(12.0, abs=0.2)
     assert mesure.decalage_nord_m == pytest.approx(-7.0, abs=0.2)
     assert mesure.pic > 0.9
+
+    # Deux passes : la grossière sur toute la marge, la fine autour de ce
+    # qu'elle a trouvé. Ensemble, moins de pixels que la seule passe fine
+    # qu'on demandait sur toute la marge : c'est ce qui fait le temps.
+    (pas_grossier, grossiere), (pas_fin, fine) = demandes
+    assert pas_grossier == pytest.approx(PAS_GROSSIER_M, rel=0.01)
+    assert pas_fin == pytest.approx(mesure.pas_m, rel=0.01)
+    une_passe = grossiere[0] * grossiere[1] * (pas_grossier / pas_fin) ** 2
+    assert grossiere[0] * grossiere[1] + fine[0] * fine[1] < une_passe / 2.5
+
+
+@besoin_gannay
+def test_un_fond_reconnu_de_loin_mais_pas_au_detail_ne_change_rien():
+    """La passe grossière trouve le site, la fine plus rien : on le dit, on ne cale pas."""
+    implantation = _implantation_gannay()
+    avant = (implantation.calage.longitude_origine, implantation.calage.correction_nord_sud_m)
+    fond = implantation.fond
+    affine = _affine_vers_l93(implantation.calage, fond)
+
+    def de_loin_seulement(_couche, cadre, largeur_mm, hauteur_mm, dpi):
+        taille = (round(largeur_mm / 25.4 * dpi), round(hauteur_mm / 25.4 * dpi))
+        pas = (cadre[2] - cadre[0]) / taille[0]
+        if pas > 1.0:
+            pixels = fond_sur_grille(fond, affine, (cadre[0], cadre[3]), pas, taille, adoucir=True)
+        else:
+            pixels = np.random.default_rng(5).integers(118, 122, size=(taille[1], taille[0]))
+        return _Fond(Image.fromarray(np.asarray(pixels).clip(0, 255).astype(np.uint8)))
+
+    with pytest.raises(ErreurCalage, match="pas au détail"):
+        caler_sur_ortho(implantation, telecharger=de_loin_seulement)
+    assert (implantation.calage.longitude_origine, implantation.calage.correction_nord_sud_m) == avant
 
 
 @pytest.mark.reseau
@@ -154,7 +190,9 @@ def test_bray_se_cale_la_ou_la_mesure_l_avait_place(tmp_path):
     # laisse l'IGN renouveler son ortho sans que le test ne tombe.
     assert ecart_est == pytest.approx(0.0, abs=1.0)
     assert calage.correction_nord_sud_m == pytest.approx(NORD_SUD_BRAY_M, abs=1.0)
-    assert mesure.pic > 3 * mesure.second_pic
+    # 2,9 fois le second, mesuré le 24/09/2026 à la passe grossière, où le
+    # pic se détache moins qu'au pas fin ; le refus est à 1,8.
+    assert mesure.pic > 2.5 * mesure.second_pic
 
 
 @pytest.mark.reseau

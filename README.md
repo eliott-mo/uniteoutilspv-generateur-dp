@@ -2151,8 +2151,18 @@ de 30 m, rien ne change et l'erreur le dit : autre site, saison, chantier, le
 réglage à l'œil reste ouvert. Pré-positionnées sur leur emprise, Gannay est à
 17,8 m de sa place et Bray à 22,3 m ; le bouton les ramène à 0,85 m et à 8 cm
 des calages mesurés indépendamment — dans le dépôt `photomontage` pour Gannay,
-avec OpenCV pour Bray. Il faut une dizaine de secondes, dont sept pour
-télécharger l'ortho.
+avec OpenCV pour Bray.
+
+La recherche se fait en deux passes depuis le 24/09/2026. Au pas fin sur
+toute la marge, elle demandait à l'IGN une ortho de 2 155 px de côté à
+Gannay : de 10 à 30 s, et plusieurs minutes quand le service peinait. Elle
+cherche d'abord à 1,6 m/px, seize fois moins de pixels, puis s'affine au pas
+du fond dans une fenêtre de quelques mètres : de 3 à 5 s d'ordinaire, pour le
+même calage à 2,5 cm près sur quatre exports. Le pic s'y détache moins qu'au
+pas fin — de 2,2 à 3,4 fois le second sur cinq exports —, toujours au-dessus
+du seuil de 1,8 ; c'est sur cette passe, la seule qui voie toute la marge,
+que l'ambiguïté se juge. Si la passe fine ne retrouve pas le fond autour de
+la position grossière, rien ne change et l'erreur le dit.
 
 **Recaler sans attendre.** Chaque geste relance le script entier, et la page
 du plan PDF mettait 13,7 s à se réafficher à Gannay, 18,9 s après un

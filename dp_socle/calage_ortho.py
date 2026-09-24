@@ -15,6 +15,11 @@ dépôt `photomontage` ; sur les quatre autres, le décalage nord-sud qu'elle
 mesure est celui qu'annonce le centre de l'image, à 0,7 m près sur trois
 d'entre eux et 4,1 m sur le dernier, dont la corrélation est la plus faible.
 
+La recherche se fait en deux passes depuis le 24/09/2026 : à 1,6 m/px sur
+toute la marge, puis au pas fin dans une fenêtre de quelques mètres autour de
+ce que la première a trouvé. Même calage, jusqu'à trois fois moins de pixels
+demandés à l'IGN.
+
 Ce qui n'est pas reconnu nettement n'est pas appliqué : le calage reste à
 l'œil, et l'erreur dit pourquoi.
 """
@@ -26,7 +31,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 from shapely.geometry import Point
 
 from .erreurs import ErreurCalage
@@ -43,10 +48,27 @@ MARGE_RECHERCHE_M = 220.0
 #: pas plus à cette finesse, pour quatre fois plus de calcul.
 PAS_MINIMAL_M = 0.4
 
+#: Pas de la passe grossière, en mètres. Chercher d'emblée au pas fin sur toute
+#: la marge demandait à l'IGN une ortho de 2 155 px de côté à Gannay : de 10 à
+#: 30 s, et plusieurs minutes quand le service peinait. La passe grossière en
+#: demande seize fois moins de pixels, la fine une fenêtre de quelques mètres :
+#: de 3 à 5 s d'ordinaire, pour le même calage à 2,5 cm près sur quatre exports
+#: (mesuré le 24/09/2026). Le pic s'y détache moins — 2,2 à 3,4 fois le second
+#: sur cinq exports, contre 2,5 à 4,8 à 0,8 m —, toujours au-dessus du seuil.
+PAS_GROSSIER_M = 1.6
+
+#: Demi-largeur de la fenêtre de la passe fine autour du résultat grossier :
+#: trois pas grossiers et 4 m. Sur les quatre exports, le résultat grossier
+#: est tombé à 1,4 m au plus du résultat fin.
+FENETRE_FINE_PAS = 3
+FENETRE_FINE_MARGE_M = 4.0
+
 #: Seuils de confiance, mesurés le 23/09/2026 sur les cinq exports : pics de
 #: corrélation de 0,21 à 0,52, chacun au moins 2,7 fois le plus haut pic situé
 #: à plus de 30 m. En deçà, le fond ne se reconnaît pas dans l'ortho — autre
-#: site, saison, chantier —, et le calage reste à l'œil.
+#: site, saison, chantier —, et le calage reste à l'œil. Le rapport se juge
+#: sur la passe grossière, la seule qui voie toute la marge ; le pic minimal,
+#: sur les deux.
 PIC_MINIMAL = 0.15
 RAPPORT_MINIMAL = 1.8
 ECART_SECOND_PIC_M = 30.0
@@ -63,7 +85,8 @@ class MesureOrtho:
     #: Déplacement à appliquer pour que le fond tombe sur l'ortho, en mètres.
     decalage_est_m: float
     decalage_nord_m: float
-    #: Corrélation au meilleur accord, et la plus haute à plus de 30 m de lui.
+    #: Corrélation au meilleur accord, et la plus haute à plus de 30 m de lui,
+    #: toutes deux de la passe grossière : la seule qui voie toute la marge.
     pic: float
     second_pic: float
     pas_m: float
@@ -184,12 +207,19 @@ def _affine_vers_l93(calage, fond) -> np.ndarray:
     return coefficients
 
 
-def fond_sur_grille(fond, affine: np.ndarray, coin: tuple, pas: float, taille: tuple) -> np.ndarray:
+def fond_sur_grille(
+    fond, affine: np.ndarray, coin: tuple, pas: float, taille: tuple, adoucir: bool = False
+) -> np.ndarray:
     """Le fond HelioScope rééchantillonné sur une grille Lambert 93, en niveaux de gris.
 
     `coin` est le coin haut-gauche de la grille (est, nord), `taille` son nombre
     de colonnes et de lignes. Coordonnées continues de part et d'autre : le
     centre du pixel (i, j) est en (i + 0,5, j + 0,5). Hors du fond, zéro.
+
+    `adoucir` floute d'abord l'image à l'échelle du pas quand il dépasse deux
+    pixels du fond. Sans cela, un pas huit fois plus grand que le pixel
+    prélèverait ses détails au hasard, quand l'ortho de l'IGN arrive déjà
+    réduite proprement.
     """
     x0, y0 = fond.origine_m
     resolution = fond.resolution_m_px
@@ -211,6 +241,9 @@ def fond_sur_grille(fond, affine: np.ndarray, coin: tuple, pas: float, taille: t
         lineaire_total[1, 0], lineaire_total[1, 1], constante[1],
     )
     image = Image.open(io.BytesIO(fond.image)).convert("L")
+    facteur = pas / resolution
+    if adoucir and facteur > 2.0:
+        image = image.filter(ImageFilter.GaussianBlur(radius=0.5 * facteur))
     rééchantillonnée = image.transform(
         taille, Image.Transform.AFFINE, donnees, resample=Image.Resampling.BILINEAR
     )
@@ -222,22 +255,30 @@ def fond_sur_grille(fond, affine: np.ndarray, coin: tuple, pas: float, taille: t
 # ---------------------------------------------------------------------------
 
 
-def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
-    """Le déplacement qui pose le fond HelioScope sur l'ortho IGN, au calage courant.
+@dataclass(frozen=True)
+class _Recherche:
+    """Ce qu'une passe de corrélation a trouvé."""
 
-    `telecharger` remplace le téléchargement de l'ortho — pour les tests ; il a
-    la signature de `ign.telecharger_fond`.
+    decalage_est_m: float
+    decalage_nord_m: float
+    pic: float
+    second: float
+    #: Le meilleur accord touche le bord de la zone cherchée : le vrai peut
+    #: être au-delà, et sa position n'a pas pu s'affiner.
+    au_bord: bool
+
+
+def _chercher(
+    implantation, telecharger, pas: float, marge_m: float, autour=(0.0, 0.0), adoucir=False
+) -> _Recherche:
+    """Cherche le fond dans l'ortho, au pas donné, à `marge_m` autour d'une position.
+
+    La position est celle du calage courant décalée de `autour` (est, nord) :
+    la passe fine cherche autour de ce que la grossière a trouvé.
     """
-    from .ign import COUCHE_ORTHO, telecharger_fond
+    from .ign import COUCHE_ORTHO
 
-    telecharger = telecharger or telecharger_fond
     fond = implantation.fond
-    if fond is None:
-        raise ErreurCalage(
-            "L'export HelioScope ne porte pas d'image de fond : rien à chercher "
-            "dans l'ortho IGN. Réglez le calage à l'œil, ou réexportez le Layout "
-            "CAD avec son image."
-        )
     affine = _affine_vers_l93(implantation.calage, fond)
     x0, y0 = fond.origine_m
     largeur_m = fond.taille_px[0] * fond.resolution_m_px
@@ -247,13 +288,13 @@ def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
     ) @ affine
     est_min, nord_min = coins.min(axis=0)
     est_max, nord_max = coins.max(axis=0)
-    pas = max(fond.resolution_m_px, PAS_MINIMAL_M)
 
+    decalage_est, decalage_nord = autour
     cadre = (
-        est_min - MARGE_RECHERCHE_M,
-        nord_min - MARGE_RECHERCHE_M,
-        est_max + MARGE_RECHERCHE_M,
-        nord_max + MARGE_RECHERCHE_M,
+        est_min + decalage_est - marge_m,
+        nord_min + decalage_nord - marge_m,
+        est_max + decalage_est + marge_m,
+        nord_max + decalage_nord + marge_m,
     )
     colonnes = int(round((cadre[2] - cadre[0]) / pas))
     lignes = int(round((cadre[3] - cadre[1]) / pas))
@@ -278,6 +319,7 @@ def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
         (cadre[0] + colonne_fond * pas, cadre[3] - ligne_fond * pas),
         pas,
         taille_fond,
+        adoucir=adoucir,
     )
     rogne = 12 + int(0.05 * min(gabarit.shape))
     gabarit = gabarit[rogne:-rogne, rogne:-rogne]
@@ -288,8 +330,40 @@ def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
     masquee = carte.copy()
     i, j = int(round(ligne)), int(round(colonne))
     masquee[max(0, i - voisinage) : i + voisinage + 1, max(0, j - voisinage) : j + voisinage + 1] = -1.0
-    second = float(masquee.max())
+    return _Recherche(
+        decalage_est_m=(colonne - (colonne_fond + rogne)) * pas,
+        decalage_nord_m=-(ligne - (ligne_fond + rogne)) * pas,
+        pic=pic,
+        second=float(masquee.max()),
+        au_bord=not (0 < i < carte.shape[0] - 1 and 0 < j < carte.shape[1] - 1),
+    )
 
+
+def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
+    """Le déplacement qui pose le fond HelioScope sur l'ortho IGN, au calage courant.
+
+    Deux passes : la grossière cherche sur toute la marge et juge si le fond se
+    reconnaît sans ambiguïté ; la fine affine autour, au pas du fond.
+    `telecharger` remplace le téléchargement de l'ortho — pour les tests ; il a
+    la signature de `ign.telecharger_fond`.
+    """
+    from .ign import telecharger_fond
+
+    telecharger = telecharger or telecharger_fond
+    fond = implantation.fond
+    if fond is None:
+        raise ErreurCalage(
+            "L'export HelioScope ne porte pas d'image de fond : rien à chercher "
+            "dans l'ortho IGN. Réglez le calage à l'œil, ou réexportez le Layout "
+            "CAD avec son image."
+        )
+    pas_fin = max(fond.resolution_m_px, PAS_MINIMAL_M)
+    pas_grossier = max(PAS_GROSSIER_M, pas_fin)
+
+    grossiere = _chercher(
+        implantation, telecharger, pas_grossier, MARGE_RECHERCHE_M, adoucir=True
+    )
+    pic, second = grossiere.pic, grossiere.second
     if pic < PIC_MINIMAL or pic < RAPPORT_MINIMAL * max(second, 0.0):
         raise ErreurCalage(
             "Le fond HelioScope ne se reconnaît pas nettement dans l'ortho IGN : "
@@ -298,12 +372,32 @@ def mesurer_sur_ortho(implantation, telecharger=None) -> MesureOrtho:
             "mieux qu'ailleurs). Le calage n'est pas modifié : réglez-le à l'œil "
             "sur la carte."
         )
+
+    fine = grossiere
+    if pas_grossier > pas_fin:
+        fenetre_m = FENETRE_FINE_PAS * pas_grossier + FENETRE_FINE_MARGE_M
+        fine = _chercher(
+            implantation,
+            telecharger,
+            pas_fin,
+            fenetre_m,
+            autour=(grossiere.decalage_est_m, grossiere.decalage_nord_m),
+        )
+        if fine.au_bord or fine.pic < PIC_MINIMAL:
+            raise ErreurCalage(
+                "Le fond HelioScope se reconnaît dans l'ortho IGN au pas de "
+                f"{_fr(pas_grossier, 'g')} m, mais pas au détail autour de cette "
+                f"position : corrélation de {fine.pic:.2f} au pas de "
+                f"{_fr(pas_fin, 'g')} m"
+                + (", au bord de la fenêtre cherchée" if fine.au_bord else "")
+                + ". Le calage n'est pas modifié : réglez-le à l'œil sur la carte."
+            )
     return MesureOrtho(
-        decalage_est_m=(colonne - (colonne_fond + rogne)) * pas,
-        decalage_nord_m=-(ligne - (ligne_fond + rogne)) * pas,
+        decalage_est_m=fine.decalage_est_m,
+        decalage_nord_m=fine.decalage_nord_m,
         pic=pic,
         second_pic=second,
-        pas_m=pas,
+        pas_m=pas_fin,
     )
 
 
