@@ -1879,7 +1879,13 @@ règles près, toutes mesurées :
   **motif** : à Bray, la citerne incendie et la citerne de refroidissement
   portent le même cyan, et seul le liseré noir de la seconde les distingue ; à
   Gannay, la clôture et le portail portent le même magenta, en points pour
-  l'une, en ellipse pleine pour l'autre ;
+  l'une, en ellipse pleine pour l'autre. La **forme** aussi, et elle pèse plus
+  qu'un liseré, qui s'oublie : une pastille en barre (allongement de 2 et
+  plus) figure un trait, une tache une surface ; sur la carte, une bande
+  d'allongement 4 et plus est un trait. À Bray, la piste existante est
+  dessinée sans le liseré gris de sa pastille, du même vert que la plateforme
+  existante, sans liseré mais figurée d'une tache : au liseré seul, ses trois
+  bandes allaient à la plateforme, et la piste sortait vide ;
 - une forme se range parmi les pastilles de sa **nature**, aplat ou trait. Si
   aucune n'a sa couleur, elle peut rejoindre une catégorie tracée de l'autre
   nature — clôture, haie, piste —, dont on ne garde que l'axe : PowerPoint
@@ -2022,19 +2028,27 @@ sous `corrections_plan`, sa longueur parmi les interruptions de l'enceinte.
 Les pistes qui longent la clôture se proposent de même, serrées contre elle
 (voir « Une piste se dessine comme sur un vrai plan »).
 
-**Le poste de livraison se cale en limite de propriété.** Instruction du chef
-de projet du 24/09/2026 : entièrement dans l'emprise du projet, mais en
-limite de propriété. À Bray, il est dessiné hors de la clôture, côté route, à
-1,8 m de la limite et tourné de 4° par rapport à elle. L'import propose de l'y
-caler, avec sa raison ; coché, le poste tourne pour longer la limite, puis
-glisse vers elle jusqu'au dernier point où il reste entier dans l'emprise. La
-limite se prend sur la longueur du poste, pas sur un seul segment : à Bray,
+**Le poste de livraison se cale en limite de propriété, dans l'enceinte.**
+Instructions du chef de projet du 24/09/2026 : en limite de propriété, à
+l'intérieur de la clôture, et sur sa longueur il tient lui-même lieu de
+clôture, comme à Gannay. À Bray, il est dessiné hors de la clôture, côté route,
+à 1,8 m de la limite et tourné de 4° par rapport à elle. L'import propose de
+l'y caler, avec sa raison. Coché, le poste tourne pour longer la limite, puis
+glisse vers elle jusqu'au dernier point où il reste entier dans l'emprise ; la
+limite se prend sur la longueur du poste, pas sur un seul segment — à Bray,
 elle fait un coude de 2,6° sous lui, et un alignement sur le seul segment
-voisin le faisait déborder. La correction se calcule sur l'emprise cadastrale,
-en Lambert 93, donc au calage courant, et non dans la construction, qui ne
-connaît que le repère du DXF. Un poste trop loin de la limite (plus de 15 m),
-de travers (plus de 15°) ou qui n'y tient pas entier ne se cale pas d'office :
-le rapport dit que c'est au plan de le placer.
+voisin le faisait déborder. L'enceinte le rejoint alors à ses pignons, à angle
+droit, sur la seule longueur du poste : une enveloppe convexe partait en biais
+dans l'angle de la clôture et avalait l'ouverture du portail voisin. La
+surface clôturée gagne 72 m² à Bray, et `enceinte_plan` consigne le poste
+parmi les interruptions de la clôture. Le portail voisin garde la place que le
+plan lui donne, et le rapport demande de le vérifier sur la planche.
+
+La correction se calcule sur l'emprise cadastrale, en Lambert 93, donc au
+calage courant, et non dans la construction, qui ne connaît que le repère du
+DXF. Un poste trop loin de la limite (plus de 15 m), de travers (plus de 15°)
+ou qui n'y tient pas entier ne se cale pas d'office : le rapport dit que c'est
+au plan de le placer.
 
 ### Le portail se dessine comme sa légende
 

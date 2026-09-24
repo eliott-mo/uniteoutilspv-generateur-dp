@@ -290,6 +290,14 @@ RAPPORT_COULEUR_MAX = 0.6
 #: ellipse cernée pour l'autre.
 EGALITE_COULEUR = 12.0
 
+#: Allongement — grand côté sur petit côté du rectangle minimal — à partir
+#: duquel une pastille figure un trait, et une forme de la carte en est un.
+#: Une pastille est une icône courte : la barre de « Piste existante » de Bray
+#: est à 2,9, la tache de « Plateforme existante » à 1,0. Sur la carte, les
+#: bandes de piste passent 50, la plateforme de 99 × 39 m reste à 2,5.
+ALLONGEMENT_PASTILLE_TRAIT = 2.0
+ALLONGEMENT_FORME_TRAIT = 4.0
+
 #: Recouvrement au delà duquel deux tracés superposés sont une même forme —
 #: un remplissage et son liseré, que PowerPoint écrit l'un après l'autre.
 RECOUVREMENT_LISERE = 0.6
@@ -900,6 +908,17 @@ def _rattacher(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegend
     return _choisir(objet, meme_nature)
 
 
+def _figure_un_trait(objet: Objet, seuil: float) -> bool:
+    """Un trait, ou une forme assez allongée pour en figurer un."""
+    if objet.nature == "trait":
+        return True
+    forme = _polygone_de(objet.principal)
+    if forme is None:
+        return True
+    _, _, longueur, largeur = _rectangle_minimal(forme)
+    return largeur <= 0 or longueur / largeur >= seuil
+
+
 def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende | None, str]:
     """Parmi ces entrées, celle dont la forme porte la couleur, ou None et pourquoi."""
     candidates = [(_distance(objet.couleur, e.pastille.couleur), e) for e in legende]
@@ -932,6 +951,14 @@ def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende 
             ecarts += 1
         if pastille.motif != objet.motif:
             ecarts += 1
+        # Une bande n'est pas une surface, et cela pèse plus qu'un liseré, qui
+        # s'oublie : à Bray, la piste existante est dessinée sans le liseré
+        # gris de sa pastille, et ses bandes allaient à « Plateforme
+        # existante », de même vert, sans liseré mais figurée d'une tache.
+        if _figure_un_trait(pastille, ALLONGEMENT_PASTILLE_TRAIT) != _figure_un_trait(
+            objet, ALLONGEMENT_FORME_TRAIT
+        ):
+            ecarts += 2
         return ecarts
 
     notes = sorted((desaccord(e), e.libelle, e) for e in egales)
@@ -2447,12 +2474,13 @@ def _ouvrage(repere: Repere, calage: CalagePlan, gabarit, enceinte_ligne) -> Ouv
 
 @dataclass(frozen=True)
 class CorrectionEnLimite:
-    """Un poste à caler en limite de propriété, entièrement dans l'emprise.
+    """Un poste à caler en limite de propriété, dans l'enceinte, qu'il ferme.
 
-    Instruction du chef de projet du 24/09/2026 : le poste de livraison se pose
-    entièrement dans la zone du projet, mais en limite de propriété. À Bray, il
-    était dessiné à 1,8 m de la limite, tourné de 5° par rapport à elle. Comme
-    la correction D8, elle se propose et ne s'applique que cochée.
+    Instructions du chef de projet du 24/09/2026 : le poste de livraison se pose
+    à l'intérieur de la clôture, en limite de propriété, et sur sa longueur il
+    tient lui-même lieu de clôture, comme à Gannay. À Bray, il était dessiné
+    hors de la clôture, à 1,8 m de la limite et tourné par rapport à elle.
+    Comme la correction D8, elle se propose et ne s'applique que cochée.
     """
 
     identifiant: str
@@ -2466,10 +2494,12 @@ class CorrectionEnLimite:
 
     @property
     def intitule(self) -> str:
-        return f"Caler « {self.libelle} » en limite de propriété"
+        return f"Caler « {self.libelle} » en limite de propriété, dans l'enceinte"
 
 
-def _correction_en_limite(poste_l93: Polygon, emprise: BaseGeometry, ouvrage, rang: int):
+def _correction_en_limite(
+    poste_l93: Polygon, emprise: BaseGeometry, ouvrage, rang: int, enceinte_l93=None
+):
     """La mise en limite de propriété d'un poste, en Lambert 93, et ce qu'il faut en dire.
 
     Le poste tourne pour longer la limite, puis glisse vers elle jusqu'au
@@ -2486,7 +2516,8 @@ def _correction_en_limite(poste_l93: Polygon, emprise: BaseGeometry, ouvrage, ra
     )
     retrait = poste_l93.distance(limite)
     dedans = poste_l93.intersection(emprise).area / poste_l93.area
-    if retrait <= SUR_LA_LIMITE_M and dedans >= 0.999:
+    dans_l_enceinte = enceinte_l93 is None or poste_l93.within(enceinte_l93.buffer(0.01))
+    if retrait <= SUR_LA_LIMITE_M and dedans >= 0.999 and dans_l_enceinte:
         return None, None
     nom = f"« {ouvrage.libelle} »"
     if retrait > RETRAIT_CORRIGEABLE_M:
@@ -2541,7 +2572,7 @@ def _correction_en_limite(poste_l93: Polygon, emprise: BaseGeometry, ouvrage, ra
         f"à {retrait:.1f} m de la limite de propriété"
         if dedans >= 0.999
         else f"à {100 * (1 - dedans):.0f} % hors de l'emprise"
-    )
+    ) + ("" if dans_l_enceinte else ", hors de l'enceinte")
     return CorrectionEnLimite(
         identifiant=f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}",
         categorie=ouvrage.categorie,
@@ -2549,12 +2580,55 @@ def _correction_en_limite(poste_l93: Polygon, emprise: BaseGeometry, ouvrage, ra
         retrait_m=retrait,
         raison=(
             f"{nom} est dessiné {etat}, tourné de {abs(ecart):.0f}° par rapport à "
-            "elle. Un poste de livraison se pose entièrement dans l'emprise du "
-            "projet, en limite de propriété (instruction du 24/09/2026). L'y "
-            "caler est une correction du plan, pas une lecture."
+            "la limite. Un poste de livraison se pose en limite de propriété, à "
+            "l'intérieur de la clôture, et tient lui-même lieu de clôture sur sa "
+            "longueur (instructions du 24/09/2026) : calé, il longe la limite, "
+            "et l'enceinte le rejoint à ses pignons. C'est une correction du "
+            "plan, pas une lecture."
         ),
         geometrie_l93=place(dedans_m),
     ), None
+
+
+def _enceinte_jusqu_au_poste(enceinte: Polygon, poste: Polygon) -> Polygon:
+    """L'enceinte prolongée jusqu'au poste, qui en tient lieu de clôture sur sa longueur.
+
+    La clôture rejoint les pignons du poste à angle droit : l'enceinte s'étend
+    sur le poste et sur la bande qui le sépare d'elle, sur la seule longueur du
+    poste. Une enveloppe convexe partait en biais dans l'angle de la clôture de
+    Bray, et avalait le bout de l'ouverture du portail voisin (mesuré le
+    24/09/2026). Un poste déjà dans l'enceinte la laisse telle quelle.
+    """
+    if poste.within(enceinte.buffer(0.01)):
+        return enceinte
+    coins = list(poste.exterior.coords)[:-1]
+    # Les deux coins tournés vers l'enceinte, et la direction qui y mène,
+    # perpendiculaire au long pan du poste.
+    interieurs = sorted(coins, key=lambda c: Point(c).distance(enceinte))[:2]
+    (xa, ya), (xb, yb) = interieurs
+    longueur = math.hypot(xb - xa, yb - ya)
+    nx, ny = -(yb - ya) / longueur, (xb - xa) / longueur
+    cx, cy = poste.centroid.x, poste.centroid.y
+    if ((xa + xb) / 2.0 - cx) * nx + ((ya + yb) / 2.0 - cy) * ny < 0:
+        nx, ny = -nx, -ny
+    portee = poste.distance(enceinte) + 2.0 * math.hypot(*_rectangle_minimal(poste)[2:])
+
+    def rabattu(coin):
+        rayon = LineString([coin, (coin[0] + portee * nx, coin[1] + portee * ny)])
+        touche = rayon.intersection(enceinte.exterior)
+        points = [q for q in getattr(touche, "geoms", [touche]) if not q.is_empty]
+        if not points:
+            return nearest_points(enceinte.exterior, Point(coin))[0]
+        return min(points, key=lambda q: Point(coin).distance(q))
+
+    pieds = [rabattu(c) for c in interieurs]
+    raccord = Polygon(
+        [interieurs[0], (pieds[0].x, pieds[0].y), (pieds[1].x, pieds[1].y), interieurs[1]]
+    ).buffer(0)
+    prolongee = enceinte.union(raccord).union(poste)
+    if prolongee.geom_type == "MultiPolygon":
+        prolongee = max(prolongee.geoms, key=lambda g: g.area)
+    return prolongee
 
 
 def _correction_proposee(ouvrage: OuvragePlace, rang: int, anneau: LineString | None):
@@ -3023,6 +3097,13 @@ class ImportPlanPDF:
 
         corrections, notes = [], []
         emprise = self.emprise_cadastrale
+        calage = self.implantation.calage
+        enceinte = self.construction.enceinte
+        enceinte_l93 = (
+            projeter(enceinte.polygone, calage)
+            if enceinte is not None and enceinte.anneau is not None
+            else None
+        )
         if emprise is not None and not emprise.is_empty:
             for rang, ouvrage in enumerate(self.construction.ouvrages, start=1):
                 if ouvrage.categorie not in POSTES_EN_LIMITE:
@@ -3031,7 +3112,7 @@ class ImportPlanPDF:
                 if geometrie is None:
                     continue
                 correction, note = _correction_en_limite(
-                    projeter(geometrie, self.implantation.calage), emprise, ouvrage, rang
+                    projeter(geometrie, calage), emprise, ouvrage, rang, enceinte_l93
                 )
                 if correction is not None:
                     corrections.append(correction)
@@ -3078,6 +3159,12 @@ class ImportPlanPDF:
                 )
             )
 
+        # Un poste calé en limite de propriété l'est en Lambert 93, et
+        # l'enceinte le rejoint : les deux entrent tels quels, sans repasser
+        # par la projection.
+        en_limite = {
+            c.identifiant: c for c in self._en_limite()[0] if c.identifiant in self.choix.corrections
+        }
         enceinte = construction.enceinte
         if enceinte is not None:
             libelle = self.lecture.entree("cloture")[0].libelle
@@ -3085,7 +3172,12 @@ class ImportPlanPDF:
                 # Un polygone, comme la clôture fermée du plan de Saint-Cyr :
                 # le lot 4 lit l'enceinte par son contour, et la coupe du
                 # terrain la retrouve là où elle franchit ce contour.
-                ajouter("cloture", libelle, enceinte.polygone)
+                polygone = projeter(enceinte.polygone, calage)
+                for correction in en_limite.values():
+                    polygone = _enceinte_jusqu_au_poste(polygone, correction.geometrie_l93)
+                entites.append(
+                    EntiteBE(categorie="cloture", calque=libelle, geometrie=polygone, z_reel=False)
+                )
             else:
                 for ligne in enceinte.lignes:
                     ajouter("cloture", libelle, ligne)
@@ -3096,11 +3188,6 @@ class ImportPlanPDF:
         for piste in construction.pistes:
             for polygone in piste.polygones:
                 ajouter(piste.categorie, piste.libelle, polygone)
-        # Un poste calé en limite de propriété l'est en Lambert 93 : il entre
-        # tel quel, sans repasser par la projection.
-        en_limite = {
-            c.identifiant: c for c in self._en_limite()[0] if c.identifiant in self.choix.corrections
-        }
         for rang, ouvrage in enumerate(construction.ouvrages, start=1):
             geometrie = ouvrage.geometrie()
             if geometrie is None:
@@ -3168,6 +3255,25 @@ class ImportPlanPDF:
                     f"Correction de plan proposée, non appliquée : {correction.raison}"
                 )
         messages.extend(self._en_limite()[1])
+        portails = [e.geometrie for e in self.entites() if e.categorie == "portail"]
+        for correction in appliquees:
+            if correction.identifiant.startswith(PREFIXE_EN_LIMITE):
+                # Le portail voisin garde la place que le plan lui donne : le
+                # déplacer, ce serait deviner où le chef de projet le voulait.
+                voisin = any(
+                    g.distance(correction.geometrie_l93) < PORTAIL_SUR_LA_CLOTURE_M for g in portails
+                )
+                messages.append(
+                    f"« {correction.libelle} » calé en limite de propriété : "
+                    "l'enceinte le rejoint à ses pignons, et il tient lieu de "
+                    "clôture sur sa longueur."
+                    + (
+                        " Le portail voisin garde la place que le plan lui donne : "
+                        "à vérifier sur la planche DP 2."
+                        if voisin
+                        else ""
+                    )
+                )
         messages.extend(self._recoupements_du_tableau_du_plan())
         return messages
 
@@ -3540,7 +3646,18 @@ class ImportPlanPDF:
         if construction.enceinte is not None:
             donnees["enceinte_plan"] = {
                 "fermee": construction.enceinte.anneau is not None,
-                "interruptions": construction.enceinte.interruptions,
+                # Un poste calé en limite de propriété ferme l'enceinte sur sa
+                # longueur, comme celui que la correction D8 pose sur la clôture.
+                "interruptions": construction.enceinte.interruptions
+                + [
+                    {
+                        "longueur_m": round(_rectangle_minimal(c.geometrie_l93)[2], 2),
+                        "ouvrages": [c.libelle],
+                        "origine": "mise en limite de propriété",
+                    }
+                    for c in self.corrections_appliquees
+                    if c.identifiant.startswith(PREFIXE_EN_LIMITE)
+                ],
             }
         # Décision D8 : une correction appliquée figure ici avec sa raison.
         donnees["corrections_plan"] = [

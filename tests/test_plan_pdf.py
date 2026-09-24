@@ -957,7 +957,7 @@ def test_une_categorie_que_le_plan_pdf_ne_sait_pas_importer_le_dit(tmp_path):
     assert not [e for e in resultat.entites() if e.categorie == "plateforme"]
     assert any(
         "« Plateforme existante » est apparié à « plateforme », qu'un plan PDF ne sait "
-        "pas importer : ses 4 forme(s) ne sont pas au contrat" in a
+        "pas importer : ses 1 forme(s) ne sont pas au contrat" in a
         for a in resultat.avertissements
     )
 
@@ -1012,12 +1012,14 @@ def test_la_plateforme_existante_se_dessine_en_piste_lourde(import_bray_2):
 
 
 @besoin_bray_2
-def test_le_poste_se_cale_en_limite_de_propriete_sur_demande(import_bray_2):
-    """Instruction du 24/09/2026 : entièrement dans l'emprise, mais en limite de propriété.
+def test_le_poste_se_cale_en_limite_de_propriete_dans_l_enceinte(import_bray_2):
+    """Instructions du 24/09/2026 : en limite de propriété, à l'intérieur de la clôture.
 
-    Dessiné à 1,8 m de la limite et tourné par rapport à elle, le poste de Bray
-    se voit proposer d'y être calé ; coché, il la touche sans la franchir,
-    malgré le coude de 2,6° qu'elle fait sous lui.
+    Dessiné hors de la clôture, à 1,8 m de la limite et tourné par rapport à
+    elle, le poste de Bray se voit proposer d'y être calé ; coché, il touche la
+    limite sans la franchir, malgré le coude de 2,6° qu'elle fait sous lui, et
+    l'enceinte le rejoint à ses pignons : il tient lieu de clôture sur sa
+    longueur, comme à Gannay.
     """
     from dp_socle.geometrie import charger_emprise
 
@@ -1031,16 +1033,51 @@ def test_le_poste_se_cale_en_limite_de_propriete_sur_demande(import_bray_2):
         c for c in import_bray_2.corrections_proposees if c.identifiant.startswith("poste_en_limite")
     )
     assert proposee.retrait_m == pytest.approx(1.78, abs=0.05)
-    assert proposee.intitule == "Caler « Poste de Livraison/transfo » en limite de propriété"
+    assert proposee.intitule == (
+        "Caler « Poste de Livraison/transfo » en limite de propriété, dans l'enceinte"
+    )
+    assert "hors de l'enceinte" in proposee.raison
     assert poste().distance(limite) == pytest.approx(1.78, abs=0.05)
+    assert not poste().within(import_bray_2.plan.polygone_cloture.buffer(0.01))
+    surface = import_bray_2.plan.surface_cloturee_m2
     try:
         import_bray_2.changer_de_choix(ChoixDuPlan(corrections=(proposee.identifiant,)))
         cale = poste()
+        enceinte = import_bray_2.plan.polygone_cloture
         assert cale.distance(limite) < 0.01
         assert cale.intersection(emprise).area / cale.area > 0.9999
         assert cale.area == pytest.approx(36.0, rel=0.005)
-        consignees = import_bray_2.parametres()["corrections_plan"]
-        assert [c["identifiant"] for c in consignees] == [proposee.identifiant]
-        assert "en limite de propriété" in consignees[0]["raison"]
+        assert cale.within(enceinte.buffer(0.01))
+        # Le poste et la bande qui le sépare de la clôture, sur sa longueur.
+        assert import_bray_2.plan.surface_cloturee_m2 - surface == pytest.approx(72, abs=15)
+        parametres = import_bray_2.parametres()
+        assert [c["identifiant"] for c in parametres["corrections_plan"]] == [proposee.identifiant]
+        interruption = parametres["enceinte_plan"]["interruptions"][-1]
+        assert interruption["ouvrages"] == ["Poste de Livraison/transfo"]
+        assert interruption["origine"] == "mise en limite de propriété"
+        assert interruption["longueur_m"] == pytest.approx(12.0, abs=0.1)
+        assert any(
+            "calé en limite de propriété : l'enceinte le rejoint à ses pignons" in a
+            and "Le portail voisin garde la place que le plan lui donne" in a
+            for a in import_bray_2.avertissements
+        )
     finally:
         import_bray_2.changer_de_choix(ChoixDuPlan())
+
+
+@besoin_bray_2
+def test_la_piste_existante_se_distingue_de_la_plateforme_de_meme_vert(import_bray_2):
+    """Même vert, et la piste dessinée sans le liseré gris de sa pastille.
+
+    Au liseré seul, ses trois bandes allaient à « Plateforme existante », et
+    « Piste existante » sortait vide. Une bande n'est pas une surface : la
+    pastille en barre prend les bandes, la tache prend la surface.
+    """
+    formes = {}
+    for x in import_bray_2.lecture.elements:
+        formes.setdefault(x.entree.libelle, []).append(x)
+    assert len(formes["Piste existante"]) == 3
+    assert len(formes["Plateforme existante"]) == 1
+    assert not any("sort vide" in a for a in import_bray_2.avertissements)
+    calques = {e.calque for e in import_bray_2.entites() if e.categorie == "piste_lourde_existante"}
+    assert calques == {"Piste existante", "Plateforme existante"}
