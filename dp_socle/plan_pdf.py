@@ -2095,7 +2095,7 @@ SUR_LA_LIMITE_M = 0.1
 #: (retour du chef de projet du 24/09/2026) : il glisse alors le long de la
 #: limite, par pas de `PAS_GLISSEMENT_M`, jusqu'à `GLISSEMENT_MAX_M`.
 DEGAGEMENT_PORTAIL_M = 10.0
-MARGE_PORTAIL_M = 1.0
+MARGE_PORTAIL_M = 2.0
 PAS_GLISSEMENT_M = 0.25
 GLISSEMENT_MAX_M = 40.0
 

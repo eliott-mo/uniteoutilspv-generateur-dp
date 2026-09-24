@@ -1042,7 +1042,7 @@ def test_le_poste_se_cale_en_limite_de_propriete_dans_l_enceinte(import_bray_2):
     )
     assert "hors de l'enceinte" in proposee.raison
     assert (
-        "Il glisse de 2.8 m le long de la limite pour ne pas se tenir devant "
+        "Il glisse de 3.8 m le long de la limite pour ne pas se tenir devant "
         "« Portail (7 m) »" in proposee.raison
     )
     assert poste().distance(limite) == pytest.approx(1.78, abs=0.05)

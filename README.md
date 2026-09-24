@@ -2046,10 +2046,10 @@ plan lui donne, et le rapport demande de le vérifier sur la planche.
 
 Calé contre la limite, le poste de Bray se tenait entre la voie et ce portail
 (retour du chef de projet du 24/09/2026). Un poste ne se pose pas dans le
-couloir d'accès d'un portail : l'ouverture élargie d'1 m de part et d'autre,
+couloir d'accès d'un portail : l'ouverture élargie de 2 m de part et d'autre,
 sur 10 m vers l'extérieur de l'enceinte. Il glisse alors le long de la limite,
 à l'écart du portail, par pas de 25 cm et jusqu'à 40 m, en se recalant à
-chaque pas : 2,8 m à Bray, et le portail reste sur la clôture. Le sens se lit
+chaque pas : 3,8 m à Bray, et le portail reste sur la clôture. Le sens se lit
 sur les centres du poste et du couloir, projetés sur la limite : comparer les
 distances au couloir ne départageait rien tant que le poste y empiétait des
 deux côtés, et il glissait vers l'angle où se tient le portail. Sans place à
