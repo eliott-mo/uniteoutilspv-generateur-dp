@@ -2022,6 +2022,20 @@ sous `corrections_plan`, sa longueur parmi les interruptions de l'enceinte.
 Les pistes qui longent la clôture se proposent de même, serrées contre elle
 (voir « Une piste se dessine comme sur un vrai plan »).
 
+**Le poste de livraison se cale en limite de propriété.** Instruction du chef
+de projet du 24/09/2026 : entièrement dans l'emprise du projet, mais en
+limite de propriété. À Bray, il est dessiné hors de la clôture, côté route, à
+1,8 m de la limite et tourné de 4° par rapport à elle. L'import propose de l'y
+caler, avec sa raison ; coché, le poste tourne pour longer la limite, puis
+glisse vers elle jusqu'au dernier point où il reste entier dans l'emprise. La
+limite se prend sur la longueur du poste, pas sur un seul segment : à Bray,
+elle fait un coude de 2,6° sous lui, et un alignement sur le seul segment
+voisin le faisait déborder. La correction se calcule sur l'emprise cadastrale,
+en Lambert 93, donc au calage courant, et non dans la construction, qui ne
+connaît que le repère du DXF. Un poste trop loin de la limite (plus de 15 m),
+de travers (plus de 15°) ou qui n'y tient pas entier ne se cale pas d'office :
+le rapport dit que c'est au plan de le placer.
+
 ### Le portail se dessine comme sa légende
 
 Posé d'abord en simple segment sur la clôture, le portail sortait au DP 2 en
@@ -2044,6 +2058,15 @@ plan — **5 m de large**, et des virages de **11 m de rayon au bord
 intérieur**, celui de la « voie engins » des pompiers, soit 13,5 m sur l'axe.
 Les plans du BE de Sarnois tracent leurs virages à 12 m. C'est
 `dp_socle/pistes.py`, qui ne travaille qu'en géométrie, en mètres au sol.
+
+**Une forme de piste plus épaisse qu'une piste est une surface.** La
+plateforme existante de Bray se matérialise comme de la piste lourde
+(instruction du 24/09/2026). Trois de ses formes sont des bandes de 4,3 m,
+qui deviennent des pistes de 5 m. La quatrième est une surface de 99 × 39 m :
+réduite à un axe, elle serait devenue une bande de 5 m, 500 m² au lieu de
+2 331. Au delà d'une épaisseur moyenne de 7,5 m — deux fois l'aire sur le
+périmètre, une fois et demie la largeur d'une piste —, la forme est gardée
+telle que dessinée, et le rapport le dit.
 
 Aux extrémités d'un tracé, trois cas, tous trois mesurés sur les plans
 d'essai :

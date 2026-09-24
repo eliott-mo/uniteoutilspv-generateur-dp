@@ -890,30 +890,28 @@ besoin_bray_2 = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def import_bray_2(tmp_path_factory):
-    """Le plan du 24/09, calé comme la mesure du 23/09 l'a placé.
-
-    « Plateforme existante » y est appariée à une catégorie qu'un plan PDF ne
-    sait pas importer : c'est ce que permettait l'application avant d'en réduire
-    la liste, et l'import doit le dire.
-    """
+def _importer_bray_2(dossier, **correspondance_en_plus):
+    """Le plan du 24/09, calé comme la mesure du 23/09 l'a placé, pistes lourdes."""
     from dp_socle.geometrie import charger_emprise
 
-    export = layout_cad(tmp_path_factory.mktemp("bray_2"), DXF_BRAY, FOND_BRAY)
     return importer_plan_pdf(
         PLAN_BRAY_ZONE_BOISEE,
-        export,
+        layout_cad(dossier, DXF_BRAY, FOND_BRAY),
         emprise_cadastrale=charger_emprise(EMPRISE_SITE_BRAY).geometrie,
         longitude_origine=LONGITUDE_BRAY,
         correction_nord_sud_m=NORD_SUD_BRAY_M,
         correspondance={
             "Piste existante": "piste_lourde_existante",
             "Piste à créer": "piste_lourde_a_creer",
-            "Plateforme existante": "plateforme",
+            **correspondance_en_plus,
         },
         choix=ChoixDuPlan(),
     )
+
+
+@pytest.fixture(scope="module")
+def import_bray_2(tmp_path_factory):
+    return _importer_bray_2(tmp_path_factory.mktemp("bray_2"))
 
 
 @besoin_bray_2
@@ -950,12 +948,17 @@ def test_la_zone_boisee_arrive_au_contrat_telle_que_dessinee(import_bray_2, tmp_
 
 
 @besoin_bray_2
-def test_une_categorie_que_le_plan_pdf_ne_sait_pas_importer_le_dit(import_bray_2):
-    assert not [e for e in import_bray_2.entites() if e.categorie == "plateforme"]
+def test_une_categorie_que_le_plan_pdf_ne_sait_pas_importer_le_dit(tmp_path):
+    """Appariée à une catégorie qu'un plan PDF ne sait pas importer, une forme se perd, et c'est dit.
+
+    C'est ce que permettait l'application avant d'en réduire la liste.
+    """
+    resultat = _importer_bray_2(tmp_path, **{"Plateforme existante": "plateforme"})
+    assert not [e for e in resultat.entites() if e.categorie == "plateforme"]
     assert any(
         "« Plateforme existante » est apparié à « plateforme », qu'un plan PDF ne sait "
         "pas importer : ses 4 forme(s) ne sont pas au contrat" in a
-        for a in import_bray_2.avertissements
+        for a in resultat.avertissements
     )
 
 
@@ -977,3 +980,67 @@ def test_un_segment_de_cloture_trace_en_trait_ferme_l_enceinte(import_bray_2):
     )
     assert not any("Clôture ouverte" in a for a in avertissements)
     assert not any("à plus de 10 m de la clôture" in a for a in avertissements)
+
+
+@besoin_bray_2
+def test_la_plateforme_existante_se_dessine_en_piste_lourde(import_bray_2):
+    """Instruction du chef de projet du 24/09/2026 : comme de la piste lourde.
+
+    Trois de ses formes sont des bandes de 4,3 m, qui deviennent des pistes de
+    5 m ; la quatrième, 99 × 39 m, est une surface, gardée telle que dessinée
+    au lieu d'être réduite à l'axe d'une piste.
+    """
+    from dp_socle.plan_pdf import _polygone_de
+
+    entree = next(e for e in import_bray_2.lecture.legende if e.libelle == "Plateforme existante")
+    assert entree.categorie == "piste_lourde_existante"
+    surfaces = [
+        _polygone_de(x.objet.principal)
+        for x in import_bray_2.lecture.elements
+        if x.entree is entree
+    ]
+    echelle = import_bray_2.calage.echelle_m_par_pt
+    plus_grande = max(s.area for s in surfaces) * echelle**2
+    assert plus_grande == pytest.approx(2_331, rel=0.01)
+    lourdes = [e for e in import_bray_2.entites() if e.categorie == "piste_lourde_existante"]
+    assert any(e.geometrie.area == pytest.approx(plus_grande, rel=0.005) for e in lourdes)
+    assert sum(e.geometrie.area for e in lourdes) > 4_500
+    assert any(
+        "« Plateforme existante » : une surface de 2331 m², plus épaisse qu'une piste" in a
+        for a in import_bray_2.avertissements
+    )
+
+
+@besoin_bray_2
+def test_le_poste_se_cale_en_limite_de_propriete_sur_demande(import_bray_2):
+    """Instruction du 24/09/2026 : entièrement dans l'emprise, mais en limite de propriété.
+
+    Dessiné à 1,8 m de la limite et tourné par rapport à elle, le poste de Bray
+    se voit proposer d'y être calé ; coché, il la touche sans la franchir,
+    malgré le coude de 2,6° qu'elle fait sous lui.
+    """
+    from dp_socle.geometrie import charger_emprise
+
+    emprise = charger_emprise(EMPRISE_SITE_BRAY).geometrie
+    limite = emprise.exterior
+
+    def poste():
+        return next(e.geometrie for e in import_bray_2.entites() if e.categorie == "pdl_ptr")
+
+    proposee = next(
+        c for c in import_bray_2.corrections_proposees if c.identifiant.startswith("poste_en_limite")
+    )
+    assert proposee.retrait_m == pytest.approx(1.78, abs=0.05)
+    assert proposee.intitule == "Caler « Poste de Livraison/transfo » en limite de propriété"
+    assert poste().distance(limite) == pytest.approx(1.78, abs=0.05)
+    try:
+        import_bray_2.changer_de_choix(ChoixDuPlan(corrections=(proposee.identifiant,)))
+        cale = poste()
+        assert cale.distance(limite) < 0.01
+        assert cale.intersection(emprise).area / cale.area > 0.9999
+        assert cale.area == pytest.approx(36.0, rel=0.005)
+        consignees = import_bray_2.parametres()["corrections_plan"]
+        assert [c["identifiant"] for c in consignees] == [proposee.identifiant]
+        assert "en limite de propriété" in consignees[0]["raison"]
+    finally:
+        import_bray_2.changer_de_choix(ChoixDuPlan())

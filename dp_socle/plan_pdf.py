@@ -114,6 +114,11 @@ CORRESPONDANCE_LEGENDE = {
     "Piste lourde existante": "piste_lourde_existante",
     "Piste lourde à créer": "piste_lourde_a_creer",
     "Piste légère": "piste_legere",
+    # Instruction du chef de projet du 24/09/2026 : la plateforme existante se
+    # matérialise comme de la piste lourde. À Bray, trois de ses formes sont des
+    # bandes de piste, la quatrième une surface de 2 331 m², gardée telle que
+    # dessinée (voir `EPAISSEUR_SURFACE_M`).
+    "Plateforme existante": "piste_lourde_existante",
 }
 
 #: Libellés dont on sait qu'ils ne se rattachent à rien sans décision : ils ne
@@ -168,6 +173,13 @@ CATEGORIES_OUVRAGES = (
     "bess",
     "bac_retention",
 )
+
+#: Épaisseur moyenne — deux fois l'aire sur le périmètre — au delà de laquelle
+#: une forme de piste est une surface, gardée telle que dessinée, et non un
+#: trait dont on tire l'axe : réduite à un axe, elle deviendrait une bande de
+#: 5 m. Mesuré le 24/09/2026 à Bray : les pistes et trois des plateformes
+#: existantes font 4,3 m d'épaisseur, la quatrième plateforme 99 × 39 m.
+EPAISSEUR_SURFACE_M = 1.5 * LARGEUR_PISTE_M
 
 #: Catégories dont le plan donne la surface telle qu'elle est dessinée : de la
 #: végétation en place, dont l'étendue est l'information — ni un trait dont on
@@ -1432,8 +1444,13 @@ class TracePlan:
         return len(coords) > 3 and math.dist(coords[0], coords[-1]) < 1e-9
 
 
-def traces(plan: PlanPDF, categorie: str) -> tuple[list[TracePlan], list[str]]:
+def traces(
+    plan: PlanPDF, categorie: str, ecarter: frozenset = frozenset()
+) -> tuple[list[TracePlan], list[str]]:
     """Tracés d'une catégorie linéaire, en points de la page, morceaux recousus.
+
+    `ecarter` porte les `id` des formes qui ne sont pas des tracés : les
+    surfaces d'une catégorie de piste, gardées telles que dessinées.
 
     Les morceaux se recousent **par entrée de légende**, et non par catégorie :
     à Gannay la haie à créer et la haie à renforcer vont toutes deux à `haie`
@@ -1446,7 +1463,7 @@ def traces(plan: PlanPDF, categorie: str) -> tuple[list[TracePlan], list[str]]:
     for entree in plan.entree(categorie):
         morceaux, largeurs, espacements = [], [], []
         for element in plan.elements:
-            if element.entree is not entree:
+            if element.entree is not entree or id(element.objet) in ecarter:
                 continue
             axes, largeur, notes = _morceaux_de_trace(element.objet)
             morceaux.extend(axes)
@@ -2034,6 +2051,16 @@ SEGMENTS_ARC_PORTAIL = 16
 #: se faisant depuis l'extérieur.
 POSTES_EN_LIMITE = ("pdl", "pdl_ptr")
 
+#: Préfixe des corrections de mise en limite de propriété. Elles se calculent
+#: sur l'emprise cadastrale, en Lambert 93, donc au calage courant — et non
+#: dans la construction, qui ne connaît que le repère du DXF.
+PREFIXE_EN_LIMITE = "poste_en_limite"
+
+#: Écart à la limite de propriété en deçà duquel un poste y est déjà calé, en
+#: mètres. Au delà de `RETRAIT_CORRIGEABLE_M`, l'y caler serait redessiner le
+#: plan : rien ne se propose, et le rapport le dit.
+SUR_LA_LIMITE_M = 0.1
+
 
 @dataclass
 class ChoixDuPlan:
@@ -2418,6 +2445,118 @@ def _ouvrage(repere: Repere, calage: CalagePlan, gabarit, enceinte_ligne) -> Ouv
     )
 
 
+@dataclass(frozen=True)
+class CorrectionEnLimite:
+    """Un poste à caler en limite de propriété, entièrement dans l'emprise.
+
+    Instruction du chef de projet du 24/09/2026 : le poste de livraison se pose
+    entièrement dans la zone du projet, mais en limite de propriété. À Bray, il
+    était dessiné à 1,8 m de la limite, tourné de 5° par rapport à elle. Comme
+    la correction D8, elle se propose et ne s'applique que cochée.
+    """
+
+    identifiant: str
+    categorie: str
+    libelle: str
+    #: Écart entre le poste et la limite de propriété, en mètres.
+    retrait_m: float
+    raison: str
+    #: Le poste recalé, en Lambert 93.
+    geometrie_l93: BaseGeometry
+
+    @property
+    def intitule(self) -> str:
+        return f"Caler « {self.libelle} » en limite de propriété"
+
+
+def _correction_en_limite(poste_l93: Polygon, emprise: BaseGeometry, ouvrage, rang: int):
+    """La mise en limite de propriété d'un poste, en Lambert 93, et ce qu'il faut en dire.
+
+    Le poste tourne pour longer la limite, puis glisse vers elle jusqu'au
+    dernier point où il reste entièrement dans l'emprise : il la touche sans
+    la franchir. La limite se prend sur la longueur du poste, et non sur un
+    seul segment : à Bray, elle fait un coude de 2,6° sous le poste, et un
+    alignement sur le seul segment voisin le faisait dépasser de l'emprise.
+    Rend la correction, ou None, et une note quand le poste n'est pas en limite
+    sans pouvoir y être calé d'office.
+    """
+    limite = min(
+        (polygone.exterior for polygone in getattr(emprise, "geoms", [emprise])),
+        key=lambda anneau: anneau.distance(poste_l93),
+    )
+    retrait = poste_l93.distance(limite)
+    dedans = poste_l93.intersection(emprise).area / poste_l93.area
+    if retrait <= SUR_LA_LIMITE_M and dedans >= 0.999:
+        return None, None
+    nom = f"« {ouvrage.libelle} »"
+    if retrait > RETRAIT_CORRIGEABLE_M:
+        return None, (
+            f"{nom} est à {retrait:.1f} m de la limite de propriété : un poste de "
+            "livraison s'y pose, entièrement dans l'emprise. Trop loin pour l'y "
+            "caler d'office : c'est au plan de le placer."
+        )
+    _, direction_poste, longueur, _ = _rectangle_minimal(poste_l93)
+    # La limite au droit du poste : sa corde sur la longueur du poste. Les
+    # abscisses se prennent modulo le tour de l'anneau, qui est fermé.
+    abscisse = limite.project(poste_l93.centroid)
+    a = limite.interpolate((abscisse - longueur / 2.0) % limite.length)
+    b = limite.interpolate((abscisse + longueur / 2.0) % limite.length)
+    ecart = _dans_demi_tour(math.degrees(math.atan2(b.y - a.y, b.x - a.x)) - direction_poste)
+    if abs(ecart) > PARALLELISME_DEG:
+        return None, (
+            f"{nom} est tourné de {abs(ecart):.0f}° par rapport à la limite de "
+            "propriété qu'il borde : il ne la longe pas, et ne s'y cale pas "
+            "d'office. C'est au plan de le placer."
+        )
+    tourne = affinity.rotate(poste_l93, ecart, origin="centroid")
+    # La normale à la corde, tournée vers la limite.
+    corde = math.hypot(b.x - a.x, b.y - a.y)
+    nx, ny = -(b.y - a.y) / corde, (b.x - a.x) / corde
+    centre = tourne.centroid
+    proche = limite.interpolate(limite.project(centre))
+    if (proche.x - centre.x) * nx + (proche.y - centre.y) * ny < 0:
+        nx, ny = -nx, -ny
+
+    def place(pas: float):
+        return affinity.translate(tourne, pas * nx, pas * ny)
+
+    # Par dichotomie : `dedans` reste dans l'emprise, `dehors` en déborde.
+    dedans_m, dehors_m = (0.0, retrait + longueur) if emprise.contains(place(0.0)) else (
+        -(longueur + RETRAIT_CORRIGEABLE_M),
+        0.0,
+    )
+    if not emprise.contains(place(dedans_m)) or emprise.contains(place(dehors_m)):
+        return None, (
+            f"{nom} n'est pas en limite de propriété, et ne tient pas entier dans "
+            "l'emprise en la longeant : le poste est au droit d'un angle, ou la "
+            "limite trop courte. C'est au plan de le placer."
+        )
+    for _ in range(40):
+        milieu = (dedans_m + dehors_m) / 2.0
+        if emprise.contains(place(milieu)):
+            dedans_m = milieu
+        else:
+            dehors_m = milieu
+    etat = (
+        f"à {retrait:.1f} m de la limite de propriété"
+        if dedans >= 0.999
+        else f"à {100 * (1 - dedans):.0f} % hors de l'emprise"
+    )
+    return CorrectionEnLimite(
+        identifiant=f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}",
+        categorie=ouvrage.categorie,
+        libelle=ouvrage.libelle,
+        retrait_m=retrait,
+        raison=(
+            f"{nom} est dessiné {etat}, tourné de {abs(ecart):.0f}° par rapport à "
+            "elle. Un poste de livraison se pose entièrement dans l'emprise du "
+            "projet, en limite de propriété (instruction du 24/09/2026). L'y "
+            "caler est une correction du plan, pas une lecture."
+        ),
+        geometrie_l93=place(dedans_m),
+    ), None
+
+
 def _correction_proposee(ouvrage: OuvragePlace, rang: int, anneau: LineString | None):
     """La correction D8 d'un poste posé en retrait de la clôture, s'il y a lieu."""
     if anneau is None or ouvrage.categorie not in POSTES_EN_LIMITE:
@@ -2533,8 +2672,22 @@ def construire(
     traces_dxf: list = []
     cloture: list = []
     axes_de_pistes: list = []
+    # Une forme de piste plus épaisse qu'une piste est une surface — la
+    # plateforme existante de Bray, 99 × 39 m : elle garde sa forme, et n'est
+    # pas réduite à l'axe d'une bande de 5 m.
+    epaisseur_pt = EPAISSEUR_SURFACE_M / calage.echelle_m_par_pt
+    surfaces_de_piste = {}
+    for categorie in CATEGORIES_PISTES:
+        for element in lecture.elements_de(categorie):
+            forme = (
+                _polygone_de(element.objet.principal)
+                if element.objet.nature == "aplat"
+                else None
+            )
+            if forme is not None and 2.0 * forme.area / forme.length > epaisseur_pt:
+                surfaces_de_piste[id(element.objet)] = (categorie, element.entree.libelle, forme)
     for categorie in CATEGORIES_TRACEES:
-        lus, remarques = traces(lecture, categorie)
+        lus, remarques = traces(lecture, categorie, frozenset(surfaces_de_piste))
         notes.extend(remarques)
         for trace in lus:
             ligne = calage.vers_dxf(trace.ligne)
@@ -2544,6 +2697,15 @@ def construire(
                 axes_de_pistes.append(AxePiste(trace.categorie, trace.libelle, ligne))
             else:
                 traces_dxf.append((trace.categorie, trace.libelle, ligne))
+    for categorie, libelle, forme in surfaces_de_piste.values():
+        notes.append(
+            f"« {libelle} » : une surface de "
+            f"{forme.area * calage.echelle_m_par_pt ** 2:.0f} m², plus épaisse "
+            "qu'une piste, est gardée telle que dessinée, et non réduite à l'axe "
+            f"d'une piste de {LARGEUR_PISTE_M:.0f} m."
+        )
+        for morceau in getattr(forme, "geoms", [forme]):
+            traces_dxf.append((categorie, libelle, calage.vers_dxf(morceau)))
     for categorie in CATEGORIES_SURFACES:
         for element in lecture.elements_de(categorie):
             forme = _polygone_de(element.objet.principal)
@@ -2671,7 +2833,11 @@ def construire(
             appliquees.append(correction_pistes)
             pistes, notes_pistes = dessiner_pistes(axes_serres)
     notes.extend(notes_pistes)
-    inconnues = set(choix.corrections) - {c.identifiant for c in proposees}
+    # Les mises en limite de propriété se vérifient au calage, dans
+    # `ImportPlanPDF` : la construction ne connaît pas l'emprise cadastrale.
+    inconnues = {
+        i for i in choix.corrections if not i.startswith(PREFIXE_EN_LIMITE)
+    } - {c.identifiant for c in proposees}
     if inconnues:
         raise ErreurPlanPDF(
             f"Correction(s) demandée(s) sans objet sur ce plan : "
@@ -2829,7 +2995,59 @@ class ImportPlanPDF:
 
     @property
     def corrections_proposees(self) -> list:
-        return self.construction.corrections_proposees
+        return self.construction.corrections_proposees + self._en_limite()[0]
+
+    @property
+    def corrections_appliquees(self) -> list:
+        """Les corrections cochées : celles de la construction, et les mises en limite."""
+        return self.construction.corrections_appliquees + [
+            c for c in self._en_limite()[0] if c.identifiant in self.choix.corrections
+        ]
+
+    def _en_limite(self) -> tuple[list, list[str]]:
+        """Les postes à caler en limite de propriété, et ce qu'il faut en dire.
+
+        Au calage courant, gardés comme le plan : l'emprise est en Lambert 93,
+        le poste s'y projette avec le calepinage, et un recalage change l'écart.
+        """
+        cle = self._cle()
+        gardes = self._memoire.get(("en_limite", cle))
+        if gardes is None or gardes[0] is not self.emprise_cadastrale:
+            gardes = self._garder(
+                "en_limite", cle, (self.emprise_cadastrale, self._proposer_en_limite())
+            )
+        return gardes[1]
+
+    def _proposer_en_limite(self) -> tuple[list, list[str]]:
+        from .helioscope import projeter
+
+        corrections, notes = [], []
+        emprise = self.emprise_cadastrale
+        if emprise is not None and not emprise.is_empty:
+            for rang, ouvrage in enumerate(self.construction.ouvrages, start=1):
+                if ouvrage.categorie not in POSTES_EN_LIMITE:
+                    continue
+                geometrie = ouvrage.geometrie()
+                if geometrie is None:
+                    continue
+                correction, note = _correction_en_limite(
+                    projeter(geometrie, self.implantation.calage), emprise, ouvrage, rang
+                )
+                if correction is not None:
+                    corrections.append(correction)
+                if note:
+                    notes.append(note)
+        # Un recalage peut ôter son objet à une mise en limite cochée avant lui :
+        # le dire, plutôt que de lever sur une page qui se réaffiche.
+        sans_objet = {
+            i for i in self.choix.corrections if i.startswith(PREFIXE_EN_LIMITE)
+        } - {c.identifiant for c in corrections}
+        for identifiant in sorted(sans_objet):
+            notes.append(
+                f"Mise en limite de propriété cochée, sans objet au calage courant "
+                f"({identifiant}) : elle ne s'applique pas."
+            )
+        return corrections, notes
 
     @property
     def decisions_manquantes(self) -> list[str]:
@@ -2878,10 +3096,27 @@ class ImportPlanPDF:
         for piste in construction.pistes:
             for polygone in piste.polygones:
                 ajouter(piste.categorie, piste.libelle, polygone)
-        for ouvrage in construction.ouvrages:
+        # Un poste calé en limite de propriété l'est en Lambert 93 : il entre
+        # tel quel, sans repasser par la projection.
+        en_limite = {
+            c.identifiant: c for c in self._en_limite()[0] if c.identifiant in self.choix.corrections
+        }
+        for rang, ouvrage in enumerate(construction.ouvrages, start=1):
             geometrie = ouvrage.geometrie()
-            if geometrie is not None:
+            if geometrie is None:
+                continue
+            recale = en_limite.get(f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}")
+            if recale is None:
                 ajouter(ouvrage.categorie, ouvrage.libelle, geometrie)
+            else:
+                entites.append(
+                    EntiteBE(
+                        categorie=ouvrage.categorie,
+                        calque=ouvrage.libelle,
+                        geometrie=recale.geometrie_l93,
+                        z_reel=False,
+                    )
+                )
         # Cinq entités par portail, comme au calque du BE : l'ouverture d'abord.
         for libelle, entites_portail in construction.portails:
             for ligne in entites_portail:
@@ -2926,11 +3161,13 @@ class ImportPlanPDF:
                 f"classeur — {' ; '.join(ecartees)}. Aucune ne porte une "
                 "dimension d'ouvrage."
             )
-        for correction in construction.corrections_proposees:
-            if correction not in construction.corrections_appliquees:
+        appliquees = self.corrections_appliquees
+        for correction in self.corrections_proposees:
+            if correction not in appliquees:
                 messages.append(
                     f"Correction de plan proposée, non appliquée : {correction.raison}"
                 )
+        messages.extend(self._en_limite()[1])
         messages.extend(self._recoupements_du_tableau_du_plan())
         return messages
 
@@ -3314,7 +3551,7 @@ class ImportPlanPDF:
                 "retrait_m": round(c.retrait_m, 2),
                 "raison": c.raison,
             }
-            for c in construction.corrections_appliquees
+            for c in self.corrections_appliquees
         ]
         return donnees
 
