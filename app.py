@@ -1685,7 +1685,7 @@ def _legende_du_plan(chemin: str, taille: int):
     ]
 
 
-def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
+def _correspondance_de_la_legende(chemin_pdf: Path) -> tuple[dict, list]:
     """Fait confirmer la catégorie de chaque libellé, avant l'import.
 
     Comme les calques du bureau d'études : proposée d'après les libellés connus,
@@ -1693,6 +1693,11 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
     libellés changent d'un plan à l'autre — « Réserve incendie » ici, « Citerne
     incendie » là —, et deux de ceux de Bray ne disent pas si la piste est
     lourde ou légère.
+
+    Ceux-là n'ont pas de choix d'office : « (ignorer) », proposé par défaut,
+    faisait disparaître les pistes de Bray sans que personne l'ait décidé
+    (retour d'usage du 24/09/2026). Rend la correspondance, et les libellés
+    encore à trancher avec la raison de chacun.
     """
     from dp_socle.plan_pdf import CATEGORIES_IMPORTABLES
 
@@ -1701,7 +1706,7 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
     # ici, ne sortait pas du plan, et rien ne le disait (24/09/2026).
     options = ["(ignorer)"] + [c for c in CATEGORIES_DE_LEGENDE if c in CATEGORIES_IMPORTABLES]
     a_decider = [e for e in entrees if e[2] is None]
-    choix = {}
+    choix, a_trancher_encore = {}, []
     with st.expander(
         f"La légende du plan — {len(entrees)} entrée(s)"
         + (f", dont {len(a_decider)} à apparier" if a_decider else "")
@@ -1729,12 +1734,19 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> dict:
                 retenue = st.selectbox(
                     "Catégorie",
                     options,
-                    index=options.index(categorie) if categorie in options else 0,
+                    index=(
+                        None
+                        if a_trancher
+                        else options.index(categorie) if categorie in options else 0
+                    ),
+                    placeholder="à choisir",
                     key=f"categorie_legende_{rang}_{libelle}",
                     label_visibility="collapsed",
                 )
-            choix[libelle] = None if retenue == "(ignorer)" else retenue
-    return choix
+            if retenue is None:
+                a_trancher_encore.append((libelle, a_trancher))
+            choix[libelle] = None if retenue in (None, "(ignorer)") else retenue
+    return choix, a_trancher_encore
 
 
 def _importer_le_plan_pdf(
@@ -1765,12 +1777,24 @@ def _importer_le_plan_pdf(
     chemin_pdf = _deposer(fichier_pdf, commune)
     chemin_altimetrie = _deposer(fichier_altimetrie, commune)
     try:
-        correspondance = _correspondance_de_la_legende(chemin_pdf)
+        correspondance, a_trancher = _correspondance_de_la_legende(chemin_pdf)
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
         return
 
-    if not st.button("Importer et caler le plan", type="primary", width="stretch"):
+    if a_trancher:
+        st.warning(
+            "Tranchez d'abord, dans la légende : "
+            + " ; ".join(f"« {libelle} », {raison}" for libelle, raison in a_trancher)
+            + ". « (ignorer) » l'écarte de l'import, en le disant.",
+            icon="⚠️",
+        )
+    if not st.button(
+        "Importer et caler le plan",
+        type="primary",
+        width="stretch",
+        disabled=bool(a_trancher),
+    ):
         return
     st.session_state.coupe_be = None
     st.session_state.profil_be = None

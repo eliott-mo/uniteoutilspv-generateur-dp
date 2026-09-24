@@ -2143,6 +2143,14 @@ du poste quand elle se propose, jamais cochée d'office. La validation attend
 que ces choix soient faits. Le dossier se nomme sans indice : l'indice vient du
 tableau bilan, et il n'y en a pas.
 
+**Un libellé à trancher n'a pas de choix d'office.** « Piste existante » et
+« Piste à créer » ne disent pas si la piste est lourde ou légère. Proposées sur
+« (ignorer) », elles faisaient disparaître les pistes du dossier de Bray sans
+que personne l'ait décidé, le message qui le disait noyé parmi quinze autres
+(retour d'usage du 24/09/2026). Leur liste s'ouvre désormais vide, et le bouton
+« Importer et caler le plan » reste grisé tant qu'elles ne sont pas tranchées,
+« (ignorer) » compris.
+
 La carte vient aussitôt après ces réglages, avant les alertes de l'import :
 c'est sur elle que se lit l'effet d'un recalage ou d'une correction, et les
 alertes la repoussaient à plusieurs écrans des réglages (retour d'usage du

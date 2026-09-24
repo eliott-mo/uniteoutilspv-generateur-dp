@@ -172,6 +172,68 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
     assert recaler < choix < carte < alerte < validation
 
 
+
+def test_une_piste_dont_le_type_manque_se_tranche_avant_l_import(tmp_path, monkeypatch):
+    """« Piste à créer » ne dit pas lourde ou légère : rien n'est choisi à sa place.
+
+    Proposée sur « (ignorer) », elle disparaissait du dossier de Bray sans que
+    personne l'ait décidé (retour d'usage du 24/09/2026). Le bouton d'import
+    attend qu'on tranche, « (ignorer) » compris.
+    """
+    from tests.jeux_plan_pdf import (
+        DXF_BRAY,
+        EMPRISE_SITE_BRAY,
+        FOND_BRAY,
+        PLAN_BRAY_ZONE_BOISEE,
+        bray_present,
+        layout_cad,
+    )
+
+    if not (bray_present() and PLAN_BRAY_ZONE_BOISEE.exists()):
+        pytest.skip("plan de Bray du 24/09 absent")
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("Bray-Saint-Aignan")
+    _televerser(
+        application,
+        "Emprise cadastrale",
+        (EMPRISE_SITE_BRAY.name, EMPRISE_SITE_BRAY.read_bytes(), "application/zip"),
+    )
+    application = application.run()
+    application.radio(key="source_plan").set_value(SOURCE_PLAN_PDF)
+    application = application.run()
+    export = layout_cad(tmp_path, DXF_BRAY, FOND_BRAY)
+    _televerser(application, "Export HelioScope", (export.name, export.read_bytes(), "application/zip"))
+    _televerser(
+        application,
+        "Plan projet (PDF)",
+        (PLAN_BRAY_ZONE_BOISEE.name, PLAN_BRAY_ZONE_BOISEE.read_bytes(), "application/pdf"),
+    )
+    application = application.run()
+    assert not application.exception, application.exception
+
+    def importer():
+        return next(b for b in application.button if b.label == "Importer et caler le plan")
+
+    def a_trancher():
+        return [w.value for w in application.warning if "Tranchez d'abord, dans la légende" in w.value]
+
+    pistes = [
+        s
+        for s in application.selectbox
+        if (s.key or "").startswith("categorie_legende_") and "Piste" in s.key
+    ]
+    assert len(pistes) == 2
+    assert all(s.value is None for s in pistes)
+    assert importer().disabled
+    assert any("« Piste à créer »" in w for w in a_trancher())
+
+    for piste in pistes:
+        piste.set_value("piste_lourde_a_creer" if "créer" in piste.key else "(ignorer)")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert not importer().disabled
+    assert not a_trancher()
+
 def _dans_l_ordre_de_la_page(application) -> list:
     """Les éléments de la page principale, dans l'ordre où ils s'affichent."""
     elements = []
