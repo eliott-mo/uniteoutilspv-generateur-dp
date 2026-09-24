@@ -2061,6 +2061,38 @@ DXF. Un poste trop loin de la limite (plus de 15 m), de travers (plus de 15°)
 ou qui n'y tient pas entier ne se cale pas d'office : le rapport dit que c'est
 au plan de le placer.
 
+**La clôture aussi se recale sur la limite de propriété.** Instruction du chef
+de projet du 24/09/2026 : à Bray elle est dessinée un à deux mètres à
+l'intérieur de la limite, alors qu'elle y sera bâtie — le poste calé en limite
+s'en trouvait détaché, et l'enceinte partait le chercher. L'import propose de
+l'y ramener, et ne le fait que coché. Un sommet s'y recale s'il en est à moins
+de 3 m **et** si l'un de ses deux segments la longe — au moins 5 m de long, à
+moins de 15° d'elle : un sommet isolé qui passe près d'elle sans la suivre
+reste où le plan l'a mis. Onze des quatorze sommets de Bray remplissent les
+deux conditions, 559 m de tracé les suivent, et la surface clôturée passe de
+4,87 à 4,89 ha. Les trois autres, à 4,8 et 7,1 m, tiennent le décrochement de
+l'accès nord-ouest : ce retrait-là est un choix de tracé, pas une imprécision.
+
+Deux sommets que le recalage confond n'en font qu'un : les deux bouts d'un
+décrochement de 80 cm se projettent sur la limite dans l'ordre inverse, et le
+tracé s'y croisait — `Self-intersection`, qu'un `buffer(0)` aurait réparée en
+silence. Un tracé recalé qui se croise encore n'est pas proposé, et le rapport
+dit pourquoi.
+
+Le tracé garde les côtés droits que le plan lui donne : ce sont ses **sommets**
+qui vont sur la limite, pas ses côtés, et la limite de Bray compte trente-trois
+sommets pour les quatorze de la clôture. Là où elle fait un ventre, la clôture
+le coupe — 8,3 m au plus après recalage, contre 8,7 m avant —, et la raison de
+la correction porte les deux chiffres plutôt que de laisser croire que le
+tracé épouse la limite. Les portails, que le plan pose sur le tracé d'avant,
+ne sont pas déplacés : ils le suivent à 0 et 0,2 m près à Bray, et au delà de
+50 cm le rapport le signale.
+
+La clôture se recale **avant** le poste : c'est elle que l'enceinte prolonge
+jusqu'aux pignons, et c'est d'elle que se lit le côté d'un couloir de portail.
+Les deux corrections cochées, la bande entre le poste et la clôture ne vaut
+plus que 64 m² au lieu de 72.
+
 ### Le portail se dessine comme sa légende
 
 Posé d'abord en simple segment sur la clôture, le portail sortait au DP 2 en

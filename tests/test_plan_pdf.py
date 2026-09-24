@@ -1100,3 +1100,101 @@ def test_la_piste_existante_se_distingue_de_la_plateforme_de_meme_vert(import_br
     assert not any("sort vide" in a for a in import_bray_2.avertissements)
     calques = {e.calque for e in import_bray_2.entites() if e.categorie == "piste_lourde_existante"}
     assert calques == {"Piste existante", "Plateforme existante"}
+
+
+@besoin_bray_2
+def test_la_cloture_se_recale_sur_la_limite_de_propriete_sur_demande(import_bray_2):
+    """Instruction du 24/09/2026 : la clôture sera bâtie sur la limite, pas à 2 m d'elle.
+
+    Le tracé du chef de projet longe la limite sans la suivre — onze de ses
+    quatorze sommets à 0,2 à 2,2 m d'elle, du côté intérieur. Coché, le recalage
+    y ramène 559 m de tracé et referme deux décrochements de moins d'un mètre,
+    qui croisaient le tracé en se projetant sur la limite dans l'ordre inverse.
+    Les trois sommets du décrochement de l'accès, à 4,8 et 7,1 m, restent où le
+    plan les met : ce retrait-là est un choix de tracé.
+    """
+    from shapely.geometry import Point
+
+    from dp_socle.geometrie import charger_emprise
+    from dp_socle.plan_pdf import PORTAIL_SUIT_LA_CLOTURE_M
+
+    emprise = charger_emprise(EMPRISE_SITE_BRAY).geometrie
+    limite = emprise.exterior
+
+    proposee = next(
+        c
+        for c in import_bray_2.corrections_proposees
+        if c.identifiant == "cloture_en_limite:cloture"
+    )
+    assert proposee.intitule == "Recaler « Clôture » sur la limite de propriété"
+    assert proposee.retrait_m == pytest.approx(2.17, abs=0.05)
+    assert proposee.lineaire_m == pytest.approx(559, abs=3)
+    assert "11 de ses 14 sommets s'en écartent de 0.2 à 2.2 m" in proposee.raison
+
+    dessinee = import_bray_2.plan.polygone_cloture
+    assert import_bray_2.plan.surface_cloturee_m2 == pytest.approx(48_703, rel=0.005)
+    try:
+        import_bray_2.changer_de_choix(ChoixDuPlan(corrections=(proposee.identifiant,)))
+        recalee = import_bray_2.plan.polygone_cloture
+        assert recalee.is_valid
+        assert import_bray_2.plan.surface_cloturee_m2 == pytest.approx(48_903, rel=0.005)
+        # Ce qui a bougé est sur la limite ; ce qui est resté n'a pas bougé.
+        sur_la_limite = [
+            Point(c).distance(limite) for c in list(recalee.exterior.coords)[:-1]
+        ]
+        assert sum(1 for d in sur_la_limite if d < 0.01) == 9
+        assert max(sur_la_limite) == pytest.approx(7.12, abs=0.05)
+        # Les sommets sont sur la limite, pas les côtés : le tracé garde les
+        # quatorze côtés du plan là où la limite en compte trente-trois, et le
+        # ventre qu'elle fait à l'ouest reste coupé — un peu moins qu'avant.
+        assert "il s'en écarte encore de 8.3 m, contre 8.7 m avant" in proposee.raison
+        # Le tracé recalé déborde moins de l'emprise qu'avant, et pas davantage.
+        assert dessinee.difference(emprise).area == pytest.approx(111, abs=2)
+        assert recalee.difference(emprise).area == pytest.approx(87, abs=2)
+        # Les portails, posés sur le tracé d'avant, le suivent sans être déplacés.
+        for portail in (e.geometrie for e in import_bray_2.entites() if e.categorie == "portail"):
+            assert portail.distance(recalee.exterior) < PORTAIL_SUIT_LA_CLOTURE_M
+        assert any(
+            "« Clôture » recalée sur la limite de propriété : 559 m de tracé "
+            "les suivent, d'au plus 2.2 m" in a
+            for a in import_bray_2.avertissements
+        )
+        assert [c["identifiant"] for c in import_bray_2.parametres()["corrections_plan"]] == [
+            proposee.identifiant
+        ]
+    finally:
+        import_bray_2.changer_de_choix(ChoixDuPlan())
+
+
+@besoin_bray_2
+def test_le_poste_cale_en_limite_rejoint_la_cloture_recalee(import_bray_2):
+    """Les deux corrections cochées : le poste et la clôture se retrouvent sur la limite.
+
+    La clôture se recale d'abord : c'est elle que l'enceinte prolonge jusqu'aux
+    pignons du poste, et c'est d'elle que se lit le côté d'un couloir de portail.
+    Le poste ne rejoignait sinon qu'un tracé périmé, et la bande qui l'en
+    séparait gardait la largeur d'avant.
+    """
+    from dp_socle.geometrie import charger_emprise
+
+    emprise = charger_emprise(EMPRISE_SITE_BRAY).geometrie
+    cloture, poste = (
+        next(c for c in import_bray_2.corrections_proposees if c.identifiant.startswith(prefixe))
+        for prefixe in ("cloture_en_limite", "poste_en_limite")
+    )
+    try:
+        import_bray_2.changer_de_choix(
+            ChoixDuPlan(corrections=(cloture.identifiant, poste.identifiant))
+        )
+        cale = next(e.geometrie for e in import_bray_2.entites() if e.categorie == "pdl_ptr")
+        enceinte = import_bray_2.plan.polygone_cloture
+        assert cale.distance(emprise.exterior) < 0.01
+        assert cale.within(enceinte.buffer(0.01))
+        # 64 m² au lieu de 72 : la clôture recalée est plus près du poste.
+        assert import_bray_2.plan.surface_cloturee_m2 == pytest.approx(48_967, rel=0.005)
+        assert [c["identifiant"] for c in import_bray_2.parametres()["corrections_plan"]] == [
+            cloture.identifiant,
+            poste.identifiant,
+        ]
+    finally:
+        import_bray_2.changer_de_choix(ChoixDuPlan())

@@ -2099,6 +2099,34 @@ MARGE_PORTAIL_M = 2.0
 PAS_GLISSEMENT_M = 0.25
 GLISSEMENT_MAX_M = 40.0
 
+#: Préfixe de la correction qui recale la clôture sur la limite de propriété.
+#: Comme les mises en limite d'un poste, elle se calcule sur l'emprise
+#: cadastrale, en Lambert 93, donc au calage courant.
+PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
+
+#: Écart à la limite de propriété en deçà duquel un sommet de la clôture y est
+#: ramené, en mètres. Mesuré le 24/09/2026 sur le plan de Bray : onze de ses
+#: quatorze sommets sont à 0,2 à 2,2 m de la limite — le tracé la longe sans
+#: la suivre —, les trois autres à 4,8 et 7,1 m, au décrochement de l'accès,
+#: qui est voulu et ne se recale pas.
+CLOTURE_EN_LIMITE_M = 3.0
+
+#: Ce qui fait qu'un segment de clôture longe la limite : au moins
+#: `SEGMENT_LE_LONG_M` de long, et à moins de `CLOTURE_LE_LONG_DEG` d'elle. Un
+#: sommet ne se recale que si l'un de ses deux segments la longe : les
+#: décrochements de 80 cm que le tracé fait dans ses angles ne suffisent pas.
+SEGMENT_LE_LONG_M = 5.0
+CLOTURE_LE_LONG_DEG = 15.0
+
+#: Deux sommets recalés à moins de ceci l'un de l'autre n'en font qu'un, en
+#: mètres : les deux bouts d'un décrochement de 80 cm se projettent sur la
+#: limite dans l'ordre inverse, et le tracé s'y croisait.
+SOMMET_CONFONDU_M = 1.0
+
+#: Écart au delà duquel un portail ne suit plus la clôture recalée, en mètres,
+#: et le rapport le dit. À Bray, les deux portails restent à 0 et 0,2 m d'elle.
+PORTAIL_SUIT_LA_CLOTURE_M = 0.5
+
 
 @dataclass
 class ChoixDuPlan:
@@ -2687,6 +2715,165 @@ def _correction_en_limite(
     ), None
 
 
+@dataclass(frozen=True)
+class CorrectionClotureEnLimite:
+    """La clôture ramenée sur la limite de propriété là où elle la longe de près.
+
+    Instruction du chef de projet du 24/09/2026 : à Bray, la clôture est
+    dessinée à un ou deux mètres à l'intérieur de la limite de parcelle, alors
+    qu'elle la suivra. Le poste calé en limite s'en trouvait détaché, et
+    l'enceinte partait le chercher. Comme la mise en limite d'un poste, elle se
+    propose et ne s'applique que cochée.
+    """
+
+    identifiant: str
+    libelle: str
+    #: Le plus grand écart rattrapé, en mètres.
+    retrait_m: float
+    #: Le linéaire de clôture que le recalage déplace, en mètres.
+    lineaire_m: float
+    raison: str
+    #: L'enceinte recalée, en Lambert 93.
+    geometrie_l93: Polygon
+    categorie: str = "cloture"
+
+    @property
+    def intitule(self) -> str:
+        return f"Recaler « {self.libelle} » sur la limite de propriété"
+
+
+def _cloture_sur_la_limite(enceinte_l93: Polygon, emprise: BaseGeometry, libelle: str):
+    """La clôture recalée sur la limite de propriété, et ce qu'il faut en dire.
+
+    Un sommet se ramène sur la limite s'il en est à moins de
+    `CLOTURE_EN_LIMITE_M` et si l'un de ses deux segments la longe : un sommet
+    isolé qui passe près d'elle sans la suivre resterait où le plan l'a mis.
+    Rend la correction, ou None, et une note quand le tracé recalé se croise.
+    """
+    anneaux = [polygone.exterior for polygone in getattr(emprise, "geoms", [emprise])]
+
+    def sur_la_limite(point: Point) -> Point:
+        anneau = min(anneaux, key=lambda a: a.distance(point))
+        return nearest_points(anneau, point)[0]
+
+    def direction_limite(point: Point) -> float:
+        return _direction_de_ligne(min(anneaux, key=lambda a: a.distance(point)), point)
+
+    sommets = list(enceinte_l93.exterior.coords)[:-1]
+    nombre = len(sommets)
+    # Les segments qui longent la limite : c'est eux qui donnent à leurs
+    # sommets le droit d'y être ramenés.
+    le_long = []
+    for a, b in zip(sommets, sommets[1:] + sommets[:1]):
+        segment = LineString([a, b])
+        milieu = segment.interpolate(0.5, normalized=True)
+        ecart = _dans_demi_tour(
+            direction_limite(milieu)
+            - math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+        )
+        le_long.append(
+            segment.length >= SEGMENT_LE_LONG_M and abs(ecart) <= CLOTURE_LE_LONG_DEG
+        )
+
+    places, ecarts = [], []
+    for rang, sommet in enumerate(sommets):
+        point = Point(sommet)
+        distance = min(anneau.distance(point) for anneau in anneaux)
+        if distance <= CLOTURE_EN_LIMITE_M and (le_long[rang] or le_long[rang - 1]):
+            sur = sur_la_limite(point)
+            places.append((sur.x, sur.y))
+            ecarts.append(distance)
+        else:
+            places.append(sommet)
+            ecarts.append(0.0)
+    if not any(ecarts):
+        return None, None
+
+    # Deux sommets que le recalage confond n'en font qu'un : le décrochement
+    # qu'ils portaient n'existe pas sur la limite, et le garder croisait le tracé.
+    gardes, retenus = [], []
+    for sommet, ecart in zip(places, ecarts):
+        if gardes and ecart and retenus[-1] and math.dist(sommet, gardes[-1]) < SOMMET_CONFONDU_M:
+            continue
+        gardes.append(sommet)
+        retenus.append(ecart)
+    recalee = Polygon(gardes)
+    if not recalee.is_valid or recalee.geom_type != "Polygon":
+        from shapely.validation import explain_validity
+
+        return None, (
+            f"« {libelle} » recalée sur la limite de propriété donnerait un tracé "
+            f"qui se croise ({explain_validity(recalee)}) : rien n'est proposé, "
+            "c'est au plan de la tracer."
+        )
+
+    def recales(anneau_ferme: list) -> list:
+        """Les segments dont les deux bouts ont été ramenés sur la limite."""
+        return [
+            LineString([a, b])
+            for (a, ea), (b, eb) in zip(
+                anneau_ferme, anneau_ferme[1:] + anneau_ferme[:1]
+            )
+            if ea and eb
+        ]
+
+    def ventre(segments: list) -> float:
+        """Ce que le tracé droit laisse entre lui et la limite, au plus, en mètres.
+
+        Un sommet ramené sur la limite ne met pas le segment qui en part
+        dessus : le tracé garde les quatorze côtés que le plan lui donne, quand
+        la limite de Bray en compte trente-trois. Là où elle fait un ventre, la
+        clôture le coupe — comme elle le coupait déjà.
+        """
+        return max(
+            (
+                min(anneau.distance(s.interpolate(i / 20.0, normalized=True)) for anneau in anneaux)
+                for s in segments
+                for i in range(21)
+            ),
+            default=0.0,
+        )
+
+    lineaire = sum(s.length for s in recales(list(zip(gardes, retenus))))
+    ventre_apres = ventre(recales(list(zip(gardes, retenus))))
+    ventre_avant = ventre(recales(list(zip(sommets, ecarts))))
+    bouges = [e for e in ecarts if e]
+    confondus = len(places) - len(gardes)
+    return CorrectionClotureEnLimite(
+        identifiant=f"{PREFIXE_CLOTURE_EN_LIMITE}:cloture",
+        libelle=libelle,
+        retrait_m=max(bouges),
+        lineaire_m=lineaire,
+        raison=(
+            f"« {libelle} » longe la limite de propriété sans la suivre : "
+            f"{len(bouges)} de ses {nombre} sommets s'en écartent de "
+            f"{min(bouges):.1f} à {max(bouges):.1f} m, du côté intérieur comme "
+            f"elle sera bâtie. Les y ramener déplace {lineaire:.0f} m de tracé et "
+            f"porte la surface clôturée de {enceinte_l93.area / 1e4:.2f} à "
+            f"{recalee.area / 1e4:.2f} ha"
+            + (
+                f", {confondus} décrochement(s) de moins de "
+                f"{SOMMET_CONFONDU_M:.0f} m disparaissant avec eux"
+                if confondus
+                else ""
+            )
+            + f". Le reste du tracé ne bouge pas : au delà de "
+            f"{CLOTURE_EN_LIMITE_M:.0f} m, un retrait est un choix de tracé, pas "
+            "une imprécision."
+            + (
+                " Le tracé garde ses côtés droits, comme au plan : là où la "
+                f"limite fait un ventre, il s'en écarte encore de {ventre_apres:.1f} m, "
+                f"contre {ventre_avant:.1f} m avant — c'est à vérifier sur la "
+                "planche DP 2."
+                if ventre_apres > CLOTURE_EN_LIMITE_M
+                else ""
+            )
+            + " C'est une correction du plan, pas une lecture."
+        ),
+        geometrie_l93=recalee,
+    ), None
+
+
 def _enceinte_jusqu_au_poste(enceinte: Polygon, poste: Polygon) -> Polygon:
     """L'enceinte prolongée jusqu'au poste, qui en tient lieu de clôture sur sa longueur.
 
@@ -3007,7 +3194,9 @@ def construire(
     # Les mises en limite de propriété se vérifient au calage, dans
     # `ImportPlanPDF` : la construction ne connaît pas l'emprise cadastrale.
     inconnues = {
-        i for i in choix.corrections if not i.startswith(PREFIXE_EN_LIMITE)
+        i
+        for i in choix.corrections
+        if not i.startswith((PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE))
     } - {c.identifiant for c in proposees}
     if inconnues:
         raise ErreurPlanPDF(
@@ -3201,6 +3390,31 @@ class ImportPlanPDF:
             if enceinte is not None and enceinte.anneau is not None
             else None
         )
+        # La clôture d'abord : recalée sur la limite, c'est elle que le poste
+        # doit rejoindre, et c'est d'elle que se lit le côté d'un couloir de
+        # portail. L'ordre inverse calait le poste sur un tracé périmé.
+        if enceinte_l93 is not None and emprise is not None and not emprise.is_empty:
+            correction, note = _cloture_sur_la_limite(
+                enceinte_l93, emprise, self.lecture.entree("cloture")[0].libelle
+            )
+            if correction is not None:
+                corrections.append(correction)
+                if correction.identifiant in self.choix.corrections:
+                    enceinte_l93 = correction.geometrie_l93
+                    for libelle_portail, entites_portail in self.construction.portails:
+                        ecart = projeter(entites_portail[0], calage).distance(
+                            enceinte_l93.exterior
+                        )
+                        if ecart > PORTAIL_SUIT_LA_CLOTURE_M:
+                            notes.append(
+                                f"« {libelle_portail} » se retrouve à {ecart:.1f} m de "
+                                "la clôture recalée sur la limite de propriété : le "
+                                "plan le pose sur le tracé d'avant, et le déplacer "
+                                "serait deviner où le chef de projet le voulait. À "
+                                "vérifier sur la planche DP 2."
+                            )
+            if note:
+                notes.append(note)
         # Le couloir d'accès de chaque portail : un poste calé en limite ne
         # s'y pose pas (retour du chef de projet du 24/09/2026).
         couloirs = [
@@ -3224,7 +3438,9 @@ class ImportPlanPDF:
         # Un recalage peut ôter son objet à une mise en limite cochée avant lui :
         # le dire, plutôt que de lever sur une page qui se réaffiche.
         sans_objet = {
-            i for i in self.choix.corrections if i.startswith(PREFIXE_EN_LIMITE)
+            i
+            for i in self.choix.corrections
+            if i.startswith((PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE))
         } - {c.identifiant for c in corrections}
         for identifiant in sorted(sans_objet):
             notes.append(
@@ -3268,6 +3484,13 @@ class ImportPlanPDF:
         en_limite = {
             c.identifiant: c for c in self._en_limite()[0] if c.identifiant in self.choix.corrections
         }
+        postes_en_limite = {
+            i: c for i, c in en_limite.items() if i.startswith(PREFIXE_EN_LIMITE)
+        }
+        cloture_recalee = next(
+            (c for i, c in en_limite.items() if i.startswith(PREFIXE_CLOTURE_EN_LIMITE)),
+            None,
+        )
         enceinte = construction.enceinte
         if enceinte is not None:
             libelle = self.lecture.entree("cloture")[0].libelle
@@ -3275,8 +3498,12 @@ class ImportPlanPDF:
                 # Un polygone, comme la clôture fermée du plan de Saint-Cyr :
                 # le lot 4 lit l'enceinte par son contour, et la coupe du
                 # terrain la retrouve là où elle franchit ce contour.
-                polygone = projeter(enceinte.polygone, calage)
-                for correction in en_limite.values():
+                polygone = (
+                    cloture_recalee.geometrie_l93
+                    if cloture_recalee is not None
+                    else projeter(enceinte.polygone, calage)
+                )
+                for correction in postes_en_limite.values():
                     polygone = _enceinte_jusqu_au_poste(polygone, correction.geometrie_l93)
                 entites.append(
                     EntiteBE(categorie="cloture", calque=libelle, geometrie=polygone, z_reel=False)
@@ -3295,7 +3522,9 @@ class ImportPlanPDF:
             geometrie = ouvrage.geometrie()
             if geometrie is None:
                 continue
-            recale = en_limite.get(f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}")
+            recale = postes_en_limite.get(
+                f"{PREFIXE_EN_LIMITE}:{ouvrage.categorie}:{rang}"
+            )
             if recale is None:
                 ajouter(ouvrage.categorie, ouvrage.libelle, geometrie)
             else:
@@ -3376,6 +3605,13 @@ class ImportPlanPDF:
                         if voisin
                         else ""
                     )
+                )
+            elif correction.identifiant.startswith(PREFIXE_CLOTURE_EN_LIMITE):
+                messages.append(
+                    f"« {correction.libelle} » recalée sur la limite de propriété : "
+                    f"{correction.lineaire_m:.0f} m de tracé les suivent, d'au "
+                    f"plus {correction.retrait_m:.1f} m. Ce qui s'en écartait de plus "
+                    f"de {CLOTURE_EN_LIMITE_M:.0f} m est laissé tel quel."
                 )
         messages.extend(self._recoupements_du_tableau_du_plan())
         return messages
