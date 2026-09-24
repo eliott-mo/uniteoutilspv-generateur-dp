@@ -4056,6 +4056,8 @@ def importer_plan_pdf(
     prepositionnement = None
     if longitude_origine is not None:
         implantation.calage.longitude_origine = float(longitude_origine)
+        # Une longitude déjà validée est le point d'où partent les réglages.
+        implantation.calage.longitude_reference = float(longitude_origine)
         corriger_nord_sud(implantation.calage, correction_nord_sud_m)
     elif emprise_cadastrale is not None and not emprise_cadastrale.is_empty:
         prepositionnement = prepositionner(implantation, emprise_cadastrale)

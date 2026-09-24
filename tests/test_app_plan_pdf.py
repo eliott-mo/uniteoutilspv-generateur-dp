@@ -255,12 +255,22 @@ def _annonces_de_l_ortho(application) -> list:
     return [s.value for s in application.success if s.value.startswith("Calé sur l'ortho")]
 
 
+def _champ_de_placement(application, debut: str):
+    """Un champ du formulaire de placement, désigné par le début de son libellé."""
+    for champ in application.number_input:
+        if champ.label.startswith(debut):
+            return champ
+    raise AssertionError(f"le champ « {debut} » n'est pas affiché")
+
+
 def _correction_nord_sud(application):
     """Le champ de la correction nord-sud du formulaire de placement."""
-    for champ in application.number_input:
-        if champ.label.startswith("Correction nord-sud"):
-            return champ
-    raise AssertionError("le champ de la correction nord-sud n'est pas affiché")
+    return _champ_de_placement(application, "Correction nord-sud")
+
+
+def _decalage_est(application):
+    """Le champ du décalage est-ouest du formulaire de placement."""
+    return _champ_de_placement(application, "Décalage vers l'est")
 
 
 def test_caler_sur_l_ortho_refuse_sans_rien_changer_puis_cale_et_le_dit(tmp_path, monkeypatch):
@@ -314,6 +324,11 @@ def test_caler_sur_l_ortho_refuse_sans_rien_changer_puis_cale_et_le_dit(tmp_path
     # toucher ne doit pas défaire en silence ce que le bouton a fait.
     assert _correction_nord_sud(application).value == pytest.approx(nord_sud - 0.8)
 
+    # Le décalage est-ouest est absolu lui aussi : le champ repartait de zéro à
+    # chaque passe, et rien ne disait si sa valeur était le déplacement total ou
+    # celui qui restait à faire (retour d'usage du 24/09/2026).
+    assert _decalage_est(application).value == pytest.approx(-18.6, abs=0.01)
+
     # Réglé à la main ensuite, le calage n'est plus celui de l'ortho, et le
     # message qui le disait s'efface.
     _correction_nord_sud(application).set_value(nord_sud)
@@ -321,7 +336,18 @@ def test_caler_sur_l_ortho_refuse_sans_rien_changer_puis_cale_et_le_dit(tmp_path
     application = application.run()
     assert not application.exception, application.exception
     assert calage.correction_nord_sud_m == pytest.approx(nord_sud)
+    # Le champ est-ouest, non touché, n'a rien déplacé : sa valeur est le
+    # placement courant, et la resoumettre le laisse où il est.
+    assert calage.decalage_est_m == pytest.approx(-18.6, abs=0.01)
     assert not _annonces_de_l_ortho(application)
+
+    # Affiné à la main, il déplace de l'écart et non de la valeur entière.
+    _decalage_est(application).set_value(-20.0)
+    _cliquer(application, "Recaler")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert calage.decalage_est_m == pytest.approx(-20.0, abs=0.01)
+    assert _decalage_est(application).value == pytest.approx(-20.0, abs=0.01)
 
 
 def test_le_contrat_ecrit_est_d_origine_plan_pdf(tmp_path, monkeypatch):

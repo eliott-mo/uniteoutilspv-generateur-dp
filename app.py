@@ -1852,6 +1852,7 @@ def _regler_le_calage(import_pdf) -> None:
     """
     from dp_socle.helioscope import (
         CORRECTION_NORD_SUD_MAX_M,
+        TOLERANCE_CALAGE_M,
         corriger_nord_sud,
         decaler_longitude,
     )
@@ -1892,14 +1893,23 @@ def _regler_le_calage(import_pdf) -> None:
     with st.form("calage_plan_pdf"):
         st.markdown(
             "**Placement sur l'ortho** — la clôture et les tables doivent tomber "
-            "sur le terrain de la carte ci-dessous."
+            "sur le terrain de la carte ci-dessous. Les deux valeurs sont "
+            "comptées depuis le placement de départ, et non d'un clic à l'autre : "
+            "ajustez celle qui est affichée pour vous en approcher."
         )
         colonne_est, colonne_nord = st.columns(2)
+        # Le champ est-ouest repartait de zéro à chaque passe, alors que celui
+        # d'à côté porte une valeur absolue : rien ne disait si sa valeur était
+        # le déplacement total ou celui qui restait à faire (retour d'usage du
+        # 24/09/2026). Les deux sont maintenant comptés depuis le départ.
         decalage = colonne_est.number_input(
-            "Déplacer vers l'est (m) — négatif vers l'ouest",
-            value=0.0,
+            "Décalage vers l'est (m) — négatif vers l'ouest",
+            value=float(calage.decalage_est_m),
             step=1.0,
             format="%.1f",
+            help="Le déplacement **total** depuis le pré-positionnement sur "
+            "l'emprise, et non ce qu'il reste à faire. « Caler sur l'ortho » "
+            "l'inscrit ici, et il s'affine ensuite mètre par mètre.",
         )
         correction = colonne_nord.number_input(
             f"Correction nord-sud (m) — positive vers le nord, ±{CORRECTION_NORD_SUD_MAX_M:.0f} m",
@@ -1908,11 +1918,17 @@ def _regler_le_calage(import_pdf) -> None:
             value=float(calage.correction_nord_sud_m),
             step=1.0,
             format="%.1f",
+            help="Le déplacement **total** depuis la latitude déduite du "
+            "fichier, comme le décalage vers l'est l'est depuis le "
+            "pré-positionnement.",
         )
         if st.form_submit_button("Recaler"):
             try:
-                if decalage:
-                    decaler_longitude(calage, decalage)
+                # Les deux champs portent une valeur absolue ; `decaler_longitude`
+                # déplace : c'est l'écart au placement courant qu'il reçoit.
+                ecart = decalage - calage.decalage_est_m
+                if abs(ecart) > TOLERANCE_CALAGE_M:
+                    decaler_longitude(calage, ecart)
                 corriger_nord_sud(calage, correction)
             except ErreurDP as erreur:
                 st.error(f"{type(erreur).__name__} : {erreur}")

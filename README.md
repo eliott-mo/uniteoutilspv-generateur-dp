@@ -637,6 +637,15 @@ que la valeur du fichier reste lisible et que toute retouche se voie. Avec
 `longitude_calage`, elle est écrite dans `projet.json` : une régénération ne
 redemande jamais le calage.
 
+Les deux se saisissent en **valeur absolue**, comptées depuis le point de
+départ : le pré-positionnement pour l'est-ouest — `Calage.longitude_reference`,
+posée là, et par la longitude reprise d'un import validé —, la latitude du
+fichier pour le nord-sud. Le champ est-ouest repartait de zéro à chaque passe
+et n'affichait donc jamais où en était le placement : rien ne disait si la
+valeur saisie était le déplacement total ou ce qu'il restait à faire, alors que
+celui d'à côté était absolu (retour d'usage du 24/09/2026). « Caler sur
+l'ortho » y inscrit ce qu'il a mesuré, et on l'affine ensuite mètre par mètre.
+
 Au-delà de ±30 m — près de trois fois l'écart mesuré entre deux designs d'un même
 projet — la correction est refusée : à cette distance ce n'est plus une retouche
 mais le signe d'un calage faux, mauvais export ou mauvaise emprise, et le

@@ -131,6 +131,27 @@ class Calage:
     #: centres d'image (11,07 m) ; à Bray, les 134 m dépassaient la borne du
     #: réglage nord-sud, et le site ne se calait pas.
     ordonnee_centre_image_m: float = 0.0
+    #: Longitude d'où part le réglage est-ouest : celle que le
+    #: pré-positionnement a trouvée, ou celle reprise d'un import validé.
+    #:
+    #: Le champ de réglage repartait de zéro à chaque passe, et rien ne disait
+    #: si sa valeur était le déplacement total ou celui qui restait à faire,
+    #: alors que la correction nord-sud d'à côté, elle, est absolue (retour
+    #: d'usage du 24/09/2026). `decalage_est_m` la rend absolue aussi.
+    longitude_reference: float | None = None
+
+    @property
+    def decalage_est_m(self) -> float:
+        """Le déplacement est-ouest cumulé depuis `longitude_reference`, en mètres."""
+        if self.longitude_reference is None:
+            raise ErreurCalage(
+                "Le calage n'a pas de longitude de départ : impossible de dire de "
+                "combien il a été déplacé vers l'est. Elle se pose au "
+                "pré-positionnement, ou avec la longitude reprise d'un import validé."
+            )
+        return (
+            self.exige_origine() - self.longitude_reference
+        ) * metres_par_degre_longitude(self.latitude_origine)
 
     @property
     def latitude_corrigee(self) -> float:
@@ -1128,6 +1149,9 @@ def prepositionner(
             f"passes (écart résiduel {ecart_x:.3f} m). Vérifiez que l'emprise "
             "fournie est bien celle du projet."
         )
+
+    # Le point d'où partiront les réglages à la main et le calage sur l'ortho.
+    calage.longitude_reference = calage.longitude_origine
 
     zone_l93 = projeter(zone, calage)
     union = zone_l93.union(emprise_l93).area
