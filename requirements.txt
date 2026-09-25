@@ -59,3 +59,17 @@ pillow-heif==1.7.0
 # figurer ici, le piège déjà rencontré avec pillow-heif. pypdf, déjà épinglé,
 # ne rend ni les tracés aplatis ni les images décodées.
 pypdfium2==5.12.1
+# Écriture du .pptx que le chef de projet finit lui-même (lot 8). Un .pptx est
+# un ZIP d'OOXML qu'on saurait écrire à la main ; ce que la bibliothèque
+# apporte, c'est le graphe des relations entre parties — poser une image sur
+# une mise en page se déclare dans plusieurs fichiers à la fois, et une
+# relation oubliée donne un fichier que PowerPoint refuse d'ouvrir sans dire
+# pourquoi. Elle laisse par ailleurs l'XML accessible (`_element`), ce qui
+# permet d'écrire à la main les quatre choses qu'elle ne couvre pas et que les
+# sondes du 25/09/2026 ont mesurées : réservation d'image dans une mise en
+# page, `a:spLocks`, `a:alpha`, `asvg:svgBlip`.
+# Tire lxml et XlsxWriter, nouvelles dans la pile ; Pillow et typing-extensions
+# y étaient déjà. Elle était installée sur le poste de développement au moment
+# des sondes sans figurer ici, le piège déjà rencontré avec pillow-heif : c'est
+# cette ligne qui en fait une dépendance du projet.
+python-pptx==1.0.2
