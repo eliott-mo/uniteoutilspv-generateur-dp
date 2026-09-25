@@ -1620,6 +1620,8 @@ def _importer_le_plan_pdf(
     st.session_state.emprise_cadastrale_be = emprise_cadastrale
     _reprendre_import_precedent(DOSSIER_SORTIE / nom_importe, resultat, emprise_cadastrale)
     _proposer_la_coupe(resultat)
+    # Même raison qu'au plan BE : le bouton s'est rendu avant ce bloc.
+    st.rerun()
 
 
 def _oublier_la_carte_et_la_coupe(import_pdf) -> None:
@@ -1950,18 +1952,26 @@ def _retoucher_la_legende(plan) -> None:
     dessiner la planche sans elle. La retouche se fait donc ici, et elle part au
     plan de masse DP 2 et aux plans de repérage des DP 4.
 
-    Replié par défaut : c'est un recours, pas une étape. Le chef de projet qui
-    n'ouvre pas ce dépliant obtient les intitulés du dossier de référence.
+    **Ouvert et annoncé**, depuis que la validation en demande la relecture
+    (26/09/2026). Il était replié, et présenté comme un recours : le chef de
+    projet passait dessus sans le voir, puis butait sur une case à cocher qui
+    lui réclamait d'avoir lu ce qu'il n'avait pas ouvert. L'annonce est en clair
+    au-dessus, et le dépliant s'ouvre de lui-même.
     """
     entrees = _entrees_de_legende(plan)
     if not entrees:
         return
-    with st.expander("Les intitulés de la légende — à corriger si besoin"):
+    st.info(
+        "**Légende à relire et à valider avant de poursuivre.** Ces intitulés "
+        "seront écrits tels quels sur le plan de masse DP 2 et sur les plans de "
+        "repérage des DP 4.",
+        icon="📋",
+    )
+    with st.expander("Les intitulés de la légende — à relire", expanded=True):
         st.caption(
-            "Ce que les planches écriront en légende. Les intitulés sont ceux du "
-            "dossier de référence HOCH ; corrigez-les si le dossier emploie "
-            "d'autres mots. Ils ne se retouchent pas dans le PowerPoint : la "
-            "légende est dessinée dans la planche."
+            "Les intitulés sont ceux du dossier de référence HOCH ; corrigez-les "
+            "si le dossier emploie d'autres mots. Ils ne se retouchent pas dans "
+            "le PowerPoint : la légende est dessinée dans la planche."
         )
         for libelle, categories, nombre in entrees:
             st.text_input(
@@ -2324,6 +2334,11 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
                 emprise_cadastrale,
             )
             _proposer_la_coupe(st.session_state.import_be)
+            # Rejoué aussitôt : le bouton s'est rendu **avant** que ce bloc ne
+            # tourne, donc encore actif, et il le serait resté à l'écran jusqu'au
+            # prochain geste. La page se refait avec l'import en session, ce qui
+            # la grise tout de suite — et ne recoûte rien, l'import étant fait.
+            st.rerun()
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
 
@@ -2631,28 +2646,19 @@ if contrat_present:
                 language="json",
             )
             st.caption("Extrait : les 4 000 premiers caractères.")
+# Le dossier réduit aux seules pièces DP 1 ne se demande plus ici : la case qui
+# l'offrait a été retirée le 26/09/2026. Elle datait du lot 1, quand le plan du
+# bureau d'études n'était pas encore importable ; elle n'a plus d'usage, et ce
+# qu'elle annonçait — « les photographies et la génération viennent ensuite » —
+# désignait des sections qui n'existent plus.
+#
+# La capacité, elle, reste dans `sortie_pptx.generer_pptx` : appelé sans contrat,
+# il produit la page de garde et les pièces DP 1 en le disant au rapport. C'est
+# l'interface qui n'y mène plus, pas l'outil qui ne sait plus le faire.
 if not contrat_present:
     st.divider()
-    st.info(
-        "**Validez l'import ci-dessus pour continuer.** Les photographies et la "
-        "génération viennent ensuite. Sans plan validé, le dossier s'arrêterait "
-        "à la page de garde et aux pièces DP 1 — sans le plan de masse DP 2, les "
-        "coupes DP 3 ni les ouvrages techniques DP 4.",
-        icon="⬆️",
-    )
-    # La capacité existe et reste offerte, mais elle se demande : c'est un
-    # dossier d'étude amont, pas un dossier déposable, et l'obtenir par
-    # inadvertance donnait un PDF de 17 Mo d'apparence complète.
-    socle_seul = st.checkbox(
-        "Je veux seulement les pièces DP 1 — page de garde, plan de situation, "
-        "photographie aérienne, plan de cadastre",
-        value=False,
-        key="socle_seul",
-        help="Pour une étude amont, avant que le bureau d'études ait livré son "
-        "plan. Le dossier obtenu n'est pas déposable en l'état.",
-    )
-    if not socle_seul:
-        st.stop()
+    st.info("**Validez l'import ci-dessus pour continuer.**", icon="⬆️")
+    st.stop()
 
 # Les sections « 3. Ajout de photographies et photomontages » et « 3 bis. La
 # carte : placer et viser les prises de vue » ont été retirées le 26/09/2026.
@@ -2816,6 +2822,11 @@ if lancer_pptx:
                 "libelle": projet.libelle_affiche,
                 "rapport": rapport_pptx,
             }
+            # Rejoué, comme les imports : le bouton s'était rendu avant la
+            # génération et serait resté actif sous le compte rendu du dossier
+            # qu'il venait de produire. Les téléchargements, eux, ne rejouent
+            # pas le script — le bouton serait donc resté allumé longtemps.
+            st.rerun()
     except ErreurDP as erreur:
         st.session_state.pop("pptx_genere", None)
         st.error(f"{type(erreur).__name__} : {erreur}")

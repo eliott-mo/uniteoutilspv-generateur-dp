@@ -1092,28 +1092,25 @@ def test_importer_sans_commune_est_hors_de_portee(tmp_path, monkeypatch):
     assert not (tmp_path / "projets").exists()
 
 
-def test_le_dossier_reduit_se_demande_explicitement(tmp_path, monkeypatch):
-    """Les seules pièces DP 1 restent possibles, mais elles se demandent.
+def test_le_dossier_reduit_ne_se_demande_plus(tmp_path, monkeypatch):
+    """Sans plan validé, la page s'arrête — et elle dit pourquoi.
 
-    Un dossier sans plan de masse ni coupes est un dossier d'étude amont, pas un
-    dossier déposable. Il était produit par simple inadvertance ; il faut
-    maintenant cocher la case qui dit ce qu'on renonce à obtenir.
+    Une case offrait les seules pièces DP 1, pour une étude amont. Elle datait du
+    lot 1, quand le plan du bureau d'études n'était pas encore importable, et a
+    été retirée le 26/09/2026. La capacité reste dans `sortie_pptx.generer_pptx`,
+    qui produit la page de garde et les DP 1 quand on l'appelle sans contrat :
+    c'est l'interface qui n'y mène plus, pas l'outil qui ne sait plus le faire.
     """
     application = _projet_cadre(tmp_path, monkeypatch)
+
     assert not _bouton_present(application, "Générer le dossier")
-
-    cases = [
-        case
-        for case in application.checkbox
+    assert not [
+        case for case in application.checkbox
         if "seulement les pièces DP 1" in case.label
-    ]
-    assert cases, [case.label for case in application.checkbox]
-    cases[0].set_value(True)
-    application.run()
-
-    assert not application.exception, [str(e.value) for e in application.exception]
-    assert "3. Génération" in _titres(application)
-    assert _bouton_present(application, "Générer le dossier")
+    ], [case.label for case in application.checkbox]
+    assert "3. Génération" not in _titres(application)
+    attentes = chr(10).join(information.value for information in application.info)
+    assert "Validez l'import" in attentes, attentes
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")

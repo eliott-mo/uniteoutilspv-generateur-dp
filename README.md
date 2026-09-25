@@ -105,8 +105,12 @@ plus bas.
 
    **Les intitulés de la légende se corrigent ici**, dans un dépliant replié par
    défaut : un champ par intitulé, proposé tel que la planche l'écrira. Leur
-   relecture est **obligatoire** : la validation attend une case cochée, « J'ai
-   relu la légende et je la valide ». La légende est dessinée dans la planche et
+   relecture est **obligatoire** : une annonce en clair l'écrit au-dessus du
+   dépliant — qui s'ouvre de lui-même —, et la validation attend une case
+   cochée, « J'ai relu la légende et je la valide ». Le dépliant était replié et
+   présenté comme un recours : le chef de projet passait dessus sans le voir,
+   puis butait sur une case qui lui réclamait d'avoir lu ce qu'il n'avait pas
+   ouvert. La légende est dessinée dans la planche et
    ne se retouche plus après la génération — c'est le seul moment où la corriger
    coûte un champ de texte plutôt qu'une régénération. Corriger un intitulé
    décoche la case, et la relecture se redemande. Nos
@@ -147,10 +151,13 @@ plus bas.
    juste depuis ici. Sans photographies déposées, elle produirait un dossier
    amputé de DP 6, DP 7 et DP 8 — sept planches sur dix, d'apparence complète.
 
-**Le dossier réduit aux seules pièces DP 1** — page de garde, situation,
-photographie aérienne, cadastre — reste possible pour une étude amont, mais il
-se demande : une case à cocher, qui dit ce à quoi on renonce. Il était obtenu
-par simple inadvertance.
+**Le dossier réduit aux seules pièces DP 1** ne se demande plus dans
+l'interface : la case qui l'offrait a été retirée le 26/09/2026. Elle datait du
+lot 1, quand le plan du bureau d'études n'était pas encore importable. La
+capacité reste dans `sortie_pptx.generer_pptx`, qui produit la page de garde et
+les pièces DP 1 quand on l'appelle sans contrat, en le disant au rapport : c'est
+l'interface qui n'y mène plus, pas l'outil qui ne sait plus le faire. Sans plan
+validé, la page s'arrête et dit ce qu'elle attend.
 
 **L'indice fait partie du nom du dossier.** Sarnois a deux indices, qui diffèrent
 par leur poste, leur citerne et leur zone de contention : sans l'indice au nom,
@@ -180,6 +187,11 @@ fait sur **ces** entrées » : un drapeau booléen aurait grisé le bouton même
 un changement qui demandait justement de le recliquer. Un bouton resté actif
 invite au reclic, et le reclic refait une minute de travail pour un résultat
 identique — ou laisse croire que le premier n'a pas pris.
+
+Le grisement passe par un `st.rerun()` après chaque action, et c'est ce qui le
+rend visible : un bouton se **rend** avant que son corps ne tourne. Sans rejeu,
+il restait allumé à l'écran jusqu'au geste suivant, et pour la génération cela
+pouvait durer — les boutons de téléchargement ne rejouent pas le script.
 
 **Les contrôles croisés sont repliés.** Une quinzaine de recoupements entre le
 plan et le tableau, sur lesquels le chef de projet n'a pas la main : un écart se
