@@ -477,7 +477,15 @@ def _surface_proche(cote: Cote, mesuree: float, tolerance: float) -> bool:
 NOM_PARAMETRES = "projet.json"
 
 #: Nom de l'archive du contrat, et du dossier qu'elle déplie.
-MOTIF_ARCHIVE = "{nom}_contrat.zip"
+#:
+#: « contrat-PHOM » et non « contrat » : le chef de projet n'a rien à faire de ce
+#: fichier lui-même, il le transmet. Le nom lui dit à quoi il sert — PHOM, le
+#: photomontage — plutôt que ce qu'il contient, qu'il ne saurait pas lire de
+#: toute façon (demande du 26/09/2026).
+#:
+#: Horodaté, comme le `.pptx` : il s'accumule dans les téléchargements, et deux
+#: contrats du même projet y seraient autrement indiscernables.
+MOTIF_ARCHIVE = "{nom}_contrat-PHOM_{horodatage}.zip"
 
 
 def archiver_le_contrat(dossier: str | Path, nom: str) -> bytes | None:

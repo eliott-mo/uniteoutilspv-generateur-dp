@@ -251,19 +251,37 @@ def plan_de_reperage(
 #:
 #: C'est la décision D2 du lot 8 : la sortie PowerPoint se produit **avant** que
 #: les prises de vue existent, et le cadrage ne peut donc pas se calculer sur
-#: elles. 150 m tout autour de l'emprise, parce que les prises de vue de DP 6 et
-#: DP 7 se font aux abords du site (25/09/2026) et que le chef de projet posera
-#: ses repères à la main dans ce cadre.
+#: elles. Elle vaut 150 m par défaut, et chaque pièce peut demander la sienne.
+#:
+#: Ce que la marge décide vraiment, c'est l'échelle : mesuré le 26/09/2026 sur
+#: Sarnois, dont la clôture fait 207 x 278 m, dans un panneau de 162 x 247 mm.
+#:
+#: | Marge | Cadre | Échelle |
+#: |---|---|---|
+#: | 0 m | 207 x 278 m | 1/1 500 |
+#: | 50 m | 307 x 378 m | 1/2 000 |
+#: | 75 m | 357 x 428 m | 1/2 500 |
+#: | 150 m | 507 x 578 m | 1/5 000 |
+#:
+#: Le dossier de référence porte ses DP 6 au 1/1 500 et sa DP 7 au 1/2 500
+#: (relevé le 10/09/2026 sur Massay) : 50 m pour DP 6 et 75 m pour DP 7
+#: retrouvent ces échelles-là sur un site de cette taille. DP 8 garde 150 m,
+#: puisque c'est la pièce du lointain et qu'elle décline trois échelles.
+#:
+#: Ce que la marge coûte quand elle rétrécit : un point de vue posé au-delà
+#: tombe hors du cadre, et le chef de projet n'a nulle part où mettre son cône.
+#: C'est le prix d'un plan plus lisible, et il se règle ici, en un nombre.
 MARGE_SANS_VUES_M = 150.0
 
 
 def cadrages_sans_vues(
-    emprise, zone_mm: tuple, libelle: str, alternatives: int = 1
+    emprise, zone_mm: tuple, libelle: str, alternatives: int = 1,
+    marge_m: float | None = None,
 ) -> tuple[list, list]:
     """Cadrages possibles d'un plan de repérage dont on ignore les points de vue.
 
     Rend `(reperages, avertissements)`. Le premier cadrage est celui de
-    l'emprise plus `MARGE_SANS_VUES_M`, à la plus grande échelle de
+    l'emprise plus `marge_m`, ou `MARGE_SANS_VUES_M` à défaut, à la plus grande échelle de
     `ECHELLES_REPERAGE_VUES` qui le contient ; les suivants reprennent le même
     cadre aux crans d'échelle d'après, pour que le chef de projet garde celui où
     son point de vue tombe (décision D2, trois diapos pour DP 8).
@@ -284,17 +302,15 @@ def cadrages_sans_vues(
             f"{libelle} : aucune emprise à cadrer. Un plan de repérage sans site "
             "ne repère rien, même vide de prises de vue."
         )
+    marge = MARGE_SANS_VUES_M if marge_m is None else float(marge_m)
     minx, miny, maxx, maxy = emprise.bounds
-    cadre = box(
-        minx - MARGE_SANS_VUES_M, miny - MARGE_SANS_VUES_M,
-        maxx + MARGE_SANS_VUES_M, maxy + MARGE_SANS_VUES_M,
-    )
-    largeur_m, hauteur_m = maxx - minx + 2 * MARGE_SANS_VUES_M, maxy - miny + 2 * MARGE_SANS_VUES_M
+    cadre = box(minx - marge, miny - marge, maxx + marge, maxy + marge)
+    largeur_m, hauteur_m = maxx - minx + 2 * marge, maxy - miny + 2 * marge
 
     depart = _echelle_ou_rien(largeur_m, hauteur_m, zone_mm, libelle)
     if depart is None:
         raise ErreurPointDeVue(
-            f"{libelle} : l'emprise élargie de {MARGE_SANS_VUES_M:.0f} m mesure "
+            f"{libelle} : l'emprise élargie de {marge:.0f} m mesure "
             f"{largeur_m:.0f} x {hauteur_m:.0f} m et ne tient à aucune échelle de "
             f"la liste (jusqu'au 1/{ECHELLES_REPERAGE_VUES[-1]}). Au-delà, le site "
             "n'occuperait plus seize millimètres sur la planche."

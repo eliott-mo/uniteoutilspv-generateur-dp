@@ -55,7 +55,10 @@ traitant maintenant dans le `.pptx` — voir « La sortie PowerPoint à finalise
 plus bas.
 
 1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale, et la
-   notice DP 11. Le nom du projet et la date ne se saisissent pas : l'un est
+   notice DP 11. Le dépôt d'un **relevé altimétrique** a été retiré le
+   26/09/2026 : le RGE ALTI a toujours répondu, et le champ ne servait qu'à s'en
+   passer. `coupe.profil_terrain` garde son paramètre, pour un relevé drone plus
+   précis en ligne de commande. Le nom du projet et la date ne se saisissent pas : l'un est
    toujours « PV » suivi de la commune et de l'indice du tableau bilan, l'autre
    est le jour où le dossier est produit. Deux champs de moins à remplir, deux
    occasions de moins de se tromper. La commune et le code postal s'ouvrent
@@ -101,7 +104,12 @@ plus bas.
    sa carte plus bas et pleine largeur.
 
    **Les intitulés de la légende se corrigent ici**, dans un dépliant replié par
-   défaut : un champ par intitulé, proposé tel que la planche l'écrira. Nos
+   défaut : un champ par intitulé, proposé tel que la planche l'écrira. Leur
+   relecture est **obligatoire** : la validation attend une case cochée, « J'ai
+   relu la légende et je la valide ». La légende est dessinée dans la planche et
+   ne se retouche plus après la génération — c'est le seul moment où la corriger
+   coûte un champ de texte plutôt qu'une régénération. Corriger un intitulé
+   décoche la case, et la relecture se redemande. Nos
    intitulés sont ceux du dossier de référence et conviennent presque toujours,
    mais un projet peut avoir ses mots — une « voie lourde » que le reste du
    dossier appelle une voie de desserte. C'est un recours, pas une étape ; qui
@@ -118,6 +126,19 @@ plus bas.
    de lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
    qu'après l'import. Le fichier produit se **télécharge** : l'application tourne
    sur un serveur, `sortie/` y reste, hors de portée du chef de projet.
+
+   **Trois téléchargements, et un seul suffit.** Le groupé — le dossier et le
+   contrat en une archive — est là pour le cas qui coûte cher : le chef de projet
+   qui emporte le `.pptx`, ferme l'onglet, et découvre le lendemain qu'il lui
+   fallait aussi le contrat. Le serveur n'a rien gardé, et tout est à refaire.
+   Les deux séparés restent parce que le contrat ne sert qu'à qui monte les
+   photomontages, et que le `.pptx` seul est plus léger à renvoyer.
+
+   Les fichiers descendent **horodatés** — `..._20260926-1432.pptx` — pour
+   s'empiler sans se confondre dans un dossier de téléchargements. Le fichier
+   écrit sur le serveur, lui, garde un nom stable : c'est un dossier de travail,
+   pas une archive. Le contrat s'appelle `contrat-PHOM` : le chef de projet n'a
+   rien à en faire lui-même, il le transmet, et le nom lui dit à quoi il sert.
 
    **Une seule sortie, le `.pptx` à finaliser.** Le bouton du PDF assemblé a été
    retiré le 26/09/2026 avec le dépôt des photographies. Ce n'est pas un
@@ -150,6 +171,15 @@ rejoue `app.py` de haut en bas à chaque interaction, l'indice est choisi au
 milieu de la section 2, et une variable serait en retard d'une exécution en tête
 de script — ou absente en section 2 si on la composait en section 3, ce qui a
 levé une `NameError` au dépôt du DXF le 09/09/2026.
+
+**Les boutons se grisent quand ils ont servi.** Importer, valider, générer : les
+trois se désarment dès qu'ils ont tourné sur les entrées affichées, et se
+rallument à la moindre qui bouge — une légende récrite, une notice remplacée, un
+recalage. Le critère n'est pas « ça a déjà été fait une fois » mais « ça a été
+fait sur **ces** entrées » : un drapeau booléen aurait grisé le bouton même après
+un changement qui demandait justement de le recliquer. Un bouton resté actif
+invite au reclic, et le reclic refait une minute de travail pour un résultat
+identique — ou laisse croire que le premier n'a pas pris.
 
 **Les contrôles croisés sont repliés.** Une quinzaine de recoupements entre le
 plan et le tableau, sur lesquels le chef de projet n'a pas la main : un écart se
@@ -3348,11 +3378,19 @@ peut être loin et on ne sait pas encore où. DP 6 en reçoit deux, qui ne diff�
 que par le nombre de cadres — le troisième volet, « projet avec mesures
 paysagères », n'existe que si le projet en porte.
 
-| Pièce | Diapos | Cadres | Repères posés |
-|---|---|---|---|
-| DP 6 | 2 versions | 2 ou 3 | « Vue A » |
-| DP 7 | 1 | 2 | « PC7-1 », « PC7-2 » |
-| DP 8 | 3 échelles | 2 | « PC8-1 », « PC8-2 » |
+| Pièce | Diapos | Cadres | Repères posés | Marge | Échelle sur Sarnois |
+|---|---|---|---|---|---|
+| DP 6 | 2 versions | 2 ou 3 | « Vue A » | 50 m | 1/2 000 |
+| DP 7 | 1 | 2 | « PC7-1 », « PC7-2 » | 75 m | 1/2 500 |
+| DP 8 | 3 échelles | 2 | « PC8-1 », « PC8-2 » | 150 m | 1/5 000 à 1/10 000 |
+
+Les marges ont été resserrées le 26/09/2026 : elles valaient 150 m partout, et
+les trois pièces sortaient au 1/5 000. Le dossier de référence porte ses DP 6 au
+1/1 500 et sa DP 7 au 1/2 500 ; les valeurs ci-dessus retrouvent ces échelles-là
+sur un site de la taille de Sarnois, dont la clôture fait 207 × 278 m. Ce que
+serrer coûte : un point de vue posé au-delà de la marge tombe hors du cadre, et
+le chef de projet n'a nulle part où mettre son cône. Cela se règle en un nombre,
+dans `sortie_pptx.PIECES_PHOTO`.
 
 Les versions d'une même pièce **partagent son numéro de page**, et le sommaire
 n'en compte qu'une : supprimer les surnuméraires laisse la pagination juste.

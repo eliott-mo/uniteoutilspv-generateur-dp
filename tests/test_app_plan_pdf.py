@@ -24,7 +24,13 @@ from tests.jeux_plan_pdf import (
     PLAN_GANNAY,
     gannay_present,
 )
-from tests.test_app_streamlit import _application, _cliquer, _televerser, _titres
+from tests.test_app_streamlit import (
+    _application,
+    _cliquer,
+    _televerser,
+    _titres,
+    _valider_l_import,
+)
 
 pytestmark = pytest.mark.skipif(not gannay_present(), reason="jeu de Gannay absent")
 
@@ -52,20 +58,6 @@ def _emprise_gannay(dossier) -> list:
     ]
 
 
-def _releve_gannay() -> bytes:
-    """Un relevé « X Y Z » de synthèse sur le site, au pas de 2 m en x."""
-    x0, y0 = CENTRE_GANNAY
-    lignes = ["# X Y Z — relevé de synthèse, Lambert 93"]
-    x = x0 - DEMI_COTE_M
-    while x <= x0 + DEMI_COTE_M:
-        y = y0 - DEMI_COTE_M
-        while y <= y0 + DEMI_COTE_M:
-            lignes.append(f"{x:.2f} {y:.2f} {200.0 + 0.01 * (y - y0):.2f}")
-            y += 5.0
-        x += 2.0
-    return "\n".join(lignes).encode("utf-8")
-
-
 def _plan_pdf_importe(tmp_path, monkeypatch):
     """Le projet cadré, la source choisie, les deux fichiers déposés, l'import fait."""
     donnees = tmp_path / "donnees"
@@ -84,7 +76,6 @@ def _plan_pdf_importe(tmp_path, monkeypatch):
     _televerser(
         application, "Plan projet (PDF)", (PLAN_GANNAY.name, PLAN_GANNAY.read_bytes(), "application/pdf")
     )
-    _televerser(application, "Relevé altimétrique", ("releve.txt", _releve_gannay(), "text/plain"))
     application = application.run()
     _cliquer(application, "Importer et caler le plan")
     return application.run()
@@ -124,7 +115,7 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
     assert application.selectbox(key="volume_citerne_plan_pdf").value is None
     assert application.number_input(key="largeur_portail_plan_pdf").value is None
     assert any("Tranchez d'abord" in w.value for w in application.warning)
-    assert not any("Valider l'import" in b.label for b in application.button)
+    assert not any("je valide" in b.label for b in application.button)
     # La correction du poste est offerte, pas cochée.
     assert application.checkbox(
         key="correction_plan_poste_sur_cloture:pdl_ptr:1"
@@ -375,7 +366,7 @@ def test_le_contrat_ecrit_est_d_origine_plan_pdf(tmp_path, monkeypatch):
     application.number_input(key="largeur_portail_plan_pdf").set_value(7.0)
     application = application.run()
     assert not application.exception, application.exception
-    _cliquer(application, "Valider l'import")
+    _valider_l_import(application)
     application = application.run()
     assert not application.exception, application.exception
 
@@ -438,7 +429,7 @@ def test_la_carte_suit_ce_qui_a_ete_ecrit_et_non_ce_qui_existe(tmp_path, monkeyp
     application.selectbox(key="volume_citerne_plan_pdf").set_value(120)
     application.number_input(key="largeur_portail_plan_pdf").set_value(7.0)
     application = application.run()
-    _cliquer(application, "Valider l'import")
+    _valider_l_import(application)
     application = application.run()
     assert not application.exception, application.exception
 
@@ -467,7 +458,7 @@ def test_la_carte_suit_ce_qui_a_ete_ecrit_et_non_ce_qui_existe(tmp_path, monkeyp
     assert not any(_est_la_carte_de_verification(e) for e in ordre)
 
     # Revalidé, elle repasse en lecture seule.
-    _cliquer(application, "Valider l'import")
+    _valider_l_import(application)
     application = application.run()
     application = application.run()
     assert not application.exception, application.exception

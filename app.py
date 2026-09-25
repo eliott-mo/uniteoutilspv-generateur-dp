@@ -6,7 +6,9 @@ dernière minute se fait en modifiant ce fichier et en relançant la génératio
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from datetime import date as _date
 from pathlib import Path
 
@@ -62,7 +64,11 @@ from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
-from dp_socle.sortie_pptx import generer_pptx
+from dp_socle.sortie_pptx import (
+    FORMAT_HORODATAGE,
+    generer_pptx,
+    nom_telechargement,
+)
 from dp_socle.import_be import SEUIL_DP_MWC
 from dp_socle.planches import dp11_notice
 from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
@@ -223,6 +229,34 @@ def _empreinte(fichier) -> tuple:
     return (getattr(fichier, "file_id", None), getattr(fichier, "size", None))
 
 
+#: Ce qu'un bouton dit quand il est grisé.
+AIDE_DEJA_FAIT = (
+    "Déjà fait sur ces données-là. Le bouton se rallume dès que quelque chose "
+    "change au-dessus."
+)
+
+
+def _deja_fait(cle: str, signature) -> bool:
+    """Vrai si ce bouton a déjà tourné sur exactement ces entrées.
+
+    Un bouton qui reste actif après avoir servi invite à le recliquer, et le
+    reclic refait une minute de travail pour un résultat identique — ou pire,
+    laisse croire que le premier n'a pas pris (retour d'usage du 26/09/2026).
+
+    Le critère n'est pas « ça a déjà été fait une fois » mais « ça a été fait
+    sur **ces** entrées » : la signature porte tout ce qui changerait le
+    résultat, et le bouton se rallume dès qu'une d'elles bouge. Un drapeau
+    booléen aurait grisé le bouton pour de bon, y compris après un changement
+    qui demandait justement de le recliquer.
+    """
+    return st.session_state.get(cle) == signature
+
+
+def _retenir_ce_qui_a_servi(cle: str, signature) -> None:
+    """Note ce sur quoi un bouton vient de tourner, pour qu'il se grise."""
+    st.session_state[cle] = signature
+
+
 def _deja_ecrit(cible: Path, fichier) -> bool:
     """Vrai si ce fichier exact est déjà sur le disque, à cet endroit.
 
@@ -264,6 +298,31 @@ def _ecrire_depose(cible: Path, donnees) -> None:
             f"Impossible d'écrire « {cible.name} » dans le dossier du projet "
             f"({erreur})."
         ) from erreur
+
+
+#: Nom de l'archive qui porte tout ce que le chef de projet doit emporter.
+MOTIF_TOUT = "{nom}_DP_et_contrat_{horodatage}.zip"
+
+
+def _tout_en_une_archive(pptx: bytes, nom_pptx: str, contrat: bytes) -> bytes:
+    """Le dossier et le contrat en un seul téléchargement.
+
+    Le contrat y entre **déplié**, et non comme un ZIP dans un ZIP : le
+    destinataire ouvre une fois et trouve le dossier du contrat à côté du
+    `.pptx`, prêt à être donné à l'outil de photomontage. Un ZIP imbriqué aurait
+    demandé de savoir qu'il fallait l'ouvrir aussi.
+
+    Le `.pptx` est déjà un ZIP, et le GeoPackage déjà compressé : `ZIP_STORED`
+    évite de les recomprimer pour un gain nul. Le JSON du contrat, lui, est déjà
+    déflaté dans l'archive qu'il vient de traverser.
+    """
+    tampon = io.BytesIO()
+    with zipfile.ZipFile(tampon, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr(nom_pptx, pptx)
+        with zipfile.ZipFile(io.BytesIO(contrat)) as recu:
+            for membre in recu.infolist():
+                archive.writestr(membre.filename, recu.read(membre))
+    return tampon.getvalue()
 
 
 def _enregistrer_notice(nom_projet: str, fichier) -> str | None:
@@ -837,16 +896,10 @@ else:
             "de la copie d'écran donnent l'échelle.",
         )
 
-with st.container():
-    fichier_altimetrie = st.file_uploader(
-        "Relevé altimétrique (.txt, facultatif)",
-        type=["txt", "csv"],
-        help="Repli quand le RGE ALTI est indisponible, ou relevé drone plus "
-        "précis. **Trois colonnes « X Y Z » en Lambert 93**, et elles seules : "
-        "la forme à deux colonnes a été retirée le 03/09/2026, rien n'y "
-        "distinguant une abscisse d'un matricule. Ce fichier prend le pas sur "
-        "l'appel automatique.",
-    )
+# Le dépôt d'un relevé altimétrique a été retiré le 26/09/2026 : le RGE ALTI a
+# toujours répondu, et le champ ne servait qu'à s'en passer. `profil_terrain`
+# garde son paramètre `fichier_altimetrie` — un relevé drone plus précis reste
+# exploitable en ligne de commande, et `tests/test_coupe.py` le mesure.
 
 
 
@@ -1041,7 +1094,7 @@ def _relever_et_controler(coupe, import_be, plan, origine: str) -> None:
     import_be.terrain_be = []
     with st.spinner("Interrogation du RGE ALTI…"):
         st.session_state.profil_be = profil_terrain(
-            coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+            coupe
         )
     import_be.profil = st.session_state.profil_be
     import_be.coherence = controler_coherence(
@@ -1089,7 +1142,7 @@ def _proposer_la_coupe(import_be) -> None:
     try:
         with st.spinner("Relevé du profil du terrain…"):
             st.session_state.profil_be = profil_terrain(
-                coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+                coupe
             )
     except ErreurDP as erreur:
         st.warning(
@@ -1387,7 +1440,7 @@ def _reprendre_import_precedent(dossier: Path, import_be, emprise_cadastrale) ->
     else:
         with st.spinner("Relevé du profil du terrain…"):
             st.session_state.profil_be = profil_terrain(
-                coupe, fichier_altimetrie=st.session_state.get("chemin_altimetrie_be")
+                coupe
             )
     import_be.profil = st.session_state.profil_be
     import_be.coherence = controler_coherence(
@@ -1489,7 +1542,7 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> tuple[dict, list]:
 
 
 def _importer_le_plan_pdf(
-    commune: str, fichiers_emprise, fichier_export, fichier_pdf, fichier_altimetrie
+    commune: str, fichiers_emprise, fichier_export, fichier_pdf
 ) -> None:
     """Dépose l'export et le plan, fait confirmer la légende, importe et cale."""
     from dp_socle.plan_pdf import importer_plan_pdf
@@ -1503,7 +1556,7 @@ def _importer_le_plan_pdf(
             )
             if fichier is None
         ]
-        if any(f is not None for f in (fichier_export, fichier_pdf, fichier_altimetrie)):
+        if any(f is not None for f in (fichier_export, fichier_pdf)):
             st.warning(
                 f"Il manque {' et '.join(manquants)} : le bouton « Importer et "
                 "caler le plan » n'apparaît qu'une fois les deux déposés. Le plan "
@@ -1514,7 +1567,6 @@ def _importer_le_plan_pdf(
 
     chemin_export = _deposer(fichier_export, commune)
     chemin_pdf = _deposer(fichier_pdf, commune)
-    chemin_altimetrie = _deposer(fichier_altimetrie, commune)
     try:
         correspondance, a_trancher = _correspondance_de_la_legende(chemin_pdf)
     except ErreurDP as erreur:
@@ -1528,17 +1580,20 @@ def _importer_le_plan_pdf(
             + ". « (ignorer) » l'écarte de l'import, en le disant.",
             icon="⚠️",
         )
+    source_pdf = (_empreinte(fichier_export), _empreinte(fichier_pdf))
+    deja = _deja_fait("import_pdf_fait", source_pdf)
     if not st.button(
         "Importer et caler le plan",
         type="primary",
         width="stretch",
-        disabled=bool(a_trancher),
+        disabled=bool(a_trancher) or deja,
+        help=AIDE_DEJA_FAIT if deja else None,
     ):
         return
+    _retenir_ce_qui_a_servi("import_pdf_fait", source_pdf)
     st.session_state.coupe_be = None
     st.session_state.profil_be = None
     st.session_state["couches_carte"] = None
-    st.session_state["couches_carte_sans_vegetation"] = None
     st.session_state["origine_coupe"] = None
     # Pas d'indice : il vient du tableau bilan, et il n'y en a pas.
     nom_importe = identifiant_de_dossier(nom_de_projet(commune))
@@ -1563,9 +1618,6 @@ def _importer_le_plan_pdf(
     st.session_state.import_be = resultat
     st.session_state["indice_tableau_bilan"] = None
     st.session_state.emprise_cadastrale_be = emprise_cadastrale
-    st.session_state.chemin_altimetrie_be = (
-        str(chemin_altimetrie) if chemin_altimetrie else None
-    )
     _reprendre_import_precedent(DOSSIER_SORTIE / nom_importe, resultat, emprise_cadastrale)
     _proposer_la_coupe(resultat)
 
@@ -1573,7 +1625,6 @@ def _importer_le_plan_pdf(
 def _oublier_la_carte_et_la_coupe(import_pdf) -> None:
     """Le plan a bougé : les couches de la carte et la coupe ne valent plus."""
     st.session_state["couches_carte"] = None
-    st.session_state["couches_carte_sans_vegetation"] = None
     st.session_state.coupe_be = None
     st.session_state.profil_be = None
     import_pdf.ligne_coupe = None
@@ -1772,15 +1823,14 @@ def _trancher_les_ouvrages(import_pdf) -> None:
     if choix.cle() != import_pdf.choix.cle():
         import_pdf.changer_de_choix(choix)
         st.session_state["couches_carte"] = None
-        st.session_state["couches_carte_sans_vegetation"] = None
 
 
 def _resumer_le_plan_pdf(import_pdf) -> None:
     """Ce sur quoi le dossier est engagé, quand le plan vient d'un PDF."""
     calage = import_pdf.calage
     plan = import_pdf.plan
-    st.markdown("### Ce sur quoi le dossier est engagé")
-    colonnes = st.columns(4)
+    engagement = st.expander("Ce sur quoi le dossier est engagé")
+    colonnes = engagement.columns(4)
     colonnes[0].metric("Rangées de tables", f"{plan.nb_tables}")
     colonnes[1].metric(
         "Échelle du plan",
@@ -1796,7 +1846,7 @@ def _resumer_le_plan_pdf(import_pdf) -> None:
         "Surface clôturée",
         f"{surface / 1e4:.2f} ha".replace(".", ",") if surface else "—",
     )
-    st.caption(
+    engagement.caption(
         f"« {import_pdf.lecture.source} », page {import_pdf.lecture.page}, calé sur "
         f"« {import_pdf.source_export} » : {calage.nb_rangees_plan} rangées relevées "
         f"sur le plan pour {calage.nb_rangees_dxf} dans le DXF. Il n'y a pas de "
@@ -1945,6 +1995,51 @@ def _legendes_retouchees(plan) -> dict:
     return retouches
 
 
+def _cle_de_relecture(plan) -> str:
+    """Clé de la case « j'ai relu la légende », propre au dépôt et à sa légende.
+
+    Les intitulés en font partie : corriger l'un d'eux décoche la case, et la
+    relecture se redemande. Sans cela, le chef de projet aurait pu valider une
+    légende qu'il a changée après l'avoir relue.
+    """
+    entrees = "|".join(libelle for libelle, _cats, _n in _entrees_de_legende(plan))
+    retouches = "|".join(
+        f"{cle}={valeur}" for cle, valeur in sorted(_legendes_retouchees(plan).items())
+    )
+    return f"legende_relue_{_nom_depot(commune)}_{hash((entrees, retouches))}"
+
+
+def _legende_relue(plan) -> bool:
+    """La case de relecture de la légende, et son état.
+
+    Elle est posée ici, dans la section de validation, et non sous les champs de
+    la légende : c'est au moment de valider qu'on s'engage, et une case cochée
+    trois écrans plus haut ne serait pas un engagement mais un réflexe.
+    """
+    return st.checkbox(
+        "J'ai relu la légende et je la valide",
+        key=_cle_de_relecture(plan),
+        help="Les intitulés partent tels quels sur le plan de masse DP 2 et sur "
+        "les plans de repérage des DP 4. Ils sont dessinés dans la planche : "
+        "après la génération, seule une régénération les change.",
+    )
+
+
+def _validation_deja_faite(import_courant) -> bool:
+    """Vrai si le contrat écrit correspond exactement à ce qui est à l'écran.
+
+    Même critère que celui qui fige la coupe : ce n'est pas « un contrat
+    existe » mais « le contrat écrit est celui de cet écran-ci ». Un recalage ou
+    un changement de couche rallume donc le bouton, et c'est ce qu'il faut — le
+    contrat sur le disque ne décrirait plus ce qu'on regarde.
+    """
+    return (
+        DOSSIER_SORTIE / _nom_dossier(commune) / NOM_GEOPACKAGE
+    ).exists() and _etat_de_l_import(import_courant) == st.session_state.get(
+        "etat_ecrit"
+    )
+
+
 def _montrer_la_coupe(import_be_courant) -> bool:
     """L'annonce de la coupe retenue, puis la carte où elle se règle.
 
@@ -2055,11 +2150,7 @@ if (
     # l'écran, serait du bruit.
     and any(
         depose is not None
-        for depose in (
-            fichier_dxf,
-            fichier_tableau,
-            fichier_altimetrie,
-        )
+        for depose in (fichier_dxf, fichier_tableau)
     )
 ):
     st.warning(
@@ -2074,7 +2165,6 @@ if (
 if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
     chemin_dxf = _deposer(fichier_dxf, commune)
     chemin_tableau = _deposer(fichier_tableau, commune)
-    chemin_altimetrie = _deposer(fichier_altimetrie, commune)
 
     try:
         indices = indices_disponibles(chemin_tableau)
@@ -2186,14 +2276,21 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             st.session_state.correspondance_be = choix
 
 
-        if st.button("Importer et contrôler", type="primary", width="stretch"):
+        _source_be = (_empreinte(fichier_dxf), _empreinte(fichier_tableau), indice)
+        if st.button(
+            "Importer et contrôler",
+            type="primary",
+            width="stretch",
+            disabled=_deja_fait("import_be_fait", _source_be),
+            help=AIDE_DEJA_FAIT if _deja_fait("import_be_fait", _source_be) else None,
+        ):
+            _retenir_ce_qui_a_servi("import_be_fait", _source_be)
             st.session_state.coupe_be = None
             st.session_state.profil_be = None
             # Le plan change : les couches reprojetées de la carte ne valent
             # plus, et une carte qui garderait les anciennes serait pire que
             # lente — elle montrerait l'import précédent.
             st.session_state["couches_carte"] = None
-            st.session_state["couches_carte_sans_vegetation"] = None
             emprise_cadastrale = None
             # Le nom se compose ici avec l'indice qu'on est en train
             # d'importer : `_nom_dossier` porte encore celui de l'import
@@ -2221,9 +2318,6 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             # relevé altimétrique dans l'état de session. Écrits après, ils
             # n'arrivaient qu'au deuxième import, et le premier retombait sur le
             # RGE ALTI en silence — alors que l'aide du champ annonce l'inverse.
-            st.session_state.chemin_altimetrie_be = (
-                str(chemin_altimetrie) if chemin_altimetrie else None
-            )
             _reprendre_import_precedent(
                 DOSSIER_SORTIE / nom_importe,
                 st.session_state.import_be,
@@ -2239,7 +2333,6 @@ if not plan_du_be and commune.strip():
         fichiers_emprise,
         fichier_export_helioscope,
         fichier_plan_pdf,
-        fichier_altimetrie,
     )
 
 
@@ -2276,8 +2369,8 @@ if import_be_courant is not None and commune.strip():
     emprise_cloturee = plan.polygone_cloture
 
     if tableau is not None:
-        st.markdown("### Ce sur quoi le dossier est engagé")
-        colonnes = st.columns(4)
+        engagement = st.expander("Ce sur quoi le dossier est engagé")
+        colonnes = engagement.columns(4)
         colonnes[0].metric("Phase", tableau.generalites["phase"])
         colonnes[1].metric(
             "Date du tableau", tableau.generalites["date"].strftime("%d/%m/%Y")
@@ -2420,6 +2513,10 @@ if import_be_courant is not None and commune.strip():
         carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
 
     st.markdown("### Validation")
+    # La case est rendue **avant** la chaîne de refus, et non dans une de ses
+    # branches : posée dans un `elif`, elle disparaissait dès qu'on la cochait —
+    # la branche suivante prenait la main — et on ne pouvait plus la décocher.
+    legende_relue = _legende_relue(import_be_courant.plan)
     if indice_choisi is not None and indice_choisi != tableau.indice:
         st.error(
             f"La liste affiche l'indice {indice_choisi}, l'import en mémoire "
@@ -2450,7 +2547,28 @@ if import_be_courant is not None and commune.strip():
             "Placez la ligne de coupe avant de valider : le lot 4 en a besoin "
             "pour la coupe DP 3."
         )
-    elif st.button("Valider l'import et écrire la sortie", type="primary", width="stretch"):
+    elif not legende_relue:
+        # La légende part telle quelle sur DP 2 et sur les plans de repérage des
+        # DP 4, et elle est dessinée **dans** la planche : une fois le dossier
+        # produit, elle ne se retouche plus. La faire relire ici est le seul
+        # moment où la corriger coûte un champ de texte plutôt qu'une
+        # régénération (demande du 26/09/2026).
+        st.info(
+            "Relisez les intitulés de la légende ci-dessus, puis cochez la case "
+            "pour débloquer la validation. Ils seront écrits tels quels sur les "
+            "planches, et ne se retouchent pas dans le PowerPoint."
+        )
+    elif st.button(
+        "Le plan est prêt, je valide",
+        type="primary",
+        width="stretch",
+        disabled=_validation_deja_faite(import_be_courant),
+        help=(
+            AIDE_DEJA_FAIT
+            if _validation_deja_faite(import_be_courant)
+            else "Écrit le contrat que les planches liront, et fige la coupe A-A'."
+        ),
+    ):
         try:
             import_be_courant.ecrire(DOSSIER_SORTIE / _nom_dossier(commune))
         except ErreurDP as erreur:
@@ -2464,9 +2582,7 @@ if import_be_courant is not None and commune.strip():
             # encore en haut, sous une annonce disant qu'elle était descendue.
             # L'annonce passe par la session, sinon la relance l'emporterait.
             st.session_state["annonce_validation"] = (
-                "Import validé, coupe A-A' figée. Les photographies et la "
-                "génération du dossier s'ouvrent ci-dessous, et la carte a "
-                "redescendu pour placer les prises de vue."
+                "Import validé, coupe A-A' figée."
             )
             st.rerun()
 
@@ -2660,8 +2776,27 @@ def _construire_projet() -> Projet | None:
 # deux contrôles de la voie PDF ne s'appliquent plus, ni la vérification que
 # chaque cartouche annonce la page où il tombe, ni celle du format 420 x 297 mm.
 # Le chef de projet les tient à partir du téléchargement.
+# Ce sur quoi la génération tourne. Le bouton se grise quand le dossier en
+# session a été produit sur exactement ces entrées-là, et se rallume dès que
+# l'une bouge — une légende récrite, une notice remplacée, un recalage. Un
+# drapeau booléen aurait grisé le bouton même après un changement qui demandait
+# justement de regénérer.
+_entrees_generation = (
+    nom,
+    _empreinte(fichier_notice),
+    tuple(sorted(
+        (_legendes_retouchees(import_be_courant.plan) or {}).items()
+    )) if import_be_courant is not None else (),
+    str(voirie),
+    st.session_state.get("etat_ecrit"),
+)
+_generation_faite = _deja_fait("generation_faite", _entrees_generation)
 lancer_pptx = st.button(
-    "Générer le dossier à finaliser (PowerPoint)", type="primary", width="stretch"
+    "Générer le dossier (à finaliser sur PowerPoint puis à exporter en PDF)",
+    type="primary",
+    width="stretch",
+    disabled=_generation_faite,
+    help=AIDE_DEJA_FAIT if _generation_faite else None,
 )
 
 if lancer_pptx:
@@ -2675,6 +2810,7 @@ if lancer_pptx:
                 "montage des diapos…"
             ):
                 rapport_pptx = generer_pptx(projet, DOSSIER_SORTIE, dpi=int(dpi))
+            _retenir_ce_qui_a_servi("generation_faite", _entrees_generation)
             st.session_state["pptx_genere"] = {
                 "nom": projet.nom,
                 "libelle": projet.libelle_affiche,
@@ -2697,12 +2833,46 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
         f"{rapport_pptx.taille_mo:.1f} Mo. Les planches y sont dessinées, les "
         "photographies restent à poser."
     )
-    with open(rapport_pptx.fichier, "rb") as _fichier:
+    # Trois téléchargements, et un seul suffit. Le groupé est là pour le cas qui
+    # coûte cher : le chef de projet qui emporte le `.pptx`, ferme l'onglet, et
+    # découvre le lendemain qu'il lui fallait aussi le contrat — le serveur a
+    # oublié son dossier, et tout est à refaire. Les deux séparés restent parce
+    # que le contrat ne sert qu'à qui monte les photomontages, et que le `.pptx`
+    # seul est plus léger à renvoyer par courriel.
+    _horodatage = rapport_pptx.produit_le.strftime(FORMAT_HORODATAGE)
+    _contrat_emporte = archiver_le_contrat(
+        rapport_pptx.dossier, _genere_pptx["nom"]
+    )
+    _pptx = rapport_pptx.fichier.read_bytes()
+
+    if _contrat_emporte is not None:
         st.download_button(
-            f"⬇️ Le dossier à finaliser dans PowerPoint "
-            f"({rapport_pptx.taille_mo:.1f} Mo, .pptx)",
-            data=_fichier.read(),
-            file_name=rapport_pptx.fichier.name,
+            f"⬇️ **Tout** — le dossier et le contrat "
+            f"({(len(_pptx) + len(_contrat_emporte)) / (1024 * 1024):.1f} Mo, ZIP)",
+            data=_tout_en_une_archive(
+                _pptx,
+                nom_telechargement(_genere_pptx["nom"], rapport_pptx.produit_le),
+                _contrat_emporte,
+            ),
+            file_name=MOTIF_TOUT.format(
+                nom=_genere_pptx["nom"], horodatage=_horodatage
+            ),
+            mime="application/zip",
+            type="primary",
+            help="Le plus sûr : tout descend d'un clic. Le contrat oublié se "
+            "repaie par une génération entière, le serveur ne gardant rien.",
+            on_click="ignore",
+            width="stretch",
+        )
+
+    colonne_dossier, colonne_contrat = st.columns(2)
+    with colonne_dossier:
+        st.download_button(
+            f"⬇️ Le dossier seul ({rapport_pptx.taille_mo:.1f} Mo, .pptx)",
+            data=_pptx,
+            file_name=nom_telechargement(
+                _genere_pptx["nom"], rapport_pptx.produit_le
+            ),
             mime=(
                 "application/vnd.openxmlformats-officedocument."
                 "presentationml.presentation"
@@ -2715,31 +2885,26 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
             on_click="ignore",
             width="stretch",
         )
-
-    # Le contrat redescend avec le dossier, et c'est ici qu'il faut le prendre :
-    # l'application tourne sur un serveur, et ce qui n'est pas téléchargé est
-    # perdu à la fermeture de l'onglet. Voir `_archive_du_contrat` pour ce qu'il
-    # sert — le photomontage se monte dessus, et sur lui seul.
-    _contrat_emporte = archiver_le_contrat(
-        rapport_pptx.dossier, _genere_pptx["nom"]
-    )
-    if _contrat_emporte is not None:
-        st.download_button(
-            f"⬇️ Le contrat du dossier "
-            f"({len(_contrat_emporte) / (1024 * 1024):.1f} Mo, ZIP)",
-            data=_contrat_emporte,
-            file_name=MOTIF_ARCHIVE.format(nom=_genere_pptx["nom"]),
-            mime="application/zip",
-            help=(
-                "La géométrie importée du plan et les paramètres du projet, tels "
-                "que ces planches les ont employés. À transmettre pour faire "
-                "monter les photomontages : c'est ce que l'outil de photomontage "
-                "lit, et le prendre ici garantit qu'il travaillera sur la "
-                "géométrie de ce dossier-ci."
-            ),
-            on_click="ignore",
-            width="stretch",
-        )
+    with colonne_contrat:
+        if _contrat_emporte is not None:
+            st.download_button(
+                f"⬇️ Le contrat seul "
+                f"({len(_contrat_emporte) / (1024 * 1024):.1f} Mo, ZIP)",
+                data=_contrat_emporte,
+                file_name=MOTIF_ARCHIVE.format(
+                    nom=_genere_pptx["nom"], horodatage=_horodatage
+                ),
+                mime="application/zip",
+                help=(
+                    "La géométrie importée du plan et les paramètres du projet, "
+                    "tels que ces planches les ont employés. À transmettre pour "
+                    "faire monter les photomontages : c'est ce que l'outil de "
+                    "photomontage lit, et le prendre ici garantit qu'il "
+                    "travaillera sur la géométrie de ce dossier-ci."
+                ),
+                on_click="ignore",
+                width="stretch",
+            )
 
     for message in rapport_pptx.avertissements:
         st.warning(message, icon="⚠️")

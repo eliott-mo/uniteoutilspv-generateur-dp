@@ -111,27 +111,31 @@ def _notice_pdf(pages: int = 1) -> bytes:
     return tampon.getvalue()
 
 
-def _releve_altimetrique() -> bytes:
-    """Un relevé « X Y Z » de synthèse couvrant le site, en pente douce.
+def _sans_rge_alti(monkeypatch) -> None:
+    """Le RGE ALTI rendu par une pente douce, au lieu d'être interrogé.
 
-    Déposé pour que `profil_terrain` lise un fichier au lieu d'interroger le
-    RGE ALTI : ces tests n'ont alors besoin d'aucun service en ligne, et le
-    profil est le même à chaque exécution.
+    Ces tests n'ont alors besoin d'aucun service en ligne, et le profil est le
+    même à chaque exécution. La doublure remplace la référence que
+    `dp_socle.coupe` détient, et non `dp_socle.ign` : `coupe` importe la
+    fonction par son nom, et substituer au module d'origine ne changerait pas ce
+    qu'il a déjà lié.
 
-    Le pas en x vaut 2 m, la largeur du demi-couloir que `_couloir_de_coupe`
-    retient autour de la ligne : plus large, aucun point du relevé ne tombe
-    dans le couloir de la coupe — qui court nord-sud — et le profil est refusé.
+    Un relevé « X Y Z » se déposait dans l'interface jusqu'au 26/09/2026 pour le
+    même office ; le champ a été retiré — le RGE ALTI a toujours répondu, et il
+    ne servait qu'à s'en passer. `profil_terrain` garde son paramètre, que
+    `tests/test_coupe.py` mesure.
     """
-    ouest, sud, est, nord = BORNES
-    lignes = ["# X Y Z — relevé de synthèse, Lambert 93"]
-    x = ouest
-    while x <= est:
-        y = sud
-        while y <= nord:
-            lignes.append(f"{x:.2f} {y:.2f} {100.0 + 0.02 * (y - sud):.2f}")
-            y += 5.0
-        x += 2.0
-    return "\n".join(lignes).encode("utf-8")
+    import dp_socle.coupe
+
+    def pente(points, timeout=60):
+        # Rapportée au premier point de la coupe, et non à des bornes fixes :
+        # `tests/test_app_plan_pdf.py` emprunte cette doublure pour un site situé
+        # ailleurs, et une origine figée lui aurait rendu des altitudes de
+        # plusieurs kilomètres.
+        origine = points[0][1]
+        return [100.0 + 0.02 * (y - origine) for _x, y in points]
+
+    monkeypatch.setattr(dp_socle.coupe, "telecharger_altitudes", pente)
 
 
 def _application(tmp_path, monkeypatch):
@@ -148,6 +152,7 @@ def _application(tmp_path, monkeypatch):
     # les tests ailleurs que dans leur dossier jetable.
     monkeypatch.delenv("DP_DOSSIER_TRAVAIL", raising=False)
     monkeypatch.chdir(tmp_path)
+    _sans_rge_alti(monkeypatch)
     return AppTest.from_file(str(APP), default_timeout=DELAI_S)
 
 
@@ -225,6 +230,25 @@ def _saisir(application, libelle: str, valeur: str):
     )
 
 
+def _valider_l_import(application):
+    """Coche la relecture de la légende, puis valide.
+
+    Deux gestes depuis le 26/09/2026 : la légende est dessinée **dans** les
+    planches et ne se retouche plus après la génération, donc l'interface en
+    demande la relecture avant d'écrire le contrat. Le parcours du chef de
+    projet passe par là, et les tests aussi.
+    """
+    cases = [
+        case for case in application.checkbox
+        if "relu la légende" in case.label
+    ]
+    assert cases, [case.label for case in application.checkbox]
+    cases[0].set_value(True)
+    application.run()
+    _cliquer(application, "Le plan est prêt, je valide")
+    return application
+
+
 def _bouton_present(application, libelle_partiel: str) -> bool:
     return any(
         libelle_partiel.lower() in bouton.label.lower() for bouton in application.button
@@ -272,15 +296,10 @@ def _projet_cadre(tmp_path, monkeypatch):
 
 
 def _plan_depose(tmp_path, monkeypatch):
-    """Étape 2 : le DXF, le tableau bilan et le relevé altimétrique sont déposés."""
+    """Étape 2 : le DXF et le tableau bilan sont déposés."""
     application = _projet_cadre(tmp_path, monkeypatch)
     _televerser(application, "Plan BE (DXF", (DXF.name, DXF.read_bytes(), "application/dxf"))
     _televerser(application, "Tableau bilan", (TABLEAU.name, TABLEAU.read_bytes(), MIME_XLSX))
-    _televerser(
-        application,
-        "Relevé altimétrique",
-        ("releve.txt", _releve_altimetrique(), "text/plain"),
-    )
     return application.run()
 
 
@@ -294,7 +313,7 @@ def _plan_importe(tmp_path, monkeypatch):
 def _import_valide(tmp_path, monkeypatch):
     """Étape 4 : le contrat est écrit, les sections 3 et 4 s'ouvrent."""
     application = _plan_importe(tmp_path, monkeypatch)
-    _cliquer(application, "Valider l'import")
+    _valider_l_import(application)
     return application.run()
 
 
@@ -330,7 +349,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
         "2. Plan du bureau d'études",
         "3. Génération",
     ]
-    assert _bouton_present(application, "Générer le dossier à finaliser")
+    assert _bouton_present(application, "Générer le dossier")
 
 
 def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
@@ -425,7 +444,11 @@ def test_la_coupe_est_proposee_des_l_import(tmp_path, monkeypatch):
     annonces = [succes.value for succes in application.success]
     assert any("Coupe par défaut" in annonce for annonce in annonces), annonces
     # Et l'écriture de la sortie est offerte sans avoir rien tracé.
-    assert _bouton_present(application, "Valider l'import")
+    # La validation s'atteint, mais elle attend d'abord la relecture de la
+    # légende : c'est la case qui dit que le parcours est arrivé là.
+    assert any("relu la légende" in case.label for case in application.checkbox), [
+        case.label for case in application.checkbox
+    ]
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -489,7 +512,7 @@ def test_changer_d_indice_sans_reimporter_refuse_d_ecrire(tmp_path, monkeypatch)
         "IND05" in message and "IND06" in message and "Importer et contrôler" in message
         for message in refus
     ), refus
-    assert not _bouton_present(application, "Valider l'import")
+    assert not _bouton_present(application, "je valide")
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -505,7 +528,12 @@ def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
 
     assert not application.exception, [str(e.value) for e in application.exception]
     messages = [avertissement.value for avertissement in application.warning]
-    assert any("RGE ALTI" in message for message in messages), messages
+    # Un message du bloc de coupe, écrit après que le conteneur a été réservé :
+    # c'est celui-là qui arrivait avec une exécution de retard. Il portait sur le
+    # RGE ALTI jusqu'au 26/09/2026, quand un relevé déposé le remplaçait et que
+    # ce remplacement se disait ; le champ retiré, c'est la coupe proposée qui
+    # tient ce rôle.
+    assert any("Coupe par défaut" in message for message in messages), messages
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -1267,7 +1295,9 @@ def test_la_seule_sortie_offerte_est_le_pptx_a_finaliser(tmp_path, monkeypatch):
 
     libelles = [bouton.label for bouton in application.button]
     generations = [l for l in libelles if l.startswith("Générer")]
-    assert generations == ["Générer le dossier à finaliser (PowerPoint)"], libelles
+    assert generations == [
+        "Générer le dossier (à finaliser sur PowerPoint puis à exporter en PDF)"
+    ], libelles
 
 
 @pytest.mark.reseau

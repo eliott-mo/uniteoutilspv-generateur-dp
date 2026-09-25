@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import tempfile
 import warnings
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -92,18 +93,38 @@ TITRE_PAGE_GARDE = "Page de garde"
 #: pas un dossier déposable (décision D9).
 MOTIF_SORTIE = "{nom}_DP_a_finaliser.pptx"
 
-#: Les pièces photographiques, ce qu'elles portent, et combien de cadrages au
-#: choix elles reçoivent.
+#: Horodatage des fichiers téléchargés, et son format.
+#:
+#: Le fichier écrit dans `sortie/{projet}/` garde un nom stable et s'écrase à
+#: chaque génération : c'est un dossier de travail, pas une archive. Ce qui
+#: descend chez le chef de projet, lui, porte la date et l'heure — il s'accumule
+#: dans ses téléchargements, et deux versions du même dossier y sont autrement
+#: indiscernables (demande du 26/09/2026).
+#:
+#: L'ordre est celui du tri alphabétique : année, mois, jour, heure, minute.
+#: `26-09-2026` se serait trié par jour, mettant tous les 26 du mois ensemble.
+FORMAT_HORODATAGE = "%Y%m%d-%H%M"
+MOTIF_TELECHARGEMENT = "{nom}_DP_a_finaliser_{horodatage}.pptx"
+
+#: Les pièces photographiques : cadres, vues attendues, cadrages au choix, et la
+#: marge que leur plan de repérage laisse autour du site.
 #:
 #: DP 6 reçoit deux alternatives qui ne diffèrent que par le nombre de cadres —
 #: le troisième volet, « projet avec mesures paysagères », n'existe que si le
 #: projet porte des mesures paysagères, et le chef de projet garde la diapo qui
 #: correspond. DP 8 reçoit trois cadrages successifs, parce que son point de vue
 #: peut être loin et qu'on ne sait pas encore où (décision D2).
+#:
+#: La marge décide de l'échelle, et les trois pièces n'en veulent pas la même :
+#: DP 6 et DP 7 montrent le proche et gagnent à serrer, DP 8 montre le lointain.
+#: Les valeurs retrouvent les échelles du dossier de référence sur un site de la
+#: taille de Sarnois — 1/2 000 pour DP 6, 1/2 500 pour DP 7, 1/5 000 à 1/10 000
+#: pour DP 8 (resserrées le 26/09/2026 ; voir `reperage_vues.MARGE_SANS_VUES_M`
+#: pour le tableau des mesures et pour ce que serrer coûte).
 PIECES_PHOTO = (
-    ("DP 6", (2, 3), 1, 1),
-    ("DP 7", (2,), 2, 1),
-    ("DP 8", (2,), 2, 3),
+    ("DP 6", (2, 3), 1, 1, 50.0),
+    ("DP 7", (2,), 2, 1, 75.0),
+    ("DP 8", (2,), 2, 3, 150.0),
 )
 
 PHOTO_PAR_CODE = {ligne[0]: ligne[1:] for ligne in PIECES_PHOTO}
@@ -193,6 +214,10 @@ class RapportPPTX:
     diapos: list = field(default_factory=list)
     sommaire: list = field(default_factory=list)
     taille_mo: float = 0.0
+    #: Instant de la génération. Il horodate les fichiers téléchargés — tous,
+    #: et à la même seconde : deux boutons cliqués à une minute d'écart
+    #: donneraient sinon deux noms qui laisseraient croire à deux versions.
+    produit_le: datetime = field(default_factory=datetime.now)
     etat_polices: object | None = None
     avertissements: list = field(default_factory=list)
     origine_contrat: str | None = None
@@ -200,7 +225,15 @@ class RapportPPTX:
 
 
 def nom_sortie(projet: Projet) -> str:
+    """Nom du fichier écrit sur le disque du serveur, stable d'une fois sur l'autre."""
     return MOTIF_SORTIE.format(nom=projet.nom)
+
+
+def nom_telechargement(nom: str, instant) -> str:
+    """Nom du fichier tel que le chef de projet le reçoit, horodaté."""
+    return MOTIF_TELECHARGEMENT.format(
+        nom=nom, horodatage=instant.strftime(FORMAT_HORODATAGE)
+    )
 
 
 def generer_pptx(
@@ -326,7 +359,7 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
                 "DP 8 ne sont pas produites."
             )
         else:
-            codes.extend(code for code, _, _, _ in PIECES_PHOTO)
+            codes.extend(ligne[0] for ligne in PIECES_PHOTO)
     if projet.chemin_notice is not None:
         codes.append("DP 11")
 
@@ -354,10 +387,10 @@ def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee
                         dossier, avertissements, dpi, fond_ign=True):
     """Les planches d'une pièce : une seule, ou plusieurs alternatives."""
     if code in PHOTO_PAR_CODE:
-        emplacements, vues, alternatives = PHOTO_PAR_CODE[code]
+        emplacements, vues, alternatives, marge = PHOTO_PAR_CODE[code]
         planches, messages = _planches_photo(
             projet, code, numero, emplacements, vues, alternatives,
-            emprise_cloturee, contrat, fond_ign,
+            emprise_cloturee, contrat, fond_ign, marge,
         )
         avertissements.extend(messages)
         return Groupe(code, numero, piece(code).titre, planches=planches)
@@ -424,7 +457,7 @@ class PlanchePPTX:
 
 
 def _planches_photo(projet, code, numero, emplacements, vues, alternatives,
-                    emprise_cloturee, contrat, fond_ign=True):
+                    emprise_cloturee, contrat, fond_ign=True, marge_m=None):
     """Les diapos d'une pièce photographique : cadres vides et repères à poser.
 
     Le cadrage ne peut pas se calculer sur les points de vue — il n'y en a pas
@@ -438,6 +471,7 @@ def _planches_photo(projet, code, numero, emplacements, vues, alternatives,
         interieur_du_panneau(disposition(modele, emplacements[0]).panneau),
         f"{code} — plan de repérage",
         alternatives=alternatives,
+        marge_m=marge_m,
     )
 
     planches = []
