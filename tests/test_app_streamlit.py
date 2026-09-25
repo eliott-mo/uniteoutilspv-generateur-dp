@@ -328,11 +328,9 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     assert _titres(application) == [
         "1. Métadonnées du projet",
         "2. Plan du bureau d'études",
-        "3. Ajout de photographies et photomontages",
-        "3 bis. La carte : placer et viser les prises de vue",
-        "4. Génération",
+        "3. Génération",
     ]
-    assert _bouton_present(application, "Générer le dossier")
+    assert _bouton_present(application, "Générer le dossier à finaliser")
 
 
 def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
@@ -585,13 +583,13 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     fin = source.index(chr(10) + "def ", debut)
     bloc = source[debut:fin]
 
-    assert "_couches_de_la_carte(plan, regler_la_coupe)" in bloc
+    assert "_couches_de_la_carte(plan)" in bloc
     assert "_style_carte(style, trait)" in bloc
     assert "emprise_cadastrale" in bloc
 
     # Le choix des catégories vit dans la fonction qui les reprojette — elles
     # ne le sont qu'une fois par import, et non à chaque exécution du script.
-    debut = source.index("def _couches_de_la_carte(plan, regler_la_coupe: bool):")
+    debut = source.index("def _couches_de_la_carte(plan):")
     fin = source.index(chr(10) + "def ", debut + 1)
     couches = source[debut:fin]
 
@@ -602,13 +600,14 @@ def test_la_carte_porte_toutes_les_categories_de_la_planche():
     # qu'ils partiraient au dossier (retour d'usage du 17/09/2026).
     assert "CATEGORIES_HORS_CARTE" in couches
 
-    # Les arbres existants sortent de la carte des prises de vue, et d'elle
-    # seule : la coupe DP 3 les dessine à 8 m quand elle les traverse, et les
-    # cacher au moment de tracer reviendrait à choisir à l'aveugle ce qui sera
-    # dessiné (objection du 19/09/2026, vérifiée dans `_vegetation_sur_le_profil`).
-    assert "CATEGORIES_HORS_CARTE_DES_VUES" in couches
-    assert "regler_la_coupe=True" in source   # la carte de la coupe les garde
-    assert "regler_la_coupe=False" in source  # celle des prises de vue, non
+    # Les arbres existants, eux, restent : la coupe DP 3 les dessine à 8 m quand
+    # elle les traverse, et les cacher au moment de tracer reviendrait à choisir
+    # à l'aveugle ce qui sera dessiné (objection du 19/09/2026, vérifiée dans
+    # `_vegetation_sur_le_profil`). Ils étaient écartés de la carte des prises de
+    # vue, qui n'existe plus depuis le 26/09/2026 : une seule carte, une seule
+    # liste de couches.
+    assert "CATEGORIES_HORS_CARTE_DES_VUES" not in couches
+    assert "arbre_existant" not in couches
 
 
 def test_un_axe_a_aplat_se_trace_en_trait_sur_la_carte():
@@ -708,11 +707,13 @@ def test_un_geste_de_coupe_arme_ne_survit_pas_a_la_validation():
     fin = source.index(chr(10) + "def ", debut + 1)
     fonction = source[debut:fin]
 
-    assert 'if not regler_la_coupe and _geste_arme() == "translation_coupe":' in fonction
-    # Le trait, le bouton et le rappel sont tous tenus par le même drapeau.
-    assert "if regler_la_coupe and st.session_state.coupe_be is not None:" in fonction
-    assert "elif regler_la_coupe and st.button(" in fonction
-    assert "if regler_la_coupe and st.session_state.coupe_be is None:" in fonction
+    assert 'if not avec_la_coupe and _geste_arme() == "translation_coupe":' in fonction
+    # Le bouton et le rappel sont tenus par le même drapeau. Le trait de la coupe,
+    # lui, ne l'est plus : il reste dessiné après la validation, où la carte sert
+    # à vérifier le plan — et par où passe la coupe décide de la planche DP 3.
+    assert 'if _geste_arme() == "translation_coupe" and avec_la_coupe:' in fonction
+    assert "elif avec_la_coupe and st.button(" in fonction
+    assert "if avec_la_coupe and st.session_state.coupe_be is None:" in fonction
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -909,58 +910,6 @@ def test_le_trait_d_apercu_n_apparait_qu_une_fois_le_geste_arme(tmp_path, monkey
     assert not _calques(carte["carte"], "ApercuCoupeAuSurvol")
 
 
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_viser_pose_un_cone_qui_suit_la_souris(tmp_path, monkeypatch):
-    """« Rien ne m'indique dans quelle direction je vise. »
-
-    Retour d'usage du 22/09/2026. Le bandeau annonçait le geste, mais la carte
-    ne montrait rien : ni le point concerné, ni la direction en cours. Le cône
-    d'aperçu est ancré à la photographie et pivote vers la souris — comme le
-    trait de la coupe, et pour la même raison : tout se passe dans Leaflet, et
-    rien ne remonte à Streamlit avant le clic.
-    """
-    carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-    assert not _calques(carte["carte"], "ApercuDeVisee")
-
-    _cliquer(application, "🎯 Viser")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    assert len(_calques(carte["carte"], "ApercuDeVisee")) == 1
-    # Et pas celui du placement : un seul geste à la fois.
-    assert not _calques(carte["carte"], "ApercuDePlacement")
-
-    _cliquer(application, "Annuler")
-    application = application.run()
-    assert not _calques(carte["carte"], "ApercuDeVisee")
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_placer_pose_un_repere_qui_suit_la_souris(tmp_path, monkeypatch):
-    """Le pendant du cône pour le placement, sur une photo sans position.
-
-    Un photomontage n'a pas d'EXIF : il reste à placer, et c'est le cas où le
-    geste sert vraiment.
-    """
-    carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(application, "DP 8", [("montage.png", _image_png(), "image/png")])
-    application = application.run()
-
-    _cliquer(application, "📍 Placer")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    assert len(_calques(carte["carte"], "ApercuDePlacement")) == 1
-    # Sans position, aucun cône : viser depuis nulle part ne veut rien dire.
-    assert not _calques(carte["carte"], "ApercuDeVisee")
-
-
 def test_le_cone_d_apercu_se_fige_au_clic_et_dit_ce_qu_il_attend():
     """Au clic, Streamlit met une à deux secondes à redessiner.
 
@@ -1135,88 +1084,8 @@ def test_le_dossier_reduit_se_demande_explicitement(tmp_path, monkeypatch):
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
-    assert "4. Génération" in _titres(application)
+    assert "3. Génération" in _titres(application)
     assert _bouton_present(application, "Générer le dossier")
-
-
-def test_deux_photos_de_meme_nom_sont_refusees(tmp_path, monkeypatch):
-    """Deux fichiers de même nom dans une pièce s'écraseraient : on refuse.
-
-    Le dossier de la pièce nomme sa cible d'après le nom du fichier déposé. Deux
-    « vue.png » dans DP 7, et le second remplaçait le premier sur le disque sans
-    que rien ne le dise ; le dossier partait avec une vue de moins.
-    """
-    application = _projet_cadre(tmp_path, monkeypatch)
-    [c for c in application.checkbox if "seulement les pièces DP 1" in c.label][
-        0
-    ].set_value(True)
-    application.run()
-
-    _televerser(
-        application,
-        "DP 7",
-        [
-            ("vue.png", _image_png((200, 120, 90)), "image/png"),
-            ("vue.png", _image_png((90, 120, 200)), "image/png"),
-        ],
-    )
-    application.run()
-
-    assert not application.exception, [str(e.value) for e in application.exception]
-    refus = [erreur.value for erreur in application.error]
-    assert any("même nom" in message and "DP 7" in message for message in refus), refus
-
-    _cliquer(application, "Générer le dossier")
-    application.run()
-    assert any("même nom" in erreur.value for erreur in application.error), [
-        e.value for e in application.error
-    ]
-    assert not (tmp_path / "sortie").exists()
-
-
-def test_une_insertion_paysagere_en_pdf_le_dit(tmp_path, monkeypatch):
-    """Un PDF déposé en DP 6 ne peut pas monter en page de garde, et on le dit.
-
-    Le dépôt accepte le PDF — c'est un format normal pour la pièce — mais la
-    page de garde attend une image. Sans message, le chef de projet croyait sa
-    couverture fournie et recevait le cadre tireté.
-    """
-    application = _projet_cadre(tmp_path, monkeypatch)
-    [c for c in application.checkbox if "seulement les pièces DP 1" in c.label][
-        0
-    ].set_value(True)
-    application.run()
-
-    _televerser(
-        application, "DP 6", [("insertion.pdf", b"%PDF-1.4 factice", "application/pdf")]
-    )
-    application.run()
-
-    assert not application.exception, [str(e.value) for e in application.exception]
-    messages = [avertissement.value for avertissement in application.warning]
-    assert any(
-        "PDF" in message and "page de garde" in message for message in messages
-    ), messages
-
-
-def test_la_couverture_se_reconnait_a_l_objet_et_non_au_nom():
-    """La page de garde prend l'insertion retenue, pas son homonyme d'une autre pièce.
-
-    `_enregistrer_photos` comparait les noms de fichiers, sur les trois pièces à
-    la fois : une photo de DP 7 appelée comme l'insertion retenue prenait sa
-    place en couverture, et le dossier partait avec une vue de l'existant au
-    lieu du projet fini.
-
-    Exercer la fonction demanderait une génération complète — emprise, fonds
-    IGN, contrat sur le disque. On contrôle donc la règle à la source : la
-    comparaison se fait sur l'objet déposé.
-    """
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("def _enregistrer_photos(")
-    fin = source.index("def _enregistrer_fichiers(")
-    corps = source[debut:fin]
-    assert "if fichier is retenu:" in corps
-    assert "retenu.name" not in corps
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
@@ -1263,60 +1132,57 @@ def test_l_absence_de_notice_avertit_sans_bloquer(tmp_path, monkeypatch):
 def test_un_dossier_sans_notice_se_produit_quand_meme(tmp_path, monkeypatch):
     """Critère de validation n°6 du lot 5, sur le parcours complet.
 
-    Le dossier sort, sans la pièce DP 11, et le rapport dit qu'il est incomplet
-    pour le dépôt. C'est le seul endroit où le chef de projet peut s'en
-    apercevoir avant de déposer.
+    Le dossier sort, sans la pièce DP 11, et le rapport dit qu'il manque. C'est
+    le seul endroit où le chef de projet peut s'en apercevoir avant de déposer.
+    Mesuré sur la sortie PowerPoint depuis le 26/09/2026 : c'est la seule que
+    l'interface produise.
     """
     application = _import_valide(tmp_path, monkeypatch)
-    _cliquer(application, "Générer le dossier")
+    _cliquer(application, "Générer le dossier à finaliser")
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
-    rapport = application.session_state["dossier_genere"]["rapport"]
+    rapport = application.session_state["pptx_genere"]["rapport"]
     assert rapport.notice is None
     assert any(
-        "incomplet pour le dépôt" in message for message in rapport.avertissements
+        "Aucune notice DP 11" in message for message in rapport.avertissements
     ), rapport.avertissements
     assert "DP 11" not in [entree["numero"] for entree in rapport.sommaire]
 
 
 @pytest.mark.reseau
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_la_notice_deposee_se_retrouve_dans_l_archive(tmp_path, monkeypatch):
-    """Critère de validation n°8 du lot 5, sur le parcours complet.
+def test_la_notice_deposee_se_retrouve_dans_le_pptx(tmp_path, monkeypatch):
+    """Critère de validation n°8 du lot 5, repris sur la sortie PowerPoint.
 
-    Déposer la notice, générer, et la retrouver dans le ZIP téléchargé : c'est
-    ce que fait le chef de projet, et rien d'autre ne le vérifie.
+    Déposer la notice, générer, et la retrouver dans le fichier téléchargé :
+    c'est ce que fait le chef de projet, et rien d'autre ne le vérifie.
+
+    Ce que ce test ne peut plus affirmer, et qui est une perte assumée : que le
+    texte de la notice reste du texte. Le `.pptx` la rastérise page par page
+    (décision D6 du lot 8), et `tests/test_notice_lot5.py` continue de mesurer
+    le texte dans le PDF de la pièce.
     """
-    import io
-    import zipfile
-
-    from pypdf import PdfReader
-
     application = _import_valide(tmp_path, monkeypatch)
     _televerser(
         application, "DP 11", ("notice.pdf", _notice_pdf(pages=2), "application/pdf")
     )
     application = application.run()
-    _cliquer(application, "Générer le dossier")
+    _cliquer(application, "Générer le dossier à finaliser")
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
-    genere = application.session_state["dossier_genere"]
-    noms = zipfile.ZipFile(io.BytesIO(genere["archive"])).namelist()
-    assert "planches/DP_11_notice.pdf" in noms, noms
-
-    # La notice ferme le dossier, sur ses deux pages, et le sommaire les
-    # annonce ensemble.
-    rapport = genere["rapport"]
+    rapport = application.session_state["pptx_genere"]["rapport"]
     assert rapport.notice["pages"] == 2
+    # La notice ferme le dossier, sur ses deux pages, et le sommaire l'annonce
+    # une fois, à sa première page.
     assert rapport.sommaire[-1]["numero"] == "DP 11"
-    assemble = PdfReader(str(rapport.assemblage))
-    assert len(assemble.pages) == rapport.sommaire[-1]["page"] + 1
-
-    # Le texte de la notice est encore du texte dans le dossier assemblé.
-    derniere = assemble.pages[-1].extract_text()
-    assert "NOTICE DE SYNTHESE" in derniere, derniere
+    notice = [diapo for diapo in rapport.diapos if diapo.code == "DP 11"]
+    assert len(notice) == 2
+    assert [d.numero for d in notice] == [
+        rapport.sommaire[-1]["page"], rapport.sommaire[-1]["page"] + 1,
+    ]
+    assert rapport.fichier.exists()
 
 
 @pytest.mark.reseau
@@ -1324,58 +1190,49 @@ def test_la_notice_deposee_se_retrouve_dans_l_archive(tmp_path, monkeypatch):
 def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     tmp_path, monkeypatch
 ):
-    """Le compte rendu et ses boutons survivent à la réexécution du script.
+    """Le compte rendu et son bouton survivent à la réexécution du script.
 
-    Tout clic sur un bouton de téléchargement rejoue le script : `lancer`
-    retombe à faux et le bloc `if lancer:` disparaît, boutons compris. Le chef
-    de projet ne pouvait donc emporter qu'un seul fichier, puis devait relancer
-    une génération complète — fonds IGN compris — pour obtenir l'autre.
+    Tout clic sur un bouton de téléchargement rejoue le script : `lancer_pptx`
+    retombe à faux et le bloc `if lancer_pptx:` disparaît, bouton compris. Le
+    chef de projet devait alors relancer une génération complète — fonds IGN
+    compris — pour réessayer.
 
     Le rejeu est ici obtenu par un `run()` de plus, ce qu'est exactement une
     réexécution provoquée par un clic.
     """
     application = _import_valide(tmp_path, monkeypatch)
-    # Une notice est déposée pour que le dossier produit soit complet : ce
-    # test-ci porte sur les boutons de téléchargement, pas sur ce qui manque.
     _televerser(
         application, "DP 11", ("notice.pdf", _notice_pdf(), "application/pdf")
     )
     application = application.run()
-    _cliquer(application, "Générer le dossier")
+    _cliquer(application, "Générer le dossier à finaliser")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
-    telechargements = application.get("download_button")
-    intitules = [bouton.label for bouton in telechargements]
-    assert any("dossier complet" in intitule for intitule in intitules), intitules
-    assert any("PDF assemblé" in intitule for intitule in intitules), intitules
+    intitules = [bouton.label for bouton in application.get("download_button")]
+    assert any("PowerPoint" in intitule for intitule in intitules), intitules
 
-    # La réexécution que provoquerait un clic sur l'un d'eux.
+    # La réexécution que provoquerait un clic dessus.
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
     survivants = [bouton.label for bouton in application.get("download_button")]
-    assert any("dossier complet" in intitule for intitule in survivants), survivants
-    assert any("PDF assemblé" in intitule for intitule in survivants), survivants
+    assert any("PowerPoint" in intitule for intitule in survivants), survivants
 
 
-def test_les_deux_sorties_s_offrent_ensemble(tmp_path, monkeypatch):
-    """Le PDF et la sortie PowerPoint se lancent par deux boutons distincts.
+def test_la_seule_sortie_offerte_est_le_pptx_a_finaliser(tmp_path, monkeypatch):
+    """Un seul bouton de génération, et c'est celui du `.pptx`.
 
-    Une seule génération produisant les deux doublerait les téléchargements IGN,
-    qui font l'essentiel du temps. Le chef de projet choisit sa voie : le PDF
-    quand ses photographies sont prêtes, le PowerPoint quand il veut avancer
-    sans elles (lot 8).
+    Le bouton du PDF assemblé a été retiré le 26/09/2026 avec le dépôt des
+    photographies. Ce n'est pas un renoncement à la voie PDF, qui reste sous
+    tests : c'est qu'elle ne peut plus être juste depuis ici, faute de
+    photographies pour DP 6, DP 7 et DP 8. Elle sortirait un dossier amputé de
+    trois pièces, d'apparence complète.
     """
     application = _import_valide(tmp_path, monkeypatch)
 
-    assert _bouton_present(application, "Générer le dossier")
-    assert _bouton_present(application, "Générer la sortie PowerPoint")
-    # Aucun des deux libellés ne contient l'autre : `_cliquer` reste sans
-    # ambiguïté, et un clic ne peut pas lancer la mauvaise voie.
-    libelles = [b.label for b in application.button]
-    assert "Générer le dossier" not in "".join(
-        libelle for libelle in libelles if "PowerPoint" in libelle
-    )
+    libelles = [bouton.label for bouton in application.button]
+    generations = [l for l in libelles if l.startswith("Générer")]
+    assert generations == ["Générer le dossier à finaliser (PowerPoint)"], libelles
 
 
 @pytest.mark.reseau
@@ -1390,7 +1247,7 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
     from dp_socle.sortie_pptx import AVERTISSEMENTS_DE_PRINCIPE
 
     application = _import_valide(tmp_path, monkeypatch)
-    _cliquer(application, "Générer la sortie PowerPoint")
+    _cliquer(application, "Générer le dossier à finaliser")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
@@ -1405,991 +1262,18 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
 
 
 # ---------------------------------------------------------------------------
-# Les prises de vue des pièces photographiques (lot 6)
+# Ce que le retrait du volet photographique laisse derrière lui
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photo_placee_et_visee_se_retrouve_dans_l_archive(tmp_path, monkeypatch):
-    """Critère de validation n°6 du lot 6, sur le parcours complet.
-
-    Déposer la photographie, la placer sur la carte, viser ce qu'elle regarde,
-    générer, et retrouver la pièce dans le ZIP téléchargé : c'est ce que fait le
-    chef de projet, et rien d'autre ne le vérifie de bout en bout.
-    """
-    import io as _io
-    import zipfile
-
-    carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
-    # place seule par son EXIF. C'est la première que le parcours éprouve.
-    _televerser(
-        application,
-        "DP 7",
-        [
-            ("vue-proche.jpg", _image_png(), "image/png"),
-            (
-                "vue-seconde.jpg",
-                # Au bord du site de Saint-Cyr, dont le centre est à
-                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
-                # refuser le plan de repérage, qui se cadre sur le site.
-                _image_geolocalisee(lat=47.8540, lon=1.9670),
-                "image/jpeg",
-            ),
-        ],
-    )
-    application = application.run()
-
-    emprise = application.session_state["import_be"].plan.polygone_cloture
-    centre = emprise.centroid
-
-    # 📍 Placer : le clic dit où est la photographie.
-    _cliquer(application, "📍 Placer")
-    application = application.run()
-    carte["point"] = (centre.x - 300.0, centre.y)
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    vue = application.session_state["vues_photo"]["DP 7"]["vue-proche.jpg"]
-    assert vue["x"] == pytest.approx(centre.x - 300.0, abs=1.0)
-    assert vue.get("cap_confirme") is not True
-
-    # Le dépôt est réalimenté entre chaque geste : mesuré le 16/09/2026, un
-    # `file_uploader` alimenté par `AppTest` perd sa valeur après un
-    # `st.rerun()` programmatique, alors qu'un fichier déposé dans un navigateur
-    # y survit. C'est une limite du harnais, pas du parcours — le même nom de
-    # fichier conserve le point de vue déjà placé.
-    carte["point"] = None
-    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
-    # place seule par son EXIF. C'est la première que le parcours éprouve.
-    _televerser(
-        application,
-        "DP 7",
-        [
-            ("vue-proche.jpg", _image_png(), "image/png"),
-            (
-                "vue-seconde.jpg",
-                # Au bord du site de Saint-Cyr, dont le centre est à
-                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
-                # refuser le plan de repérage, qui se cadre sur le site.
-                _image_geolocalisee(lat=47.8540, lon=1.9670),
-                "image/jpeg",
-            ),
-        ],
-    )
-    application = application.run()
-
-    # 🎯 Viser : le second clic dit ce qu'elle regarde, et le cap s'en déduit.
-    _cliquer(application, "🎯 Viser")
-    application = application.run()
-    carte["point"] = (centre.x, centre.y)
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    vue = application.session_state["vues_photo"]["DP 7"]["vue-proche.jpg"]
-    assert vue["cap_confirme"] is True
-    # La cible est plein est de la prise de vue : cap de 90°.
-    assert vue["cap_deg"] == pytest.approx(90.0, abs=1.0)
-
-    carte["point"] = None
-    # Deux photographies : DP 7 en porte exactement deux, et la seconde se
-    # place seule par son EXIF. C'est la première que le parcours éprouve.
-    _televerser(
-        application,
-        "DP 7",
-        [
-            ("vue-proche.jpg", _image_png(), "image/png"),
-            (
-                "vue-seconde.jpg",
-                # Au bord du site de Saint-Cyr, dont le centre est à
-                # 47,85273 / 1,97003 : un point de vue trop lointain ferait
-                # refuser le plan de repérage, qui se cadre sur le site.
-                _image_geolocalisee(lat=47.8540, lon=1.9670),
-                "image/jpeg",
-            ),
-        ],
-    )
-    application = application.run()
-    _cliquer(application, "Générer le dossier")
-    application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    genere = application.session_state["dossier_genere"]
-    noms = zipfile.ZipFile(_io.BytesIO(genere["archive"])).namelist()
-    assert "planches/DP_7_environnement_proche.pdf" in noms, (
-        [m for m in genere["rapport"].avertissements if "DP 7" in m] or noms
-    )
-    assert "planches/DP_7_environnement_proche.pdf" in noms
-    assert any(entree["numero"] == "DP 7" for entree in genere["rapport"].sommaire)
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_viser_avant_de_placer_est_refuse(tmp_path, monkeypatch):
-    """Le cap se mesure depuis une position, pas depuis rien.
-
-    Le bouton est désactivé tant que la photographie n'est pas placée : le test
-    vérifie qu'il l'est, plutôt que d'éprouver un garde-fou que l'écran ne
-    laisse pas atteindre.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(application, "DP 7", [("vue.jpg", _image_png(), "image/png")])
-    application = application.run()
-
-    viser = [b for b in application.button if "Viser" in b.label]
-    assert viser, "le bouton de visée manque"
-    assert viser[0].disabled
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photo_remplacee_par_une_autre_oublie_son_point_de_vue(
-    tmp_path, monkeypatch
-):
-    """Sinon la planche portait un repère pour une image qui n'est plus là.
-
-    Le dépôt vide, lui, ne nettoie rien : il ne se distingue pas d'un dépôt
-    momentanément vide, et `_photographies_du_projet` part de toute façon des
-    fichiers déposés.
-    """
-    carte = _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(application, "DP 7", [("vue.jpg", _image_png(), "image/png")])
-    application = application.run()
-    _cliquer(application, "📍 Placer")
-    application = application.run()
-    emprise = application.session_state["import_be"].plan.polygone_cloture
-    carte["point"] = (emprise.centroid.x, emprise.centroid.y)
-    application = application.run()
-    assert "vue.jpg" in application.session_state["vues_photo"]["DP 7"]
-
-    carte["point"] = None
-    # Un nouveau dépôt remplace la sélection : c'est ce que fait le navigateur
-    # quand on redépose dans le même champ.
-    _televerser(
-        application, "DP 7", [("autre.jpg", _image_png(), "image/png")],
-        remplacer=True,
-    )
-    application = application.run()
-    assert "vue.jpg" not in application.session_state["vues_photo"]["DP 7"]
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photo_geolocalisee_se_place_seule(tmp_path, monkeypatch):
-    """L'EXIF d'une photographie de visite porte déjà sa position.
-
-    La redemander au chef de projet serait lui faire saisir ce que le fichier
-    contient. Le cap, lui, reste une proposition : aucun cône tant qu'il n'a pas
-    été visé sur fond satellite.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application,
-        "DP 8",
-        [("visite.jpg", _image_geolocalisee(cap=212.0), "image/jpeg")],
-    )
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    vue = application.session_state["vues_photo"]["DP 8"]["visite.jpg"]
-    assert vue["x"] is not None and vue["y"] is not None
-    assert vue["origine_position"] == "exif"
-    # Le cap est lu et fait un cône — « si le chef de projet a déjà fait
-    # l'effort de le placer, c'est désagréable d'avoir à le refaire »
-    # (26/09/2026) — mais la ligne dit qu'il sort de l'appareil.
-    assert vue["cap_deg"] == pytest.approx(212.0, abs=0.5)
-    assert vue["cap_confirme"] is True
-    assert vue["cap_verifie"] is False
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photo_sans_exif_reste_a_placer(tmp_path, monkeypatch):
-    """Un photomontage est un rendu : il n'a aucune position à livrer."""
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(application, "DP 8", [("montage.png", _image_png(), "image/png")])
-    application = application.run()
-
-    vue = application.session_state["vues_photo"]["DP 8"]["montage.png"]
-    assert vue.get("x") is None
-    assert vue["exif_lu"] is True
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_le_cadrage_regle_a_l_ecran_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
-    """Ce que le chef de projet règle doit atteindre la planche.
-
-    Le cadrage se pose au clic sur l'image depuis le 24/09/2026, et le
-    composant qui le reçoit n'est pas pilotable depuis `AppTest`. Ce qui se
-    mesure ici est l'autre moitié du chemin, celle qui compte : un cadrage
-    posé en session se retrouve dans `projet.json`, donc sur la planche.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-
-    application.session_state["vues_photo"]["DP 8"]["visite.jpg"]["cadrage"] = -0.30
-    _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    photographies = application.session_state["vues_photo"]["DP 8"]["visite.jpg"]
-    assert photographies["cadrage"] == pytest.approx(-0.30)
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_l_image_se_clique_pour_choisir_ce_que_le_cadre_garde(tmp_path, monkeypatch):
-    """Plus de curseur : « on est obligé de bouger le curseur, attendre une à
-    deux secondes, et refaire des essais-erreurs » (24/09/2026).
-
-    L'aperçu porte le cadre et se clique. Le composant ne se pilote pas depuis
-    `AppTest` — ce qui se vérifie est qu'aucun curseur ne subsiste, et que
-    l'écran dit le geste.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 8", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-
-    assert not [c for c in application.slider if "cadre" in c.label.lower()]
-    legendes = "\n".join(bloc.value for bloc in application.get("caption"))
-    assert "Cliquez sur l'image" in legendes, legendes
-
-
-# ---------------------------------------------------------------------------
-# Reprendre un rapport de visite photos-geoloc
-# ---------------------------------------------------------------------------
-
-
-def _cases_du_rapport(application):
-    """Les cases à cocher de la galerie du rapport, dans l'ordre.
-
-    Depuis le 25/09/2026 la galerie sert à trier — verser ou non — et la pièce
-    se choisit ensuite dans le tableau commun, avec les photographies déposées.
-    La case dit « Verser » et non la pièce : la nommer laissait croire qu'on ne
-    pouvait verser que celle-là (« je ne peux cocher que des DP 7 »).
-    """
-    return [c for c in application.checkbox if c.label == "Verser"]
-
-
-def _carte_photos(points) -> bytes:
-    """Une carte photos-geoloc minimale, avec de vraies images en base64."""
-    import base64
-    import io
-    import json
-
-    from PIL import Image
-
-    def _image_base64(teinte):
-        tampon = io.BytesIO()
-        Image.new("RGB", (120, 80), teinte).save(tampon, format="JPEG")
-        return base64.b64encode(tampon.getvalue()).decode("ascii")
-
-    ecrits = []
-    for rang, (nom, lat, lon, cap, manuel) in enumerate(points):
-        point = {
-            "id": rang, "nom": nom, "ordre": rang,
-            "lat_brut": lat, "lon_brut": lon,
-            "lat_manuel": None, "lon_manuel": None, "lat": lat, "lon": lon,
-            "cap_brut": cap, "cap_manuel": cap if manuel else None,
-            "cap": cap, "precision_m": None, "masque": False, "commentaire": "",
-            "image": _image_base64((160 + 20 * rang, 180, 150)),
-        }
-        ecrits.append(point)
-    donnees = {
-        "version": 5, "titre": "Visite de site", "offset": 0.0,
-        "emprise": None, "points": ecrits,
-    }
-    return (
-        "<html><body>"
-        + '<script id="donnees-carte" type="application/json">'
-        + json.dumps(donnees, ensure_ascii=False)
-        + "</script></body></html>"
-    ).encode("utf-8")
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_un_rapport_de_visite_se_reprend_avec_ses_points_de_vue(tmp_path, monkeypatch):
-    """L'entrée de premier choix du lot : le travail déjà fait ne se refait pas.
-
-    Une direction **figée à la main** dans le rapport part confirmée ; elle fera
-    donc dessiner un cône sans qu'on ait à viser de nouveau.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    # Saint-Cyr : un point tout près du site, un autre à plus d'un kilomètre.
-    carte = _carte_photos([
-        ("proche.jpeg", 47.85268, 1.96650, 212.0, True),
-        ("lointaine.jpeg", 47.85793, 1.94968, None, False),
-    ])
-    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    # Rien n'est retenu tant que le chef de projet n'a pas choisi : le bouton
-    # reste hors d'atteinte, et c'est tout l'objet du défaut « Ne pas retenir ».
-    reprendre = [b for b in application.button if "au projet" in b.label]
-    assert reprendre and reprendre[0].disabled
-
-    # Les widgets sont reconstruits à chaque exécution : la liste se relit à
-    # chaque tour, sinon la seconde référence pointe sur un objet périmé et son
-    # choix se perd en silence.
-    # Les widgets sont reconstruits à chaque exécution : la liste se relit à
-    # chaque tour, sinon la seconde référence pointe sur un objet périmé.
-    for rang in range(2):
-        _cases_du_rapport(application)[rang].check()
-        application = application.run()
-
-    _cliquer(application, "Verser ces")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    reprises = application.session_state["photos_reprises"]
-    retenues = {nom for par_nom in reprises.values() for nom in par_nom}
-    assert retenues == {"proche.jpg", "lointaine.jpg"}, reprises
-
-    # La direction figée dans le rapport fait autorité, et rien d'autre.
-    vues = application.session_state["vues_photo"]
-    confirmes = [
-        vue for par_nom in vues.values() for vue in par_nom.values()
-        if vue.get("cap_confirme")
-    ]
-    assert len(confirmes) == 1
-    assert confirmes[0]["cap_deg"] == pytest.approx(212.0, abs=0.5)
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_la_piece_proposee_suit_la_distance_au_site(tmp_path, monkeypatch):
-    """La pièce est suggérée, jamais choisie d'office.
-
-    DP 7 est l'environnement proche, DP 8 le paysage lointain.
-
-    Chaque point se range donc seul, et le chef de projet ne corrige que ce qui
-    n'est pas évident. Positions calculées le 16/09/2026 sur les bornes réelles
-    de Saint-Cyr : 90 m du site pour la première, 1 396 m pour la seconde.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    carte = _carte_photos([
-        ("proche.jpeg", 47.85268, 1.96650, None, False),
-        ("lointaine.jpeg", 47.85793, 1.94968, None, False),
-    ])
-    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
-    application = application.run()
-
-    # Rien n'est coché d'avance : une visite de vingt-cinq photographies ne
-    # doit pas en verser vingt-cinq au dossier parce que personne n'a rien dit.
-    cases = _cases_du_rapport(application)
-    assert [case.value for case in cases] == [False, False]
-    # La distance au site nomme en revanche la pièce sous la vignette, pour
-    # n'avoir à corriger que ce qui n'est pas évident.
-    suggestions = [
-        c.value for c in application.caption if "d'après sa distance" in c.value
-    ]
-    assert "DP 7" in suggestions[0] and "DP 8" in suggestions[1], suggestions
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_carte_illisible_est_refusee_sans_bloquer_l_ecran(tmp_path, monkeypatch):
-    """Le chef de projet doit pouvoir corriger, pas se retrouver devant un mur."""
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "Carte du rapport",
-        ("pas-une-carte.htm", b"<html><body>bonjour</body></html>", "text/html"),
-    )
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-    assert any(
-        "n'est pas une carte" in erreur.value for erreur in application.error
-    ), [e.value for e in application.error]
-
-
-# ---------------------------------------------------------------------------
-# Le dépôt des fichiers, qui se rejoue à chaque interaction
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_un_fichier_inchange_n_est_pas_reecrit_a_chaque_interaction(
-    tmp_path, monkeypatch
-):
-    """Signalé en usage réel le 16/09/2026, sur un PermissionError de OneDrive.
-
-    `_deposer` vit dans le flux principal : il se rejouait donc à chaque clic, et
-    réécrivait le DXF et le classeur — plusieurs dizaines de mégaoctets — pour
-    rien. Dans un dossier synchronisé, le service tenait le fichier ouvert
-    pendant son téléversement et l'écriture échouait.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _plan_importe(tmp_path, monkeypatch)
-    depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
-    assert depose.exists(), "le DXF déposé est introuvable"
-
-    ecrit_le = depose.stat().st_mtime_ns
-    # Une interaction quelconque : le script se rejoue en entier.
-    _cliquer(application, "Déplacer la coupe")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-    assert depose.stat().st_mtime_ns == ecrit_le, (
-        "le DXF a été réécrit alors qu'il n'avait pas changé"
-    )
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_un_fichier_efface_du_disque_est_reecrit(tmp_path, monkeypatch):
-    """L'existence se vérifie, et pas seulement la mémoire de session.
-
-    Sans cela, un fichier effacé entre deux exécutions n'était jamais réécrit, et
-    la génération échouait plus tard sur un chemin qui ne mène nulle part.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _plan_importe(tmp_path, monkeypatch)
-    depose = tmp_path / "projets" / "PV-SAINT-CYR" / DXF.name
-    depose.unlink()
-
-    _cliquer(application, "Déplacer la coupe")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-    assert depose.exists(), "le DXF effacé n'a pas été réécrit"
-
-
-def test_un_fichier_verrouille_designe_la_vraie_cause(tmp_path, monkeypatch):
-    """Un PermissionError brut est une trace que le chef de projet ne lit pas.
-
-    Sous Windows la cause est presque toujours un autre programme qui tient le
-    fichier — OneDrive, un antivirus, ou le logiciel qui l'a produit.
-    """
-    import sys
-
-    sys.path.insert(0, str(RACINE)) if str(RACINE) not in sys.path else None
-    from dp_socle.erreurs import ErreurDepot
-
-    import app as application_module
-
-    cible = tmp_path / "verrouille.dxf"
-
-    def _refuser(*_args, **_kwargs):
-        raise PermissionError(13, "Permission denied")
-
-    monkeypatch.setattr(Path, "write_bytes", _refuser)
-    with pytest.raises(ErreurDepot, match="tient ouvert"):
-        application_module._ecrire_depose(cible, b"peu importe")
-
-
-# ---------------------------------------------------------------------------
-# Le bruit des avertissements, et les photographies reprises
-# ---------------------------------------------------------------------------
-
-
-def test_les_messages_de_routine_se_replient():
-    """Un avertissement qu'on ne lit plus ne protège plus de rien.
-
-    Mesuré le 17/09/2026 sur le plan de Sarnois : vingt-deux messages, dont onze
-    qui disaient seulement quels calques de travail avaient été écartés. Ils
-    noyaient les quatre qui demandaient une action, dont deux écarts de surface
-    de 100 %.
-    """
-    import sys
-
-    if str(RACINE) not in sys.path:
-        sys.path.insert(0, str(RACINE))
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    espace = {}
-    exec(  # noqa: S102 — la fonction est extraite du script, qui ne s'importe pas
-        source[
-            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
-                "def _tableau_controles("
-            )
-        ],
-        espace,
-    )
-    trier = espace["_trier_les_avertissements"]
-
-    _, a_lire, routine = trier([
-        "16 calque(s) écarté(s) — fond cadastral du BE, remplacé par le WFS IGN : CAD_1",
-        "10533 annotation(s) écartée(s) (4394 3DSOLID) : textes et cotations",
-        "1 entité(s) sans calque écartée(s) (1 GEOMAPIMAGE).",
-        "Surface de voie lourde : Écart de 100.0%, au-delà des 5% admis.",
-        "Calque « ESPACE VERT » : 1 géométrie(s) invalide(s).",
-    ])
-    assert len(routine) == 3
-    assert a_lire == [
-        "Surface de voie lourde : Écart de 100.0%, au-delà des 5% admis.",
-        "Calque « ESPACE VERT » : 1 géométrie(s) invalide(s).",
-    ]
-
-
-def test_un_message_de_forme_inconnue_reste_visible():
-    """Le repli est sûr : ce qui n'est pas reconnu s'affiche.
-
-    Le classement se fait sur le texte, ce qui est fragile. Un message dont la
-    formulation change doit redevenir visible, jamais se replier en silence.
-    """
-    import sys
-
-    if str(RACINE) not in sys.path:
-        sys.path.insert(0, str(RACINE))
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    espace = {}
-    exec(  # noqa: S102
-        source[
-            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
-                "def _tableau_controles("
-            )
-        ],
-        espace,
-    )
-    _, a_lire, routine = espace["_trier_les_avertissements"](
-        ["Trois calques ont été laissés de côté"]
-    )
-    assert a_lire and not routine
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_vue_dp6_a_une_seule_image_est_signalee_avant_de_generer(
-    tmp_path, monkeypatch
-):
-    """« DP 6 n'est pas dedans, j'avais pourtant choisi une image brute. »
-
-    Retour d'usage du 22/09/2026. Le refus était juste — une insertion
-    paysagère compare l'état actuel et le projet, une image seule ne compare
-    rien — mais il tombait à la génération, au bout du parcours, dans le
-    rapport. Il se dit maintenant là où le photomontage peut encore être
-    déposé.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 6", [("brute.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    # L'EXIF l'a placée : elle compte, et il en manque donc une.
-    assert application.session_state["vues_photo"]["DP 6"]["brute.jpg"]["x"]
-    alertes = [a.value for a in application.warning]
-    assert any("une seule photographie" in a for a in alertes), alertes
-    assert any("photomontage" in a for a in alertes), alertes
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_vue_dp6_complete_ne_se_fait_rien_reprocher(tmp_path, monkeypatch):
-    """Deux volets sur la même vue : la planche sortira, rien à signaler."""
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application,
-        "DP 6",
-        [
-            ("brute.jpg", _image_geolocalisee(), "image/jpeg"),
-            ("montage.jpg", _image_geolocalisee(lat=47.9001), "image/jpeg"),
-        ],
-    )
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    # Les deux sont sur la vue A par défaut : c'est la même prise de vue.
-    alertes = [a.value for a in application.warning]
-    assert not any("une seule photographie" in a for a in alertes), alertes
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photo_reprise_du_rapport_se_place_et_se_recadre(tmp_path, monkeypatch):
-    """Elle compte autant qu'une photographie déposée à la main.
-
-    Signalé à l'usage le 17/09/2026 : le bloc ne comptait que les dépôts, et
-    sortait en annonçant « aucune photographie » à un chef de projet qui venait
-    d'en reprendre douze d'un rapport. Ni bouton pour les placer, ni curseur pour
-    les recadrer — alors qu'elles s'affichaient bien sur la carte.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    carte = _carte_photos([("proche.jpeg", 47.85268, 1.96650, 212.0, True)])
-    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
-    application = application.run()
-    _cases_du_rapport(application)[0].check()
-    application = application.run()
-    _cliquer(application, "Verser ces")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    assert _bouton_present(application, "📍 Placer"), [
-        b.label for b in application.button
-    ]
-    assert _bouton_present(application, "🎯 Viser")
-    # Son image du rapport a déjà le rapport de son emplacement : il n'y a rien
-    # à rogner, et c'est ce que la ligne dit à la place du curseur. L'un ou
-    # l'autre prouve que la photographie reprise est bien rendue.
-    legendes = [c.value for c in application.get("caption")]
-    # Son cadrage se règle au clic sur l'image, ou il n'y a rien à rogner :
-    # l'un ou l'autre prouve que la photographie reprise est bien rendue.
-    assert any(
-        "Cliquez sur l'image" in legende or "Rien à rogner" in legende
-        for legende in legendes
-    ), legendes
-
-
-def test_un_curseur_de_recadrage_ne_s_affiche_que_s_il_peut_rogner(
-    tmp_path, monkeypatch
-):
-    """« Le recadrage ne fonctionne pas, je bouge le curseur et il ne se passe
-    rien. » Retour d'usage du 22/09/2026 — et pour cause.
-
-    L'emplacement de la planche prend le rapport **médian** des photographies
-    d'une pièce. Quand elles viennent toutes du même appareil, elles ont toutes
-    ce rapport : il n'y a rien à retirer, et le curseur n'a rien à déplacer.
-    Un curseur qui ne peut rien faire doit le dire.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    # Au format de l'emplacement — 1,92:1 pour les deux cadres d'une DP 8 —
-    # il n'y a rien à retirer. Toute autre photographie sera rognée, et le
-    # curseur sert alors à choisir ce qu'on garde.
-    _televerser(
-        application,
-        "DP 8",
-        [("visite.jpg", _image_geolocalisee(taille=(1924, 1000)), "image/jpeg")],
-    )
-    application = application.run()
-
-    assert not [c for c in application.slider if "cadre garde" in c.label]
-    legendes = [c.value for c in application.get("caption")]
-    assert any("Rien à rogner" in legende for legende in legendes), legendes
-
-
-def test_les_demandes_au_bureau_d_etudes_sont_rassemblees():
-    """« Comme je ne serai pas toujours là pour vérifier les plans. »
-
-    Un chef de projet qui reçoit un plan incomplet doit savoir exactement quoi
-    redemander, sans trier lui-même une vingtaine de remarques ni connaître le
-    DXF. La demande est recopiable telle quelle, et nomme ce qu'elle concerne.
-    """
-    import sys
-
-    if str(RACINE) not in sys.path:
-        sys.path.insert(0, str(RACINE))
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    espace = {}
-    exec(  # noqa: S102
-        source[
-            source.index("MOTIFS_DE_ROUTINE = (") : source.index(
-                "def _trancher_les_voiries("
-            )
-        ],
-        espace,
-    )
-    au_be, a_lire, routine = espace["_trier_les_avertissements"]([
-        "Calque « PVcase Road » : 13 remplissage(s) HATCH et aucune polyligne. "
-        "L'élément serait perdu — à demander au bureau d'études : le contour de "
-        "cet élément, en polyligne fermée.",
-        "16 calque(s) écarté(s) — fond cadastral du BE : CAD_1",
-        "Calque « UNI_Cloture » : 1 sommet(s) dupliqué(s).",
-    ])
-    assert len(au_be) == 1 and len(routine) == 1 and len(a_lire) == 1
-    # La demande porte ce qu'elle concerne : « le contour de cet élément » seul
-    # ne dirait pas de quel élément il s'agit.
-    demande = espace["_demande_au_be"](au_be[0])
-    assert demande.startswith("Calque « PVcase Road » —")
-    assert "polyligne fermée" in demande
-    assert "HATCH" not in demande
-
-
-def _calcul_du_cadrage():
-    """`_cadrage_depuis_le_clic` tirée du source, hors de Streamlit."""
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("def _cadrage_depuis_le_clic(")
-    fin = source.index(chr(10) + "def ", debut + 1)
-    espace = {}
-    exec(source[debut:fin], espace)  # noqa: S102 — code du dépôt
-    return espace["_cadrage_depuis_le_clic"]
-
-
-def test_le_cadre_se_centre_sur_le_point_clique():
-    """« On clique et ça sélectionne le cadrage à garder. »
-
-    Retour d'usage du 24/09/2026. Le curseur demandait des essais-erreurs : on
-    le bougeait, on attendait le rerun, et on découvrait où le cadre était
-    allé. Le clic dit où le cadre doit être, et il y va.
-    """
-    from dp_socle.planches.photographies import fenetre_de_cadrage
-
-    calcul = _calcul_du_cadrage()
-    taille, rapport = (460, 613), 1.924  # une image portrait dans un bandeau
-
-    for y in (150, 306, 460):
-        cadrage = calcul(taille, rapport, {"x": 230, "y": y})
-        boite, _ = fenetre_de_cadrage(taille, rapport, (cadrage, cadrage))
-        milieu = (boite[1] + boite[3]) / 2
-        assert milieu == pytest.approx(y, abs=1.0), (y, milieu)
-
-
-def test_un_clic_au_bord_ne_fait_pas_sortir_le_cadre_de_l_image():
-    """Le cadre reste dans la photographie : il n'y a rien au-delà."""
-    from dp_socle.planches.photographies import fenetre_de_cadrage
-
-    calcul = _calcul_du_cadrage()
-    taille, rapport = (460, 613), 1.924
-
-    for y in (0, 613):
-        cadrage = calcul(taille, rapport, {"x": 230, "y": y})
-        assert -0.5 <= cadrage <= 0.5
-        boite, _ = fenetre_de_cadrage(taille, rapport, (cadrage, cadrage))
-        assert boite[1] >= -0.5 and boite[3] <= taille[1] + 0.5
-
-
-def test_le_clic_agit_sur_l_axe_que_le_rognage_touche():
-    """Le rognage n'en touche qu'un : l'autre ne veut rien dire.
-
-    Une photographie plus panoramique que son emplacement perd de la largeur,
-    et c'est alors l'abscisse du clic qui compte ; sinon c'est l'ordonnée.
-    """
-    calcul = _calcul_du_cadrage()
-
-    # Panoramique dans un cadre plus carré : le clic horizontal agit.
-    large = calcul((900, 300), 1.5, {"x": 200, "y": 150})
-    assert large is not None and large != calcul((900, 300), 1.5, {"x": 700, "y": 150})
-    # Et le vertical ne change rien, puisque la hauteur est déjà au format.
-    assert calcul((900, 300), 1.5, {"x": 200, "y": 10}) == large
-
-    # Une image déjà au format n'a aucun jeu : le clic ne décide de rien.
-    assert calcul((900, 600), 1.5, {"x": 200, "y": 150}) is None
-
-
-# ---------------------------------------------------------------------------
-# Les deux portes, et le tableau unique
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_les_photographies_entrent_par_un_seul_depot(tmp_path, monkeypatch):
-    """« Pas très clair la différence entre l'ajout des photos avec le rapport
-    HTML et l'ajout en simple clic-drop. » Retour d'usage du 22/09/2026.
-
-    Il y avait trois dépôts — un par pièce — plus celui du rapport, et rien ne
-    disait qu'on pouvait les combiner. Il n'y a plus qu'un dépôt de fichiers et
-    un dépôt de rapport, et la pièce se choisit ensuite, la même façon pour les
-    deux.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-
-    libelles = [t.label for t in application.get("file_uploader")]
-    assert "Photographies et photomontages" in libelles, libelles
-    for code in ("DP 6 —", "DP 7 —", "DP 8 —"):
-        assert not any(l.startswith(code) for l in libelles), libelles
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photographie_sans_piece_n_entre_dans_aucune(tmp_path, monkeypatch):
-    """« À choisir » fait le défaut : rien ne part au dossier sans décision.
-
-    Une pièce proposée d'emblée ferait entrer au dossier ce qu'on n'a pas
-    choisi — le même travers que la galerie du rapport avant le 17/09/2026.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    depot = _televersement(application, "Photographies et photomontages")
-    depot.set_value([("orpheline.jpg", _image_geolocalisee(), "image/jpeg")])
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    choix = [b for b in application.selectbox if b.label == "Pièce"]
-    assert choix and choix[0].value == "À choisir", [b.value for b in choix]
-    # Sans pièce, elle n'est pas à placer : elle n'est dans aucune.
-    try:
-        vues = application.session_state["vues_photo"]
-    except KeyError:
-        vues = {}
-    assert not vues.get("DP 7")
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_le_compte_de_chaque_piece_se_lit_avant_de_generer(tmp_path, monkeypatch):
-    """« En s'assurant bien d'avoir 2 images pour DP 7, 2 pour DP 8. »
-
-    Le contrôle vivait en avertissements dispersés sous chaque pièce ; il se lit
-    d'un coup, en tête du tableau, avant de descendre placer les prises de vue.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 7", [("seule.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-
-    compteurs = {m.label: m.value for m in application.get("metric")}
-    assert compteurs.get("DP 7") == "1 / 2", compteurs
-    assert compteurs.get("DP 8") == "0 / 2", compteurs
-    assert compteurs.get("DP 6") == "0 / 2 à 3", compteurs
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_changer_une_photographie_de_piece_garde_son_placement(
-    tmp_path, monkeypatch
-):
-    """Position, direction et cadrage tiennent à la photographie, pas à la pièce.
-
-    Les reperdre en corrigeant une affectation ferait tout replacer, alors que
-    l'erreur ne porte que sur la pièce.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application, "DP 7", [("visite.jpg", _image_geolocalisee(), "image/jpeg")]
-    )
-    application = application.run()
-    posee = application.session_state["vues_photo"]["DP 7"]["visite.jpg"]
-    assert posee["x"] is not None
-
-    choix = [b for b in application.selectbox if b.label == "Pièce"]
-    choix[0].set_value("DP 8")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    vues = application.session_state["vues_photo"]
-    assert "visite.jpg" not in vues.get("DP 7", {})
-    assert vues["DP 8"]["visite.jpg"]["x"] == pytest.approx(posee["x"])
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_une_photographie_versee_du_rapport_s_affiche_sans_planter(
-    tmp_path, monkeypatch
-):
-    """« '_PhotoReprise' object has no attribute 'format' » — 25/09/2026.
-
-    Streamlit ne sait rien faire d'un `_PhotoReprise` : il attend des octets,
-    un chemin ou une image Pillow. La page plantait dès qu'une photographie
-    versée d'un rapport devait s'afficher en couverture — cas qu'aucun test
-    n'atteignait, les photographies versées n'ayant jamais été des DP 6.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    carte = _carte_photos([("insertion.jpeg", 47.85268, 1.96650, 212.0, True)])
-    _televerser(application, "Carte du rapport", ("rapport.htm", carte, "text/html"))
-    application = application.run()
-    _cases_du_rapport(application)[0].check()
-    application = application.run()
-    _cliquer(application, "Verser ces")
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    # Versée puis rangée en DP 6 : c'est elle qui monte en page de garde.
-    application.session_state["piece_de_la_photo"] = {"insertion.jpeg": "DP 6"}
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    legendes = [c.value for c in application.get("caption")]
-    assert any("Page de garde" in legende for legende in legendes), legendes
-
-
-def test_la_couverture_ne_montre_qu_une_vignette():
-    """« Elle est énorme et ce n'est pas utile » (25/09/2026).
-
-    Le tableau des photographies montre déjà chaque image en grand, cadre
-    compris : la mosaïque de toutes les insertions faisait doublon juste en
-    dessous. Ne reste que celle qui monte en couverture, en vignette.
-    """
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("if image_garde is not None:")
-    fin = source.index("st.divider()", debut)
-    bloc = source[debut:fin]
-
-    assert "LARGEUR_VIGNETTE_COUVERTURE_PX" in bloc
-    assert 'width="stretch"' not in bloc
-    # Et elle passe par les octets, seul format que Streamlit sache lire pour
-    # une photographie versée d'un rapport.
-    assert "_octets_de(image_garde)" in bloc
-
-
-# ---------------------------------------------------------------------------
-# Ce que l'écran transmet au navigateur
-# ---------------------------------------------------------------------------
-
-
-def test_un_apercu_est_reduit_avant_d_etre_transmis():
-    """« Ça rame vraiment beaucoup à chaque action » — 26/09/2026.
-
-    Le cadre se dessinait sur l'image pleine — 4 032 px pour une photographie
-    de visite — puis Streamlit la renvoyait entière au navigateur, qui
-    l'affichait à 460 px. Mesuré : 35 Mo transmis par image et par exécution du
-    script, contre 18 Ko une fois réduite. Avec six photographies à l'écran,
-    c'est ce qui figeait la page plusieurs secondes à chaque geste.
-    """
-    import io
-
-    from PIL import Image
-
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("def _dessiner_le_cadre(")
-    fin = source.index(chr(10) + "@st.cache_data", debut)
-    espace = {"LARGEUR_APERCU_PX": 460, "VOILE_HORS_CADRE": 0.35,
-              "TRAIT_DU_CADRE": 0.006}
-    exec(source[debut:fin], espace)  # noqa: S102 — code du dépôt
-
-    grande = Image.new("RGB", (4032, 3024), (120, 150, 180))
-    apercu = espace["_dessiner_le_cadre"](grande, 1.92, 0.0)
-    assert apercu.width <= 460, apercu.size
-
-    tampon = io.BytesIO()
-    apercu.save(tampon, format="JPEG", quality=80)
-    assert len(tampon.getvalue()) < 200_000, len(tampon.getvalue())
-
-
-def test_le_composant_de_cadrage_transmet_du_jpeg():
-    """PNG sans compression par défaut : 465 Ko là où le JPEG rend 18 Ko.
-
-    À l'œil, aucune différence sur un aperçu de cadrage.
-    """
-    source = (RACINE / "app.py").read_text(encoding="utf-8")
-    debut = source.index("def _apercu_cliquable(")
-    fin = source.index(chr(10) + "def ", debut + 1)
-    bloc = source[debut:fin]
-
-    assert 'image_format="JPEG"' in bloc
-    assert "jpeg_quality" in bloc
-
-
-@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
-def test_un_volet_dp6_n_a_ni_a_etre_place_ni_a_etre_vise(tmp_path, monkeypatch):
-    """« Elle hérite de la position de l'image brute » — 26/09/2026.
-
-    Un photomontage n'a été nulle part : il montre le même point de vue que
-    l'image brute. Lui demander de se placer, c'est demander deux fois la même
-    chose.
-    """
-    _carte_cliquable(monkeypatch)
-    application = _import_valide(tmp_path, monkeypatch)
-    _televerser(
-        application,
-        "DP 6",
-        [
-            ("brute.jpg", _image_geolocalisee(), "image/jpeg"),
-            ("montage.jpg", _image_png(), "image/png"),
-        ],
-    )
-    application = application.run()
-
-    # Le second volet, désigné comme tel, perd ses deux boutons. Le choix
-    # passe par le sélecteur : un widget réécrit sa valeur à chaque exécution,
-    # et la poser en session serait effacé au tour suivant.
-    volets = [b for b in application.selectbox if b.key == "volet_de_montage.jpg"]
-    assert volets, [b.key for b in application.selectbox]
-    volets[0].set_value(1)
-    application = application.run()
-    assert not application.exception, [str(e.value) for e in application.exception]
-
-    assert not [b for b in application.button if b.key == "placer_DP 6_montage.jpg"]
-    assert not [b for b in application.button if b.key == "viser_DP 6_montage.jpg"]
-    # L'image brute, elle, garde les siens.
-    assert [b for b in application.button if b.key == "placer_DP 6_brute.jpg"]
-    legendes = [c.value for c in application.get("caption")]
-    assert any("hérite du point de vue" in legende for legende in legendes), legendes
+#
+# Un millier de lignes de tests vivaient ici : le dépôt des photographies par
+# deux portes, la reprise d'un rapport `photos-geoloc`, le placement et la visée
+# sur la carte, le cadrage au clic, et le bruit des avertissements qui les
+# accompagnait. Les sections qu'ils mesuraient ont été retirées de l'interface
+# le 26/09/2026 : le volet photographique se traite dans le `.pptx` du lot 8.
+#
+# Ce qui les remplace n'est pas rien, et n'est pas ici : `tests/test_sortie_pptx_lot8.py`
+# mesure les cadres vides, leurs intitulés et les repères de vue dans le fichier
+# produit, et `tests/test_photographies_lot6.py` continue de mesurer les planches
+# DP 6 à DP 8 elles-mêmes. Ce qui n'est plus mesuré nulle part, parce que plus
+# personne ne le fait, c'est le contrôle de la position d'un cône contre l'EXIF
+# de sa photographie.
