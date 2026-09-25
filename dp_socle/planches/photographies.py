@@ -70,6 +70,9 @@ from .reperage_vues import dessiner_points_de_vue, plan_de_reperage
 #: déduit du blanc tournant, qui est la marge unique de toutes nos planches.
 LARGEUR_COLONNE_IMAGES_MM = 229.0
 
+#: Largeur en dessous de laquelle le plan de repérage ne se lit plus.
+LARGEUR_REPERAGE_MINIMALE_MM = 60.0
+
 #: Hauteur minimale d'une image sur la planche. En dessous, une insertion
 #: paysagère ne se lit plus : c'est la comparaison avant/après qui fait la
 #: pièce, et elle demande de voir le paysage.
@@ -82,6 +85,94 @@ ROGNAGE_SIGNALE = 0.12
 #: le PDF. Au-delà, le poids du dossier croît sans rien apporter à l'impression :
 #: une photographie de 4 000 px dans un cadre de 222 mm porterait du 460 dpi.
 DPI_IMAGE = 300
+
+
+@dataclass(frozen=True)
+class Emplacement:
+    """Un cadre de la colonne d'images, et la place de l'image dedans.
+
+    Les deux sont en millimètres papier : `(x, y, largeur, hauteur)`.
+    """
+
+    cadre: tuple
+    image: tuple
+
+    @property
+    def rapport(self) -> float:
+        """Largeur sur hauteur de l'image, le format qu'elle prendra."""
+        return self.image[2] / self.image[3]
+
+
+@dataclass(frozen=True)
+class Disposition:
+    """Les deux colonnes de la planche : le repérage à gauche, les images à droite."""
+
+    #: `(x, y, largeur, hauteur)` du panneau du plan de repérage.
+    panneau: tuple
+    #: Un `Emplacement` par cadre d'image, de haut en bas.
+    emplacements: list
+
+
+def disposition(planche: Planche, emplacements: int) -> Disposition:
+    """Géométrie de la planche photographique, avant d'y poser quoi que ce soit.
+
+    **Un seul calcul, trois usages.** La planche du dossier PDF y pose ses
+    images, l'écran de saisie y lit le format du cadre pour dessiner le rognage
+    avant de générer, et la sortie PowerPoint du lot 8 y pose des réservations
+    d'image vides sur un panneau de repérage qu'elle compose elle-même. Trois
+    copies de cette arithmétique finiraient par différer — c'est ce qui est
+    arrivé aux deux listes de types de voirie, le 19/09/2026.
+
+    Les emplacements sont **identiques et fixés par la pièce** : un cadre qui
+    reste vide ne redistribue rien, et la planche d'un dossier ressemble à celle
+    du suivant. À deux emplacements, les cadres tombent à (185,5 ; 18,1) et
+    (185,5 ; 150,1) pour 222 x 115,4 mm, rapport 1,924 — mesuré le 25/09/2026.
+    """
+    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+    utile_x = zone_x + BLANC_TOURNANT_MM
+    y_mm = zone_y + BLANC_TOURNANT_MM
+    utile_l = zone_l - 2 * BLANC_TOURNANT_MM
+    hauteur_mm = zone_h - 2 * BLANC_TOURNANT_MM
+
+    # La colonne d'images est calée à droite, comme au dossier de référence ; ce
+    # qui reste à gauche revient au plan de repérage.
+    x_mm = utile_x + utile_l - LARGEUR_COLONNE_IMAGES_MM
+    largeur_reperage = x_mm - BLANC_TOURNANT_MM - utile_x
+    if largeur_reperage < LARGEUR_REPERAGE_MINIMALE_MM:
+        raise ErreurComposition(
+            f"La colonne d'images ne laisse que {largeur_reperage:.0f} mm au plan "
+            "de repérage, où rien ne serait lisible."
+        )
+
+    habillage = hauteur_titre_cadre()
+    blancs = BLANC_TOURNANT_MM * (emplacements - 1)
+    hauteur_cadre = (hauteur_mm - blancs) / emplacements
+    hauteur_image = hauteur_cadre - habillage
+    if hauteur_image <= 0:
+        raise ErreurComposition(
+            f"{emplacements} emplacements ne laissent aucune hauteur d'image."
+        )
+    largeur_image = LARGEUR_COLONNE_IMAGES_MM - 2 * MARGE_SOUS_CADRE_MM
+
+    poses = []
+    ordonnee = y_mm
+    for _ in range(emplacements):
+        poses.append(
+            Emplacement(
+                cadre=(x_mm, ordonnee, LARGEUR_COLONNE_IMAGES_MM, hauteur_cadre),
+                image=(
+                    x_mm + MARGE_SOUS_CADRE_MM,
+                    ordonnee + habillage - MARGE_SOUS_CADRE_MM,
+                    largeur_image,
+                    hauteur_image,
+                ),
+            )
+        )
+        ordonnee += hauteur_cadre + BLANC_TOURNANT_MM
+    return Disposition(
+        panneau=(utile_x, y_mm, largeur_reperage, hauteur_mm),
+        emplacements=poses,
+    )
 
 
 @dataclass(frozen=True)
@@ -125,29 +216,10 @@ def composer(
             "photographique vide ne se produit pas."
         )
 
-    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
-    utile_x = zone_x + BLANC_TOURNANT_MM
-    utile_y = zone_y + BLANC_TOURNANT_MM
-    utile_l = zone_l - 2 * BLANC_TOURNANT_MM
-    utile_h = zone_h - 2 * BLANC_TOURNANT_MM
+    plan = disposition(planche, emplacements)
+    messages_images = _poser_images(planche, images, plan.emplacements)
 
-    # La colonne d'images est calée à droite, comme au dossier de référence ; ce
-    # qui reste à gauche revient au plan de repérage.
-    x_images = utile_x + utile_l - LARGEUR_COLONNE_IMAGES_MM
-    largeur_reperage = x_images - BLANC_TOURNANT_MM - utile_x
-    if largeur_reperage < 60.0:
-        raise ErreurComposition(
-            f"{libelle_reperage} : la colonne d'images ne laisse que "
-            f"{largeur_reperage:.0f} mm au plan de repérage, où rien ne serait "
-            "lisible."
-        )
-
-    messages_images = _poser_images(
-        planche, images, x_images, utile_y, LARGEUR_COLONNE_IMAGES_MM,
-        utile_h, emplacements,
-    )
-
-    panneau = (utile_x, utile_y, largeur_reperage, utile_h)
+    panneau = plan.panneau
     interieur = _interieur_du_cadre(panneau)
     reperage = plan_de_reperage(points_de_vue, emprise, interieur, libelle_reperage)
 
@@ -330,61 +402,42 @@ def _poser_emprise(planche: Planche, emprise) -> None:
     planche.ajouter_geometrie(emprise, STYLE_EMPRISE)
 
 
-def _poser_images(
-    planche: Planche, images, x_mm: float, y_mm: float, largeur_mm: float,
-    hauteur_mm: float, emplacements: int,
-) -> list:
+def _poser_images(planche: Planche, images, poses) -> list:
     """Empile les images dans des emplacements identiques, et rend les messages.
 
     `emplacements` est fixé par la pièce, non par le nombre d'images reçues :
     une DP 6 sans mesures paysagères garde ses trois emplacements et en laisse
     un vide, plutôt que d'étirer les deux autres.
     """
-    if len(images) > emplacements:
+    if len(images) > len(poses):
         raise ErreurComposition(
-            f"{len(images)} images pour {emplacements} emplacement(s) sur la "
+            f"{len(images)} images pour {len(poses)} emplacement(s) sur la "
             "planche."
         )
     rapports = [_rapport(image.chemin) for image in images]
-    habillage = hauteur_titre_cadre()
-    largeur_utile = largeur_mm - 2 * MARGE_SOUS_CADRE_MM
-
-    blancs = BLANC_TOURNANT_MM * (emplacements - 1)
-    hauteur_cadre = (hauteur_mm - blancs) / emplacements
-    hauteur_image = hauteur_cadre - habillage
+    hauteur_image = poses[0].image[3]
     if hauteur_image < HAUTEUR_IMAGE_MINIMALE_MM:
         raise ErreurComposition(
-            f"{emplacements} emplacements sur une même planche réduiraient "
+            f"{len(poses)} emplacements sur une même planche réduiraient "
             f"chaque image à {hauteur_image:.0f} mm de haut, sous les "
             f"{HAUTEUR_IMAGE_MINIMALE_MM:.0f} mm où une insertion paysagère cesse "
             "de se lire."
         )
 
-    # Le format de l'emplacement, et non celui des images : c'est le bandeau du
-    # dossier de référence, et il ne dépend pas de ce qu'on y dépose. Voir
-    # l'en-tête du module pour ce que ce choix coûte, et comment il se règle.
-    largeur_image = largeur_utile
-    largeur_cadre = largeur_image + 2 * MARGE_SOUS_CADRE_MM
-    x_cadre = x_mm + (largeur_mm - largeur_cadre) / 2.0
-
     messages = []
-    ordonnee = y_mm
-    for image, rapport in zip(images, rapports):
-        sous_cadre(planche, x_cadre, ordonnee, largeur_cadre, hauteur_cadre,
-                   titre=image.intitule)
-        perte = _poser_une_image(
-            planche, image,
-            x_cadre + MARGE_SOUS_CADRE_MM, ordonnee + habillage - MARGE_SOUS_CADRE_MM,
-            largeur_image, hauteur_image,
-        )
+    for image, rapport, pose in zip(images, rapports, poses):
+        # Le format de l'emplacement, et non celui des images : c'est le bandeau
+        # du dossier de référence, et il ne dépend pas de ce qu'on y dépose. Voir
+        # l'en-tête du module pour ce que ce choix coûte, et comment il se règle.
+        sous_cadre(planche, *pose.cadre, titre=image.intitule)
+        perte = _poser_une_image(planche, image, *pose.image)
         if perte > ROGNAGE_SIGNALE:
-            cote = "de sa largeur" if 1.0 / rapport > largeur_image / hauteur_image else "de sa hauteur"
+            cote = "de sa largeur" if 1.0 / rapport > pose.rapport else "de sa hauteur"
             messages.append(
                 f"« {Path(image.chemin).name} » a été rognée de {perte:.0%} "
                 f"{cote} pour remplir son emplacement. Déposez-la au format des "
                 "autres vues si ce recadrage retire ce qu'il fallait montrer."
             )
-        ordonnee += hauteur_cadre + BLANC_TOURNANT_MM
     return messages
 
 
@@ -444,16 +497,12 @@ def rapport_de_l_emplacement(planche: Planche, emplacements: int) -> float:
 
     L'écran de saisie en a besoin pour dessiner le bon cadre avant de générer :
     c'est le format que la photographie prendra, et il ne dépend pas d'elle.
+
+    Le calcul n'est pas refait ici : il vient de `disposition`, qui sert aussi la
+    planche et la sortie PowerPoint. Deux arithmétiques donneraient deux cadres,
+    et l'écran montrerait un rognage que la planche ne fait pas.
     """
-    _, _, _, zone_h = planche.zone_dessin()
-    hauteur_utile = zone_h - 2 * BLANC_TOURNANT_MM
-    blancs = BLANC_TOURNANT_MM * (emplacements - 1)
-    hauteur_image = (hauteur_utile - blancs) / emplacements - hauteur_titre_cadre()
-    if hauteur_image <= 0:
-        raise ErreurComposition(
-            f"{emplacements} emplacements ne laissent aucune hauteur d'image."
-        )
-    return (LARGEUR_COLONNE_IMAGES_MM - 2 * MARGE_SOUS_CADRE_MM) / hauteur_image
+    return disposition(planche, emplacements).emplacements[0].rapport
 
 
 def _recadrer(source, rapport_cible: float, cadrage: tuple, hauteur_mm: float):

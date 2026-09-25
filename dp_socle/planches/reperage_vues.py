@@ -247,6 +247,83 @@ def plan_de_reperage(
     )
 
 
+#: Marge autour de l'emprise, en mètres, d'un cadrage qui ignore les points de vue.
+#:
+#: C'est la décision D2 du lot 8 : la sortie PowerPoint se produit **avant** que
+#: les prises de vue existent, et le cadrage ne peut donc pas se calculer sur
+#: elles. 150 m tout autour de l'emprise, parce que les prises de vue de DP 6 et
+#: DP 7 se font aux abords du site (25/09/2026) et que le chef de projet posera
+#: ses repères à la main dans ce cadre.
+MARGE_SANS_VUES_M = 150.0
+
+
+def cadrages_sans_vues(
+    emprise, zone_mm: tuple, libelle: str, alternatives: int = 1
+) -> tuple[list, list]:
+    """Cadrages possibles d'un plan de repérage dont on ignore les points de vue.
+
+    Rend `(reperages, avertissements)`. Le premier cadrage est celui de
+    l'emprise plus `MARGE_SANS_VUES_M`, à la plus grande échelle de
+    `ECHELLES_REPERAGE_VUES` qui le contient ; les suivants reprennent le même
+    cadre aux crans d'échelle d'après, pour que le chef de projet garde celui où
+    son point de vue tombe (décision D2, trois diapos pour DP 8).
+
+    Pourquoi `zone_de_reperage` ne peut pas servir ici : elle vise les points de
+    vue d'abord, et il n'y en a aucun. C'est la conséquence la plus profonde du
+    lot 8 — ce qui était calculé sur un contenu connu devient un cadrage décidé
+    d'avance.
+
+    Le refus au-delà du 1/10 000 est celui de `plan_de_reperage`, et pour la même
+    raison : une planche où le site n'occupe plus seize millimètres ne se sort
+    pas en silence.
+    """
+    from shapely.geometry import box
+
+    if emprise is None or emprise.is_empty:
+        raise ErreurPointDeVue(
+            f"{libelle} : aucune emprise à cadrer. Un plan de repérage sans site "
+            "ne repère rien, même vide de prises de vue."
+        )
+    minx, miny, maxx, maxy = emprise.bounds
+    cadre = box(
+        minx - MARGE_SANS_VUES_M, miny - MARGE_SANS_VUES_M,
+        maxx + MARGE_SANS_VUES_M, maxy + MARGE_SANS_VUES_M,
+    )
+    largeur_m, hauteur_m = maxx - minx + 2 * MARGE_SANS_VUES_M, maxy - miny + 2 * MARGE_SANS_VUES_M
+
+    depart = _echelle_ou_rien(largeur_m, hauteur_m, zone_mm, libelle)
+    if depart is None:
+        raise ErreurPointDeVue(
+            f"{libelle} : l'emprise élargie de {MARGE_SANS_VUES_M:.0f} m mesure "
+            f"{largeur_m:.0f} x {hauteur_m:.0f} m et ne tient à aucune échelle de "
+            f"la liste (jusqu'au 1/{ECHELLES_REPERAGE_VUES[-1]}). Au-delà, le site "
+            "n'occuperait plus seize millimètres sur la planche."
+        )
+
+    rang = ECHELLES_REPERAGE_VUES.index(depart)
+    retenues = ECHELLES_REPERAGE_VUES[rang:rang + alternatives]
+    avertissements = []
+    if len(retenues) < alternatives:
+        avertissements.append(
+            f"{libelle} : {len(retenues)} cadrage(s) au choix au lieu de "
+            f"{alternatives}. Le site est déjà large au 1/{depart}, et la liste "
+            f"des échelles s'arrête au 1/{ECHELLES_REPERAGE_VUES[-1]} — au-delà, "
+            "le site ne se repérerait plus."
+        )
+    return (
+        [
+            Reperage(
+                denominateur=denominateur,
+                cadre=cadre.bounds,
+                site_entier=True,
+                avertissements=(),
+            )
+            for denominateur in retenues
+        ],
+        avertissements,
+    )
+
+
 def _echelle_ou_rien(largeur_m, hauteur_m, zone_mm, libelle) -> int | None:
     """L'échelle retenue, ou `None` si aucune de la liste ne convient."""
     from ..erreurs import ErreurEchelle
