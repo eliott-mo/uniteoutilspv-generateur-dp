@@ -180,15 +180,31 @@ Le rendu passe par un PNG **à taille de pixel imposée**, pas par
 imprimer » : `cairosvg.svg2png` avec `output_width`/`output_height` calculés
 depuis 420 × 297 mm.
 
-**Une voie reste ouverte pour s'en affranchir** : poser la planche en **SVG**
-plutôt qu'en image matricielle. PowerPoint 2016 et suivants lisent un
-`asvg:svgBlip` posé à côté du PNG de repli dans le `a:blip`, et l'affichent en
-vectoriel. La sonde 4 le mesure : le SVG du plan de masse de Sarnois pèse
-0,20 Mo contre 0,53 Mo pour son PNG à 200 dpi, et il ne se rastériserait ni à
-l'affichage ni à l'export. Le risque est que le moteur SVG de PowerPoint ne
-soit pas celui de cairo — polices, `clipPath`, images incorporées —, et une
-planche qui s'affiche autrement là-bas qu'ici est exactement ce que D0 refuse.
-À trancher sur ce que la sonde montre.
+**Et une voie pour s'en affranchir, éprouvée le 25/09/2026** : poser la planche
+en **SVG** plutôt qu'en image matricielle. PowerPoint 2016 et suivants lisent
+un `asvg:svgBlip` posé à côté du PNG de repli dans le `a:blip`, et l'affichent
+en vectoriel. Mesuré à l'écran sur le plan de masse de Sarnois : aucune
+dégradation au zoom, couleurs justes, et le PDF exporté reste net là où le
+200 dpi pixellise.
+
+**Sauf le texte.** « Des caractères espacés de manière irrégulière » — le
+cartouche sort avec des lettres mal chassées, alors que le SVG, lui, est
+propre : de simples `<text font-family="Aptos">`, sans `textLength` ni
+`letter-spacing` (vérifié dans le fichier produit). C'est PowerPoint qui
+compose les glyphes à sa façon.
+
+Le remède tient en un appel : **repasser le SVG par cairo**
+(`cairosvg.svg2svg`) le rend en **tracés de glyphes** — zéro `<text>` en
+sortie. Plus de texte à composer, donc plus rien à composer de travers, et la
+mise en page reste celle du PDF puisque c'est le même moteur. Le fichier passe
+de 0,20 à 0,36 Mo, contre 0,53 Mo pour le PNG à 200 dpi. Fidélité mesurée en
+rendant les deux SVG à 3 308 px et en les comparant pixel à pixel : **0,17 %
+des pixels s'écartent de plus de 8/255**, et l'écart moyen vaut 0,09/255 —
+c'est le crénelage des contours, rien d'autre.
+
+Ce que la voie vectorielle coûte : le texte de la planche cesse d'être du
+texte, comme il l'est déjà dans la voie matricielle. Ce qu'elle rapporte :
+plus de plafond de résolution, et un fichier plus léger.
 
 ### D9 — Le fichier se nomme pour ce qu'il est
 
@@ -286,8 +302,8 @@ PowerPoint sur un poste. Les mesurer d'abord, et noter la date en commentaire.
 2. `a:spLocks noMove="1" noResize="1"` **empêche-t-il** de déplacer un cadre ?
    C'est ce que PowerPoint 365 écrit quand on verrouille une forme à la main.
 3. `upright="1"` garde-t-il l'étiquette **horizontale** dans un groupe qui tourne ?
-4. **Le SVG** : PowerPoint affiche-t-il la planche vectorielle comme cairo la
-   dessine, et le PDF exporté la garde-t-il en vectoriel ? Si oui, D8 tombe.
+4. **Le SVG en tracés** : l'espacement des lettres du cartouche est-il redevenu
+   régulier ? C'est le dernier écart connu entre les deux voies.
 
 ---
 
