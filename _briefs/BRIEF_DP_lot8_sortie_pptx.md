@@ -156,16 +156,39 @@ chef de projet — c'est la police par défaut de Microsoft 365 depuis 2024. Rie
 à changer, et pas de Calibri de repli : du Calibri éditable à côté d'un Aptos
 rastérisé sur la même planche se verrait.
 
-### D8 — Le poids n'est plus une contrainte, la résolution en est une
+### D8 — 200 dpi, parce que l'export PowerPoint n'en rend pas davantage
 
 Le chef de projet ajoute ses photos hors Streamlit : le fichier n'a plus à
-tenir dans une limite de téléversement. On vise **200 dpi** pour les planches,
-et on mesure sur un dossier réel avant de figer.
+tenir dans une limite de téléversement. La résolution, elle, est plafonnée
+ailleurs.
+
+**Mesuré le 25/09/2026** sur un PDF réellement exporté depuis PowerPoint
+(« Enregistrer au format PDF », qualité standard) à partir d'une sonde portant
+la même planche à 200, 300 et 400 dpi : **les trois pages en ressortent à
+3 308 × 2 339 px, soit exactement 200 dpi**, pour 0,66 à 0,68 Mo chacune. Ce
+que l'on met au-delà de 200 dpi est jeté à l'export, et ne coûte que du poids.
+On rastérise donc à 200 dpi, et pas plus.
+
+Deux réglages du poste à connaître, relevés à l'écran : « Ne pas compresser
+les images dans un fichier » est coché par défaut — c'est lui qui protège le
+fichier `.pptx` à l'enregistrement —, mais la « Résolution par défaut » d'à
+côté est à **96 ppp**. Décoché, ce réglage détruirait les plans : la consigne
+aux chefs de projet doit dire de le laisser coché.
 
 Le rendu passe par un PNG **à taille de pixel imposée**, pas par
 `rendre_apercu_png`, dont la docstring dit « sans valeur métrologique : ne pas
-imprimer ». Il faut une méthode de rendu dédiée, ou `cairosvg.svg2png` avec
-`output_width`/`output_height` calculés depuis 420 × 297 mm.
+imprimer » : `cairosvg.svg2png` avec `output_width`/`output_height` calculés
+depuis 420 × 297 mm.
+
+**Une voie reste ouverte pour s'en affranchir** : poser la planche en **SVG**
+plutôt qu'en image matricielle. PowerPoint 2016 et suivants lisent un
+`asvg:svgBlip` posé à côté du PNG de repli dans le `a:blip`, et l'affichent en
+vectoriel. La sonde 4 le mesure : le SVG du plan de masse de Sarnois pèse
+0,20 Mo contre 0,53 Mo pour son PNG à 200 dpi, et il ne se rastériserait ni à
+l'affichage ni à l'export. Le risque est que le moteur SVG de PowerPoint ne
+soit pas celui de cairo — polices, `clipPath`, images incorporées —, et une
+planche qui s'affiche autrement là-bas qu'ici est exactement ce que D0 refuse.
+À trancher sur ce que la sonde montre.
 
 ### D9 — Le fichier se nomme pour ce qu'il est
 
@@ -229,7 +252,22 @@ Quatre choses sont acquises ; elles n'ont plus à être cherchées.
   horizontal dans un groupe qui tourne. À confirmer.
 - **Le poids par résolution**, planche DP 2 de Sarnois en JPEG q88 :
   0,9 Mo à 200 dpi (3 308 × 2 339 px), 1,6 Mo à 300 dpi, 2,4 Mo à 400 dpi. Le
-  rendu à 200 dpi est jugé « ok mais pas exceptionnel ».
+  rendu à 200 dpi est jugé « ok mais pas exceptionnel » — et c'est ce que
+  l'export rend, voir D8.
+- **Le verrou tient** : `a:spLocks noMove="1" noResize="1"`, posé sur la forme
+  de la **diapo** et non sur celle de la mise en page, empêche bien de déplacer
+  un cadre. Les titres de cadre, laissés libres, se déplaçaient : ils se
+  verrouillent de même.
+- **La réservation d'image fait ce qu'il faut** : « l'insertion d'une photo
+  avec le bouton Insérer une image ne fait apparaître que ce qui peut
+  apparaître en respectant le format de la réservation ». Le recadrage se
+  corrige ensuite à la main, par « Rogner » — ce qui remplace le `cadrage` en
+  deux fractions de `fenetre_de_cadrage`, que le chef de projet n'a plus à
+  saisir à l'écran.
+- **`upright` ne suffit pas seul** : l'étiquette reste droite tant que le
+  groupe tourne peu, mais de côté elle se replie à une lettre par ligne — la
+  boîte, elle, tourne, et le texte horizontal n'y tient plus. `wrap="none"`
+  sur le corps de texte l'en empêche. À confirmer.
 - **Le plafond de PowerPoint** : *Fichier > Options > Options avancées > Taille
   et qualité de l'image* compresse par défaut les images à **220 ppp** à
   l'enregistrement. Au-delà, la résolution supplémentaire est perdue dès que le
@@ -248,11 +286,8 @@ PowerPoint sur un poste. Les mesurer d'abord, et noter la date en commentaire.
 2. `a:spLocks noMove="1" noResize="1"` **empêche-t-il** de déplacer un cadre ?
    C'est ce que PowerPoint 365 écrit quand on verrouille une forme à la main.
 3. `upright="1"` garde-t-il l'étiquette **horizontale** dans un groupe qui tourne ?
-4. **La résolution** : 200, 300 ou 400 dpi ? Et que reste-t-il après l'export
-   PDF — la mesure se fait sur le PDF exporté, en divisant la largeur en pixels
-   de l'image incorporée par les 420 mm de la page.
-5. **L'export PDF** sort-il bien à 420 × 297 mm ? (« Taille minimale »
-   ré-échantillonne à 96 dpi et détruit les plans — à écrire dans le README.)
+4. **Le SVG** : PowerPoint affiche-t-il la planche vectorielle comme cairo la
+   dessine, et le PDF exporté la garde-t-il en vectoriel ? Si oui, D8 tombe.
 
 ---
 
