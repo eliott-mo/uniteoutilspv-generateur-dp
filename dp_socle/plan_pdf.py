@@ -2107,9 +2107,10 @@ PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
 #: Écart à la limite de propriété en deçà duquel un sommet de la clôture y est
 #: ramené, en mètres. Mesuré le 24/09/2026 sur le plan de Bray : onze de ses
 #: quatorze sommets sont à 0,2 à 2,2 m de la limite — le tracé la longe sans
-#: la suivre —, les trois autres à 4,8 et 7,1 m, au décrochement de l'accès,
-#: qui est voulu et ne se recale pas.
-CLOTURE_EN_LIMITE_M = 3.0
+#: la suivre —, deux autres à 4,8 et 5,0 m, et le dernier à 7,1 m. Porté de 3
+#: à 5 m le 25/09/2026 : à 3 m, l'angle nord-ouest restait en retrait autour du
+#: poste calé en limite, et l'enceinte partait l'y chercher.
+CLOTURE_EN_LIMITE_M = 5.0
 
 #: Ce qui fait qu'un segment de clôture longe la limite : au moins
 #: `SEGMENT_LE_LONG_M` de long, et à moins de `CLOTURE_LE_LONG_DEG` d'elle. Un
@@ -2123,8 +2124,17 @@ CLOTURE_LE_LONG_DEG = 15.0
 #: limite dans l'ordre inverse, et le tracé s'y croisait.
 SOMMET_CONFONDU_M = 1.0
 
+#: Surface au delà de laquelle le débord de la clôture hors de l'emprise est
+#: dit, en mètres carrés. Une clôture recalée garde les côtés droits du plan :
+#: là où la limite rentre, ils la franchissent. À Bray, 169 m² en trois langues
+#: de 1,2 m de large au plus, contre 111 m² avant recalage.
+DEBORD_DIT_M2 = 1.0
+
 #: Écart au delà duquel un portail ne suit plus la clôture recalée, en mètres,
-#: et le rapport le dit. À Bray, les deux portails restent à 0 et 0,2 m d'elle.
+#: et le rapport le dit — mesuré sur les cinq traits de son symbole. À Bray,
+#: avec le seuil à 5 m, l'un reste sur le tracé et l'autre s'en détache de
+#: 0,83 m, moins d'un millimètre au 1/1000 : assez peu pour ne pas déplacer le
+#: portail d'office, assez pour le dire.
 PORTAIL_SUIT_LA_CLOTURE_M = 0.5
 
 
@@ -2835,6 +2845,8 @@ def _cloture_sur_la_limite(enceinte_l93: Polygon, emprise: BaseGeometry, libelle
         )
 
     lineaire = sum(s.length for s in recales(list(zip(gardes, retenus))))
+    dehors_avant = enceinte_l93.difference(emprise).area
+    dehors_apres = recalee.difference(emprise).area
     ventre_apres = ventre(recales(list(zip(gardes, retenus))))
     ventre_avant = ventre(recales(list(zip(sommets, ecarts))))
     bouges = [e for e in ecarts if e]
@@ -2861,11 +2873,12 @@ def _cloture_sur_la_limite(enceinte_l93: Polygon, emprise: BaseGeometry, libelle
             f"{CLOTURE_EN_LIMITE_M:.0f} m, un retrait est un choix de tracé, pas "
             "une imprécision."
             + (
-                " Le tracé garde ses côtés droits, comme au plan : là où la "
-                f"limite fait un ventre, il s'en écarte encore de {ventre_apres:.1f} m, "
-                f"contre {ventre_avant:.1f} m avant — c'est à vérifier sur la "
-                "planche DP 2."
-                if ventre_apres > CLOTURE_EN_LIMITE_M
+                " Le tracé garde les côtés droits du plan, quand la limite en "
+                "compte davantage : là où elle fait un ventre, il s'en écarte "
+                f"encore de {ventre_apres:.1f} m ({ventre_avant:.1f} m avant), et "
+                f"il la franchit sur {dehors_apres:.0f} m² ({dehors_avant:.0f} m² "
+                "avant) là où elle rentre. À vérifier sur la planche DP 2."
+                if ventre_apres > CLOTURE_EN_LIMITE_M or dehors_apres > DEBORD_DIT_M2
                 else ""
             )
             + " C'est une correction du plan, pas une lecture."
@@ -3413,8 +3426,11 @@ class ImportPlanPDF:
                 if correction.identifiant in self.choix.corrections:
                     enceinte_l93 = correction.geometrie_l93
                     for libelle_portail, entites_portail in self.construction.portails:
-                        ecart = projeter(entites_portail[0], calage).distance(
-                            enceinte_l93.exterior
+                        # Les cinq traits du symbole, et non la seule ouverture :
+                        # un vantail détaché du tracé se voit comme le reste.
+                        ecart = max(
+                            projeter(entite, calage).distance(enceinte_l93.exterior)
+                            for entite in entites_portail
                         )
                         if ecart > PORTAIL_SUIT_LA_CLOTURE_M:
                             notes.append(
