@@ -14,7 +14,9 @@ ambiguë. Chacun de ces refus vaut mieux qu'une planche présentable et fausse.
 
 from __future__ import annotations
 
+import io
 import re
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -467,6 +469,52 @@ def _surface_proche(cote: Cote, mesuree: float, tolerance: float) -> bool:
         if reference and abs(mesuree - reference) <= tolerance * reference:
             return True
     return False
+
+
+#: Nom du `projet.json` du contrat, dans le dossier de sortie. À ne pas
+#: confondre avec celui du lot 1, qui vit dans `projets/{nom}/` et décrit le
+#: projet — commune, date, emprise. Celui-ci porte les paramètres de l'import.
+NOM_PARAMETRES = "projet.json"
+
+#: Nom de l'archive du contrat, et du dossier qu'elle déplie.
+MOTIF_ARCHIVE = "{nom}_contrat.zip"
+
+
+def archiver_le_contrat(dossier: str | Path, nom: str) -> bytes | None:
+    """Le contrat en une archive, prête à quitter le serveur. `None` s'il n'y en a pas.
+
+    **Pourquoi elle existe.** L'application tourne sur un serveur : `sortie/` y
+    vit, et le chef de projet n'en repart qu'avec ce qu'il télécharge. Le
+    contrat — la géométrie du plan importée et calée en Lambert 93, avec les
+    paramètres du projet — était donc perdu à la fermeture de l'onglet. Or c'est
+    exactement ce que lit le dépôt voisin `photomontage` pour monter les
+    insertions paysagères : il ne relit plus aucun plan depuis le 24/09/2026, il
+    lit ce contrat (`photomontage/lecture_contrat.py`).
+
+    Le faire redescendre avec le dossier garantit au passage ce qu'aucune reprise
+    du plan ne garantirait : que le photomontage sera monté sur **la géométrie
+    qui a produit ces planches-là**, et non sur un plan réimporté depuis,
+    peut-être recalé, peut-être d'un autre indice.
+
+    L'archive se déplie en un **dossier** portant les deux fichiers à leurs noms
+    d'origine, et non en deux fichiers en vrac : c'est un dossier que
+    `charger_contrat` reçoit ici, et `lecture_contrat.lire` là-bas. Les renommer
+    obligerait le destinataire à les remettre en ordre, et à deviner comment.
+
+    Le GeoPackage est déjà compressé ; la déflation ne vaut que pour le JSON, qui
+    s'y comprime bien — 0,75 Mo de contrat tiennent dans 0,10 Mo d'archive
+    (mesuré sur Sarnois le 26/09/2026).
+    """
+    dossier = Path(dossier)
+    geometries = dossier / NOM_GEOPACKAGE
+    parametres = dossier / NOM_PARAMETRES
+    if not geometries.exists() or not parametres.exists():
+        return None
+    tampon = io.BytesIO()
+    with zipfile.ZipFile(tampon, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(geometries, arcname=f"{nom}/{NOM_GEOPACKAGE}")
+        archive.write(parametres, arcname=f"{nom}/{NOM_PARAMETRES}")
+    return tampon.getvalue()
 
 
 def charger_contrat(dossier: str | Path, voirie=None) -> Contrat:

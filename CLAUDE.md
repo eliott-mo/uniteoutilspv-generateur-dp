@@ -31,6 +31,13 @@ lira une seule structure sans savoir de quel lot vient le dossier. Le test
 est ce qui empêche les producteurs de repartir chacun de leur côté :
 n'ajoutez une couche ou une colonne d'un côté qu'en la traitant des deux autres.
 
+**Ce contrat a un consommateur hors du dépôt.** Le dépôt voisin `photomontage`
+le lit depuis le 24/09/2026 (`photomontage/lecture_contrat.py`) et ne relit plus
+aucun plan. Le test ci-dessus protège l'amont, pas l'aval : une couche retirée ou
+renommée ici casse le photomontage sans que rien ne le dise. Le contrat
+redescend avec le dossier, en archive, pour que le chef de projet puisse le
+transmettre — voir `contrat.archiver_le_contrat`.
+
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on
 ne peut les relire sans le texte d'origine.

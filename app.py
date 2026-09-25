@@ -42,7 +42,13 @@ from dp_socle.coupe import (
     reprendre_coupe,
     translater_ligne_coupe,
 )
-from dp_socle.contrat import NOM_GEOPACKAGE, VOIRIES_ADMISES, decrire_voiries
+from dp_socle.contrat import (
+    MOTIF_ARCHIVE,
+    NOM_GEOPACKAGE,
+    VOIRIES_ADMISES,
+    archiver_le_contrat,
+    decrire_voiries,
+)
 from dp_socle.erreurs import ErreurCoupe, ErreurDepot, ErreurDP
 from dp_socle.import_be import (
     CALQUES_TERRAIN,
@@ -2482,9 +2488,12 @@ if contrat_present:
     # réexécution du script, et le téléchargement du GeoPackage avec lui.
     with st.expander("Le contrat d'entrée écrit — pour vérification"):
         st.caption(
-            "Ce que le lot 4 lira pour dessiner DP 2, DP 3 et DP 4. Rien à en "
-            "faire pour monter le dossier : c'est de quoi contrôler l'import "
-            "dans un SIG, ou joindre à une question au bureau d'études."
+            "Ce que les planches DP 2, DP 3 et DP 4 dessineront : de quoi "
+            "contrôler l'import dans un SIG, ou joindre à une question au bureau "
+            "d'études. Pour le **transmettre** — au photomontage, par exemple — "
+            "prenez plutôt l'archive complète proposée après la génération : "
+            "elle porte aussi les paramètres du projet, que l'aperçu ci-dessous "
+            "ne fait qu'extraire."
         )
         with open(_dossier_contrat / NOM_GEOPACKAGE, "rb") as fichier:
             st.download_button(
@@ -2505,6 +2514,7 @@ if contrat_present:
                 )[:4000],
                 language="json",
             )
+            st.caption("Extrait : les 4 000 premiers caractères.")
 if not contrat_present:
     st.divider()
     st.info(
@@ -2701,6 +2711,31 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
                 "Déposez vos photographies dans les cadres vides, déplacez et "
                 "orientez les repères de vue, puis supprimez les diapos "
                 "surnuméraires et leurs bandeaux rouges avant d'exporter en PDF."
+            ),
+            on_click="ignore",
+            width="stretch",
+        )
+
+    # Le contrat redescend avec le dossier, et c'est ici qu'il faut le prendre :
+    # l'application tourne sur un serveur, et ce qui n'est pas téléchargé est
+    # perdu à la fermeture de l'onglet. Voir `_archive_du_contrat` pour ce qu'il
+    # sert — le photomontage se monte dessus, et sur lui seul.
+    _contrat_emporte = archiver_le_contrat(
+        rapport_pptx.dossier, _genere_pptx["nom"]
+    )
+    if _contrat_emporte is not None:
+        st.download_button(
+            f"⬇️ Le contrat du dossier "
+            f"({len(_contrat_emporte) / (1024 * 1024):.1f} Mo, ZIP)",
+            data=_contrat_emporte,
+            file_name=MOTIF_ARCHIVE.format(nom=_genere_pptx["nom"]),
+            mime="application/zip",
+            help=(
+                "La géométrie importée du plan et les paramètres du projet, tels "
+                "que ces planches les ont employés. À transmettre pour faire "
+                "monter les photomontages : c'est ce que l'outil de photomontage "
+                "lit, et le prendre ici garantit qu'il travaillera sur la "
+                "géométrie de ce dossier-ci."
             ),
             on_click="ignore",
             width="stretch",

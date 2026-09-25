@@ -1295,6 +1295,12 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
     intitules = [bouton.label for bouton in application.get("download_button")]
     assert any("PowerPoint" in intitule for intitule in intitules), intitules
 
+    # Le contrat redescend avec le dossier : l'application tourne sur un serveur,
+    # et ce qui n'est pas téléchargé est perdu à la fermeture de l'onglet. C'est
+    # lui que lit le dépôt voisin `photomontage`, et le prendre ici garantit que
+    # le photomontage sera monté sur la géométrie de ce dossier-ci.
+    assert any("contrat du dossier" in intitule for intitule in intitules), intitules
+
 
 @pytest.mark.reseau
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")

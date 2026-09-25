@@ -8,7 +8,9 @@ présentable et fausse, et aucun ne peut se vérifier sur le dessin.
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 
 import pytest
 from shapely.geometry import Polygon
@@ -16,6 +18,7 @@ from shapely.geometry import Polygon
 from dp_socle.contrat import (
     TOLERANCE_VARIANTE,
     Cote,
+    archiver_le_contrat,
     charger_contrat,
     decoder_cote,
 )
@@ -26,7 +29,11 @@ from dp_socle.erreurs import (
     ErreurImportBE,
     ErreurVoirieIndecise,
 )
-from dp_socle.import_be import ORIGINE_HELIOSCOPE, VERSION_CONTRAT
+from dp_socle.import_be import (
+    ORIGINE_HELIOSCOPE,
+    ORIGINE_IMPORT_BE,
+    VERSION_CONTRAT,
+)
 
 from . import contrat_synthetique as synthese
 
@@ -484,3 +491,72 @@ def test_un_ecart_de_surface_avec_le_tableau_est_signale(tmp_path):
     avertissements = []
     emprise_de_poste(contrat, "pdl_ptr", avertissements)
     assert any("déclarés au tableau bilan" in m for m in avertissements)
+
+
+# ---------------------------------------------------------------------------
+# L'archive du contrat, qui doit quitter le serveur et revenir entière
+# ---------------------------------------------------------------------------
+#
+# L'application tourne sur un serveur : `sortie/` y vit, et le chef de projet
+# n'en repart qu'avec ce qu'il télécharge. Le contrat est aussi ce que lit le
+# dépôt voisin `photomontage` — il ne relit plus aucun plan depuis le
+# 24/09/2026. Ce qui est mesuré ici est donc le **voyage** : ce qui descend doit
+# se déplier en un contrat lisible, sans que le destinataire ait à remettre quoi
+# que ce soit en ordre.
+
+
+def test_l_archive_se_deplie_en_un_contrat_relisable(tmp_path):
+    """Le critère n'est pas que le ZIP s'écrive, mais qu'il se relise.
+
+    Écrit, téléchargé, déplié, relu : c'est le geste complet, et c'est le seul
+    qui dise si l'archive sert à quelque chose.
+    """
+    dossier = tmp_path / "sortie" / "PV-TÉMOIN"
+    synthese.ecrire(dossier)
+
+    octets = archiver_le_contrat(dossier, "PV-TÉMOIN")
+
+    assert octets is not None
+    deplie = tmp_path / "recu"
+    with zipfile.ZipFile(io.BytesIO(octets)) as archive:
+        # Un dossier portant les deux fichiers à leurs noms d'origine : c'est ce
+        # que `charger_contrat` attend ici, et `lecture_contrat.lire` là-bas.
+        assert sorted(archive.namelist()) == [
+            "PV-TÉMOIN/geometries.gpkg",
+            "PV-TÉMOIN/projet.json",
+        ]
+        archive.extractall(deplie)
+
+    contrat = charger_contrat(deplie / "PV-TÉMOIN")
+
+    assert contrat.origine == ORIGINE_IMPORT_BE
+    assert len(contrat.geometries("tables_pv")) == len(
+        charger_contrat(dossier).geometries("tables_pv")
+    )
+
+
+def test_l_archive_porte_le_meme_geopackage_octet_pour_octet(tmp_path):
+    """Rien n'est recomposé au passage : c'est le fichier du dossier, tel quel.
+
+    Un GeoPackage réécrit par une autre version de la pile, même à géométrie
+    égale, ne serait plus celui que les planches ont lu — et c'est justement ce
+    que l'archive doit garantir à qui montera le photomontage.
+    """
+    dossier = tmp_path / "sortie" / "PV-TÉMOIN"
+    synthese.ecrire(dossier)
+
+    octets = archiver_le_contrat(dossier, "PV-TÉMOIN")
+
+    with zipfile.ZipFile(io.BytesIO(octets)) as archive:
+        embarque = archive.read("PV-TÉMOIN/geometries.gpkg")
+    assert embarque == (dossier / "geometries.gpkg").read_bytes()
+
+
+def test_sans_contrat_il_n_y_a_rien_a_emporter(tmp_path):
+    """Un dossier d'étude amont n'a pas de plan importé : pas d'archive, et pas
+    de bouton non plus — plutôt qu'un ZIP vide qui se télécharge sans rien dire.
+    """
+    vide = tmp_path / "sortie" / "PV-SANS-PLAN"
+    vide.mkdir(parents=True)
+
+    assert archiver_le_contrat(vide, "PV-SANS-PLAN") is None

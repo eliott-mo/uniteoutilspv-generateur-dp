@@ -3220,6 +3220,56 @@ sur le plan de repérage, il passait par-dessus l'implantation. Il n'en reste qu
 le trait — et seulement faute de contrat, la clôture étant sinon déjà dessinée
 par la palette, puisque l'emprise reçue **est** l'union des clôtures.
 
+## Le contrat, et qui le lit en aval
+
+Trois producteurs écrivent la même structure dans `sortie/{projet}/` — l'import
+DXF HelioScope (lot 2), l'import du plan du bureau d'études (lot 2bis) et
+l'import du plan PDF (lot 2ter) : un `geometries.gpkg` et un `projet.json`, en
+Lambert 93, à `version_contrat` égale, distingués par leur champ `origine`. Le
+lot 4 en lit une seule sans savoir lequel l'a écrite, et
+`tests/test_contrat_helioscope.py::test_les_trois_producteurs_ecrivent_le_meme_schema`
+leur interdit de diverger.
+
+**Ce contrat a un consommateur hors de ce dépôt.** Le dépôt voisin
+`photomontage` ne relit plus aucun plan depuis le 24/09/2026 : son
+`lecture_contrat.py` lit ce contrat-ci, et rend la même `Scene` que sa lecture
+de DXF rendait — tout son aval, du calage au rendu Blender, n'a pas bougé. Son
+en-tête dit ce que le contrat lui apporte et qu'un DXF ne donnait pas : le Z par
+sommet, donc l'inclinaison réelle de chaque table sans reconstruction ; les
+cotes normalisées des ouvrages avec `ordre_cotes`, qui dit le sens de chaque
+nombre ; et le géoréférencement, déjà fait et vérifié en amont.
+
+Mesuré le 26/09/2026 : les six dossiers produits à ce jour se lisent, y compris
+celui d'origine `helioscope`, dont les tables sont plates et que le photomontage
+reconstruit de son côté. **Un export DXF depuis ce dépôt serait donc une
+régression** — il faudrait jeter le Z, les cotes et le calage pour les faire
+redeviner en aval.
+
+La conséquence pour qui modifie le schéma : le test des trois producteurs
+protège l'amont, pas l'aval. Une couche retirée ou renommée ici casse le
+photomontage sans que rien ne le dise.
+
+### Il redescend avec le dossier
+
+L'application tourne sur un serveur : `sortie/` y vit, et le chef de projet n'en
+repart qu'avec ce qu'il télécharge. Le contrat était donc perdu à la fermeture de
+l'onglet, alors que c'est lui qu'il faut transmettre pour faire monter les
+photomontages.
+
+Un second bouton le propose à la génération, à côté du `.pptx` :
+`{projet}_contrat.zip`, qui se déplie en un **dossier** portant les deux fichiers
+à leurs noms d'origine — celui que `charger_contrat` reçoit ici et que
+`lecture_contrat.lire` reçoit là-bas. Le destinataire n'a rien à remettre en
+ordre. 0,10 Mo sur Sarnois, le GeoPackage étant déjà compressé et le JSON se
+déflatant bien.
+
+Le GeoPackage y entre **octet pour octet**, et c'est le point : un fichier
+réécrit par une autre version de la pile, même à géométrie égale, ne serait plus
+celui que les planches ont lu. Ce que l'archive garantit, qu'aucune reprise du
+plan ne garantirait, c'est que le photomontage sera monté sur la géométrie qui a
+produit ces planches-là — et non sur un plan réimporté depuis, peut-être recalé,
+peut-être d'un autre indice.
+
 ## La sortie PowerPoint à finaliser (lot 8)
 
 Le dossier sort aussi en un `.pptx` dont les planches sont déjà dessinées et dont
