@@ -124,3 +124,18 @@ class ErreurRecouvrementInsuffisant(ErreurPlanPDF):
 
 class ErreurGabaritIndecis(ErreurPlanPDF):
     """Un ouvrage du plan n'a pas de dimension tranchée : variante ou largeur à choisir."""
+
+
+class ErreurSortiePPTX(ErreurDP):
+    """La sortie PowerPoint à finaliser n'a pas pu être écrite (lot 8)."""
+
+
+class ErreurMontagePPTX(ErreurSortiePPTX):
+    """Une propriété réglée dans le paquet OOXML ne s'y retrouve pas.
+
+    `python-pptx` ne couvre pas tout, et Python accepte sans lever d'affecter
+    un attribut qui n'existe pas : `fill.transparency = 0.45` ne faisait rien,
+    et le cône de visée sortait magenta opaque par-dessus le plan (mesuré le
+    25/09/2026). Ce qui s'écrit à la main se relit donc dans l'élément produit,
+    et cette erreur est ce qui reste quand la relecture échoue.
+    """
