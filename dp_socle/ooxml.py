@@ -25,6 +25,7 @@ refait nulle part ailleurs.
 from __future__ import annotations
 
 import copy
+import io
 
 from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.opc.constants import CONTENT_TYPE as CT
@@ -160,7 +161,7 @@ def _retirer_pieds_de_page(mise_en_page) -> None:
 # ---------------------------------------------------------------------------
 
 
-def poser_fond(mise_en_page, chemin_image, svg: bytes | None = None,
+def poser_fond(mise_en_page, image_matricielle, svg: bytes | None = None,
                nom: str = "Fond de planche"):
     """Pose une image pleine page sur la mise en page, hors d'atteinte.
 
@@ -168,13 +169,21 @@ def poser_fond(mise_en_page, chemin_image, svg: bytes | None = None,
     recette, mesurée le 25/09/2026 : `get_or_add_image_part` rend un `rId`
     valable pour la partie de la mise en page, et `add_pic` l'y déclare.
 
+    `image_matricielle` est un chemin ou directement les octets de l'image : le
+    lot 8 rend ses planches en mémoire et n'a pas de fichier à nommer.
+
     `svg` est le SVG de la même planche, texte passé en tracés. Fourni, il
     voyage dans une extension du `a:blip` que PowerPoint 2016 et suivants
     affichent en vectoriel, l'image matricielle restant le repli des versions
     antérieures.
     """
     formes = mise_en_page.shapes
-    image, rId = mise_en_page.part.get_or_add_image_part(str(chemin_image))
+    fichier = (
+        io.BytesIO(image_matricielle)
+        if isinstance(image_matricielle, bytes)
+        else str(image_matricielle)
+    )
+    image, rId = mise_en_page.part.get_or_add_image_part(fichier)
     presentation = mise_en_page.part.package.presentation_part.presentation
     pic = formes._spTree.add_pic(
         formes._next_shape_id, nom, image.desc, rId,
