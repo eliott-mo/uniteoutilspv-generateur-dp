@@ -1846,6 +1846,99 @@ def _etat_de_l_import(import_courant):
     return getattr(import_courant, "etat", None)
 
 
+def _cle_de_legende(libelle: str) -> str:
+    """Clé de session du champ d'un intitulé.
+
+    Le nom du dépôt en fait partie. Sans lui, une correction faite sur un projet
+    suivait le chef de projet quand il en ouvrait un autre : Streamlit garde la
+    valeur d'un champ tant que sa clé ne change pas, et l'intitulé de « Voie
+    lourde » est le même d'un dossier à l'autre. Le second projet aurait hérité
+    des mots du premier sans rien en dire.
+    """
+    return f"legende_{_nom_depot(commune)}_{libelle}"
+
+def _entrees_de_legende(plan) -> list:
+    """Les entrées de légende du plan importé : intitulé par défaut, et ce qu'elles couvrent.
+
+    Une entrée par **intitulé**, et non par catégorie : deux catégories peuvent
+    délibérément partager le même — « Voie lourde » couvre la piste lourde et
+    l'aire de grutage, qui sont la même grave compactée — et la planche n'en fait
+    qu'une ligne (décision D3 du lot 4). En montrer deux champs laisserait croire
+    qu'on peut les nommer séparément, et renommer l'un des deux scinderait la
+    ligne en silence.
+
+    Rend `[(intitulé, (catégories,), nombre d'objets)]`, dans l'ordre du dessin :
+    c'est celui de la légende imprimée.
+    """
+    from dp_socle.planches.palette import EXCLUES as EXCLUES_DP
+    from dp_socle.planches.palette import SANS_STYLE, STYLES as STYLES_DP
+
+    entrees: dict[str, list] = {}
+    for categorie, fiche in sorted(STYLES_DP.items(), key=lambda p: p[1].rang):
+        if categorie in EXCLUES_DP or categorie in SANS_STYLE:
+            continue
+        nombre = len(plan.par_categorie(categorie))
+        if not nombre:
+            continue
+        groupe = entrees.setdefault(fiche.libelle, [fiche.libelle, [], 0])
+        groupe[1].append(categorie)
+        groupe[2] += nombre
+    return [(libelle, tuple(cats), nombre) for libelle, cats, nombre in entrees.values()]
+
+def _retoucher_la_legende(plan) -> None:
+    """Laisse corriger les intitulés de légende avant de générer.
+
+    Nos intitulés sont ceux du dossier de référence et conviennent presque
+    toujours ; mais un projet peut avoir ses mots, et la légende est **dans
+    l'image** de la planche — la rendre éditable dans le `.pptx` demanderait de
+    dessiner la planche sans elle. La retouche se fait donc ici, et elle part au
+    plan de masse DP 2 et aux plans de repérage des DP 4.
+
+    Replié par défaut : c'est un recours, pas une étape. Le chef de projet qui
+    n'ouvre pas ce dépliant obtient les intitulés du dossier de référence.
+    """
+    entrees = _entrees_de_legende(plan)
+    if not entrees:
+        return
+    with st.expander("Les intitulés de la légende — à corriger si besoin"):
+        st.caption(
+            "Ce que les planches écriront en légende. Les intitulés sont ceux du "
+            "dossier de référence HOCH ; corrigez-les si le dossier emploie "
+            "d'autres mots. Ils ne se retouchent pas dans le PowerPoint : la "
+            "légende est dessinée dans la planche."
+        )
+        for libelle, categories, nombre in entrees:
+            st.text_input(
+                f"{libelle} — {nombre} objet(s)",
+                value=libelle,
+                key=_cle_de_legende(libelle),
+                help="Vide, l'intitulé d'origine est conservé."
+                + (
+                    f" Couvre {len(categories)} catégories du plan "
+                    f"({', '.join(categories)}) : elles ne font qu'une ligne."
+                    if len(categories) > 1
+                    else ""
+                ),
+            )
+
+def _legendes_retouchees(plan) -> dict:
+    """Les intitulés corrigés, par catégorie, tels que `palette` les attend.
+
+    Une saisie identique à l'intitulé d'origine n'est pas retenue : le dossier
+    n'a pas à porter une correction qui ne corrige rien, et `projet.json` reste
+    lisible. Un champ vidé n'est pas une correction non plus — c'est un
+    renoncement, et l'intitulé d'origine reprend sa place.
+    """
+    retouches = {}
+    for libelle, categories, _nombre in _entrees_de_legende(plan):
+        saisi = str(st.session_state.get(_cle_de_legende(libelle), "")).strip()
+        if not saisi or saisi == libelle:
+            continue
+        for categorie in categories:
+            retouches[categorie] = saisi
+    return retouches
+
+
 def _montrer_la_coupe(import_be_courant) -> bool:
     """L'annonce de la coupe retenue, puis la carte où elle se règle.
 
@@ -1910,7 +2003,9 @@ def _montrer_la_coupe(import_be_courant) -> bool:
     # La carte reste à l'écran dans les deux cas, et ne descend plus : avant la
     # validation pour régler la coupe, après pour vérifier le plan et sa légende.
     _carte_du_plan(import_be_courant, avec_la_coupe=carte_de_la_coupe)
+    _retoucher_la_legende(import_be_courant.plan)
     return carte_de_la_coupe
+
 
 
 #: L'indice affiché par la liste déroulante, pour cette exécution seulement.
@@ -2525,6 +2620,14 @@ def _construire_projet() -> Projet | None:
         libelle=libelle or None,
         voirie=voirie,
         notice=chemin_notice,
+        # Les intitulés de légende que le chef de projet a corrigés en section 2,
+        # s'il en a corrigé. Ils partent au plan de masse DP 2 et aux plans de
+        # repérage des DP 4, où la légende est dessinée dans la planche.
+        legendes=(
+            _legendes_retouchees(import_be_courant.plan) or None
+            if import_be_courant is not None
+            else None
+        ),
     )
 
 

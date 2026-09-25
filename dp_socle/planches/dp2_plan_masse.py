@@ -159,6 +159,10 @@ def generer(
             categories_tracees,
             avec_parcelles=True,
             avec_batiments=bool(batiments_visibles),
+            # Les intitulés que le chef de projet a corrigés à l'écran, s'il en a
+            # corrigé : la légende est dans l'image de la planche, elle ne se
+            # retouche donc pas après coup.
+            libelles=projet.legendes,
         ),
         position=(zone[0] + 3.0, zone[1] + 3.0),
         largeur_mm=LARGEUR_LEGENDE_MM,

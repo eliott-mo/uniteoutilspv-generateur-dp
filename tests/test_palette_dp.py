@@ -13,8 +13,10 @@ from itertools import combinations
 
 import pytest
 
+from dp_socle.erreurs import ErreurComposition
 from dp_socle.planches.palette import (
     ECART_MINIMAL,
+    CLE_PARCELLE,
     EXCLUES,
     LIBELLE_BATIMENT,
     LIBELLE_PARCELLE,
@@ -213,6 +215,55 @@ def test_parcelles_et_batiments_viennent_du_wfs_et_figurent_en_legende():
         LIBELLE_BATIMENT,
         "Panneaux photovoltaïques",
     ]
+
+
+def test_un_intitule_retouche_par_le_chef_de_projet_est_celui_de_la_planche():
+    """Nos intitulés sont ceux du dossier de référence ; un projet peut en vouloir
+    d'autres, et la légende est dessinée dans la planche — pas retouchable après.
+    """
+    legende = construire_legende(
+        ("tables_pv", "cloture"),
+        avec_parcelles=True,
+        libelles={"tables_pv": "Panneaux solaires", CLE_PARCELLE: "Parcelles"},
+    )
+
+    assert [e.libelle for e in legende] == [
+        "Parcelles", "Panneaux solaires", "Clôture du projet solaire",
+    ]
+
+
+def test_renommer_une_seule_de_deux_categories_jumelles_les_separe():
+    """Le remplacement se fait avant le dédoublonnage, et cela se voit.
+
+    `piste_lourde` et `aire_grutage` partagent « Voie lourde » et ne font qu'une
+    ligne. Renommer l'une en fait deux : la légende suit ce que le chef de projet
+    a écrit, et non ce que la table prévoyait. C'est la raison pour laquelle
+    l'interface propose **un champ par intitulé**, et non un par catégorie.
+    """
+    ensemble = construire_legende(("piste_lourde", "aire_grutage"))
+    assert [e.libelle for e in ensemble] == ["Voie lourde"]
+
+    separees = construire_legende(
+        ("piste_lourde", "aire_grutage"), libelles={"aire_grutage": "Aire de grutage"}
+    )
+
+    assert [e.libelle for e in separees] == ["Voie lourde", "Aire de grutage"]
+
+
+def test_deux_categories_renommees_pareil_se_rejoignent():
+    """L'inverse est vrai, et c'est la même règle."""
+    legende = construire_legende(
+        ("tables_pv", "cloture"),
+        libelles={"tables_pv": "Le projet", "cloture": "Le projet"},
+    )
+
+    assert [e.libelle for e in legende] == ["Le projet"]
+
+
+def test_un_intitule_vide_est_refuse():
+    """Une entrée de légende sans texte est un aplat que rien ne nomme."""
+    with pytest.raises(ErreurComposition, match="Intitulé de légende vide"):
+        construire_legende(("tables_pv",), libelles={"tables_pv": "   "})
 
 
 def test_sans_batiment_pas_dentree_batiment():

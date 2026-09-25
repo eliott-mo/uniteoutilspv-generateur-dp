@@ -396,7 +396,7 @@ def generer(
 
     echelle_ouvrages = _dessiner_ouvrages(planche, blocs, panneau_droit)
     echelle_reperage, messages = _plan_de_reperage(
-        planche, contrat, panneau_gauche, categories
+        planche, contrat, panneau_gauche, categories, libelles=projet.legendes
     )
     avertissements.extend(messages)
 
@@ -848,7 +848,7 @@ def _categories_visibles(contrat: Contrat, cadre, avertissements) -> list:
     return visibles
 
 
-def _plan_de_reperage(planche, contrat, panneau, categories):
+def _plan_de_reperage(planche, contrat, panneau, categories, libelles=None):
     """L'emprise repérée et ses ouvrages, dans un sous-cadre à gauche.
 
     Le moteur centre la carte sur la zone de dessin entière. Pour qu'elle tombe
@@ -911,7 +911,9 @@ def _plan_de_reperage(planche, contrat, panneau, categories):
         messages_du_plan = []
         visibles = _categories_visibles(contrat, fenetre, messages_du_plan)
         besoin = hauteur_bloc(
-            len(construire_legende([c for c, _ in visibles], avec_parcelles=True))
+            len(construire_legende(
+                [c for c, _ in visibles], avec_parcelles=True, libelles=libelles
+            ))
         )
         if besoin <= hauteur_legende:
             break
@@ -964,7 +966,7 @@ def _plan_de_reperage(planche, contrat, panneau, categories):
             _tracer_tables(planche, contrat, geometries, fenetre, avertissements)
 
     entrees = construire_legende(
-        [c for c, _ in visibles], avec_parcelles=bool(parcelles)
+        [c for c, _ in visibles], avec_parcelles=bool(parcelles), libelles=libelles
     )
     dessiner_legende(
         planche,

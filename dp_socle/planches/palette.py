@@ -36,6 +36,7 @@ from dataclasses import dataclass as _dataclass
 
 from shapely.ops import unary_union
 
+from ..erreurs import ErreurComposition
 from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, Style
 from .primitives import union_valide
 
@@ -455,10 +456,18 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
     return dessinee, []
 
 
+#: Clés sous lesquelles les deux entrées qui ne viennent pas du contrat se
+#: renomment. Le parcellaire et les bâtiments viennent du WFS IGN, pas du plan du
+#: bureau d'études : ils n'ont pas de catégorie de contrat à porter leur nom.
+CLE_PARCELLE = "_parcelle"
+CLE_BATIMENT = "_batiment"
+
+
 def construire_legende(
     categories,
     avec_parcelles: bool = False,
     avec_batiments: bool = False,
+    libelles: dict | None = None,
 ) -> list:
     """Légende bâtie sur ce qui a été dessiné, et sur rien d'autre (D3).
 
@@ -466,22 +475,57 @@ def construire_legende(
     le même intitulé n'y font qu'une entrée — le dédoublonnage se fait sur
     l'intitulé, pas sur la catégorie. L'ordre est celui du rang de dessin du
     contrat.
+
+    `libelles` remplace l'intitulé de certaines catégories, `{catégorie: texte}`.
+    C'est ce que le chef de projet peut corriger à l'écran avant de générer : nos
+    intitulés sont ceux du dossier de référence, mais un projet peut avoir ses
+    mots — une « piste lourde » qui s'appelle une voie de desserte sur les autres
+    pièces du dossier. Le parcellaire et les bâtiments se renomment sous
+    `CLE_PARCELLE` et `CLE_BATIMENT`.
+
+    Le remplacement se fait **avant** le dédoublonnage, et c'est ce qui compte :
+    renommer deux catégories qui partageaient un intitulé les sépare en deux
+    entrées, et leur donner le même les réunit en une. La légende suit donc ce que
+    le chef de projet a écrit, et non ce que la table prévoyait.
+
+    Un intitulé vide est refusé plutôt que laissé vide : une entrée de légende
+    sans texte est un aplat de couleur que rien ne nomme.
     """
+    libelles = dict(libelles or {})
+    vides = [cle for cle, texte in libelles.items() if not str(texte).strip()]
+    if vides:
+        raise ErreurComposition(
+            "Intitulé de légende vide pour "
+            f"{', '.join(sorted(vides))} : une entrée de légende sans texte est "
+            "un aplat de couleur que rien ne nomme."
+        )
+
     entrees = []
     if avec_parcelles:
-        entrees.append(
-            (RANG_PARCELLE, LIBELLE_PARCELLE, STYLE_PARCELLE, SYMBOLE_PARCELLE)
-        )
+        entrees.append((
+            RANG_PARCELLE,
+            libelles.get(CLE_PARCELLE, LIBELLE_PARCELLE),
+            STYLE_PARCELLE,
+            SYMBOLE_PARCELLE,
+        ))
     if avec_batiments:
-        entrees.append(
-            (RANG_BATIMENT, LIBELLE_BATIMENT, STYLE_BATIMENT, SYMBOLE_BATIMENT)
-        )
+        entrees.append((
+            RANG_BATIMENT,
+            libelles.get(CLE_BATIMENT, LIBELLE_BATIMENT),
+            STYLE_BATIMENT,
+            SYMBOLE_BATIMENT,
+        ))
 
     for categorie in categories:
         if categorie in EXCLUES or categorie in SANS_STYLE:
             continue
         fiche = style(categorie)
-        entrees.append((fiche.rang, fiche.libelle, fiche.style, fiche.symbole))
+        entrees.append((
+            fiche.rang,
+            libelles.get(categorie, fiche.libelle),
+            fiche.style,
+            fiche.symbole,
+        ))
 
     entrees.sort(key=lambda e: e[0])
     vues = set()

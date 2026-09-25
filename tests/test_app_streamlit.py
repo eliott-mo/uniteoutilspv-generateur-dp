@@ -1219,6 +1219,41 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     assert any("PowerPoint" in intitule for intitule in survivants), survivants
 
 
+def test_les_intitules_de_legende_se_corrigent_avant_de_generer(tmp_path, monkeypatch):
+    """La légende est dessinée dans la planche : elle se retouche avant, ou jamais.
+
+    La décision D1 du lot 8 la voulait éditable dans le `.pptx` ; elle ne l'est
+    pas, et ne le sera pas sans redessiner les planches sans elle. Le recours est
+    donc ici, à l'étape où le chef de projet vérifie le plan.
+
+    Un champ par **intitulé** et non par catégorie : « Voie lourde » couvre la
+    piste lourde et l'aire de grutage, et la planche n'en fait qu'une ligne.
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+
+    champs = {
+        champ.label: champ
+        for champ in application.text_input
+        if "objet(s)" in champ.label
+    }
+    assert champs, [c.label for c in application.text_input]
+    # L'intitulé par défaut est celui du dossier de référence, et il est proposé
+    # tel quel : le chef de projet corrige, il ne saisit pas tout.
+    for libelle, champ in champs.items():
+        assert champ.value == libelle.split(" — ")[0]
+
+    premier = next(iter(champs.values()))
+    premier.set_value("Emprise du parc solaire")
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    # La clé porte le nom du dépôt : une correction faite sur un projet ne suit
+    # pas le chef de projet quand il en ouvre un autre.
+    assert application.session_state[premier.key] == "Emprise du parc solaire"
+    assert premier.key.startswith("legende_")
+    assert "SAINT-CYR" in premier.key.upper()
+
+
 def test_la_seule_sortie_offerte_est_le_pptx_a_finaliser(tmp_path, monkeypatch):
     """Un seul bouton de génération, et c'est celui du `.pptx`.
 
@@ -1259,6 +1294,36 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
 
     intitules = [bouton.label for bouton in application.get("download_button")]
     assert any("PowerPoint" in intitule for intitule in intitules), intitules
+
+
+@pytest.mark.reseau
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_intitule_corrige_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
+    """La retouche de légende part au `projet.json`, et donc aux planches.
+
+    Conservée plutôt que consommée : une régénération ne redemande pas au chef de
+    projet de récrire ce qu'il a déjà écrit.
+    """
+    import json
+
+    application = _import_valide(tmp_path, monkeypatch)
+    champ = next(c for c in application.text_input if "objet(s)" in c.label)
+    intitule = champ.label.split(" — ")[0]
+    champ.set_value("Voie de desserte")
+    application = application.run()
+
+    _cliquer(application, "Générer le dossier à finaliser")
+    application.run()
+    assert not application.exception, [str(e.value) for e in application.exception]
+
+    nom = application.session_state["pptx_genere"]["nom"]
+    donnees = json.loads(
+        (tmp_path / "projets" / nom / "projet.json").read_text(encoding="utf-8")
+    )
+    assert "Voie de desserte" in donnees["legendes"].values(), donnees["legendes"]
+    # L'intitulé d'origine, lui, n'est pas retenu : une correction qui ne corrige
+    # rien n'a pas à encombrer le fichier.
+    assert intitule not in donnees["legendes"].values()
 
 
 # ---------------------------------------------------------------------------

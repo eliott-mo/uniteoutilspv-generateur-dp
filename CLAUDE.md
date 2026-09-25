@@ -15,7 +15,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
 | 4 | DP 2, DP 3, DP 4 | livré |
 | 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
-| 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré |
+| 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré ; saisie retirée de l'interface au lot 8 |
 | 7 | Reprise d'un dossier produit, pour le compléter | à venir, brief écrit |
 | 8 | Sortie PowerPoint à finaliser, pour le volet photographique | livré |
 

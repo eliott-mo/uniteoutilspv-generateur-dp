@@ -132,6 +132,20 @@ class Projet:
     #: `Projet` doit rester sérialisable sans traitement particulier, et une
     #: dataclass imbriquée s'y serait invitée dans `asdict`.
     photographies: dict | None = None
+    #: Intitulés de légende retouchés par le chef de projet, `{catégorie: texte}`.
+    #:
+    #: Nos intitulés sont ceux du dossier de référence, et ils conviennent presque
+    #: toujours ; mais un projet peut avoir ses mots — une « piste lourde » que les
+    #: autres pièces du dossier appellent une voie de desserte. Les corriger ici
+    #: plutôt que dans le `.pptx` a une raison : la légende est dans l'image de la
+    #: planche, et la rendre éditable dans PowerPoint demanderait de dessiner la
+    #: planche sans elle (décision D1 du lot 8, non tenue). Une correction se fait
+    #: donc avant de générer, et se conserve pour les régénérations suivantes.
+    #:
+    #: Les deux entrées qui ne viennent pas du contrat — le parcellaire et les
+    #: bâtiments du WFS IGN — se renomment sous `palette.CLE_PARCELLE` et
+    #: `palette.CLE_BATIMENT`.
+    legendes: dict | None = None
 
     @property
     def libelle_affiche(self) -> str:

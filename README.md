@@ -42,18 +42,25 @@ Une **liste de prérequis** ouvre la page : ce qu'il faut avoir sous la main, ce
 qui est obligatoire et ce qui ne l'est pas. La découverte d'un fichier manquant
 au milieu du parcours coûte un aller-retour au bureau d'études.
 
-Puis quatre sections, qui **apparaissent au fur et à mesure** — chacune attend
+Puis trois sections, qui **apparaissent au fur et à mesure** — chacune attend
 que la précédente soit satisfaite. C'est ce qui empêche de lancer une génération
 avant d'avoir importé le plan : le dossier obtenu s'arrêtait alors aux pièces
 DP 1, quatre planches sur neuf, dans un PDF de 17 Mo d'apparence complète.
 Techniquement, un `st.stop()` à chaque porte : Streamlit rejoue le script de
 haut en bas, arrêter la lecture revient à ne pas afficher la suite.
 
-1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale. Le nom du
-   projet et la date ne se saisissent pas : l'un est toujours « PV » suivi de la
-   commune et de l'indice du tableau bilan, l'autre est le jour où le dossier est
-   produit. Deux champs de moins à remplir, deux occasions de moins de se
-   tromper.
+Elles étaient cinq jusqu'au 26/09/2026 : le dépôt des photographies et la carte
+de placement des prises de vue ont été retirés, le volet photographique se
+traitant maintenant dans le `.pptx` — voir « La sortie PowerPoint à finaliser »
+plus bas.
+
+1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale, et la
+   notice DP 11. Le nom du projet et la date ne se saisissent pas : l'un est
+   toujours « PV » suivi de la commune et de l'indice du tableau bilan, l'autre
+   est le jour où le dossier est produit. Deux champs de moins à remplir, deux
+   occasions de moins de se tromper. La commune et le code postal s'ouvrent
+   **vides**, avec une invite grisée : ils portaient Bray-Saint-Aignan en valeur
+   par défaut, et une valeur préremplie se génère sans qu'on la relise.
 2. **Plan du bureau d'études** — le DXF et le tableau bilan, leurs contrôles
    croisés et la ligne de coupe A-A'. C'est le gros de la saisie, et c'est pour
    cela qu'elle vient avant le bouton. **La coupe est proposée dès l'import** :
@@ -72,18 +79,18 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    jamais le tracé d'origine — le voir persister donnait à croire que rien
    n'avait été redressé.
 
-   La carte se tient **ici tant que l'import n'est pas validé**, et c'est
-   voulu : la coupe se règle avant qu'on la fige, pas après. La validation
-   libérait tout d'un coup — la coupe et les photographies — et l'annonce
-   « Tracez sur la carte si vous voulez la déplacer » s'affichait alors
-   qu'aucune carte n'existait encore (retour d'usage du 19/09/2026). Une fois
-   l'import validé, elle **redescend** sous les dépôts de photographies, où
-   les prises de vue se placent. Jamais deux cartes à l'écran : l'état est figé
-   au début de l'exécution du script et relu plus bas, faute de quoi le clic
-   sur « Valider » — qui écrit le contrat au milieu de la page — en faisait
-   dessiner deux, et Streamlit refusait le second bouton « Déplacer la coupe ».
+   **La carte ne bouge plus.** Elle vivait ici tant que l'import n'était pas
+   validé, puis descendait sous les dépôts de photographies pour y placer les
+   prises de vue — section retirée le 26/09/2026. Elle reste donc en place et
+   **passe en lecture seule** à la validation, coupe retenue comprise : c'est là
+   que le chef de projet vérifie le plan avant de générer, et la lui retirer
+   l'aveuglait au moment où il en a le plus besoin. « Validé » se compte sur ce
+   qui est à l'écran et non sur la présence du contrat sur le disque : après une
+   première validation, un recalage ou un changement de couche remet la coupe en
+   jeu, et la figer laisserait une coupe relevée sur un autre calage (retour
+   d'usage du 24/09/2026).
 
-   Pour un plan PDF, elle se tient **à droite des réglages**, dans la même
+   Pour un plan PDF, la carte se tient **à droite des réglages**, dans la même
    ligne : le calage, les choix du plan et les corrections à cocher dans la
    colonne de gauche, la carte dans celle de droite. L'un sous l'autre, il
    fallait défiler dans les deux sens pour juger de l'effet d'un recalage — la
@@ -93,47 +100,31 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    bureau d'études, qui n'a ni calage ni choix à suivre une fois importé, garde
    sa carte plus bas et pleine largeur.
 
-   « Validé » se compte sur ce qui est à l'écran, et non sur la présence du
-   contrat sur le disque : après une première validation, un recalage ou un
-   changement de couche renvoyait la carte tout en bas, à deux écrans des
-   boutons de recalage (retour d'usage du 24/09/2026). Elle reste donc en
-   haut tant que le calage, les choix du plan et la correspondance de la
-   légende ne sont pas ceux de la dernière écriture — c'est
-   `ImportPlanPDF.etat`, comparé à ce que la validation a retenu. Un plan du
-   bureau d'études n'a rien de tout cela à régler une fois importé : son état
-   est `None`, et il redescend dès la première validation, comme avant.
+   **Les intitulés de la légende se corrigent ici**, dans un dépliant replié par
+   défaut : un champ par intitulé, proposé tel que la planche l'écrira. Nos
+   intitulés sont ceux du dossier de référence et conviennent presque toujours,
+   mais un projet peut avoir ses mots — une « voie lourde » que le reste du
+   dossier appelle une voie de desserte. C'est un recours, pas une étape ; qui
+   n'ouvre pas le dépliant obtient les intitulés de référence. La correction se
+   conserve dans `projet.json`, et une régénération ne la redemande pas.
 
-   Les deux cartes ne portent pas tout à fait la même chose. Celle des prises
-   de vue laisse de côté les **arbres existants** : 290 des 504 objets du plan
-   de Sarnois, 43 % des 308 Ko envoyés au navigateur à chaque exécution, et
-   l'ortho IGN les montre déjà. Celle de la coupe les **garde** — `dp3_coupes`
-   dessine à 8 m les arbres que la coupe traverse, et cette hauteur fixe celle
-   du bloc de la planche : choisir par où passer sans les voir reviendrait à
-   choisir à l'aveugle ce qui sera dessiné.
-3. **Pièces fournies** — ce que l'outil ne dessine pas. La **notice DP 11**
-   ouvre la section : c'est la seule que l'outil intègre au dossier assemblé —
-   voir « Notice DP 11 » plus bas. Elle est attendue de tout dossier déposable
-   sans être exigée : sans elle le dossier sort quand même, et le rapport dit
-   qu'il est incomplet. Viennent ensuite les photographies et photomontages, une ligne par
-   pièce, DP 6, DP 7 et DP 8 : ce sont trois pièces distinctes, qui ne montrent
-   pas la même chose et ne se rangent pas au même endroit du dossier, et les
-   mélanger obligerait à les retrier à la main. L'insertion paysagère de DP 6
-   monte en page de garde ; quand il y en a plusieurs, un bouton radio désigne
-   laquelle.
-4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis
-   les boutons. Ils sont en dernier parce que tout ce qu'ils consomment est
-   au-dessus d'eux, et c'est là que le nom du projet est complet : l'indice ne se
-   connaît qu'après l'import. Le dossier produit se **télécharge** — en une
-   archive ZIP, ou en PDF assemblé seul. L'application tourne sur un serveur :
-   `sortie/` y reste, hors de portée du chef de projet.
+   Un champ par **intitulé** et non par catégorie : « Voie lourde » couvre la
+   piste lourde et l'aire de grutage, qui sont la même grave compactée, et la
+   planche n'en fait qu'une ligne. En montrer deux champs laisserait croire
+   qu'on peut les nommer séparément — ce qui est possible, mais scinde la ligne,
+   et doit donc se demander plutôt que s'obtenir par surprise.
+3. **Génération** — le type des voiries si le plan en laisse d'indécises, puis
+   le bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus
+   de lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
+   qu'après l'import. Le fichier produit se **télécharge** : l'application tourne
+   sur un serveur, `sortie/` y reste, hors de portée du chef de projet.
 
-   **Deux voies, deux boutons.** « Générer le dossier » produit le PDF vérifié de
-   bout en bout ; « Générer la sortie PowerPoint à finaliser » produit un `.pptx`
-   dont les planches sont dessinées et dont les pièces photographiques restent à
-   garnir, pour avancer avant d'avoir traité les photographies — voir « La sortie
-   PowerPoint à finaliser » plus bas. Ils ne se lancent pas ensemble : chacun
-   recompose toutes les planches, et les téléchargements IGN font l'essentiel du
-   temps de génération.
+   **Une seule sortie, le `.pptx` à finaliser.** Le bouton du PDF assemblé a été
+   retiré le 26/09/2026 avec le dépôt des photographies. Ce n'est pas un
+   renoncement à la voie PDF, qui reste la sortie vérifiée de bout en bout et
+   reste sous tests (`dp_socle.assemblage`) : c'est qu'elle ne peut plus être
+   juste depuis ici. Sans photographies déposées, elle produirait un dossier
+   amputé de DP 6, DP 7 et DP 8 — sept planches sur dix, d'apparence complète.
 
 **Le dossier réduit aux seules pièces DP 1** — page de garde, situation,
 photographie aérienne, cadastre — reste possible pour une étude amont, mais il
@@ -150,15 +141,14 @@ Le **dépôt** des fichiers du bureau d'études, lui, ne porte pas l'indice :
 altimétrique. Ils y arrivent avant qu'on sache quel indice lire — c'est le
 tableau déposé là qui en donne la liste — et le tableau porte de toute façon
 tous les indices du projet. Un dépôt par commune, donc, et un dossier par
-indice : `projets/{commune}-{indice}/` pour l'emprise, les photos et le
-`projet.json` du lot 1, `sortie/{commune}-{indice}/` pour le contrat et les
-planches.
+indice : `projets/{commune}-{indice}/` pour l'emprise et le `projet.json` du
+lot 1, `sortie/{commune}-{indice}/` pour le contrat et le fichier produit.
 
 Ces deux noms se composent par `_nom_depot()` et `_nom_dossier()`, appelés là où
 le nom sert. Ce ne sont pas des variables posées en tête de script : Streamlit
 rejoue `app.py` de haut en bas à chaque interaction, l'indice est choisi au
 milieu de la section 2, et une variable serait en retard d'une exécution en tête
-de script — ou absente en section 2 si on la composait en section 4, ce qui a
+de script — ou absente en section 2 si on la composait en section 3, ce qui a
 levé une `NameError` au dépôt du DXF le 09/09/2026.
 
 **Les contrôles croisés sont repliés.** Une quinzaine de recoupements entre le
@@ -173,17 +163,16 @@ lequel appeler. Le reste est consultable dans un dépliant.
 - écrire la sortie quand la liste d'indices s'est écartée de l'import en
   mémoire, ce qui déposerait la géométrie d'un indice dans le dossier d'un
   autre ;
-- générer sans emprise cadastrale, ou avec deux photographies de même nom dans
-  une même pièce, la seconde écrasant la première sur le disque ;
+- générer sans emprise cadastrale ;
 - trancher à votre place le type d'une voirie que le plan laisse indécise.
 
 Chacun de ces cas affiche ce qui manque et pourquoi. C'est la règle du dépôt :
 une planche fausse qui s'affiche correctement est pire qu'un refus, parce que
 personne ne la détecte avant l'instruction du dossier.
 
-Les pièces photographiques DP 6, DP 7 et DP 8 sont assemblées au dossier depuis
-le lot 6, avec le **report de la position de prise de vue sur un plan de
-repérage** — voir « Les pièces photographiques » plus bas.
+Les pièces photographiques DP 6, DP 7 et DP 8 sont toujours produites, avec le
+**plan de repérage des prises de vue** — mais leurs cadres sortent vides, et
+c'est dans PowerPoint qu'ils se garnissent.
 
 ## Installation
 
@@ -269,16 +258,20 @@ Interface :
 streamlit run app.py
 ```
 
-Ou directement, à partir du format pivot `projet.json` :
-
-```bash
-python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import generer_dossier; generer_dossier(Projet.charger('exemples/bray-saint-aignan-PDF/projet.json'))"
-```
-
-La seconde sortie, le `.pptx` à finir dans PowerPoint, se demande de même :
+L'interface produit le `.pptx` à finaliser, et lui seul. Il se demande aussi
+directement, à partir du format pivot `projet.json` :
 
 ```bash
 python -c "from dp_socle.projet import Projet; from dp_socle.sortie_pptx import generer_pptx; generer_pptx(Projet.charger('exemples/bray-saint-aignan-PDF/projet.json'))"
+```
+
+La voie PDF reste là, et reste la sortie vérifiée de bout en bout — mais elle
+n'est plus offerte par l'interface, qui n'a plus de quoi lui donner ses
+photographies. Elle se demande en ligne de commande, sur un `projet.json` qui
+porte ses prises de vue :
+
+```bash
+python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import generer_dossier; generer_dossier(Projet.charger('exemples/bray-saint-aignan-PDF/projet.json'))"
 ```
 
 ### `projet.json`
@@ -301,7 +294,11 @@ python -c "from dp_socle.projet import Projet; from dp_socle.sortie_pptx import 
   figure au cartouche et sur la page de garde. À défaut, `nom` est repris.
 - `image_garde` est le photomontage de la page de garde. Il occupe la moitié
   gauche de la page ; sans lui, un cadre tireté gris y tient la place et la
-  nomme, « Photomontage à insérer ».
+  nomme, « Photomontage à insérer ». L'interface ne le renseigne plus : dans le
+  `.pptx`, ce cadre est une réservation d'image que le chef de projet garnit
+  lui-même.
+- `legendes` porte les intitulés de légende qu'il a corrigés, `{catégorie:
+  texte}`. Absent, les planches emploient ceux du dossier de référence.
 
 Les chemins relatifs le sont par rapport au dossier du `projet.json`. Une
 correction de dernière minute se fait en modifiant une valeur ici puis en
@@ -480,18 +477,23 @@ python -m pytest -q
   dossier d'étude amont ne s'entend rien reprocher.
 - `tests/test_app_streamlit.py` — l'application elle-même, jouée sans navigateur
   par `AppTest`, qui suit le parcours du chef de projet : cadrer le projet,
-  déposer le plan, importer, valider, générer. Il contrôle l'ouverture des
-  sections une à une, la coupe proposée dès l'import, et surtout les **refus** —
-  changer d'indice sans réimporter, générer hors de portée d'une emprise,
-  importer sans commune, déposer deux photos de même nom. C'est le seul contrôle
+  déposer le plan, importer, valider, corriger les intitulés de légende,
+  générer. Il contrôle l'ouverture des sections une à une, la coupe proposée dès
+  l'import, et surtout les **refus** — changer d'indice sans réimporter, générer
+  hors de portée d'une emprise, importer sans commune. C'est le seul contrôle
   qui exécute `app.py` ; les tests des modules ne le touchent pas, et une
   `NameError` y est restée invisible jusqu'à ce qu'un chef de projet la
   rencontre. Un relevé altimétrique de synthèse y est déposé à chaque fois,
   pour que le profil se lise dans un fichier plutôt que sur le RGE ALTI : seuls
-  les tests qui produisent un vrai dossier sont marqués `reseau` : le
-  téléchargement, le **critère n°8 du lot 5** — déposer la notice, générer, la
-  retrouver dans l'archive ZIP — et la génération sans notice, qui doit aboutir
-  à un dossier produit et à un rapport qui le dit incomplet.
+  les tests qui produisent un vrai dossier sont marqués `reseau` — le
+  téléchargement, le **critère n°8 du lot 5** (déposer la notice, générer, la
+  retrouver dans le `.pptx`), la génération sans notice qui doit aboutir à un
+  dossier produit et à un rapport qui le dit incomplet, et l'intitulé corrigé qui
+  doit se retrouver dans `projet.json`.
+
+  Un millier de lignes y mesuraient le dépôt des photographies, la reprise d'un
+  rapport `photos-geoloc`, le placement sur la carte et le cadrage au clic. Elles
+  sont parties avec les sections qu'elles mesuraient, le 26/09/2026.
 - `tests/test_ooxml_lot8.py` — les six recettes OOXML du lot 8, mesurées dans le
   fichier **enregistré puis relu**, et non dans l'objet en mémoire : c'est
   l'enregistrement qui sérialise l'XML. Une mise en page clonée survit au
@@ -3070,6 +3072,15 @@ repérage** à gauche, qui dit d'où chaque vue a été prise et — quand la di
 est vérifiée — ce qu'elle regarde. L'outil ne fabrique pas les images : il les
 assemble, les repère et les pagine.
 
+**Ce que l'interface en fait depuis le 26/09/2026.** Elle ne dépose plus de
+photographies et ne place plus de points de vue : le `.pptx` sort ces trois
+pièces avec des cadres vides et des repères à poser à la main, et le chef de
+projet les garnit dans PowerPoint. Tout ce qui suit reste vrai des planches
+elles-mêmes, qui sont composées par les mêmes modules ; ce qui ne vaut plus,
+c'est la saisie décrite au fil du texte, et le contrôle d'un cap contre l'EXIF
+qu'elle permettait. La voie PDF, elle, sait toujours les produire garnies, à
+partir d'un `projet.json` qui porte ses prises de vue.
+
 | Pièce | Ce qu'elle porte | Planches |
 |---|---|---|
 | DP 6 | un point de vue, 2 ou 3 volets | une par vue, « Vue A », « Vue B » |
@@ -3220,9 +3231,10 @@ planche redimensionnée rendrait faux le dénominateur écrit à son cartouche.
 | Sur la diapo, donc modifiable | Dans l'image, donc figé |
 |---|---|
 | les cadres photo, à garnir | les planches entières |
-| les intitulés des cadres | les légendes des planches |
-| les repères et cônes de vue | le sommaire de la page de garde |
-| les bandeaux rouges, à supprimer | les cartouches |
+| la perspective de la page de garde | les légendes des planches |
+| les intitulés des cadres | le sommaire de la page de garde |
+| les repères et cônes de vue | les cartouches |
+| les bandeaux rouges, à supprimer | |
 
 Les cadres sont des **réservations d'image** : PowerPoint y rogne la photographie
 déposée au format du cadre, au lieu d'étirer le cadre au format de la
@@ -3233,8 +3245,14 @@ libres, ils se déplaçaient au moindre clic.
 
 La décision D1 du brief voulait aussi éditables les légendes et le sommaire.
 Elles ne le sont pas : les rendre éditables demanderait de redessiner ces
-planches sans eux, donc de toucher aux modules des lots 1 à 4. Le rapport le dit,
-et une correction de légende se fait en régénérant le dossier.
+planches sans eux, donc de toucher aux modules des lots 1 à 4.
+
+Les **intitulés** de légende, eux, se corrigent — mais en amont, dans
+l'interface, à l'étape où le chef de projet vérifie le plan. C'est la réponse au
+même besoin par l'autre bout : plutôt que de rendre la légende retouchable après
+coup dans un fichier que l'outil ne relira jamais, l'outil la dessine avec les
+mots que le chef de projet a choisis. Voir « L'application, dans l'ordre du
+travail » plus haut, et `projet.legendes`.
 
 ### Le cadrage se décide avant l'export
 
