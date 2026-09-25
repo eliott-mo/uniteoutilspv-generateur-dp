@@ -179,6 +179,7 @@ def generer(
         titre=TITRE,
         chemin=chemin,
         echelle=denominateur,
+        planche=planche,
         details={
             "categories_dessinees": categories_tracees,
             "nb_parcelles": len(parcelles),

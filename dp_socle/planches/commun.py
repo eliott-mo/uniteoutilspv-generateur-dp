@@ -20,6 +20,19 @@ class Sortie:
     chemin: object
     echelle: int | None = None
     details: dict | None = None
+    #: La planche composée, telle que le moteur l'a dessinée.
+    #:
+    #: Le PDF n'en a pas besoin — il est déjà écrit quand la `Sortie` se
+    #: construit. C'est la sortie PowerPoint du lot 8 qui la demande : elle porte
+    #: la planche en une image pleine page, et ne peut la rendre qu'à partir du
+    #: SVG que cette planche produit. La garder ici est ce qui rend les deux
+    #: sorties identiques par construction, plutôt que par ressemblance.
+    #:
+    #: Vide pour la notice DP 11, qui n'est pas composée : son PDF est fusionné
+    #: page par page dans autant de planches, et c'est le PDF produit que le
+    #: lot 8 rastérise.
+    planche: object | None = None
+
     #: Numéros que les cartouches de la pièce annoncent réellement, dans
     #: l'ordre de ses pages.
     #:

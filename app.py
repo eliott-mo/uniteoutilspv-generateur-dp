@@ -75,6 +75,7 @@ from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
 from dp_socle.polices import etat_polices
+from dp_socle.sortie_pptx import generer_pptx
 from dp_socle.import_be import SEUIL_DP_MWC
 from dp_socle.planches import dp11_notice
 from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
@@ -4097,11 +4098,28 @@ def _construire_projet() -> Projet | None:
     )
 
 
-# Un seul bouton. Le second, « Écrire projet.json », n'écrivait que le fichier
-# de métadonnées du lot 1 — que celui-ci écrit de toute façon avant de dessiner —
+# Deux sorties, deux boutons, et non une génération qui produirait les deux.
+#
+# Le bouton « Écrire projet.json » a été retiré : il n'écrivait que le fichier de
+# métadonnées du lot 1 — que la génération écrit de toute façon avant de dessiner —
 # et se confondait avec le `projet.json` du contrat d'entrée, qui est un autre
 # fichier, dans un autre dossier, produit par l'import du plan BE.
-lancer = st.button("Générer le dossier", type="primary", width="stretch")
+#
+# La sortie PowerPoint, elle, est un second bouton parce qu'elle recompose toutes
+# les planches pour son compte : les produire ensemble doublerait les
+# téléchargements IGN, qui sont l'essentiel du temps de génération. Le chef de
+# projet choisit la voie dont il a besoin — le PDF quand ses photographies sont
+# prêtes, le PowerPoint quand il veut avancer sans elles.
+colonne_pdf, colonne_pptx = st.columns(2)
+with colonne_pdf:
+    lancer = st.button("Générer le dossier", type="primary", width="stretch")
+with colonne_pptx:
+    # Le libellé ne reprend pas « Générer le dossier » : les tests de l'interface
+    # cliquent par sous-chaîne, et deux boutons dont l'un contient le libellé de
+    # l'autre rendraient ces clics ambigus.
+    lancer_pptx = st.button(
+        "Générer la sortie PowerPoint à finaliser", width="stretch"
+    )
 
 if lancer:
     try:
@@ -4130,6 +4148,26 @@ if lancer:
             }
     except ErreurDP as erreur:
         st.session_state.pop("dossier_genere", None)
+        st.error(f"{type(erreur).__name__} : {erreur}")
+
+if lancer_pptx:
+    try:
+        projet = _construire_projet()
+        if projet is not None:
+            projet.valider()
+            projet.ecrire(DOSSIER_PROJETS / projet.nom / "projet.json")
+            with st.spinner(
+                "Téléchargement des fonds IGN, composition des planches et "
+                "montage des diapos…"
+            ):
+                rapport_pptx = generer_pptx(projet, DOSSIER_SORTIE, dpi=int(dpi))
+            st.session_state["pptx_genere"] = {
+                "nom": projet.nom,
+                "libelle": projet.libelle_affiche,
+                "rapport": rapport_pptx,
+            }
+    except ErreurDP as erreur:
+        st.session_state.pop("pptx_genere", None)
         st.error(f"{type(erreur).__name__} : {erreur}")
 
 
@@ -4213,3 +4251,60 @@ if _genere is not None and _genere["nom"] == nom:
     )
 
 
+
+
+# Le compte rendu de la sortie PowerPoint, au même régime que celui du PDF : il
+# survit au rejeu que provoque chaque téléchargement, et il disparaît si le projet
+# affiché change.
+_genere_pptx = st.session_state.get("pptx_genere")
+if _genere_pptx is not None and _genere_pptx["nom"] == nom:
+    rapport_pptx = _genere_pptx["rapport"]
+    st.divider()
+    st.success(
+        f"**{_genere_pptx['libelle']}** — {len(rapport_pptx.diapos)} diapos, "
+        f"{rapport_pptx.taille_mo:.1f} Mo. Les planches y sont dessinées, les "
+        "photographies restent à poser."
+    )
+    with open(rapport_pptx.fichier, "rb") as _fichier:
+        st.download_button(
+            f"⬇️ Le dossier à finaliser dans PowerPoint "
+            f"({rapport_pptx.taille_mo:.1f} Mo, .pptx)",
+            data=_fichier.read(),
+            file_name=rapport_pptx.fichier.name,
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "presentationml.presentation"
+            ),
+            help=(
+                "Déposez vos photographies dans les cadres vides, déplacez et "
+                "orientez les repères de vue, puis supprimez les diapos "
+                "surnuméraires et leurs bandeaux rouges avant d'exporter en PDF."
+            ),
+            on_click="ignore",
+            width="stretch",
+        )
+
+    for message in rapport_pptx.avertissements:
+        st.warning(message, icon="⚠️")
+
+    st.dataframe(
+        [
+            {
+                "Diapo": rang,
+                "Pièce": diapo.code or "—",
+                "Planche": diapo.libelle,
+                "Page": diapo.numero,
+                "Cadres": diapo.cadres,
+                "Rendu": diapo.voie,
+                "Mo": round(diapo.octets / 1e6, 2),
+            }
+            for rang, diapo in enumerate(rapport_pptx.diapos, start=1)
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "Une même page portée par plusieurs diapos est un choix à faire : gardez "
+        "celle qui convient et supprimez les autres, la pagination du sommaire "
+        "est calculée pour cela."
+    )

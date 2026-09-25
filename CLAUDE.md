@@ -17,7 +17,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
 | 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré |
 | 7 | Reprise d'un dossier produit, pour le compléter | à venir, brief écrit |
-| 8 | Sortie PowerPoint à finaliser, pour le volet photographique | à venir, brief écrit |
+| 8 | Sortie PowerPoint à finaliser, pour le volet photographique | livré |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
 fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE,

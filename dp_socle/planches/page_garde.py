@@ -157,7 +157,7 @@ def generer(
     )
 
     chemin = planche.rendre_pdf(Path(dossier) / "DP_0_page_de_garde.pdf")
-    return Sortie(numero=NUMERO, titre=TITRE, chemin=chemin)
+    return Sortie(numero=NUMERO, titre=TITRE, chemin=chemin, planche=planche)
 
 
 def _recadrer_la_couverture(chemin, largeur_mm: float, hauteur_mm: float,

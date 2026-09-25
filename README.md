@@ -120,12 +120,20 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    mélanger obligerait à les retrier à la main. L'insertion paysagère de DP 6
    monte en page de garde ; quand il y en a plusieurs, un bouton radio désigne
    laquelle.
-4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis le
-   bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus de
-   lui, et c'est là que le nom du projet est complet : l'indice ne se connaît
-   qu'après l'import. Le dossier produit se **télécharge** — en une archive ZIP,
-   ou en PDF assemblé seul. L'application tourne sur un serveur : `sortie/` y
-   reste, hors de portée du chef de projet.
+4. **Génération** — le type des voiries si le plan en laisse d'indécises, puis
+   les boutons. Ils sont en dernier parce que tout ce qu'ils consomment est
+   au-dessus d'eux, et c'est là que le nom du projet est complet : l'indice ne se
+   connaît qu'après l'import. Le dossier produit se **télécharge** — en une
+   archive ZIP, ou en PDF assemblé seul. L'application tourne sur un serveur :
+   `sortie/` y reste, hors de portée du chef de projet.
+
+   **Deux voies, deux boutons.** « Générer le dossier » produit le PDF vérifié de
+   bout en bout ; « Générer la sortie PowerPoint à finaliser » produit un `.pptx`
+   dont les planches sont dessinées et dont les pièces photographiques restent à
+   garnir, pour avancer avant d'avoir traité les photographies — voir « La sortie
+   PowerPoint à finaliser » plus bas. Ils ne se lancent pas ensemble : chacun
+   recompose toutes les planches, et les téléchargements IGN font l'essentiel du
+   temps de génération.
 
 **Le dossier réduit aux seules pièces DP 1** — page de garde, situation,
 photographie aérienne, cadastre — reste possible pour une étude amont, mais il
@@ -265,6 +273,12 @@ Ou directement, à partir du format pivot `projet.json` :
 
 ```bash
 python -c "from dp_socle.projet import Projet; from dp_socle.assemblage import generer_dossier; generer_dossier(Projet.charger('exemples/bray-saint-aignan-PDF/projet.json'))"
+```
+
+La seconde sortie, le `.pptx` à finir dans PowerPoint, se demande de même :
+
+```bash
+python -c "from dp_socle.projet import Projet; from dp_socle.sortie_pptx import generer_pptx; generer_pptx(Projet.charger('exemples/bray-saint-aignan-PDF/projet.json'))"
 ```
 
 ### `projet.json`
@@ -478,6 +492,30 @@ python -m pytest -q
   téléchargement, le **critère n°8 du lot 5** — déposer la notice, générer, la
   retrouver dans l'archive ZIP — et la génération sans notice, qui doit aboutir
   à un dossier produit et à un rapport qui le dit incomplet.
+- `tests/test_ooxml_lot8.py` — les six recettes OOXML du lot 8, mesurées dans le
+  fichier **enregistré puis relu**, et non dans l'objet en mémoire : c'est
+  l'enregistrement qui sérialise l'XML. Une mise en page clonée survit au
+  masque, le fond couvre la diapo entière et reste sur la mise en page, le SVG
+  voyage à côté du matriciel, une réservation d'image transmet ses cotes à la
+  diapo au rapport 1,924, et le verrou, l'alpha et l'étiquette horizontale se
+  retrouvent bien dans l'XML — le piège que ce fichier surveille est que
+  `python-pptx` accepte sans lever qu'on lui règle une propriété inexistante.
+- `tests/test_rendu_pptx_lot8.py` — la voie de rendu retenue, et son poids. Le
+  poids déflaté annoncé est comparé à ce qu'un vrai ZIP écrit ; une planche de
+  trait part en vectoriel, une planche que son fond raster domine en matriciel ;
+  le SVG produit ne porte plus aucun `<text>`. Le fond raster de contrôle est un
+  bruit fabriqué exprès : incompressible, donc représentatif d'une ortho.
+- `tests/test_cadrage_sans_vues_lot8.py` — le cadrage d'un plan de repérage dont
+  les prises de vue n'existent pas encore, et la géométrie des cadres photo
+  partagée par la planche du dossier, l'écran de saisie et le `.pptx`.
+- `tests/test_sortie_pptx_lot8.py` — le dossier PowerPoint entier, produit une
+  fois puis mesuré : taille de diapo, ordre des pièces, cotes et rapport de
+  chaque cadre contre `photographies.disposition`, un groupe repère + cône par
+  vue attendue à 2,4 et 8 mm, le dénominateur du cartouche relu dans le PDF de
+  la planche, l'égalité des numéros de page des versions d'une même pièce, et le
+  fait que la génération ne laisse aucun PDF dans le dossier du projet. Les trois
+  appels à la Géoplateforme y sont remplacés par des doublures rendant une image
+  à la bbox exacte : ce qui est mesuré est le montage, pas le service.
 - `tests/test_ordre_app.py` — l'ordre des noms dans `app.py`, relu dans l'arbre
   syntaxique. Streamlit rejoue le script de haut en bas : un nom écrit plus bas
   qu'il n'est lu lève dans le navigateur et nulle part ailleurs. Le contrôle
@@ -536,6 +574,9 @@ dp_socle/
 ├── polices.py        installation et vérification d'Aptos
 ├── projet.py         modèle projet.json
 ├── assemblage.py     génération complète, sommaire paginé, PDF assemblé
+├── sortie_pptx.py    seconde sortie : le .pptx que le chef de projet finit (lot 8)
+├── rendu_pptx.py     les deux voies de rendu d'une planche, et la mesure qui tranche
+├── ooxml.py          ce que python-pptx ne sait pas écrire, relu dans le fichier
 ├── environnement.py  chemin des DLL cairo sous Windows
 ├── erreurs.py        exceptions nommées
 └── planches/
@@ -546,7 +587,10 @@ dp_socle/
     ├── dp1_1_situation.py, dp1_2_aerienne.py, dp1_3_cadastre.py
     ├── dp2_plan_masse.py plan de masse
     ├── dp3_coupes.py     coupe de type des tables et coupe du terrain
-    └── dp4_ouvrages.py   postes, clôture, portail, citerne, équipements
+    ├── dp4_ouvrages.py   postes, clôture, portail, citerne, équipements
+    ├── photographies.py  colonne d'images et panneau de repérage, DP 6 à DP 8
+    ├── reperage_vues.py  cadrage du repérage, repères et cônes de visée
+    └── dp11_notice.py    habillage de la notice fournie en PDF
 ```
 
 L'API `Planche` sépare le repère papier (millimètres) du repère terrain
@@ -3133,6 +3177,196 @@ points de vue « à plusieurs kilomètres » pour DP 8 ; l'usage réel le démen
 `tests/test_echelle_reperage_pdf.py` mesure l'échelle dans le flux de contenu du
 PDF produit, sur la largeur de l'emprise et sur la distance entre deux repères,
 à 0,5 % près.
+
+## La sortie PowerPoint à finaliser (lot 8)
+
+Le dossier sort aussi en un `.pptx` dont les planches sont déjà dessinées et dont
+les pièces photographiques restent à garnir. Le chef de projet peut ainsi
+**télécharger le dossier sans avoir traité ses photographies**, qui sont ce qui
+bloque un dossier : il faut avoir choisi les prises de vue, les avoir
+géolocalisées, avoir posé leurs cônes de visée avant que l'outil produise quoi que
+ce soit. Il finit dans PowerPoint, sur son poste, et exporte en PDF.
+
+Deux boutons, deux voies : « Générer le dossier » produit le PDF vérifié de bout
+en bout, « Générer la sortie PowerPoint à finaliser » produit le fichier à finir.
+Ils ne se lancent pas ensemble — chacun recompose toutes les planches, et les
+téléchargements IGN font l'essentiel du temps de génération.
+
+Le fichier se nomme `{projet}_DP_a_finaliser.pptx`. C'est le seul fichier que
+cette voie laisse dans `sortie/{projet}/` : les PDF intermédiaires vivent dans un
+dossier de travail effacé aussitôt, parce qu'ils portent la pagination du PPTX et
+remplaceraient ceux de la voie PDF par des planches d'une autre numérotation.
+
+### Ce qui cesse d'être garanti
+
+C'est moins robuste que la voie PDF, et c'est assumé (25/09/2026). Ce que l'outil
+garantit dans le PDF — un cône à la bonne position, au bon azimut, vérifié contre
+l'EXIF — devient la responsabilité du chef de projet. Deux contrôles de la voie
+PDF ne s'appliquent plus, parce qu'ils portent sur un fichier édité après nous :
+la vérification que chaque cartouche annonce la page où il tombe
+(`assemblage._verifier_numerotation`) et celle du format 420 × 297 mm de chaque
+page (`assemblage.verifier_format`).
+
+Le rapport de génération le dit à chaque fois, en quatre phrases non
+conditionnelles (`sortie_pptx.AVERTISSEMENTS_DE_PRINCIPE`). Taire ce qui n'est
+plus vérifié serait le repli silencieux le plus coûteux du lot.
+
+### Ce qui est éditable, et ce qui ne l'est pas
+
+Le fond de chaque diapo est posé sur sa **mise en page**, pas sur la diapo : il
+n'y est ni sélectionnable ni déplaçable, et c'est ce qui protège l'échelle. Une
+planche redimensionnée rendrait faux le dénominateur écrit à son cartouche.
+
+| Sur la diapo, donc modifiable | Dans l'image, donc figé |
+|---|---|
+| les cadres photo, à garnir | les planches entières |
+| les intitulés des cadres | les légendes des planches |
+| les repères et cônes de vue | le sommaire de la page de garde |
+| les bandeaux rouges, à supprimer | les cartouches |
+
+Les cadres sont des **réservations d'image** : PowerPoint y rogne la photographie
+déposée au format du cadre, au lieu d'étirer le cadre au format de la
+photographie. C'est ce qui remplace le cadrage en deux fractions que l'écran de
+saisie demande pour la voie PDF — le recadrage se corrige ensuite par
+« Rogner ». Les cadres et leurs intitulés sont verrouillés en position : laissés
+libres, ils se déplaçaient au moindre clic.
+
+La décision D1 du brief voulait aussi éditables les légendes et le sommaire.
+Elles ne le sont pas : les rendre éditables demanderait de redessiner ces
+planches sans eux, donc de toucher aux modules des lots 1 à 4. Le rapport le dit,
+et une correction de légende se fait en régénérant le dossier.
+
+### Le cadrage se décide avant l'export
+
+Redimensionner un plan de repérage dans PowerPoint rendrait faux son
+dénominateur. Le cadrage est donc figé à la génération, et il ne peut pas se
+calculer sur les points de vue — il n'y en a pas encore.
+`reperage_vues.cadrages_sans_vues` cadre sur l'**emprise clôturée élargie de
+150 m**, à la plus grande échelle de `ECHELLES_REPERAGE_VUES` qui la contient.
+
+DP 8 en reçoit **trois**, aux trois crans d'échelle successifs : son point de vue
+peut être loin et on ne sait pas encore où. DP 6 en reçoit deux, qui ne diffèrent
+que par le nombre de cadres — le troisième volet, « projet avec mesures
+paysagères », n'existe que si le projet en porte.
+
+| Pièce | Diapos | Cadres | Repères posés |
+|---|---|---|---|
+| DP 6 | 2 versions | 2 ou 3 | « Vue A » |
+| DP 7 | 1 | 2 | « PC7-1 », « PC7-2 » |
+| DP 8 | 3 échelles | 2 | « PC8-1 », « PC8-2 » |
+
+Les versions d'une même pièce **partagent son numéro de page**, et le sommaire
+n'en compte qu'une : supprimer les surnuméraires laisse la pagination juste.
+Chacune porte un bandeau rouge, posé sur la diapo et donc supprimable.
+
+### Les repères de vue sont des formes à déplacer
+
+Un disque de 2,4 mm de rayon, un secteur de 50° et 8 mm, une étiquette : les mêmes
+cotes que la voie PDF, en millimètres **papier**, donc indépendantes de l'échelle
+du repérage. Le groupe n'a jamais à être redimensionné — le redimensionner serait
+mentir sur ce qu'il mesure.
+
+Ils sont posés **au centre du panneau de repérage**, pas en marge : un cône oublié
+doit se voir. Le secteur part vers le nord, celui de la flèche du cartouche. Le
+groupe fait 16 × 16 mm centré sur le point, de sorte qu'il tourne autour du point
+de vue et non à côté : c'est le `prstGeom` « pie » du cône qui tient ce cadre, en
+occupant la boîte du cercle entier.
+
+Le même repère figure sur le cône **et** sur l'intitulé du cadre photo
+correspondant. C'est tout ce qui force encore l'appariement.
+
+### Deux voies de rendu, et la mesure qui tranche
+
+Une planche entre dans le fichier en une seule image pleine page. La retraduire en
+formes DrawingML serait un second moteur de rendu, avec ses propres métriques de
+texte : une planche qui s'afficherait autrement dans PowerPoint que dans le PDF
+est exactement la planche fausse que personne ne détecte.
+
+Deux façons de la porter, et `rendu_pptx.rendre_fond` les rend toutes les deux
+pour garder la plus légère :
+
+- **vectorielle** — le SVG de la planche, repassé par cairo pour que son texte
+  devienne des tracés de glyphes (zéro `<text>`, donc plus rien que PowerPoint
+  puisse composer de travers), greffé au `a:blip` dans l'extension `asvg:svgBlip`
+  que PowerPoint 2016 et suivants affichent en vectoriel ;
+- **matricielle** — la même planche en JPEG q88 à 200 dpi.
+
+**Le poids qui compte est le poids déflaté**, puisqu'un `.pptx` est un ZIP.
+Mesuré le 25/09/2026 sur le plan de masse de Sarnois :
+
+| Voie | Brut | Déflaté, dans le paquet |
+|---|---|---|
+| SVG en tracés | 2,16 Mo | **0,43 Mo** |
+| JPEG q88 à 200 dpi | 0,86 Mo | 0,77 Mo |
+| PNG à 200 dpi | 1,69 Mo | 1,66 Mo |
+
+Le SVG est du texte : il se comprime d'un facteur cinq. Le brief tranchait par une
+table de codes de pièces ; la table disait vrai mais elle dérive — elle oubliait
+DP 1-3, qui ne porte aucun raster, et ne prévoyait pas une page de garde chargée
+d'un photomontage. La voie se mesure donc planche par planche, et le rapport dit
+laquelle a gagné et de combien.
+
+Sur le dossier de Sarnois, les cinq planches de trait partent en vectoriel, les
+planches à fond IGN en matriciel, et le fichier pèse 10,8 Mo pour 20 diapos avant
+les photographies — dont 5,9 Mo pour les cinq pages de la notice.
+
+**Pourquoi 200 dpi et pas plus.** Mesuré le 25/09/2026 sur un PDF réellement
+exporté depuis PowerPoint, à partir d'une sonde portant la même planche à 200, 300
+et 400 dpi : les trois pages en ressortent à 3 308 × 2 339 px, soit exactement
+200 dpi. Ce qu'on met au-delà est jeté à l'export et ne coûte que du poids. C'est
+la raison d'être de la voie vectorielle, qui n'a pas ce plafond.
+
+**Le repli matriciel d'une planche vectorielle** est volontairement petit
+(`rendu_pptx.LARGEUR_REPLI_PX`). Le brief le voulait à 3 308 px comme la voie
+matricielle ; à cette taille il pèse à lui seul près de quatre fois la planche
+vectorielle qu'il accompagne, et la voie vectorielle deviendrait la plus lourde
+des deux. C'est ce que voit une version de PowerPoint antérieure à 2016 : une
+planche visiblement floue, pas une planche fausse.
+
+**La notice DP 11 est rastérisée** en PNG, page par page, depuis le PDF produit —
+elle n'est pas composée, son PDF est fusionné en vecteur dans le cadre A3, et il
+n'existe donc aucun SVG à passer en tracés. Son texte cesse d'être du texte
+(accepté le 25/09/2026). Le brief justifiait le PNG par « du texte noir sur blanc,
+quelques dizaines de kilo-octets » ; c'est faux — les cinq pages de la notice de
+Sarnois portent de 2 000 à 120 000 couleurs distinctes et pèsent 5,9 Mo en PNG
+contre 3,8 en JPEG q88. Le PNG reste retenu quand même : les artefacts du JPEG
+autour d'un petit corps de texte sont ce qui rend une pièce illisible à
+l'instruction.
+
+### Un réglage du poste à ne pas toucher
+
+*Fichier > Options > Options avancées > Taille et qualité de l'image* : l'option
+« Ne pas compresser les images dans un fichier » est cochée par défaut, et c'est
+elle qui protège les plans à l'enregistrement. La « Résolution par défaut » d'à
+côté est à 96 ppp — décochée, l'option détruirait les plans. Le rapport de
+génération le rappelle à chaque fois.
+
+### Ce que python-pptx ne sait pas faire
+
+`dp_socle/ooxml.py` est le seul endroit du dépôt qui descend sous l'API de la
+bibliothèque. Six recettes y vivent, trouvées à tâtons par les sondes des 25 et
+26/09/2026 et vérifiées sur un fichier réellement ouvert dans PowerPoint : la mise
+en page clonée (`python-pptx` sait en retirer une, pas en créer), le fond posé
+pleine page sur cette mise en page, le SVG greffé au `a:blip`, la réservation
+d'image, le verrou `a:spLocks`, l'alpha et l'étiquette horizontale.
+
+Chaque fonction **relit l'élément qu'elle a produit**. La raison est mesurée :
+`fill.transparency = 0.45` n'existe pas dans `python-pptx`, Python l'accepte sans
+lever et ne fait rien, et le cône sortait magenta opaque par-dessus le plan. Deux
+autres pièges du même genre ont été payés à la mesure — la mise en page « Blank »
+du modèle porte trois réservations de pied de page aux `idx` 10 à 12, et un cadre
+photo posé à l'`idx` 10 héritait des cotes de la case de date, 59 × 10 mm au lieu
+de 222 × 115,4 ; et les poignées d'angle d'un `prstGeom` s'écrivent en 60 000e de
+degré, si bien qu'un secteur de 50° réglé sans ce facteur sortait à 0,12°.
+
+`tests/test_ooxml_lot8.py` et `tests/test_sortie_pptx_lot8.py` mesurent tout cela
+dans le fichier **enregistré puis relu** : taille de diapo, ordre des diapos,
+position et rapport de chaque cadre contre `photographies.disposition`, un groupe
+repère + cône par vue attendue à 2,4 et 8 mm, le dénominateur du cartouche contre
+le cadrage retenu, et l'égalité des numéros de page des versions d'une même pièce.
+Rien de cela ne prouve que PowerPoint l'ouvre correctement : c'est la liste de
+contrôles à l'écran que tient le brief, et qui se refait à chaque changement du
+montage.
 
 ## Hors périmètre de ces lots
 

@@ -597,6 +597,7 @@ def generer(
         titre=TITRE,
         chemin=chemin,
         echelle=echelle_tables,
+        planche=planche,
         details={
             "echelle_tables": echelle_tables,
             "echelle_terrain": echelle_terrain,

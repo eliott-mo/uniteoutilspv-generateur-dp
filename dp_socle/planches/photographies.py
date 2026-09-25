@@ -220,21 +220,15 @@ def composer(
     messages_images = _poser_images(planche, images, plan.emplacements)
 
     panneau = plan.panneau
-    interieur = _interieur_du_cadre(panneau)
-    reperage = plan_de_reperage(points_de_vue, emprise, interieur, libelle_reperage)
-
-    interieur = sous_cadre(
-        planche, *panneau, titre="Plan de repérage", echelle=reperage.denominateur
+    reperage = plan_de_reperage(
+        points_de_vue, emprise, _interieur_du_cadre(panneau), libelle_reperage
     )
-    planche.definir_echelle(reperage.denominateur)
-    _centrer_sur_le_panneau(planche, interieur, reperage.centre)
 
     messages = messages_images + list(reperage.avertissements)
-    fenetre = box(*fenetre_du_panneau(planche, interieur, reperage))
-    if fond_ign:
-        _poser_fond(planche, interieur, reperage)
-    messages.extend(_poser_le_plan(planche, contrat, reperage, fenetre))
-    _poser_emprise(planche, emprise)
+    _interieur, messages_panneau = composer_le_panneau(
+        planche, panneau, reperage, emprise, contrat, fond_ign=fond_ign
+    )
+    messages.extend(messages_panneau)
     messages.extend(dessiner_points_de_vue(planche, points_de_vue, reperes))
     return {
         "echelle_reperage": reperage.denominateur,
@@ -242,6 +236,46 @@ def composer(
         "site_entier": reperage.site_entier,
         "avertissements": messages,
     }
+
+
+def composer_le_panneau(planche: Planche, panneau: tuple, reperage, emprise,
+                        contrat, fond_ign: bool = True) -> tuple:
+    """Le panneau du plan de repérage : cadre titré, fond IGN, plan de masse, emprise.
+
+    Rend `(interieur, avertissements)`. C'est tout ce qu'une planche
+    photographique porte à gauche **sauf les repères de vue** — ceux-ci se
+    dessinent après, et de deux façons : en géométries pour le dossier PDF
+    (`dessiner_points_de_vue`), en formes PowerPoint déplaçables pour la sortie
+    du lot 8, qui n'a pas encore de prise de vue à repérer.
+
+    Le cadrage arrive tout fait : `plan_de_reperage` le calcule sur les points de
+    vue pour le PDF, `reperage_vues.cadrages_sans_vues` le décide sur la seule
+    emprise pour le PPTX. Le reste — l'échelle, le recentrage sur le panneau, la
+    fenêtre IGN, le découpage du plan de masse — est identique, et c'est
+    précisément ce qu'il ne faut pas écrire deux fois.
+    """
+    interieur = sous_cadre(
+        planche, *panneau, titre="Plan de repérage", echelle=reperage.denominateur
+    )
+    planche.definir_echelle(reperage.denominateur)
+    _centrer_sur_le_panneau(planche, interieur, reperage.centre)
+
+    messages = []
+    fenetre = box(*fenetre_du_panneau(planche, interieur, reperage))
+    if fond_ign:
+        _poser_fond(planche, interieur, reperage)
+    messages.extend(_poser_le_plan(planche, contrat, reperage, fenetre))
+    _poser_emprise(planche, emprise)
+    return interieur, messages
+
+
+def interieur_du_panneau(panneau) -> tuple:
+    """Place que le sous-cadre du repérage laisse à la carte, avant de le tracer.
+
+    C'est sur cette zone que se choisit l'échelle, des deux côtés : le cadrage du
+    PDF comme celui du PPTX.
+    """
+    return _interieur_du_cadre(panneau)
 
 
 def _interieur_du_cadre(panneau) -> tuple:

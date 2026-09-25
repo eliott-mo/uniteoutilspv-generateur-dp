@@ -91,6 +91,7 @@ def generer(
         titre=piece(CODE).titre,
         chemin=chemin,
         echelle=retenu["echelle_reperage"],
+        planche=planche,
         details={"reperes": reperes, **retenu},
     )
 

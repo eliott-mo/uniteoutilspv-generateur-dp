@@ -417,6 +417,7 @@ def generer(
         titre=piece(code).titre,
         chemin=chemin,
         echelle=echelle_ouvrages,
+        planche=planche,
         details={
             "ouvrages": [b.titre for b in blocs],
             "categories": categories,

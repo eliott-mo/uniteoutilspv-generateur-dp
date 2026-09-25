@@ -182,6 +182,7 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         titre=TITRE,
         chemin=chemin,
         echelle=denominateur,
+        planche=planche,
         details={
             "avertissements": avertissements,
             "nb_parcelles_tracees": len(parcelles),

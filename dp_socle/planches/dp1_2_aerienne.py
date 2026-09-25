@@ -62,5 +62,6 @@ def generer(
         titre=TITRE,
         chemin=chemin,
         echelle=ECHELLE,
+        planche=planche,
         details={"couche": fond.couche, "dpi": fond.dpi, "taille_px": fond.taille_px},
     )

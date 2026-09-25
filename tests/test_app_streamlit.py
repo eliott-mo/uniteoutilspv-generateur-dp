@@ -1335,6 +1335,52 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
     assert any("PDF assemblé" in intitule for intitule in survivants), survivants
 
 
+def test_les_deux_sorties_s_offrent_ensemble(tmp_path, monkeypatch):
+    """Le PDF et la sortie PowerPoint se lancent par deux boutons distincts.
+
+    Une seule génération produisant les deux doublerait les téléchargements IGN,
+    qui font l'essentiel du temps. Le chef de projet choisit sa voie : le PDF
+    quand ses photographies sont prêtes, le PowerPoint quand il veut avancer
+    sans elles (lot 8).
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+
+    assert _bouton_present(application, "Générer le dossier")
+    assert _bouton_present(application, "Générer la sortie PowerPoint")
+    # Aucun des deux libellés ne contient l'autre : `_cliquer` reste sans
+    # ambiguïté, et un clic ne peut pas lancer la mauvaise voie.
+    libelles = [b.label for b in application.button]
+    assert "Générer le dossier" not in "".join(
+        libelle for libelle in libelles if "PowerPoint" in libelle
+    )
+
+
+@pytest.mark.reseau
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypatch):
+    """La raison d'être du lot 8 : un dossier téléchargeable sans les photos.
+
+    Aucune prise de vue n'est déposée, et les pièces photographiques sortent
+    quand même — cadres vides, plan de repérage imprimé, repères à poser. Le
+    compte rendu dit ce qui n'est plus vérifié.
+    """
+    from dp_socle.sortie_pptx import AVERTISSEMENTS_DE_PRINCIPE
+
+    application = _import_valide(tmp_path, monkeypatch)
+    _cliquer(application, "Générer la sortie PowerPoint")
+    application.run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    rapport = application.session_state["pptx_genere"]["rapport"]
+    assert rapport.fichier.name.endswith("_DP_a_finaliser.pptx")
+    assert {"DP 6", "DP 7", "DP 8"} <= {diapo.code for diapo in rapport.diapos}
+    for phrase in AVERTISSEMENTS_DE_PRINCIPE:
+        assert phrase in rapport.avertissements
+
+    intitules = [bouton.label for bouton in application.get("download_button")]
+    assert any("PowerPoint" in intitule for intitule in intitules), intitules
+
+
 # ---------------------------------------------------------------------------
 # Les prises de vue des pièces photographiques (lot 6)
 # ---------------------------------------------------------------------------
