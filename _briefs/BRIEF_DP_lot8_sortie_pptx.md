@@ -326,6 +326,60 @@ surnuméraires supprimées.
 
 ---
 
+## Les incantations que les sondes ont écrites
+
+Cinq recettes trouvées à tâtons les 25 et 26/09/2026, et qui n'ont pas à être
+retrouvées. `python-pptx` 1.0.2, testées sur un fichier réellement ouvert dans
+PowerPoint.
+
+**Une image sur la mise en page.** Son API ne l'offre que sur une diapo ; la
+passer par une diapo jetable échoue, l'élément copié gardant le `r:embed` de
+la diapo.
+
+```python
+image, rId = mise_en_page.part.get_or_add_image_part(str(fond))
+formes = mise_en_page.shapes
+formes._spTree.add_pic(formes._next_shape_id, "Fond de planche", image.desc,
+                       rId, 0, 0, Mm(420), Mm(297))
+```
+
+**Une réservation d'image**, que la diapo héritera et que PowerPoint remplit en
+rognant. `python-pptx` n'en crée pas : le `p:sp` s'écrit à la main dans la mise
+en page, avec `<p:ph type="pic" idx="N"/>`, un `a:xfrm` et un `a:prstGeom`. La
+diapo créée ensuite la porte comme une vraie `PicturePlaceholder`.
+
+**Le verrou** se pose sur la forme de la **diapo**, pas sur celle de la mise en
+page — le clonage ne reprend que l'identifiant et le type :
+`<a:spLocks noMove="1" noResize="1"/>` dans le `p:cNvSpPr`.
+
+**L'étiquette d'un repère** reste droite avec `upright="1"` **et**
+`wrap="none"` sur le `a:bodyPr` — le premier seul la replie à une lettre par
+ligne dès que le groupe tourne de côté. Et le groupe tourne autour du centre de
+son cadre : un carré transparent de `2 × RAYON_CONE_MM` centré sur le repère
+remet le pivot au bon endroit.
+
+**La planche vectorielle** voyage dans une extension du `a:blip`, à côté du PNG
+de repli, et sa partie se déclare à la main :
+
+```python
+partie_svg = Part(PackURI("/ppt/media/planche.svg"), "image/svg+xml",
+                  diapo.part.package, svg_en_traces)
+rId_svg = diapo.part.relate_to(partie_svg, RT.IMAGE)
+# dans le <a:blip r:embed="{rId_png}"> :
+#   <a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}">
+#     <asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main"
+#                   r:embed="{rId_svg}"/>
+#   </a:ext></a:extLst>
+```
+
+**Et un piège** : `fill.transparency = 0.45` n'existe pas dans `python-pptx`.
+Python l'accepte sans lever et ne fait rien. L'alpha s'écrit à la main,
+`<a:alpha val="55000"/>` dans le `a:solidFill`. Partout où l'on règle une
+propriété que la bibliothèque ne couvre pas, vérifier que le fichier produit la
+porte — sans quoi c'est un repli silencieux.
+
+---
+
 ## Comment l'éprouver
 
 « Tester le résultat, pas l'exécution » : le critère n'est pas que le `.pptx`
