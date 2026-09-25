@@ -45,8 +45,7 @@ se photographie en paysage large**, et non en portrait.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from shapely.geometry import box
@@ -263,9 +262,12 @@ def composer_le_panneau(planche: Planche, panneau: tuple, reperage, emprise,
     messages = []
     fenetre = box(*fenetre_du_panneau(planche, interieur, reperage))
     if fond_ign:
-        _poser_fond(planche, interieur, reperage)
+        _poser_le_cadastre(planche, fenetre, messages)
     messages.extend(_poser_le_plan(planche, contrat, reperage, fenetre))
-    _poser_emprise(planche, emprise)
+    if contrat is None:
+        # Sans plan de masse, le contour du site est tout ce qui situe la prise
+        # de vue. Avec, la clôture est déjà dessinée : voir `_poser_emprise`.
+        _poser_emprise(planche, emprise, fenetre)
     return interieur, messages
 
 
@@ -337,56 +339,54 @@ def fenetre_du_panneau(planche: Planche, interieur, reperage) -> tuple:
     )
 
 
-#: Résolution au sol au-delà de laquelle le Plan IGN v2 cesse de dessiner le
-#: parcellaire, en mètres par pixel.
-#:
-#: Mesuré le 24/09/2026 sur le service : à 0,315 m/px les limites de parcelles
-#: et leurs numéros sont là, à 0,318 ils ont disparu. C'est une bascule de
-#: niveau de zoom du WMS-R, pas un réglage que nous tenons.
-#:
-#: Le piège est étroit et il a mordu : le plan de repérage d'une DP 7 au
-#: 1/2 500, demandé aux 200 dpi habituels, tombe à 0,3175 m/px — deux
-#: millièmes au-dessus du seuil. La planche sortait sans cadastre, à côté
-#: d'une DP 6 au 1/2 000 qui l'avait (retour d'usage du 24/09/2026).
-RESOLUTION_PARCELLAIRE_M = 0.30
+#: Marge demandée au WFS autour de la fenêtre du panneau, en mètres. Une
+#: parcelle qui mord sur le bord doit être dessinée entière avant d'être
+#: découpée, sinon son bord coïncide avec celui du panneau et se lit comme une
+#: limite qu'il n'est pas.
+MARGE_PARCELLAIRE_M = 50.0
 
 
-def _dpi_du_parcellaire(echelle: int) -> int:
-    """Résolution d'image qui garde le parcellaire du Plan IGN v2, en dpi.
+def _poser_le_cadastre(planche: Planche, fenetre, avertissements: list) -> None:
+    """Le parcellaire vectoriel sous le repérage, comme sur DP 1-3 et DP 4.
 
-    La résolution au sol vaut `echelle x 25,4 / (1000 x dpi)` : demander plus de
-    pixels pour la même surface de papier fait descendre sous le seuil. L'image
-    est ensuite affichée à la taille du panneau, donc plus fine — seul son poids
-    augmente.
+    Le fond était jusqu'au 26/09/2026 une image du Plan IGN v2, choisie pour ses
+    toponymes : « le plan de repérage du dossier de référence est vectoriel et
+    porte les lieux-dits ». Il coûtait trois choses, et c'est l'usage qui les a
+    nommées. Sa teinte jaune passe sous l'implantation et la noie. Il oblige à
+    guetter la résolution au sol, parce que le service cesse de dessiner le
+    parcellaire au-delà de 0,30 m/px — un piège qui a mordu le 24/09/2026. Et
+    surtout, il est matriciel : la planche entière partait donc en image dans le
+    `.pptx`, pixellisée, là où les planches de trait y partent en vectoriel.
 
-    Aux petites échelles le compte dépasse ce que le WMS accepte ; `ign`
-    plafonne alors la taille, et le parcellaire y serait de toute façon
-    illisible.
+    Ce que ce changement coûte, et qu'il faut savoir : **les lieux-dits
+    disparaissent**. Un instructeur qui ne connaît pas la commune situe la prise
+    de vue par le parcellaire et par le bâti alentour, et non plus par un nom de
+    hameau. C'est le choix du 26/09/2026, pris pour mieux voir le plan
+    d'implantation.
+
+    Une panne du service n'empêche pas de produire la planche — les ouvrages
+    viennent du contrat — mais elle s'écrit au rapport. Même règle que DP 4.
     """
-    return int(math.ceil(echelle * 0.0254 / RESOLUTION_PARCELLAIRE_M))
+    from ..erreurs import ErreurService
+    from ..ign import telecharger_parcelles
+    from ..planche import STYLE_PARCELLE
 
-
-def _poser_fond(planche: Planche, interieur, reperage) -> None:
-    """Plan IGN v2 sous le repérage, demandé à la fenêtre du seul panneau.
-
-    Le plan de repérage du dossier de référence est vectoriel et porte les
-    lieux-dits ; le Plan IGN v2 porte les mêmes toponymes, et c'est ce qui situe
-    une prise de vue pour un instructeur qui ne connaît pas la commune.
-
-    La fenêtre demandée est celle du **panneau**, non de la planche : un fond
-    couvrant toute la zone de dessin passerait sous la colonne d'images, pour
-    plusieurs mégaoctets invisibles.
-    """
-    from ..ign import COUCHE_PLAN, DPI_DEFAUT, telecharger_fond
-
-    _, _, interieur_l, interieur_h = interieur
-    fenetre = fenetre_du_panneau(planche, interieur, reperage)
-    dpi = max(DPI_DEFAUT, _dpi_du_parcellaire(planche.echelle))
-    fond = telecharger_fond(
-        COUCHE_PLAN, fenetre, interieur_l, interieur_h,
-        dpi=dpi, format_image="image/jpeg",
-    )
-    planche.ajouter_fond_raster(fond.image, fond.bbox)
+    minx, miny, maxx, maxy = fenetre.bounds
+    marge = MARGE_PARCELLAIRE_M
+    try:
+        parcelles = telecharger_parcelles(
+            (minx - marge, miny - marge, maxx + marge, maxy + marge)
+        )
+    except ErreurService as exc:
+        avertissements.append(
+            f"Plan de repérage : parcellaire IGN indisponible ({exc}). La "
+            "planche est produite sans fond cadastral."
+        )
+        return
+    for parcelle in parcelles:
+        visible = parcelle.geometrie.intersection(fenetre)
+        if not visible.is_empty:
+            planche.ajouter_geometrie(visible, STYLE_PARCELLE)
 
 
 def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
@@ -429,11 +429,29 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
     return messages
 
 
-def _poser_emprise(planche: Planche, emprise) -> None:
-    """L'emprise du site sous les repères, dans la couleur des autres planches."""
+def _poser_emprise(planche: Planche, emprise, fenetre) -> None:
+    """Le contour du site, **sans son aplat**, et seulement faute de plan de masse.
+
+    `STYLE_EMPRISE` — le rouge des planches du socle — porte un remplissage à
+    15 % d'opacité. Posé en dernier sur le plan de repérage, il passait par-dessus
+    l'implantation et la noyait sous un voile saumon (retour d'usage du
+    26/09/2026). Il ne reste ici que le trait.
+
+    Et ce trait ne se pose que quand aucun contrat n'a été transmis. Avec un
+    contrat, `objets_a_dessiner` a déjà dessiné la clôture — qui **est** cette
+    géométrie, l'emprise reçue étant l'union des clôtures — dans le rouge de la
+    palette. La reposer la dessinait deux fois.
+
+    Découpé à la fenêtre du panneau, comme le reste : le clip SVG de la planche
+    ne protège que sa zone de dessin, dont le panneau n'est qu'une part, et un
+    site plus large que la fenêtre débordait dans la colonne d'images.
+    """
     from ..planche import STYLE_EMPRISE
 
-    planche.ajouter_geometrie(emprise, STYLE_EMPRISE)
+    contour = replace(STYLE_EMPRISE, remplissage="none", opacite_remplissage=1.0)
+    visible = emprise.intersection(fenetre)
+    if not visible.is_empty:
+        planche.ajouter_geometrie(visible, contour)
 
 
 def _poser_images(planche: Planche, images, poses) -> list:

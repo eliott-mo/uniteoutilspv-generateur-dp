@@ -23,8 +23,8 @@ import pytest
 from PIL import Image
 from shapely.geometry import box
 
+from dp_socle.planche import Planche
 from dp_socle.planches import dp7_environnement_proche
-from dp_socle.planches.reperage_vues import ECHELLES_REPERAGE_VUES
 from dp_socle.points_de_vue import place_a_la_main
 from dp_socle.projet import Projet
 
@@ -156,72 +156,72 @@ def _centre(points) -> tuple:
     )
 
 
-def _part_de_parcellaire(image) -> float:
-    """Part de l'image couverte par le jaune pâle des parcelles du Plan IGN v2.
+# ---------------------------------------------------------------------------
+# Le fond du plan de repérage
+# ---------------------------------------------------------------------------
+#
+# Il a été une image du Plan IGN v2 jusqu'au 26/09/2026, et deux tests
+# mesuraient le seuil de résolution au-delà duquel ce service cesse de dessiner
+# le parcellaire — 0,30 m/px, un piège de deux millièmes qui avait mordu. Ils
+# n'ont plus d'objet : le parcellaire vient maintenant du WFS, en vectoriel,
+# comme sur DP 1-3 et sur le plan de repérage de DP 4. Trois raisons, dans
+# l'ordre où l'usage les a nommées le 26/09/2026 — la teinte jaune du Plan IGN
+# noyait l'implantation, le seuil de résolution était à guetter, et un fond
+# matriciel faisait partir toute la planche en image dans le `.pptx`.
 
-    C'est le signe le plus net de sa présence : la couche parcellaire teinte le
-    fond, là où le plan sans cadastre reste blanc.
+
+def test_le_plan_de_reperage_ne_porte_aucun_fond_matriciel(planche):
+    """Le fond est vectoriel, et c'est ce qui rend la planche nette dans le `.pptx`.
+
+    Mesuré dans le SVG de la planche et non dans le PDF : c'est là que le raster
+    se verrait, encodé en base64. La planche en porte d'autres — le logo du
+    cartouche, et les photographies de la colonne de droite — et ce n'est pas
+    d'eux qu'il s'agit : `preserveAspectRatio="none"` est la signature du seul
+    `ajouter_fond_raster`, qui étire son image à une emprise terrain exacte.
     """
-    rvb = image.convert("RGB")
-    couleurs = rvb.getcolors(400_000) or []
-    jaune = sum(
-        nombre
-        for nombre, (rouge, vert, bleu) in couleurs
-        if rouge > 250 and vert > 250 and bleu < 235
-    )
-    return jaune / (rvb.width * rvb.height)
+    svg = planche.planche.svg()
+
+    assert 'preserveAspectRatio="none"' not in svg
 
 
-def test_le_fond_est_demande_assez_fin_pour_garder_le_parcellaire():
-    """Le seuil est étroit, et deux millièmes l'ont fait manquer.
+def test_l_emprise_ne_couvre_pas_le_plan_d_un_aplat(planche):
+    """Le voile saumon de `STYLE_EMPRISE` noyait l'implantation.
 
-    Mesuré le 24/09/2026 : le Plan IGN v2 dessine le parcellaire jusqu'à
-    0,315 m/px et l'abandonne à 0,318. Un plan de repérage au 1/2 500 demandé
-    aux 200 dpi habituels tombe à 0,3175 — la DP 7 sortait sans cadastre à côté
-    d'une DP 6 au 1/2 000 qui l'avait.
+    Il vient de son remplissage à 15 % d'opacité, posé en dernier donc par-dessus
+    tout le reste. Sur un plan de repérage, seul le trait subsiste — et seulement
+    faute de contrat, la clôture étant sinon déjà dessinée par la palette.
     """
-    from dp_socle.planches.photographies import (
-        RESOLUTION_PARCELLAIRE_M,
-        _dpi_du_parcellaire,
-    )
+    from dp_socle.planche import STYLE_EMPRISE
 
-    for echelle in ECHELLES_REPERAGE_VUES:
-        dpi = _dpi_du_parcellaire(echelle)
-        assert echelle * 0.0254 / dpi <= RESOLUTION_PARCELLAIRE_M, echelle
+    svg = planche.planche.svg()
 
-    # Le cas qui a mordu : 200 dpi ne suffisent pas au 1/2 500.
-    assert _dpi_du_parcellaire(2500) > 200
-    # Et le 1/2 000, qui passait déjà, n'en demande pas plus que d'habitude.
-    assert _dpi_du_parcellaire(2000) < 200
+    assert STYLE_EMPRISE.remplissage == "#d40000", "le style du socle a changé"
+    assert f'fill="{STYLE_EMPRISE.remplissage}"' not in svg
+    assert 'fill-opacity="0.15"' not in svg
 
 
 @pytest.mark.reseau
-def test_le_plan_ign_rend_le_parcellaire_a_la_resolution_demandee():
-    """Le seuil est une mesure du service, pas une hypothèse.
+def test_le_parcellaire_du_wfs_se_dessine_sous_le_reperage(tmp_path):
+    """Le fond cadastral vient bien du service, et il est tracé.
 
-    Ce test est le seul endroit qui dise si la bascule a bougé : le jour où
-    l'IGN change son niveau de zoom, c'est ici que ça se verra.
+    C'est le seul endroit qui dise si le WFS répond encore ce qu'on attend :
+    des limites de parcelle en vectoriel, autour du site.
     """
-    from dp_socle.ign import COUCHE_PLAN, telecharger_fond
-    from dp_socle.planches.photographies import _dpi_du_parcellaire
+    from shapely.geometry import box as _box
 
-    centre = (622_974.0, 6_750_762.0)  # le site de Saint-Cyr-en-Val
-    largeur_mm, hauteur_mm, echelle = 162.0, 247.0, 2500
-    demi_l = largeur_mm * echelle / 1000 / 2
-    demi_h = hauteur_mm * echelle / 1000 / 2
-    fenetre = (
-        centre[0] - demi_l, centre[1] - demi_h,
-        centre[0] + demi_l, centre[1] + demi_h,
-    )
+    from dp_socle.planche import STYLE_PARCELLE
+    from dp_socle.planches.photographies import _poser_le_cadastre
 
-    grossier = telecharger_fond(
-        COUCHE_PLAN, fenetre, largeur_mm, hauteur_mm, dpi=200,
-        format_image="image/png",
-    )
-    assert _part_de_parcellaire(grossier.image) < 0.05
+    temoin = Planche(titre="T", numero="1", projet="essai", date="16/09/2026",
+                     echelle=2500)
+    # Saint-Cyr-en-Val : un site réel, dont le parcellaire est renseigné.
+    centre = (622_974.0, 6_750_762.0)
+    temoin.centrer_sur(centre)
+    fenetre = _box(centre[0] - 200, centre[1] - 200, centre[0] + 200, centre[1] + 200)
 
-    fin = telecharger_fond(
-        COUCHE_PLAN, fenetre, largeur_mm, hauteur_mm,
-        dpi=_dpi_du_parcellaire(echelle), format_image="image/png",
-    )
-    assert _part_de_parcellaire(fin.image) > 0.5
+    messages = []
+    _poser_le_cadastre(temoin, fenetre, messages)
+
+    assert messages == []
+    svg = temoin.svg()
+    assert svg.count(f'stroke="{STYLE_PARCELLE.trait}"') > 5, "trop peu de parcelles"

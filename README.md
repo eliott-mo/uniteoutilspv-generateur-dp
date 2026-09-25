@@ -3189,6 +3189,37 @@ points de vue « à plusieurs kilomètres » pour DP 8 ; l'usage réel le démen
 PDF produit, sur la largeur de l'emprise et sur la distance entre deux repères,
 à 0,5 % près.
 
+### Le fond du repérage : le parcellaire, et non le Plan IGN
+
+Le plan de repérage porte le **parcellaire vectoriel** du WFS, comme DP 1-3 et
+comme le plan de repérage de DP 4 : des limites de parcelle sur fond blanc, sous
+l'implantation.
+
+Il a porté une image du Plan IGN v2 jusqu'au 26/09/2026, choisie pour ses
+toponymes — « le plan de repérage du dossier de référence est vectoriel et porte
+les lieux-dits », et ce sont eux qui situent une prise de vue pour un instructeur
+qui ne connaît pas la commune. Trois choses l'ont fait abandonner, et l'usage les
+a nommées ensemble :
+
+- sa teinte jaune passe **sous** l'implantation et la noie ;
+- il oblige à guetter la résolution au sol, le service cessant de dessiner le
+  parcellaire au-delà de 0,30 m/px. Le piège avait mordu le 24/09/2026 : une
+  DP 7 au 1/2 500 demandée aux 200 dpi habituels tombait à 0,3175 m/px, deux
+  millièmes au-dessus du seuil, et sortait sans cadastre à côté d'une DP 6 au
+  1/2 000 qui l'avait ;
+- il est **matriciel**, donc la planche entière partait en image dans le `.pptx`,
+  visiblement pixellisée à côté des planches de trait.
+
+Ce que le changement coûte : **les lieux-dits disparaissent**. La prise de vue se
+situe par le parcellaire et le bâti alentour, plus par un nom de hameau. C'est le
+choix du 26/09/2026, pris pour mieux voir le plan d'implantation.
+
+Le **voile saumon** de l'emprise est parti avec lui. `STYLE_EMPRISE`, le rouge
+des planches du socle, porte un remplissage à 15 % d'opacité ; posé en dernier
+sur le plan de repérage, il passait par-dessus l'implantation. Il n'en reste que
+le trait — et seulement faute de contrat, la clôture étant sinon déjà dessinée
+par la palette, puisque l'emprise reçue **est** l'union des clôtures.
+
 ## La sortie PowerPoint à finaliser (lot 8)
 
 Le dossier sort aussi en un `.pptx` dont les planches sont déjà dessinées et dont
@@ -3324,9 +3355,17 @@ DP 1-3, qui ne porte aucun raster, et ne prévoyait pas une page de garde charg�
 d'un photomontage. La voie se mesure donc planche par planche, et le rapport dit
 laquelle a gagné et de combien.
 
-Sur le dossier de Sarnois, les cinq planches de trait partent en vectoriel, les
-planches à fond IGN en matriciel, et le fichier pèse 10,8 Mo pour 20 diapos avant
-les photographies — dont 5,9 Mo pour les cinq pages de la notice.
+Sur le dossier de Sarnois, quatorze diapos sur vingt partent en vectoriel. Il n'en
+restait que cinq jusqu'au 26/09/2026 : les six planches photographiques portaient
+une image du Plan IGN v2 sous leur plan de repérage, qui les faisait basculer en
+matriciel — et se voyait, pixellisée, à côté des planches nettes. Leur fond est
+devenu le parcellaire vectoriel, comme sur DP 1-3 et DP 4, et elles ont suivi. Ne
+restent en matriciel que DP 1-1 et DP 1-2, dont l'ortho est le sujet, et la
+notice.
+
+Le fichier pèse 10,2 Mo pour 20 diapos avant les photographies, dont 5,9 Mo pour
+les cinq pages de la notice — et se produit en 53 s au lieu de 165, six fonds
+raster de moins à télécharger.
 
 **Pourquoi 200 dpi et pas plus.** Mesuré le 25/09/2026 sur un PDF réellement
 exporté depuis PowerPoint, à partir d'une sonde portant la même planche à 200, 300

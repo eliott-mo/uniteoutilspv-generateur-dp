@@ -34,7 +34,7 @@ from PIL import Image
 from shapely.geometry import box
 
 from dp_socle import sortie_pptx
-from dp_socle.ign import FondRaster
+from dp_socle.ign import FondRaster, Parcelle
 from dp_socle.planche import HAUTEUR_MM, LARGEUR_MM, Planche
 from dp_socle.planches.photographies import disposition
 from dp_socle.planches.reperage_vues import RAYON_CONE_MM, RAYON_REPERE_MM
@@ -73,9 +73,33 @@ def sans_geoplateforme():
             bbox=tuple(bbox), couche=couche, dpi=dpi, format=format_image,
         )
 
+    def parcelles(bbox, *args, **kwargs):
+        """Un damier de parcelles couvrant la fenêtre demandée.
+
+        Pas une liste vide : le parcellaire est le fond des plans de repérage
+        depuis le 26/09/2026, et c'est lui qui décide du poids d'une planche
+        photographique, donc de la voie de rendu retenue. Un fond vide aurait
+        fait passer ces planches en vectoriel sans rien prouver.
+        """
+        minx, miny, maxx, maxy = bbox
+        cote = 60.0
+        return [
+            Parcelle(
+                geometrie=box(
+                    minx + rang_x * cote, miny + rang_y * cote,
+                    minx + (rang_x + 1) * cote, miny + (rang_y + 1) * cote,
+                ),
+                idu=f"{rang_x:03d}{rang_y:03d}", section="AB",
+                numero=f"{rang_x}-{rang_y}", contenance_m2=cote * cote,
+                commune="00000",
+            )
+            for rang_x in range(int((maxx - minx) // cote) + 1)
+            for rang_y in range(int((maxy - miny) // cote) + 1)
+        ]
+
     with pytest.MonkeyPatch.context() as substitution:
         substitution.setattr(ign, "telecharger_fond", fond)
-        substitution.setattr(ign, "telecharger_parcelles", lambda *a, **k: [])
+        substitution.setattr(ign, "telecharger_parcelles", parcelles)
         substitution.setattr(ign, "telecharger_batiments", lambda *a, **k: [])
         yield
 
@@ -508,6 +532,25 @@ def test_le_rapport_dit_les_garanties_que_cette_sortie_ne_donne_pas(rapport):
     """Taire ce qui n'est plus vérifié serait le repli silencieux le plus coûteux."""
     for phrase in sortie_pptx.AVERTISSEMENTS_DE_PRINCIPE:
         assert phrase in rapport.avertissements
+
+
+def test_les_planches_de_reperage_partent_en_vectoriel(rapport):
+    """Elles partaient en image, et se voyaient pixellisées à l'écran.
+
+    C'est la conséquence du fond : tant que le plan de repérage portait une image
+    du Plan IGN v2, la planche entière était dominée par du raster et la mesure
+    de `rendu_pptx` retenait la voie matricielle — 200 dpi, le plafond de
+    l'export PowerPoint. Le parcellaire vectoriel l'a fait basculer
+    (retour d'usage du 26/09/2026).
+    """
+    photographiques = [
+        diapo for diapo in rapport.diapos if diapo.code in ("DP 6", "DP 7", "DP 8")
+    ]
+
+    assert photographiques
+    assert all(d.voie == "vectorielle" for d in photographiques), [
+        (d.libelle, d.voie) for d in photographiques
+    ]
 
 
 def test_le_rapport_dit_la_voie_et_le_poids_de_chaque_diapo(rapport):
