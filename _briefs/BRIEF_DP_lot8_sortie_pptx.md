@@ -149,16 +149,12 @@ cherchable dans le PDF final. Accepté le 25/09/2026. En **PNG** et non en JPEG 
 du texte noir sur blanc y pèse quelques dizaines de kilo-octets et le JPEG le
 baverait.
 
-### D7 — La police se vérifie avant de se choisir
+### D7 — La police reste Aptos
 
-Aptos est la police par défaut de Microsoft 365 depuis 2024 : elle est
-probablement déjà installée sur les postes. **À vérifier** (ouvrir la liste des
-polices de PowerPoint). Si elle y est, rien à changer.
-
-Sinon, la voie PPTX rend **tout** dans la police de repli — l'image comprise, via
-`dp_socle/polices.py` —, pour que le texte éditable et le texte de l'image se
-ressemblent. Du Calibri éditable à côté d'un Aptos rastérisé sur la même
-planche se verrait.
+Vérifié à l'écran le 25/09/2026 : Aptos est rendue correctement sur le poste du
+chef de projet — c'est la police par défaut de Microsoft 365 depuis 2024. Rien
+à changer, et pas de Calibri de repli : du Calibri éditable à côté d'un Aptos
+rastérisé sur la même planche se verrait.
 
 ### D8 — Le poids n'est plus une contrainte, la résolution en est une
 
@@ -208,6 +204,38 @@ Quatre choses sont acquises ; elles n'ont plus à être cherchées.
   0,9 Mo pour une DP 2 en JPEG q88 : une quinzaine de diapos tiennent dans 10 à
   15 Mo avant les photographies.
 
+### Ce que la sonde a montré à l'écran, le 25/09/2026
+
+- **Le fond posé sur la mise en page est bien hors d'atteinte** : le chef de
+  projet ne peut ni le sélectionner ni le déplacer. Le montage tient.
+- **Une image simplement posée ne garde pas son cadre.** « Clic droit >
+  Remplacer l'image : la forme de la boîte change pour s'adapter à la forme de
+  l'image. » Une photographie en portrait a étiré le cadre. Il faut donc des
+  **réservations d'image**, que PowerPoint remplit en rognant — et
+  `python-pptx` sait les écrire dans la mise en page, toujours sans modèle
+  fabriqué à la main : la diapo en hérite comme de vraies réservations, avec
+  `insert_picture`.
+- **Un bandeau posé sur la diapo se supprime sans toucher au fond.** Le montage
+  des diapos alternatives tient.
+- **Rien de ce qui est dans l'image n'est éditable**, et cela vaut aussi pour ce
+  que D1 promet : la légende d'une planche et les intitulés des cadres photo
+  sont dans le fond. Pour les rendre éditables, il faut **dessiner la planche
+  sans eux** et les reconstruire en objets PowerPoint — un rectangle de teinte
+  et une ligne de texte par entrée de légende, une zone de texte par cadre. Le
+  sommaire de la page de garde est dans le même cas.
+- **L'étiquette d'un repère se dissocie mal du cône.** Hors du groupe, elle
+  reste droite mais il faut penser à la déplacer avec lui — « pas dramatique »,
+  mais évitable : l'attribut `upright` du corps de texte garde le texte
+  horizontal dans un groupe qui tourne. À confirmer.
+- **Le poids par résolution**, planche DP 2 de Sarnois en JPEG q88 :
+  0,9 Mo à 200 dpi (3 308 × 2 339 px), 1,6 Mo à 300 dpi, 2,4 Mo à 400 dpi. Le
+  rendu à 200 dpi est jugé « ok mais pas exceptionnel ».
+- **Le plafond de PowerPoint** : *Fichier > Options > Options avancées > Taille
+  et qualité de l'image* compresse par défaut les images à **220 ppp** à
+  l'enregistrement. Au-delà, la résolution supplémentaire est perdue dès que le
+  chef de projet enregistre, sauf à cocher « Ne pas compresser les images dans
+  le fichier ». À mesurer sur un PDF réellement exporté avant de choisir.
+
 ---
 
 ## Ce qu'il faut mesurer avant de câbler
@@ -215,21 +243,16 @@ Quatre choses sont acquises ; elles n'ont plus à être cherchées.
 Aucune de ces réponses ne s'obtient depuis le dépôt : elles demandent
 PowerPoint sur un poste. Les mesurer d'abord, et noter la date en commentaire.
 
-1. **« Modifier l'image »** sur une image grise déjà posée au bon format :
-   PowerPoint garde-t-il le cadre et rogne-t-il pour le remplir ? **Si oui, tout
-   le sujet des réservations d'image disparaît**, et avec lui le modèle `.pptx`.
-2. Sinon : une **réservation d'image** dans une mise en page. `python-pptx` ne
-   sait pas créer de mise en page ni de réservation par son API — il les clone
-   depuis un modèle. Il faudra donc un `dp_socle/ressources/modele.pptx`,
-   produit par une passe d'écriture XML et versionné comme `logo_unite.png`.
-3. Le contenu posé sur la **mise en page** est-il bien non sélectionnable en
-   mode normal, et imprimé ?
-4. Un secteur « camembert » se **fait-il tourner à la main** de façon utilisable,
-   ou faut-il une poignée plus lisible ?
-5. **L'export PDF** : la page sort-elle bien à 420 × 297 mm ? La qualité
-   « standard » préserve-t-elle 200 dpi ? (« Taille minimale » ré-échantillonne
-   à 96 dpi et détruit les plans — à écrire dans le README.)
-6. **Aptos** est-elle installée ?
+1. Une **réservation d'image** remplie par le chef de projet garde-t-elle sa
+   taille en rognant la photographie ?
+2. `a:spLocks noMove="1" noResize="1"` **empêche-t-il** de déplacer un cadre ?
+   C'est ce que PowerPoint 365 écrit quand on verrouille une forme à la main.
+3. `upright="1"` garde-t-il l'étiquette **horizontale** dans un groupe qui tourne ?
+4. **La résolution** : 200, 300 ou 400 dpi ? Et que reste-t-il après l'export
+   PDF — la mesure se fait sur le PDF exporté, en divisant la largeur en pixels
+   de l'image incorporée par les 420 mm de la page.
+5. **L'export PDF** sort-il bien à 420 × 297 mm ? (« Taille minimale »
+   ré-échantillonne à 96 dpi et détruit les plans — à écrire dans le README.)
 
 ---
 
