@@ -263,8 +263,8 @@ def _est_la_carte_de_la_coupe(element) -> bool:
     return "Le plan importé, et la ligne de coupe" in _texte(element)
 
 
-def _est_la_carte_des_vues(element) -> bool:
-    return "Le plan, pour placer les prises de vue" in _texte(element)
+def _est_la_carte_de_verification(element) -> bool:
+    return "Le plan importé, pour vérification" in _texte(element)
 
 
 def _annonces_de_l_ortho(application) -> list:
@@ -387,7 +387,7 @@ def test_le_contrat_ecrit_est_d_origine_plan_pdf(tmp_path, monkeypatch):
     assert projet["corrections_plan"] == []
     assert (dossier / "geometries.gpkg").exists()
     # Les sections suivantes s'ouvrent sur ce contrat comme sur un autre.
-    assert "3. Ajout de photographies et photomontages" in _titres(application)
+    assert "3. Génération" in _titres(application)
 
 
 def test_un_recalage_garde_les_choix_deja_faits(tmp_path, monkeypatch):
@@ -421,13 +421,18 @@ def test_un_recalage_garde_les_choix_deja_faits(tmp_path, monkeypatch):
     ]
 
 
-def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypatch):
-    """Validé puis recalé, l'import reprend la carte sous ses réglages.
+def test_la_carte_suit_ce_qui_a_ete_ecrit_et_non_ce_qui_existe(tmp_path, monkeypatch):
+    """Validé puis recalé, l'import reprend la main sur sa coupe.
 
-    Elle descend en section 3 bis à la validation, pour placer les prises de
-    vue. Un recalage la ramène sous les boutons qui la changent : elle restait
-    en bas, à deux écrans de défilement de ceux-ci, dès lors qu'un contrat avait
-    été écrit une fois (retour d'usage du 24/09/2026).
+    La carte ne descend plus : la section qui l'accueillait après validation a
+    été retirée le 26/09/2026. Elle reste sous les réglages et **change
+    d'état** — réglable tant que ce qui est à l'écran n'a pas été écrit, en
+    lecture seule ensuite, pour vérifier le plan avant de générer.
+
+    Ce que ce test mesure n'a pas changé pour autant : l'état suit ce qui a été
+    **écrit**, et non la seule présence d'un contrat sur le disque. Sans cela, un
+    recalage postérieur à une première validation laissait le chef de projet avec
+    une coupe figée, relevée sur un autre calage (retour d'usage du 24/09/2026).
     """
     application = _plan_pdf_importe(tmp_path, monkeypatch)
     application.selectbox(key="volume_citerne_plan_pdf").set_value(120)
@@ -438,18 +443,18 @@ def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypa
     assert not application.exception, application.exception
 
     # Une exécution de plus avant de lire la page : les réglages et la carte
-    # vivent maintenant dans deux colonnes, et `AppTest` garde les enfants d'un
-    # conteneur d'une exécution à l'autre quand un `st.rerun()` les enchaîne —
-    # la carte de la coupe y survivait à la validation qui la fait descendre.
+    # vivent dans deux colonnes, et `AppTest` garde les enfants d'un conteneur
+    # d'une exécution à l'autre quand un `st.rerun()` les enchaîne.
     application = application.run()
     assert not application.exception, application.exception
 
-    # Validée, la carte est descendue en 3 bis, avec les prises de vue.
+    # Validée, la carte est passée en lecture seule — et elle est toujours là.
     ordre = _dans_l_ordre_de_la_page(application)
-    assert any(_est_la_carte_des_vues(e) for e in ordre)
+    assert any(_est_la_carte_de_verification(e) for e in ordre)
     assert not any(_est_la_carte_de_la_coupe(e) for e in ordre)
 
-    # Recalé, l'écran n'est plus celui qui a été écrit : elle remonte.
+    # Recalé, l'écran n'est plus celui qui a été écrit : la coupe se règle à
+    # nouveau, au même endroit de la page.
     _decalage_est(application).set_value(_decalage_est(application).value + 2.0)
     _cliquer(application, "Recaler")
     application = application.run()
@@ -459,14 +464,13 @@ def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypa
     assert _rang(ordre, _est_la_carte_de_la_coupe, "la carte de la coupe") < _rang(
         ordre, lambda e: _texte(e) == "### Validation", "le titre de la validation"
     )
-    assert not any(_est_la_carte_des_vues(e) for e in ordre)
-    assert any("Revalidez l'import pour qu'elle redescende ici" in _texte(e) for e in ordre)
+    assert not any(_est_la_carte_de_verification(e) for e in ordre)
 
-    # Revalidé, elle redescend.
+    # Revalidé, elle repasse en lecture seule.
     _cliquer(application, "Valider l'import")
     application = application.run()
     application = application.run()
     assert not application.exception, application.exception
     ordre = _dans_l_ordre_de_la_page(application)
-    assert any(_est_la_carte_des_vues(e) for e in ordre)
+    assert any(_est_la_carte_de_verification(e) for e in ordre)
     assert not any(_est_la_carte_de_la_coupe(e) for e in ordre)
