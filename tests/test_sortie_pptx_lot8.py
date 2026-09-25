@@ -260,6 +260,26 @@ def test_les_cadres_photo_tombent_ou_la_planche_les_pose(
             assert mesure == pytest.approx(attendu, abs=0.05)
 
 
+def test_la_page_de_garde_reserve_la_perspective(presentation):
+    """Le cadre du photomontage est une réservation, comme les cadres photo.
+
+    Le chef de projet insère sa perspective dans le fichier plutôt que de la
+    déposer avant de générer. La planche garde dessous son cadre tireté et sa
+    mention « Photomontage à insérer », que l'image posée recouvre.
+    """
+    from dp_socle.planches.page_garde import zone_image
+
+    garde = presentation.slides[0]
+
+    cadres = list(garde.placeholders)
+    assert len(cadres) == 1
+    mesure = (
+        _mm(cadres[0].left), _mm(cadres[0].top),
+        _mm(cadres[0].width), _mm(cadres[0].height),
+    )
+    assert mesure == pytest.approx(zone_image(), abs=0.05)
+
+
 def test_les_cadres_sont_verrouilles_en_position(rapport):
     """Un cadre déplacé fausse la planche : le verrou le dit dans le fichier."""
     with zipfile.ZipFile(rapport.fichier) as paquet:

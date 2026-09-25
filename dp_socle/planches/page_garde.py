@@ -45,6 +45,24 @@ GRIS_CADRE_VIDE = "#a8a8a8"
 #: Hauteur du bandeau de légende posé au-dessus du photomontage.
 HAUTEUR_LEGENDE_IMAGE = 6.5
 
+
+def zone_image() -> tuple:
+    """Place que la page de garde laisse à la perspective, sous son bandeau.
+
+    `(x, y, largeur, hauteur)` en millimètres papier. La sortie PowerPoint du
+    lot 8 y pose une réservation d'image, pour que le chef de projet insère sa
+    perspective dans le fichier plutôt que de la déposer avant de générer. Le
+    calcul est ici et non là-bas : deux arithmétiques donneraient une réservation
+    décalée du cadre imprimé.
+    """
+    x_mm, y_mm, largeur_mm, hauteur_mm = CADRE_IMAGE
+    return (
+        x_mm,
+        y_mm + HAUTEUR_LEGENDE_IMAGE,
+        largeur_mm,
+        hauteur_mm - HAUTEUR_LEGENDE_IMAGE,
+    )
+
 COLONNE_DROITE = 266.0
 LARGEUR_COLONNE = 132.0
 

@@ -598,9 +598,18 @@ def _ecrire(projet, groupes, notice, dossier, travail) -> Path:
     diapo_garde = Diapo(
         code="", numero=1, titre=TITRE_PAGE_GARDE, libelle=TITRE_PAGE_GARDE, voie="",
     )
+    # La perspective de la page de garde est une réservation d'image, comme les
+    # cadres photo : le chef de projet l'insère dans le fichier au lieu de la
+    # déposer avant de générer. Sans photographie insérée, la planche garde son
+    # cadre tireté et sa mention « Photomontage à insérer », que l'image posée
+    # recouvre — il n'y a donc rien à dessiner autrement.
     _poser_diapo(
         presentation,
-        PlanchePPTX(planche=garde.planche, libelle=TITRE_PAGE_GARDE),
+        PlanchePPTX(
+            planche=garde.planche,
+            cadres=[page_garde.zone_image()],
+            libelle=TITRE_PAGE_GARDE,
+        ),
         diapo_garde,
     )
     groupes.insert(
