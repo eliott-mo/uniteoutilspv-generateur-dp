@@ -630,7 +630,6 @@ def _ecrire(projet, groupes, notice, dossier, travail) -> Path:
                 libelle=planches.libelle or groupe.code,
                 voie="",
                 alternative=(rang, total),
-                cadres=len(planches.cadres),
                 echelle=planches.echelle,
             )
             _poser_diapo(presentation, planches, diapo)
@@ -646,6 +645,10 @@ def _poser_diapo(presentation, planches: PlanchePPTX, diapo: Diapo) -> None:
     fond = rendu_pptx.rendre_fond(planches.planche, diapo.libelle)
     diapo.voie = fond.voie
     diapo.octets = fond.octets
+    # Compté ici plutôt qu'annoncé par l'appelant : le rapport disait « 0 cadre »
+    # pour la page de garde, qui en porte un depuis que sa perspective est une
+    # réservation. Un rapport qui décrit autre chose que le fichier ne sert à rien.
+    diapo.cadres = len(planches.cadres)
 
     mise_en_page = ooxml.nouvelle_mise_en_page(presentation, diapo.libelle)
     ooxml.poser_fond(mise_en_page, fond.image, fond.svg)
