@@ -179,6 +179,37 @@ alternatives et dans le texte du bouton de téléchargement.
 
 ---
 
+## Ce que la sonde du 25/09/2026 a déjà mesuré
+
+Une sonde a été construite sur le dossier `sortie/PV-Sarnois-IND10B` — deux
+diapos, les fonds de DP 7 et DP 2 rastérisés — et relue avec `python-pptx`.
+Quatre choses sont acquises ; elles n'ont plus à être cherchées.
+
+- **`python-pptx` sait poser une image sur une mise en page**, contrairement à
+  ce que son API laisse croire : `partie.get_or_add_image_part(fichier)` rend un
+  `rId` valable pour la mise en page, et `shapes._spTree.add_pic(...)` l'y
+  déclare. **Aucun modèle `.pptx` n'est nécessaire pour le fond.** Passer par
+  une diapo jetable, en revanche, ne marche pas : l'élément copié garde le
+  `r:embed` de la diapo, et l'image se perd avec elle.
+- **`fill.transparency` est un attribut qui n'existe pas.** Python l'accepte
+  sans lever, et le cône sortait magenta opaque par-dessus le plan. L'alpha
+  s'écrit à la main : `<a:alpha val="55000"/>` dans le `a:solidFill`. C'est le
+  genre de repli silencieux que la charte interdit — à surveiller partout où
+  l'on règle une propriété que `python-pptx` ne couvre pas.
+- **Un groupe tourne autour du centre de son cadre.** Un groupe « rond + cône »
+  a son cadre décalé du côté du cône : viser ferait glisser le repère hors du
+  point de vue. Un carré transparent de `2 × RAYON_CONE_MM` centré sur le
+  repère remet le pivot au bon endroit. Mesuré : le groupe fait alors
+  16 × 16 mm, centré sur le point.
+- **Les cotes et le poids.** Les cadres photo d'une planche à deux emplacements
+  tombent à (185,5 ; 18,1) et (185,5 ; 150,1), 222 × 115,4 mm, rapport
+  1,924:1 — identiques à ce que `rapport_de_l_emplacement` annonce. Une planche
+  A3 rastérisée à 200 dpi fait 3 308 × 2 339 px, soit 0,5 Mo pour une DP 7 et
+  0,9 Mo pour une DP 2 en JPEG q88 : une quinzaine de diapos tiennent dans 10 à
+  15 Mo avant les photographies.
+
+---
+
 ## Ce qu'il faut mesurer avant de câbler
 
 Aucune de ces réponses ne s'obtient depuis le dépôt : elles demandent
