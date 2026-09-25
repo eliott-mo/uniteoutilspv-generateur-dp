@@ -65,8 +65,9 @@ balayage (`planches/primitives.py:215` `forme_pleine`). Une planche qui
 s'afficherait autrement dans PowerPoint que dans le PDF est exactement la
 planche fausse que personne ne détecte.
 
-Le PPTX porte donc **le PNG de la planche**, rendu par la même chaîne. Les deux
-sorties restent identiques par construction.
+Le PPTX porte donc **la planche telle que le moteur la dessine**, en une seule
+image posée pleine page — vectorielle si possible (voir D8), matricielle
+sinon. Les deux sorties restent identiques par construction.
 
 ### D1 — Ce qui est éditable, et rien d'autre
 
@@ -156,55 +157,66 @@ chef de projet — c'est la police par défaut de Microsoft 365 depuis 2024. Rie
 à changer, et pas de Calibri de repli : du Calibri éditable à côté d'un Aptos
 rastérisé sur la même planche se verrait.
 
-### D8 — 200 dpi, parce que l'export PowerPoint n'en rend pas davantage
+### D8 — La planche part en SVG, texte en tracés
 
-Le chef de projet ajoute ses photos hors Streamlit : le fichier n'a plus à
-tenir dans une limite de téléversement. La résolution, elle, est plafonnée
-ailleurs.
+**C'est la voie retenue**, éprouvée à l'écran le 25/09/2026 et confirmée le
+même jour : « cartouche identique sur les deux planches ». Le chef de projet
+ajoute ses photos hors Streamlit, le fichier n'a donc pas de limite de
+téléversement à respecter ; et le vectoriel lève le plafond de résolution
+décrit plus bas, tout en pesant moins que le matriciel.
+
+Le montage : un `asvg:svgBlip` posé à côté du PNG de repli dans le `a:blip`,
+que PowerPoint 2016 et suivants affichent en vectoriel. Le SVG est celui que
+`Planche.svg()` produit, **repassé par cairo** (`cairosvg.svg2svg`) pour que
+son texte devienne des tracés de glyphes : zéro `<text>` en sortie, donc plus
+rien que PowerPoint puisse composer de travers, et une mise en page qui reste
+celle du PDF puisque c'est le même moteur qui la calcule. Le PNG de repli, lui,
+se rend à 3 308 × 2 339 px, taille de pixel imposée — pas par
+`rendre_apercu_png`, dont la docstring dit « sans valeur métrologique : ne pas
+imprimer ».
+
+Poids sur le plan de masse de Sarnois : 0,20 Mo en SVG à texte vivant,
+**0,36 Mo en tracés**, contre 0,53 Mo pour le PNG à 200 dpi. Fidélité de la
+conversion, mesurée en rendant les deux SVG à 3 308 px et en les comparant
+pixel à pixel : **0,17 % des pixels s'écartent de plus de 8/255**, écart moyen
+0,09/255 — le crénelage des contours, rien d'autre.
+
+Ce que la voie vectorielle coûte : le texte de la planche cesse d'être du
+texte, comme il l'était déjà en matriciel. Ce qu'elle rapporte : la netteté à
+tout grossissement, et un fichier plus léger.
+
+**Mais pas pour toutes les planches.** Une planche à fond IGN porte un raster
+incorporé, que `svg2svg` ré-encode en PNG sans perte. Mesuré sur une planche au
+1/5 000 chargée d'une ortho de 2 481 × 1 754 px : le SVG passe de **1,03 Mo à
+6,89 Mo**, sept fois, quand la même planche en JPEG q88 à 200 dpi ne pèse que
+**1,16 Mo**. Le vectoriel ne paie que là où le contenu est vectoriel.
+
+La règle est donc :
+
+| Planche | Voie | Pourquoi |
+|---|---|---|
+| DP 2, DP 3, DP 4, page de garde | **SVG en tracés** | tout y est vectoriel, et le trait y gagne |
+| DP 1-1, DP 1-2, DP 6, DP 7, DP 8 | **JPEG q88 à 200 dpi** | le fond IGN domine la planche ; le vectoriser ne fait que réencoder une photographie |
+| DP 11 | PNG à 200 dpi | du texte noir sur blanc (voir D6) |
+
+Une planche matricielle n'a pas le défaut de chasse du texte : il n'y a pas de
+texte à composer. Le remède de `svg2svg` ne sert qu'à la voie vectorielle.
+
+#### Le plafond matriciel, pour mémoire
 
 **Mesuré le 25/09/2026** sur un PDF réellement exporté depuis PowerPoint
 (« Enregistrer au format PDF », qualité standard) à partir d'une sonde portant
 la même planche à 200, 300 et 400 dpi : **les trois pages en ressortent à
 3 308 × 2 339 px, soit exactement 200 dpi**, pour 0,66 à 0,68 Mo chacune. Ce
 que l'on met au-delà de 200 dpi est jeté à l'export, et ne coûte que du poids.
-On rastérise donc à 200 dpi, et pas plus.
+C'est pourquoi le matriciel, là où il subsiste, se rend à 200 dpi et pas plus,
+et c'est la raison d'être de la voie vectorielle.
 
 Deux réglages du poste à connaître, relevés à l'écran : « Ne pas compresser
 les images dans un fichier » est coché par défaut — c'est lui qui protège le
 fichier `.pptx` à l'enregistrement —, mais la « Résolution par défaut » d'à
 côté est à **96 ppp**. Décoché, ce réglage détruirait les plans : la consigne
 aux chefs de projet doit dire de le laisser coché.
-
-Le rendu passe par un PNG **à taille de pixel imposée**, pas par
-`rendre_apercu_png`, dont la docstring dit « sans valeur métrologique : ne pas
-imprimer » : `cairosvg.svg2png` avec `output_width`/`output_height` calculés
-depuis 420 × 297 mm.
-
-**Et une voie pour s'en affranchir, éprouvée le 25/09/2026** : poser la planche
-en **SVG** plutôt qu'en image matricielle. PowerPoint 2016 et suivants lisent
-un `asvg:svgBlip` posé à côté du PNG de repli dans le `a:blip`, et l'affichent
-en vectoriel. Mesuré à l'écran sur le plan de masse de Sarnois : aucune
-dégradation au zoom, couleurs justes, et le PDF exporté reste net là où le
-200 dpi pixellise.
-
-**Sauf le texte.** « Des caractères espacés de manière irrégulière » — le
-cartouche sort avec des lettres mal chassées, alors que le SVG, lui, est
-propre : de simples `<text font-family="Aptos">`, sans `textLength` ni
-`letter-spacing` (vérifié dans le fichier produit). C'est PowerPoint qui
-compose les glyphes à sa façon.
-
-Le remède tient en un appel : **repasser le SVG par cairo**
-(`cairosvg.svg2svg`) le rend en **tracés de glyphes** — zéro `<text>` en
-sortie. Plus de texte à composer, donc plus rien à composer de travers, et la
-mise en page reste celle du PDF puisque c'est le même moteur. Le fichier passe
-de 0,20 à 0,36 Mo, contre 0,53 Mo pour le PNG à 200 dpi. Fidélité mesurée en
-rendant les deux SVG à 3 308 px et en les comparant pixel à pixel : **0,17 %
-des pixels s'écartent de plus de 8/255**, et l'écart moyen vaut 0,09/255 —
-c'est le crénelage des contours, rien d'autre.
-
-Ce que la voie vectorielle coûte : le texte de la planche cesse d'être du
-texte, comme il l'est déjà dans la voie matricielle. Ce qu'elle rapporte :
-plus de plafond de résolution, et un fichier plus léger.
 
 ### D9 — Le fichier se nomme pour ce qu'il est
 
@@ -283,7 +295,8 @@ Quatre choses sont acquises ; elles n'ont plus à être cherchées.
 - **`upright` ne suffit pas seul** : l'étiquette reste droite tant que le
   groupe tourne peu, mais de côté elle se replie à une lettre par ligne — la
   boîte, elle, tourne, et le texte horizontal n'y tient plus. `wrap="none"`
-  sur le corps de texte l'en empêche. À confirmer.
+  sur le corps de texte l'en empêche : confirmé le 25/09/2026, « le texte
+  reste bien horizontal dans toutes les positions ».
 - **Le plafond de PowerPoint** : *Fichier > Options > Options avancées > Taille
   et qualité de l'image* compresse par défaut les images à **220 ppp** à
   l'enregistrement. Au-delà, la résolution supplémentaire est perdue dès que le
@@ -294,16 +307,22 @@ Quatre choses sont acquises ; elles n'ont plus à être cherchées.
 
 ## Ce qu'il faut mesurer avant de câbler
 
-Aucune de ces réponses ne s'obtient depuis le dépôt : elles demandent
-PowerPoint sur un poste. Les mesurer d'abord, et noter la date en commentaire.
+Les cinq comportements de PowerPoint dont dépendait le montage ont été relevés
+à l'écran les 25 et 26/09/2026, sur cinq sondes successives, et **sont tous
+acquis** : la réservation d'image rogne au format du cadre, `a:spLocks` tient,
+`upright` avec `wrap="none"` garde l'étiquette droite à tous les angles, le
+fond posé sur la mise en page est hors d'atteinte, et le SVG à texte en tracés
+rend un cartouche identique à celui du PDF. Chaque constat est détaillé
+ci-dessus, avec ce qu'il a coûté de découvrir.
 
-1. Une **réservation d'image** remplie par le chef de projet garde-t-elle sa
-   taille en rognant la photographie ?
-2. `a:spLocks noMove="1" noResize="1"` **empêche-t-il** de déplacer un cadre ?
-   C'est ce que PowerPoint 365 écrit quand on verrouille une forme à la main.
-3. `upright="1"` garde-t-il l'étiquette **horizontale** dans un groupe qui tourne ?
-4. **Le SVG en tracés** : l'espacement des lettres du cartouche est-il redevenu
-   régulier ? C'est le dernier écart connu entre les deux voies.
+Il ne reste rien à mesurer avant de câbler : le poids du SVG d'une planche à
+fond IGN, dernière inconnue, a été relevé depuis le dépôt et tranché en D8 —
+sept fois le fichier, d'où les deux voies.
+
+Ce qui restera à vérifier **après** le premier export complet, et qu'aucune
+sonde ne couvre : qu'un dossier entier s'ouvre, s'édite et s'exporte sans
+accroc, et que la pagination du sommaire tombe juste une fois les diapos
+surnuméraires supprimées.
 
 ---
 
