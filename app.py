@@ -396,11 +396,16 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
 
 
 st.subheader("1. Métadonnées du projet")
+# Champs vides, avec une invite grisée : les deux portaient la commune et le code
+# postal de Bray-Saint-Aignan en valeur par défaut, restes du premier jeu
+# d'essai. Une valeur préremplie est pire qu'un champ vide — elle se génère sans
+# qu'on la relise, et un dossier au nom d'une autre commune que la sienne ne se
+# détecte qu'à l'instruction.
 colonne_gauche, colonne_droite = st.columns(2)
 with colonne_gauche:
-    commune = st.text_input("Commune", value="Bray-Saint-Aignan")
+    commune = st.text_input("Commune", placeholder="Nom commune projet")
 with colonne_droite:
-    code_postal = st.text_input("Code postal", value="45460")
+    code_postal = st.text_input("Code postal", placeholder="Code postal projet")
 
 # Le nom du projet et la date ne se saisissent pas : l'un est toujours « PV »
 # suivi de la commune et de l'indice du tableau bilan, l'autre est le jour où le

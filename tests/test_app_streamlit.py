@@ -209,6 +209,22 @@ def _cliquer(application, libelle_partiel: str):
     )
 
 
+def _saisir(application, libelle: str, valeur: str):
+    """Renseigne le champ texte dont le libellé est exactement celui-là.
+
+    Par le libellé et non par le rang : `text_input[0]` liait les tests à l'ordre
+    des champs à l'écran, et une colonne déplacée les faisait écrire la commune
+    dans le code postal sans rien casser de visible.
+    """
+    for champ in application.text_input:
+        if champ.label == libelle:
+            return champ.set_value(valeur)
+    raise AssertionError(
+        f"Aucun champ « {libelle} » parmi : "
+        + (", ".join(c.label for c in application.text_input) or "aucun")
+    )
+
+
 def _bouton_present(application, libelle_partiel: str) -> bool:
     return any(
         libelle_partiel.lower() in bouton.label.lower() for bouton in application.button
@@ -233,9 +249,16 @@ def _titres(application) -> list:
 
 
 def _projet_cadre(tmp_path, monkeypatch):
-    """Étape 1 : la commune est saisie et l'emprise cadastrale déposée."""
+    """Étape 1 : la commune et le code postal sont saisis, l'emprise déposée.
+
+    Les deux champs se remplissent ici depuis que l'interface n'a plus de valeurs
+    par défaut : elle portait la commune et le code postal de Bray-Saint-Aignan,
+    restes du premier jeu d'essai, et les tests s'appuyaient sur eux sans le dire.
+    Un test qui dépend d'une valeur préremplie cesse de mesurer le parcours réel.
+    """
     application = _application(tmp_path, monkeypatch).run()
-    application.text_input[0].set_value("SAINT CYR")
+    _saisir(application, "Commune", "SAINT CYR")
+    _saisir(application, "Code postal", "45460")
     _televerser(
         application,
         "Emprise cadastrale",
@@ -1063,7 +1086,7 @@ def test_sans_emprise_la_generation_est_hors_de_portee(tmp_path, monkeypatch):
     l'écran inchangé. La section n'existe plus, et l'écran dit ce qu'il attend.
     """
     application = _application(tmp_path, monkeypatch).run()
-    application.text_input[0].set_value("SAINT CYR")
+    _saisir(application, "Commune", "SAINT CYR")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
@@ -1082,7 +1105,7 @@ def test_importer_sans_commune_est_hors_de_portee(tmp_path, monkeypatch):
     même nom s'écrasaient l'un l'autre sans un mot.
     """
     application = _application(tmp_path, monkeypatch).run()
-    application.text_input[0].set_value("")
+    _saisir(application, "Commune", "")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
