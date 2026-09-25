@@ -83,6 +83,16 @@ haut en bas, arrêter la lecture revient à ne pas afficher la suite.
    sur « Valider » — qui écrit le contrat au milieu de la page — en faisait
    dessiner deux, et Streamlit refusait le second bouton « Déplacer la coupe ».
 
+   Pour un plan PDF, elle se tient **à droite des réglages**, dans la même
+   ligne : le calage, les choix du plan et les corrections à cocher dans la
+   colonne de gauche, la carte dans celle de droite. L'un sous l'autre, il
+   fallait défiler dans les deux sens pour juger de l'effet d'un recalage — la
+   carte est passée de sous les alertes (23/09/2026) à sous les réglages
+   (24/09/2026), et il restait un aller-retour (25/09/2026). Les mesures qui
+   engagent le dossier, elles, gardent toute la largeur au-dessus. Le plan du
+   bureau d'études, qui n'a ni calage ni choix à suivre une fois importé, garde
+   sa carte plus bas et pleine largeur.
+
    « Validé » se compte sur ce qui est à l'écran, et non sur la présence du
    contrat sur le disque : après une première validation, un recalage ou un
    changement de couche renvoyait la carte tout en bas, à deux écrans des

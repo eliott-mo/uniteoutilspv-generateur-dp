@@ -236,9 +236,17 @@ def _dans_l_ordre_de_la_page(application) -> list:
 
 
 def _texte(element) -> str:
-    """Le texte d'un élément, ou rien : la valeur d'un tableau n'en est pas un."""
+    """Le texte d'un élément, ou rien : la valeur d'un tableau n'en est pas un.
+
+    La carte `st_folium` arrive en `UnknownElement`, qu'`AppTest` ne modélise
+    pas : lire sa valeur cherche dans l'état de session une clé qui n'y est
+    pas. Ce n'est pas un élément de texte, et il n'a donc rien à dire ici.
+    """
     for attribut in ("value", "label"):
-        valeur = getattr(element, attribut, None)
+        try:
+            valeur = getattr(element, attribut, None)
+        except KeyError:
+            continue
         if isinstance(valeur, str) and valeur:
             return valeur
     return ""
@@ -429,6 +437,13 @@ def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypa
     application = application.run()
     assert not application.exception, application.exception
 
+    # Une exécution de plus avant de lire la page : les réglages et la carte
+    # vivent maintenant dans deux colonnes, et `AppTest` garde les enfants d'un
+    # conteneur d'une exécution à l'autre quand un `st.rerun()` les enchaîne —
+    # la carte de la coupe y survivait à la validation qui la fait descendre.
+    application = application.run()
+    assert not application.exception, application.exception
+
     # Validée, la carte est descendue en 3 bis, avec les prises de vue.
     ordre = _dans_l_ordre_de_la_page(application)
     assert any(_est_la_carte_des_vues(e) for e in ordre)
@@ -437,6 +452,7 @@ def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypa
     # Recalé, l'écran n'est plus celui qui a été écrit : elle remonte.
     _decalage_est(application).set_value(_decalage_est(application).value + 2.0)
     _cliquer(application, "Recaler")
+    application = application.run()
     application = application.run()
     assert not application.exception, application.exception
     ordre = _dans_l_ordre_de_la_page(application)
@@ -448,6 +464,7 @@ def test_la_carte_remonte_sous_les_reglages_apres_un_recalage(tmp_path, monkeypa
 
     # Revalidé, elle redescend.
     _cliquer(application, "Valider l'import")
+    application = application.run()
     application = application.run()
     assert not application.exception, application.exception
     ordre = _dans_l_ordre_de_la_page(application)

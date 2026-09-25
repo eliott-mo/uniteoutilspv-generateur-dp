@@ -2064,6 +2064,14 @@ def _resumer_le_plan_pdf(import_pdf) -> None:
         "tableau bilan : surfaces et puissance ne sont recoupées avec aucune "
         "déclaration."
     )
+
+
+def _regler_et_trancher_le_plan_pdf(import_pdf) -> None:
+    """Le calage, les choix du plan et ses ouvrages — la colonne de gauche.
+
+    Séparé du résumé parce qu'il se tient dans une colonne à côté de la carte,
+    quand les mesures qui engagent le dossier, elles, gardent toute la largeur.
+    """
     _regler_le_calage(import_pdf)
     lecture = import_pdf.lecture
     if (
@@ -2418,14 +2426,20 @@ if import_be_courant is not None and commune.strip():
     tableau = getattr(import_be_courant, "tableau", None)
     if tableau is None:
         # Avant de lire le plan : les ouvrages tranchés et le calage réglé
-        # changent ce que la carte, plus bas, doit montrer.
+        # changent ce que la carte doit montrer.
         _resumer_le_plan_pdf(import_be_courant)
-        # La carte d'un plan PDF vient ici, sous le calage et les choix du plan,
-        # et non sous les alertes : c'est sur elle que se lit l'effet d'un
-        # recalage ou d'une correction, et les alertes la repoussaient à
-        # plusieurs écrans des réglages (retour d'usage du 23/09/2026). Le plan
-        # du BE, qui n'a ni calage ni choix à suivre, la garde plus bas.
-        carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
+        # Les réglages à gauche, la carte à droite, côte à côte. L'un sous
+        # l'autre, il fallait défiler dans les deux sens pour juger de l'effet
+        # d'un recalage ou d'une correction : la carte était d'abord sous les
+        # alertes (23/09/2026), puis directement sous les réglages (24/09/2026),
+        # et il restait un aller-retour (25/09/2026). Côte à côte, il n'y en a
+        # plus. Le plan du BE, qui n'a ni calage ni choix à suivre, garde sa
+        # carte plus bas, sur toute la largeur.
+        colonne_reglages, colonne_carte = st.columns([1.0, 1.25], gap="medium")
+        with colonne_reglages:
+            _regler_et_trancher_le_plan_pdf(import_be_courant)
+        with colonne_carte:
+            carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
     plan = import_be_courant.plan
     emprise_cloturee = plan.polygone_cloture
 
