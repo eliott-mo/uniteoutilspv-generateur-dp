@@ -82,8 +82,15 @@ DOSSIER_PROJETS, DOSSIER_SORTIE = dossiers_de_travail()
 
 EXTENSIONS_SHAPEFILE = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qmd")
 
-st.set_page_config(page_title="Générateur de dossier DP", page_icon="📄", layout="wide")
-st.title("Générateur de dossier DP")
+#: Le picto de l'outil, devant son titre et dans l'onglet du navigateur : les
+#: outils UNITe portent tous le leur, et le chef de projet qui en ouvre
+#: plusieurs les distingue dans sa barre d'onglets avant d'avoir lu un mot.
+PICTO = "🏗️"
+
+st.set_page_config(
+    page_title="Générateur de dossier DP", page_icon=PICTO, layout="wide"
+)
+st.title(f"{PICTO} Générateur de dossier DP")
 st.caption(
     "Page de garde, DP 1-1 plan de situation, DP 1-2 photographie aérienne, "
     "DP 1-3 plan de cadastre. Fonds IGN Géoplateforme, Lambert 93, A3 paysage à "
