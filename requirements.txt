@@ -11,6 +11,12 @@ shapely==2.1.2
 geopandas==1.1.3
 pyogrio==0.12.1
 pyproj==3.7.2
+# Employé directement — corrélation du calage sur l'ortho, grilles de rendu,
+# projection en lot des géométries — et non pas seulement à travers shapely et
+# geopandas. Ce qui est importé doit être déclaré, même quand une autre
+# dépendance le garantit : c'est ce que fiona a coûté le 26/09/2026, présente
+# sur le poste et absente du conteneur.
+numpy==2.4.4
 CairoSVG==2.9.0
 cairocffi==1.7.1
 pypdf==6.16.2
@@ -32,17 +38,12 @@ openpyxl==3.1.5
 # Streamlit sans écrire un composant React.
 folium==0.20.0
 streamlit-folium==0.27.2
+# Légendes HTML posées sur la carte de la coupe (`apercu_be`), par
+# `branca.element`. Folium l'apporte de toute façon, mais l'outil l'importe
+# lui-même : voir le commentaire de numpy ci-dessus.
+branca==0.8.2
 # Tracé du profil altimétrique de la coupe.
 matplotlib==3.10.9
-# Cadrage des photographies au clic (lot 6). Le format des emplacements est
-# imposé, la photographie y est donc rognée, et le chef de projet choisit la
-# part qu'il garde. Un curseur le faisait à l'aveugle : « on est obligé de
-# bouger le curseur, attendre une à deux secondes que le cadre se replace sans
-# trop savoir où il va aller, et refaire des essais-erreurs » (24/09/2026).
-# Streamlit ne rend pas les clics sur une image, et un composant React écrit
-# pour cela seul serait plus lourd que ce paquet de 300 Ko, dont la seule
-# dépendance est Streamlit.
-streamlit-image-coordinates==0.4.1
 # Lecture des photos HEIC (lot 6). C'est le format par défaut des iPhone, et un
 # chef de projet qui dépose une photo de visite dépose un HEIC sans le savoir.
 # Roue autonome de 5,6 Mo, disponible pour cp312 à cp314 : elle embarque libheif

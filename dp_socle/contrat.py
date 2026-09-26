@@ -583,11 +583,21 @@ def charger_contrat(dossier: str | Path, voirie=None) -> Contrat:
 
 
 def _lire_couches(chemin: Path) -> dict:
-    """Toutes les couches du GeoPackage, indexées par catégorie."""
-    import fiona
+    """Toutes les couches du GeoPackage, indexées par catégorie.
+
+    Le nom des couches se demande à **pyogrio**, et non à fiona. Les deux
+    embarquent leur propre GDAL, et geopandas passe déjà par pyogrio pour lire :
+    en tenir deux doublait la pile pour un `listlayers`. Fiona n'était d'ailleurs
+    pas déclarée dans `requirements.txt` — présente sur le poste de
+    développement, absente du conteneur, la génération s'y arrêtait sur un
+    `ModuleNotFoundError` au premier dossier produit en ligne (26/09/2026).
+    Vérifié le même jour sur le contrat de Bray : mêmes 22 couches, dans le même
+    ordre, et le même compte d'objets sur « voirie ».
+    """
+    from pyogrio import list_layers
 
     try:
-        noms = fiona.listlayers(str(chemin))
+        noms = [nom for nom, _type_geometrique in list_layers(chemin)]
     except Exception as exc:
         raise ErreurContrat(f"{chemin} illisible : {exc}") from exc
 
@@ -624,17 +634,15 @@ def decrire_voiries(dossier: str | Path) -> list:
     lourd ou léger n'aurait pas de sens. Deux des trois objets de Sarnois sont
     dans ce cas (mesuré le 17/09/2026).
     """
-    import fiona
-    from shapely.geometry import shape
+    from pyogrio import list_layers
 
     chemin = Path(dossier) / NOM_GEOPACKAGE
     if not chemin.exists():
         return []
     try:
-        if "voirie" not in fiona.listlayers(str(chemin)):
+        if "voirie" not in [nom for nom, _type in list_layers(chemin)]:
             return []
-        with fiona.open(str(chemin), layer="voirie") as source:
-            objets = [shape(entite["geometry"]) for entite in source]
+        objets = list(gpd.read_file(chemin, layer="voirie").geometry)
     except Exception:
         return []
 
@@ -705,15 +713,16 @@ def voiries_a_trancher(dossier: str | Path) -> int:
     illisible, rend zéro — la question ne se pose pas encore, et c'est le
     chargement du contrat qui refusera plus tard, avec son message à lui.
     """
-    import fiona
+    from pyogrio import list_layers, read_info
 
     chemin = Path(dossier) / NOM_GEOPACKAGE
     if not chemin.exists():
         return 0
     try:
-        if "voirie" not in fiona.listlayers(str(chemin)):
+        if "voirie" not in [nom for nom, _type in list_layers(chemin)]:
             return 0
-        with fiona.open(str(chemin), layer="voirie") as source:
-            return len(source)
+        # `read_info` lit l'en-tête de la couche, pas ses géométries : c'est un
+        # compte, l'interface le demande à chaque exécution du script.
+        return int(read_info(chemin, layer="voirie")["features"])
     except Exception:
         return 0

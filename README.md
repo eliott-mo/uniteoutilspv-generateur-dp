@@ -54,6 +54,17 @@ de placement des prises de vue ont été retirés, le volet photographique se
 traitant maintenant dans le `.pptx` — voir « La sortie PowerPoint à finaliser »
 plus bas.
 
+La dépendance `streamlit-image-coordinates` est partie avec eux. Elle servait au
+**cadrage des photographies au clic** : le format des emplacements étant imposé,
+la photographie y est rognée, et le chef de projet choisissait la part gardée. Un
+curseur le faisait à l'aveugle — « on est obligé de bouger le curseur, attendre
+une à deux secondes que le cadre se replace sans trop savoir où il va aller, et
+refaire des essais-erreurs » (24/09/2026). Streamlit ne rend pas les clics sur
+une image, et un composant React écrit pour cela seul serait plus lourd que ce
+paquet de 300 Ko, dont la seule dépendance est Streamlit. C'est le raisonnement à
+reprendre le jour où le cadrage au clic reviendra ; d'ici là, il ne pèse plus sur
+chaque reconstruction du conteneur.
+
 1. **Infos générales** — la commune, le code postal, l'emprise cadastrale, et la
    notice DP 11. Le dépôt d'un **relevé altimétrique** a été retiré le
    26/09/2026 : le RGE ALTI a toujours répondu, et le champ ne servait qu'à s'en
