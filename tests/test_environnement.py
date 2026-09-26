@@ -107,15 +107,16 @@ def _normaliser(nom: str) -> str:
     return nom.strip().lower().replace("_", "-")
 
 
-def _modules_importes() -> set:
-    """Les modules tiers importés par le socle et par l'application.
+def _modules_importes(chemins) -> set:
+    """Les modules tiers importés par ces fichiers.
 
     Lus dans l'arbre syntaxique et non à l'exécution : un import fait au fond
-    d'une fonction, pour ne le payer qu'à l'usage, ne s'exécute pas pendant les
-    tests — et c'est précisément un import de ce genre qui a manqué en ligne.
+    d'une fonction, pour ne le payer qu'à l'usage, ne s'exécute pas forcément
+    pendant les tests — et c'est précisément un import de ce genre qui a manqué
+    en ligne.
     """
     modules = set()
-    for chemin in [*RACINE.glob("dp_socle/**/*.py"), RACINE / "app.py"]:
+    for chemin in chemins:
         arbre = ast.parse(chemin.read_text(encoding="utf-8"))
         for noeud in ast.walk(arbre):
             if isinstance(noeud, ast.Import):
@@ -125,21 +126,47 @@ def _modules_importes() -> set:
     return {
         module
         for module in modules
-        if module not in sys.stdlib_module_names and module != "dp_socle"
+        if module not in sys.stdlib_module_names
+        and module not in ("dp_socle", "tests")
     }
 
 
-def _paquets_declares() -> set:
-    lignes = (RACINE / "requirements.txt").read_text(encoding="utf-8").splitlines()
-    return {
-        _normaliser(ligne.split("==")[0])
-        for ligne in lignes
-        if ligne.strip() and not ligne.lstrip().startswith("#")
-    }
+def _paquets_declares(*fichiers) -> set:
+    """Les paquets épinglés dans ces fichiers de dépendances.
+
+    Les lignes de renvoi (« -r requirements.txt ») sont ignorées : le fichier
+    renvoyé est passé explicitement par l'appelant, qui sait ce qu'il exige.
+    """
+    declares = set()
+    for fichier in fichiers:
+        for ligne in (RACINE / fichier).read_text(encoding="utf-8").splitlines():
+            ligne = ligne.strip()
+            if not ligne or ligne.startswith(("#", "-")):
+                continue
+            declares.add(_normaliser(ligne.split("==")[0]))
+    return declares
 
 
-def test_tout_module_importe_est_declare_dans_requirements():
-    """Ce que le code importe doit figurer dans `requirements.txt`.
+def _exiger_declares(chemins, fichiers, ou: str) -> None:
+    """Refuse tout module importé qu'aucun de ces fichiers ne déclare."""
+    declares = _paquets_declares(*fichiers)
+    distributions = packages_distributions()
+
+    manquants = []
+    for module in sorted(_modules_importes(chemins)):
+        fournisseurs = {_normaliser(nom) for nom in distributions.get(module, [])}
+        if not fournisseurs:
+            manquants.append(f"{module} : aucun paquet installé ne le fournit")
+        elif not fournisseurs & declares:
+            manquants.append(f"{module} : fourni par {', '.join(sorted(fournisseurs))}")
+
+    assert not manquants, f"Modules importés, absents de {ou} :\n" + "\n".join(
+        f"  - {ligne}" for ligne in manquants
+    )
+
+
+def test_tout_module_importe_par_le_socle_est_declare():
+    """Ce que le socle et l'application importent doit figurer dans `requirements.txt`.
 
     Le piège s'est refermé trois fois : pillow-heif, puis PyMuPDF, puis fiona —
     installés sur le poste de développement, absents du conteneur. Les deux
@@ -153,17 +180,26 @@ def test_tout_module_importe_est_declare_dans_requirements():
     qu'écrit dans une table — `PIL` vient de Pillow, `pptx` de python-pptx, et
     une table aurait vieilli sans prévenir.
     """
-    declares = _paquets_declares()
-    distributions = packages_distributions()
+    _exiger_declares(
+        [*RACINE.glob("dp_socle/**/*.py"), RACINE / "app.py"],
+        ["requirements.txt"],
+        "requirements.txt",
+    )
 
-    manquants = []
-    for module in sorted(_modules_importes()):
-        fournisseurs = {_normaliser(nom) for nom in distributions.get(module, [])}
-        if not fournisseurs:
-            manquants.append(f"{module} : aucun paquet installé ne le fournit")
-        elif not fournisseurs & declares:
-            manquants.append(f"{module} : fourni par {', '.join(sorted(fournisseurs))}")
 
-    assert not manquants, "Modules importés mais non déclarés :\n" + "\n".join(
-        f"  - {ligne}" for ligne in manquants
+def test_tout_module_importe_par_les_tests_est_declare():
+    """Les tests ont le droit d'en importer plus, pas d'en importer sans le dire.
+
+    Ce contrôle-ci manquait : posé le 26/09/2026 sur le socle seul, il laissait
+    deux `import fiona` dans `test_contrat_helioscope.py`. Ils passaient sur le
+    poste, où fiona est installée, et l'intégration continue les a fait tomber
+    sur sa toute première exécution — ce pour quoi elle est là.
+
+    `requirements-dev.txt` fait foi, qui reprend `requirements.txt` et y ajoute
+    de quoi jouer la suite.
+    """
+    _exiger_declares(
+        sorted(RACINE.glob("tests/**/*.py")),
+        ["requirements.txt", "requirements-dev.txt"],
+        "requirements.txt et requirements-dev.txt",
     )

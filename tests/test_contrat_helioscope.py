@@ -114,12 +114,18 @@ def _implantation_pour_schema():
 
 
 def _schema(chemin: Path) -> dict[str, set[str]]:
-    """Couches du GeoPackage et colonnes de chacune, CRS vérifié au passage."""
-    import fiona
+    """Couches du GeoPackage et colonnes de chacune, CRS vérifié au passage.
+
+    Par pyogrio, comme `contrat._lire_couches` : fiona n'est pas déclarée, et
+    ces deux tests-ci sont ce qui restait d'elle après le 26/09/2026 — ils
+    passaient sur le poste, où elle est installée, et tombaient en intégration
+    continue, où elle ne l'est pas.
+    """
     import geopandas as gpd
+    from pyogrio import list_layers
 
     schema = {}
-    for couche in fiona.listlayers(chemin):
+    for couche, _type_geometrique in list_layers(chemin):
         gdf = gpd.read_file(chemin, layer=couche)
         assert gdf.crs is not None, f"couche « {couche} » sans CRS"
         assert gdf.crs.to_string() == CRS_PROJET, (
@@ -297,10 +303,10 @@ def test_les_trois_producteurs_ecrivent_le_meme_schema(sortie_lot2, tmp_path):
 
 @besoin_export
 def test_couches_ecrites_par_le_lot_2(sortie_lot2):
-    import fiona
+    from pyogrio import list_layers
 
     _, gpkg, _, _ = sortie_lot2
-    assert set(fiona.listlayers(gpkg)) == {
+    assert {couche for couche, _type in list_layers(gpkg)} == {
         "tables_pv",
         "modules_pv",
         "zone_implantation_pv",
