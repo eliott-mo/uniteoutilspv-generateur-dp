@@ -176,7 +176,10 @@ def _sommet(carte: np.ndarray) -> tuple[float, float, float]:
             gauche, milieu, droite = valeurs[i - 1], valeurs[i], valeurs[i + 1]
             courbure = gauche - 2.0 * milieu + droite
             if courbure < 0:
-                return i + 0.5 * (gauche - droite) / courbure
+                # `float()` : le calcul se fait sur des scalaires NumPy, et ce
+                # que la mesure rend finit dans le calage, donc dans le contrat
+                # et dans une chaîne proj4 — voir `helioscope.decaler_longitude`.
+                return float(i + 0.5 * (gauche - droite) / courbure)
         return float(i)
 
     return (

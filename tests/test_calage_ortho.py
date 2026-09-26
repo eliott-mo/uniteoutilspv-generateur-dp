@@ -21,6 +21,7 @@ from PIL import Image
 from dp_socle.calage_ortho import (
     PAS_GROSSIER_M,
     _affine_vers_l93,
+    _sommet,
     caler_sur_ortho,
     correlation_normalisee,
     fond_sur_grille,
@@ -32,6 +33,7 @@ from dp_socle.helioscope import (
     decaler_longitude,
     importer,
     metres_par_degre_longitude,
+    projeter,
 )
 from tests.jeux_plan_pdf import (
     EXPORT_GANNAY,
@@ -69,6 +71,26 @@ def test_la_correlation_ne_voit_pas_la_luminosite():
     assert np.unravel_index(int(np.argmax(carte)), carte.shape) == (100, 30)
 
 
+def test_le_sommet_affine_au_sous_pixel_en_flottants_du_langage():
+    """La position rendue doit être un flottant du langage, pas un scalaire NumPy.
+
+    `np.float64` est une sous-classe de `float` : elle traverse sans bruit les
+    annotations, les comparaisons et les conversions, jusqu'à la chaîne proj4 de
+    la projection, où son `repr` s'écrit « np.float64(2.34…) » et fait refuser
+    PROJ. Ce que cette fonction mesure finit dans le calage, donc dans le
+    contrat et dans cette chaîne : le type est ici une propriété du résultat.
+    """
+    carte = np.zeros((9, 9))
+    carte[4, 4], carte[4, 3], carte[4, 5] = 1.0, 0.4, 0.6
+    carte[3, 4], carte[5, 4] = 0.3, 0.5
+    colonne, ligne, pic = _sommet(carte)
+    assert [type(valeur) for valeur in (colonne, ligne, pic)] == [float] * 3
+    # La parabole voit le pic penché vers la droite et vers le bas.
+    assert colonne == pytest.approx(4.1)
+    assert ligne == pytest.approx(4.083, abs=1e-3)
+    assert pic == 1.0
+
+
 @dataclass
 class _Fond:
     image: Image.Image
@@ -97,6 +119,32 @@ def test_un_fond_qui_ne_se_reconnait_pas_ne_change_rien():
     assert (implantation.calage.longitude_origine, implantation.calage.correction_nord_sud_m) == avant
 
 
+def _ortho_du_site_deplace(implantation, est_m: float, nord_m: float, demandes=None):
+    """Une « ortho » qui est le fond HelioScope lui-même, posé à sa vraie place.
+
+    Le site y est `est_m` plus à l'est et `nord_m` plus au nord que le calage
+    courant ne le pose : le déplacement à mesurer est donc connu d'avance, sans
+    rien demander à l'IGN. `demandes` recueille le pas et la taille de chaque
+    passe, pour qui veut les compter.
+    """
+    vrai = copy.deepcopy(implantation.calage)
+    decaler_longitude(vrai, est_m)
+    corriger_nord_sud(vrai, vrai.correction_nord_sud_m + nord_m)
+    fond = implantation.fond
+
+    def telecharger(_couche, cadre, largeur_mm, hauteur_mm, dpi):
+        taille = (round(largeur_mm / 25.4 * dpi), round(hauteur_mm / 25.4 * dpi))
+        pas = (cadre[2] - cadre[0]) / taille[0]
+        if demandes is not None:
+            demandes.append((pas, taille))
+        pixels = fond_sur_grille(
+            fond, _affine_vers_l93(vrai, fond), (cadre[0], cadre[3]), pas, taille, adoucir=True
+        )
+        return _Fond(Image.fromarray(pixels.clip(0, 255).astype(np.uint8)))
+
+    return telecharger
+
+
 @besoin_gannay
 def test_le_decalage_mesure_est_celui_du_site_dans_l_ortho():
     """Le site est dans l'ortho 12 m plus à l'est et 7 m plus au sud que le calage ne le pose.
@@ -105,20 +153,8 @@ def test_le_decalage_mesure_est_celui_du_site_dans_l_ortho():
     qui se vérifie, c'est que la mesure rend ce déplacement, avec son signe.
     """
     implantation = _implantation_gannay()
-    vrai = copy.deepcopy(implantation.calage)
-    decaler_longitude(vrai, 12.0)
-    corriger_nord_sud(vrai, vrai.correction_nord_sud_m - 7.0)
-    fond = implantation.fond
     demandes = []
-
-    def site_deplace(_couche, cadre, largeur_mm, hauteur_mm, dpi):
-        taille = (round(largeur_mm / 25.4 * dpi), round(hauteur_mm / 25.4 * dpi))
-        pas = (cadre[2] - cadre[0]) / taille[0]
-        demandes.append((pas, taille))
-        pixels = fond_sur_grille(
-            fond, _affine_vers_l93(vrai, fond), (cadre[0], cadre[3]), pas, taille, adoucir=True
-        )
-        return _Fond(Image.fromarray(pixels.clip(0, 255).astype(np.uint8)))
+    site_deplace = _ortho_du_site_deplace(implantation, 12.0, -7.0, demandes)
 
     mesure = mesurer_sur_ortho(implantation, telecharger=site_deplace)
     assert mesure.decalage_est_m == pytest.approx(12.0, abs=0.2)
@@ -155,6 +191,35 @@ def test_un_fond_reconnu_de_loin_mais_pas_au_detail_ne_change_rien():
     with pytest.raises(ErreurCalage, match="pas au détail"):
         caler_sur_ortho(implantation, telecharger=de_loin_seulement)
     assert (implantation.calage.longitude_origine, implantation.calage.correction_nord_sud_m) == avant
+
+
+@besoin_gannay
+def test_apres_un_calage_sur_l_ortho_les_geometries_se_projettent_encore():
+    """Le calage que le bouton laisse derrière lui doit pouvoir projeter.
+
+    Le bouton « Caler sur l'ortho » finissait en `CRSError` à l'écran suivant,
+    au premier appel à la projection : la mesure sous-pixel rendait un
+    `np.float64`, que `decaler_longitude` posait tel quel comme longitude, et
+    PROJ refuse le « +lon_0=np.float64(2.34…) » qu'en fait la chaîne proj4
+    (constaté le 26/09/2026 sur un plan PDF, à la proposition de la coupe).
+    Rien avant cela ne pouvait s'en apercevoir, la classe étant une sous-classe
+    de `float`. Ce qui se vérifie ici est donc le bout de la chaîne : la
+    géométrie se projette, et elle a bougé de ce que la mesure a dit.
+    """
+    implantation = _implantation_gannay()
+    avant = projeter(implantation.zone_implantation, implantation.calage)
+
+    mesure = caler_sur_ortho(
+        implantation, telecharger=_ortho_du_site_deplace(implantation, 12.0, -7.0)
+    )
+
+    apres = projeter(implantation.zone_implantation, implantation.calage)
+    assert apres.centroid.x - avant.centroid.x == pytest.approx(
+        mesure.decalage_est_m, abs=0.1
+    )
+    assert apres.centroid.y - avant.centroid.y == pytest.approx(
+        mesure.decalage_nord_m, abs=0.1
+    )
 
 
 @pytest.mark.reseau

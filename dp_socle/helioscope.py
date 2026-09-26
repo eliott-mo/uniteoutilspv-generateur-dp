@@ -1040,8 +1040,16 @@ def _transformateur_local(latitude: float, longitude: float) -> Transformer:
     à 4 de la recette, qui déduisent le zoom et la latitude, sont conservées mot
     pour mot : c'est uniquement le placement, l'étape 5, qui est corrigé ici.
     """
+    # `float()` avant d'écrire la chaîne : sans lui, une valeur NumPy s'y écrit
+    # « +lon_0=np.float64(2.3471603) », que PROJ refuse — « invalid value for
+    # lon_0 » (constaté le 26/09/2026 au clic sur « Caler sur l'ortho », dont la
+    # mesure sous-pixel rendait un `np.float64`). Rien en amont ne pouvait
+    # l'attraper : `np.float64` est une sous-classe de `float`, elle passe donc
+    # les annotations, les comparaisons, `json.dump` et toute conversion ; seul
+    # son `repr`, changé par NumPy 2.0, trahit sa nature. La conversion est
+    # exacte, c'est le même double, et `!r` garde la précision d'aller-retour.
     local = CRS.from_proj4(
-        f"+proj=tmerc +lat_0={latitude!r} +lon_0={longitude!r} +k=1 "
+        f"+proj=tmerc +lat_0={float(latitude)!r} +lon_0={float(longitude)!r} +k=1 "
         "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     )
     return Transformer.from_crs(local, CRS.from_epsg(2154), always_xy=True)
@@ -1770,8 +1778,13 @@ def decaler_longitude(calage: "Calage", metres: float) -> None:
     dimensions serait plus facile à rater : la latitude étant verrouillée par le
     fichier, la laisser bouger reviendrait à masquer un calage faux.
     """
-    calage.longitude_origine = calage.exige_origine() + metres / metres_par_degre_longitude(
-        calage.latitude_origine
+    # `float()` comme dans `corriger_nord_sud` : ce que le calage sur l'ortho
+    # apporte est un scalaire NumPy, et le calage se relit dans des messages, se
+    # compare d'un rejeu à l'autre et s'écrit dans le contrat. Il n'y tient que
+    # des flottants du langage.
+    calage.longitude_origine = float(
+        calage.exige_origine()
+        + metres / metres_par_degre_longitude(calage.latitude_origine)
     )
 
 
