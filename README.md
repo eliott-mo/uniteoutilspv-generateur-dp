@@ -656,8 +656,15 @@ Identifiants confirmés par GetCapabilities le 2026-09-01 :
 Le WMS-R limite les images à 5010 px de côté ; à 200 dpi, la zone de dessin A3
 fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne pèse
 5,9 Mo à 150 dpi, 10,6 Mo à 200 et 16,2 Mo à 250, pour une lisibilité
-équivalente à l'impression : 200 dpi est le défaut. La barre latérale de l'application permet de reconfronter
-les identifiants au GetCapabilities.
+équivalente à l'impression : **200 dpi, et plus de réglage** — la valeur est
+figée dans le code depuis le 26/09/2026, avec la barre latérale qui l'offrait.
+Un réglage dont une seule valeur est la bonne n'est pas un réglage.
+
+Les identifiants se reconfrontent au GetCapabilities par `ign.verifier_couches()`,
+depuis un shell ou un test. Le bouton qui le faisait est parti avec la barre
+latérale, au premier déploiement chez les chefs de projet : il montrait de la
+plomberie en première page, et le jour où l'IGN renomme une couche, c'est un
+diagnostic d'atelier qu'il faut, pas un écran de production.
 
 **Une session, un contexte TLS.** Toutes les requêtes passent par une même
 session (`ign._session`), dont l'adaptateur HTTPS porte un contexte TLS chargé

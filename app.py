@@ -62,7 +62,7 @@ from dp_socle.import_be import (
 )
 from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
-from dp_socle.ign import COUCHE_ORTHO, COUCHE_PLAN, DPI_DEFAUT, verifier_couches
+from dp_socle.ign import DPI_DEFAUT
 from dp_socle.polices import etat_polices
 from dp_socle.sortie_pptx import (
     FORMAT_HORODATAGE,
@@ -170,26 +170,22 @@ if etat.disponible:
 else:
     st.warning(f"Police : {etat.message}", icon="⚠️")
 
-with st.sidebar:
-    st.header("Contrôles")
-    st.write("Couches Géoplateforme câblées :")
-    st.code(f"{COUCHE_PLAN}\n{COUCHE_ORTHO}", language="text")
-    if st.button("Vérifier via GetCapabilities", width="stretch"):
-        try:
-            resultat = verifier_couches()
-        except ErreurDP as erreur:
-            st.error(str(erreur))
-        else:
-            for couche, presente in resultat.items():
-                (st.success if presente else st.error)(
-                    f"{couche} : {'présente' if presente else 'ABSENTE'}"
-                )
-    st.divider()
-    dpi = st.number_input(
-        "DPI des fonds raster", min_value=100, max_value=400, value=DPI_DEFAUT, step=25,
-        help="200 dpi en A3 donne 3228 x 2110 px sur la zone de dessin. "
-        "250 dpi améliore peu à l'impression et alourdit le dossier de moitié.",
-    )
+# La barre latérale « Contrôles » a été retirée le 26/09/2026, au premier
+# déploiement chez les chefs de projet. Elle portait trois choses, dont deux
+# étaient de la plomberie — les deux identifiants de couches Géoplateforme et un
+# bouton « Vérifier via GetCapabilities » — et c'était la première chose qu'on
+# voyait en ouvrant l'outil.
+#
+# Le contrôle lui-même n'est pas perdu : `ign.verifier_couches()` s'appelle
+# toujours, depuis un shell ou un test, le jour où l'IGN renomme une couche et
+# où toutes les planches échouent d'un coup. C'est un diagnostic d'atelier, pas
+# un écran de production.
+#
+# Le troisième réglage, le DPI des fonds raster, est désormais figé à
+# `ign.DPI_DEFAUT` — 200 ppp, soit 3 228 x 2 110 px sur la zone de dessin d'un
+# A3. Son propre texte d'aide disait que 250 « améliore peu à l'impression et
+# alourdit le dossier de moitié » : un réglage dont une seule valeur est la
+# bonne n'est pas un réglage, c'est une occasion de se tromper.
 
 
 def _nom_depot(commune: str) -> str:
@@ -2855,7 +2851,7 @@ if lancer_pptx:
                 "Téléchargement des fonds IGN, composition des planches et "
                 "montage des diapos…"
             ):
-                rapport_pptx = generer_pptx(projet, DOSSIER_SORTIE, dpi=int(dpi))
+                rapport_pptx = generer_pptx(projet, DOSSIER_SORTIE, dpi=DPI_DEFAUT)
             _retenir_ce_qui_a_servi("generation_faite", _entrees_generation)
             st.session_state["pptx_genere"] = {
                 "nom": projet.nom,
