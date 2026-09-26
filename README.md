@@ -516,9 +516,12 @@ L'action installe les paquets système en lisant `packages.txt` lui-même : les
 deux ne peuvent pas diverger, et un `packages.txt` repassé en CRLF fait échouer
 apt bruyamment là où Streamlit l'ignore en silence.
 
-La version de Python y est écrite en clair et doit rester celle du conteneur
-Streamlit Cloud — « Manage app → Settings → Python version ». Jouer la suite sur
-une autre dirait vrai sur Linux et faux sur le déploiement.
+La version de Python y est écrite en clair : **3.14**, celle du conteneur
+Streamlit Cloud relevée le 26/09/2026 dans « Manage app → Settings → Python
+version ». Ce n'est pas celle du poste de développement, qui est en 3.12, et
+c'est voulu — c'est le déploiement qu'on reproduit, pas l'atelier. Si le réglage
+du conteneur change, la ligne de l'action change avec lui : jouer la suite sur
+une autre version dirait vrai sur Linux et faux sur le déploiement.
 
 - `tests/test_echelle.py` — conversions millimètres ↔ mètres, transformation
   Lambert 93 → SVG, choix d'échelle adaptative.

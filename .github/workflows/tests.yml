@@ -27,12 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # La version du conteneur Streamlit Cloud, à tenir égale à celle de
-      # « Manage app → Settings → Python version ». Jouer la suite sur une
-      # autre version dirait vrai sur Linux et faux sur le déploiement.
+      # La version du conteneur Streamlit Cloud, relevée le 26/09/2026 dans
+      # « Manage app → Settings → Python version ». Elle n'est pas celle du
+      # poste de développement, qui est en 3.12 : c'est le déploiement qu'on
+      # reproduit ici, pas l'atelier. Si le réglage du conteneur change, cette
+      # ligne change avec lui — sinon la suite dirait vrai sur Linux et faux
+      # sur le déploiement.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
