@@ -373,7 +373,7 @@ def _enregistrer_fichiers(nom_projet: str, fichiers) -> Path | None:
     return None
 
 
-st.subheader("1. Métadonnées du projet")
+st.subheader("1. Infos générales")
 # Champs vides, avec une invite grisée : les deux portaient la commune et le code
 # postal de Bray-Saint-Aignan en valeur par défaut, restes du premier jeu
 # d'essai. Une valeur préremplie est pire qu'un champ vide — elle se génère sans

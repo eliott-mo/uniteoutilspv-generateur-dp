@@ -54,7 +54,7 @@ de placement des prises de vue ont été retirés, le volet photographique se
 traitant maintenant dans le `.pptx` — voir « La sortie PowerPoint à finaliser »
 plus bas.
 
-1. **Métadonnées** — la commune, le code postal, l'emprise cadastrale, et la
+1. **Infos générales** — la commune, le code postal, l'emprise cadastrale, et la
    notice DP 11. Le dépôt d'un **relevé altimétrique** a été retiré le
    26/09/2026 : le RGE ALTI a toujours répondu, et le champ ne servait qu'à s'en
    passer. `coupe.profil_terrain` garde son paramètre, pour un relevé drone plus

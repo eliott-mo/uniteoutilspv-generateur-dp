@@ -349,12 +349,12 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     pas validé.
     """
     application = _application(tmp_path, monkeypatch).run()
-    assert _titres(application) == ["1. Métadonnées du projet"]
+    assert _titres(application) == ["1. Infos générales"]
     assert not _bouton_present(application, "Générer le dossier")
 
     application = _projet_cadre(tmp_path, monkeypatch)
     assert _titres(application) == [
-        "1. Métadonnées du projet",
+        "1. Infos générales",
         "2. Plan du bureau d'études",
     ]
     assert not _bouton_present(application, "Générer le dossier")
@@ -362,7 +362,7 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     application = _import_valide(tmp_path, monkeypatch)
     assert not application.exception, [str(e.value) for e in application.exception]
     assert _titres(application) == [
-        "1. Métadonnées du projet",
+        "1. Infos générales",
         "2. Plan du bureau d'études",
         "3. Génération",
     ]
@@ -1137,7 +1137,7 @@ def test_importer_sans_commune_est_hors_de_portee(tmp_path, monkeypatch):
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
-    assert _titres(application) == ["1. Métadonnées du projet"]
+    assert _titres(application) == ["1. Infos générales"]
     attentes = "\n".join(information.value for information in application.info)
     assert "commune" in attentes.lower(), attentes
     assert not (tmp_path / "projets").exists()
