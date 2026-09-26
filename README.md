@@ -430,6 +430,28 @@ la chasse mesurée par cairo à celle calculée depuis le TTF embarqué. Un éca
 signifie que cairo compose autre chose, et l'avertissement affiché en tête de
 l'application nomme la police réellement utilisée.
 
+#### Les métriques se mesurent sans crénage
+
+Le premier déploiement, le 26/09/2026, a fait dire à ce contrôle qu'Aptos
+n'était pas utilisée alors qu'elle l'était. Le nombre le prouvait : 830,000
+mesuré contre 832,375 attendu, et 830,000 est **exactement** la somme des
+avances des 26 glyphes du texte témoin arrondies une à une.
+
+C'est le crénage des métriques. cairo arrondit l'avance de chaque glyphe à
+l'entier quand la surface est matricielle — celle qui sert à mesurer — et la
+laisse fractionnaire sur une surface vectorielle — celle dont sortent les
+planches. Une même chaîne se mesurait donc autrement qu'elle ne se dessine.
+
+Rien ne pouvait s'en apercevoir en développement : le backend DirectWrite de
+Windows ignore le crénage des métriques, et les surfaces image, PDF et SVG y
+donnent la même valeur au millième près. FreeType, lui, l'honore — et c'est
+FreeType qui compose sur la cible de déploiement.
+
+`polices._options_de_mesure` le désactive donc explicitement : la chasse mesurée
+ne dépend plus ni de la surface, ni de la plateforme, et c'est celle que le PDF
+compose. Ce n'était pas qu'un faux avertissement : la justification des blocs de
+texte se calculait sur des chasses que le dossier n'emploie pas.
+
 ### Installer Aptos selon la plateforme
 
 - **Linux** (cible de déploiement) : cairo passe par FreeType et fontconfig. Le

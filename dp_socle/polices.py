@@ -186,17 +186,50 @@ def _installer_fontconfig(fichiers: list) -> None:
 # -- mesures ----------------------------------------------------------------
 
 
+@lru_cache(maxsize=1)
+def _options_de_mesure():
+    """Options de police des mesures : crénage des métriques désactivé.
+
+    cairo arrondit l'avance de chaque glyphe à l'entier quand la surface est
+    **matricielle** — c'est le cas de la surface témoin employée ici — et la
+    laisse fractionnaire sur une surface **vectorielle**, celle dont sortent les
+    planches. Une même chaîne se mesurait donc autrement qu'elle ne se dessine.
+
+    Sur Windows, la question ne se pose pas : le backend DirectWrite ignore le
+    crénage des métriques, et les trois réglages donnent la même valeur au
+    millième près (mesuré le 26/09/2026, surfaces image, PDF et SVG). C'est
+    pourquoi rien ne s'était vu en développement. Sous Linux, où FreeType
+    l'honore, les 26 glyphes du texte témoin d'Aptos mesuraient **830,000 au
+    lieu de 832,375** — exactement la somme de leurs avances arrondies une à
+    une. Le contrôle de démarrage en concluait « Aptos non utilisée » sur
+    Streamlit Cloud alors qu'elle l'était, et la justification des blocs de
+    texte se calculait sur des chasses que le PDF n'emploie pas.
+
+    Désactivé explicitement, le crénage ne dépend plus ni de la surface de
+    mesure, ni de la plateforme : la chasse mesurée est celle du fichier de
+    police, et c'est celle que le PDF compose.
+    """
+    import cairocffi
+
+    options = cairocffi.FontOptions()
+    options.set_hint_metrics(cairocffi.HINT_METRICS_OFF)
+    return options
+
+
 def chasse_cairo(texte: str, famille: str, taille: float, gras: bool = False) -> float:
     """Chasse (avance horizontale) d'un texte, telle que cairo la composera.
 
     Même moteur et même API que CairoSVG au rendu : la mesure est donc exacte,
     quelle que soit la police que cairo aura finalement retenue. C'est cette
     fonction qui permet de justifier les blocs de texte.
+
+    Les métriques sont mesurées sans crénage, voir `_options_de_mesure`.
     """
     import cairocffi
 
     surface = cairocffi.ImageSurface(cairocffi.FORMAT_A8, 8, 8)
     contexte = cairocffi.Context(surface)
+    contexte.set_font_options(_options_de_mesure())
     contexte.select_font_face(
         famille,
         cairocffi.FONT_SLANT_NORMAL,
