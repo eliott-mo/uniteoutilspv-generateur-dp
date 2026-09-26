@@ -97,6 +97,10 @@ def _remplie(couleur: str, filet: str, epaisseur: float = 0.2) -> Style:
 #: partager le même : elles ne produisent alors qu'une entrée (décision D3).
 STYLES = {
     # -- surfaces de sol ----------------------------------------------------
+    # Écartée du dossier depuis le 26/09/2026 — voir `EXCLUES`. Le style reste
+    # pour l'aperçu de calage, qui montre ce que l'export contient, et pour que
+    # la catégorie garde un intitulé là où on la nomme.
+    #
     # Dérivée : le gris 215 du contrat est celui de la plateforme et de la
     # piste légère, deux relevées, et aucun gris clair ne s'en distingue assez.
     # Une zone évitée n'est pas une surface aménagée mais une surface qu'on
@@ -286,6 +290,17 @@ EXCLUES = {
     "stockage_chantier": "installation de chantier, temporaire",
     "zone_implantation_pv": "contour d'étude ; seule la clôture délimite le projet",
     "recul_implantation": "contour d'étude ; seule la clôture délimite le projet",
+    # Le calque « Keepouts » de l'export HelioScope, et lui seul : les trois
+    # producteurs du contrat, seul le lot 2 l'écrit. Ce n'est pas une servitude
+    # ni une surface qu'on s'interdit, comme le laissait croire l'intitulé
+    # « Zone évitée » : c'est la **réservation** que le chef de projet pose
+    # dans HelioScope pour garder la place des locaux techniques, afin que le
+    # calepinage n'y mette pas de modules. Les ouvrages qu'elle annonce sont
+    # ensuite dessinés pour eux-mêmes, avec leurs cotes ; la réservation, elle,
+    # n'existe pas sur le terrain et n'a rien à faire sur une planche
+    # d'instruction (relevé sur un dossier de chef de projet le 26/09/2026).
+    "zone_evitee": "réservation posée dans HelioScope pour les locaux "
+    "techniques ; pas un élément du projet",
 }
 
 #: Catégories qui ne se dessinent jamais sous leur propre nom.

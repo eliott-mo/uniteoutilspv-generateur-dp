@@ -1045,7 +1045,18 @@ tous les deux, ou à refuser les projets sans plan BE.
 | `modules_pv` | chaque module | non |
 | `zone_implantation_pv` | zone tracée dans HelioScope | non |
 | `recul_implantation` | reculs de la zone | non |
-| `zone_evitee` | bâtiments, bassins, voiries | non |
+| `zone_evitee` | réservations posées dans HelioScope | non |
+
+La couche `zone_evitee` **n'est pas dessinée au dossier** depuis le 26/09/2026
+(`palette.EXCLUES`). Elle vient du calque « Keepouts » de l'export, et son
+intitulé « Zone évitée » disait le contraire de ce qu'elle est : non pas une
+servitude ni une surface qu'on s'interdit, mais la **réservation** que le chef
+de projet pose dans HelioScope pour garder la place des locaux techniques, afin
+que le calepinage n'y mette pas de modules. Les ouvrages qu'elle annonce sont
+ensuite dessinés pour eux-mêmes, avec leurs cotes ; la réservation, elle,
+n'existe pas sur le terrain. Elle reste au contrat — il enregistre ce que
+l'export contenait — et sort du dessin, comme les deux contours d'étude à côté
+d'elle.
 
 Les colonnes sont les mêmes des deux côtés — `calque`, `categorie`, `z_reel`,
 `z_min`, `z_max` — y compris celles que HelioScope ne peut pas remplir : le DXF
