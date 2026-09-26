@@ -99,6 +99,13 @@ moteur `Planche` du lot 1.
   Inkscape, GIMP, msys2) et dit lequel il retient. `DP_CAIRO_DLL_DIR` reste
   prioritaire si la DLL est ailleurs ; renseignée mais fausse, elle lève.
   Inutile sous Linux.
+- **Le poste de développement n'est pas la cible.** On développe sous Windows,
+  on déploie sous Linux, et deux défauts sont tombés en production le
+  26/09/2026 que la suite verte sur Windows ne pouvait pas voir : des métriques
+  de police crénées par FreeType et ignorées par DirectWrite, et un import non
+  déclaré dans `requirements.txt`. `.github/workflows/tests.yml` rejoue donc la
+  suite sur `ubuntu-latest` à chaque poussée. Un vert local ne suffit plus à
+  dire qu'un lot est livrable.
 - **Console Windows** : préfixer les commandes Python par
   `PYTHONIOENCODING=utf-8`, sinon les accents lèvent une `UnicodeEncodeError` à
   l'affichage.

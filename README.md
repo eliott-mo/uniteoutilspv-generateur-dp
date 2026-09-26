@@ -1,5 +1,7 @@
 # Générateur de dossier DP
 
+[![Tests](https://github.com/eliott-mo/uniteoutilspv-generateur-dp/actions/workflows/tests.yml/badge.svg)](https://github.com/eliott-mo/uniteoutilspv-generateur-dp/actions/workflows/tests.yml)
+
 Production interne des dossiers de déclaration préalable pour les centrales
 photovoltaïques au sol de moins de 3 MWc.
 
@@ -489,6 +491,34 @@ que le bord droit des lignes justifiées tombe sur la largeur demandée.
 ```bash
 python -m pytest -q
 ```
+
+### La suite tourne aussi sur Linux, à chaque poussée
+
+`.github/workflows/tests.yml` la rejoue sur `ubuntu-latest`, tests `reseau`
+exclus. Ce n'est pas un rituel : c'est la seule façon de voir ce que le poste de
+développement ne peut pas montrer.
+
+Le 26/09/2026, au premier déploiement chez les chefs de projet, deux défauts
+sont tombés en ligne à une heure d'écart, suite verte sur Windows dans les deux
+cas :
+
+- **les métriques crénées** — cairo arrondit l'avance de chaque glyphe sous
+  FreeType, pas sous DirectWrite. Le contrôle de démarrage annonçait une police
+  de substitution qui n'existait pas, et la justification se calculait sur des
+  chasses que le PDF n'emploie pas. `test_mesure_proportionnelle_a_la_taille`
+  tombait sur Linux depuis toujours ;
+- **`fiona` importée sans être déclarée** — présente sur le poste, absente du
+  conteneur. La génération s'y arrêtait sur un `ModuleNotFoundError`. Le piège
+  s'était déjà refermé sur pillow-heif et sur PyMuPDF, tous deux rattrapés à la
+  relecture ; celui-là a été rattrapé par un chef de projet.
+
+L'action installe les paquets système en lisant `packages.txt` lui-même : les
+deux ne peuvent pas diverger, et un `packages.txt` repassé en CRLF fait échouer
+apt bruyamment là où Streamlit l'ignore en silence.
+
+La version de Python y est écrite en clair et doit rester celle du conteneur
+Streamlit Cloud — « Manage app → Settings → Python version ». Jouer la suite sur
+une autre dirait vrai sur Linux et faux sur le déploiement.
 
 - `tests/test_echelle.py` — conversions millimètres ↔ mètres, transformation
   Lambert 93 → SVG, choix d'échelle adaptative.
