@@ -45,6 +45,8 @@ from .standards import (
     HAUTEUR_ARBRE_M,
     HAUTEUR_CLOTURE_M,
     HAUTEUR_HAIE_M,
+    LARGEUR_ARBRE_M,
+    LARGEUR_HAIE_M,
     MESSAGE_VEGETATION,
 )
 from .primitives import (
@@ -193,12 +195,26 @@ COTE_GOUSSET_M = 0.22
 #: surépaisseur, elle se lisait comme un merlon.
 EPAISSEUR_PISTE_MM = 1.3
 
-#: Végétation traversée par la coupe, avec sa hauteur conventionnelle.
+#: Végétation traversée par la coupe : hauteur et largeur de couronne
+#: conventionnelles, en mètres. Une zone plus large qu'une couronne porte
+#: autant de sujets qu'elle en contient — voir `_vegetation_sur_le_profil`.
 VEGETATION_TRAVERSEE = {
-    "haie": HAUTEUR_HAIE_M,
-    "haie_existante": HAUTEUR_HAIE_M,
-    "arbre_existant": HAUTEUR_ARBRE_M,
+    "haie": (HAUTEUR_HAIE_M, LARGEUR_HAIE_M),
+    "haie_existante": (HAUTEUR_HAIE_M, LARGEUR_HAIE_M),
+    "arbre_existant": (HAUTEUR_ARBRE_M, LARGEUR_ARBRE_M),
 }
+
+#: Hauteurs relatives des sujets d'un peuplement, prises à tour de rôle.
+#:
+#: Une rangée de silhouettes identiques se lit comme un peigne, pas comme un
+#: bois. La suite est fixe et non tirée au hasard : le dépôt corrige un dossier
+#: en modifiant une valeur et en régénérant, et deux générations des mêmes
+#: entrées doivent donner la même planche.
+PORTS_RELATIFS = (1.0, 0.86, 0.97, 0.81, 0.93, 1.0, 0.88)
+
+#: Recouvrement de deux couronnes voisines. Jointives, elles se lisent comme un
+#: couvert continu ; espacées, comme un verger planté au cordeau.
+CHEVAUCHEMENT_COURONNES = 1.15
 
 #: Ouvrages dont la hauteur vient des cotes normalisées du tableau bilan.
 OUVRAGES_TRAVERSES = (
@@ -1000,7 +1016,7 @@ def _coupe_du_terrain(
         [table.point_haut_m]
         + [
             hauteur
-            for categorie, hauteur in VEGETATION_TRAVERSEE.items()
+            for categorie, (hauteur, _couronne) in VEGETATION_TRAVERSEE.items()
             if contrat.presente(categorie)
         ]
     )
@@ -1345,6 +1361,33 @@ def _ouvrages_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
     return avertissements
 
 
+def _sujet_de_vegetation(dessin, centre, sol, hauteur, couronne, style) -> None:
+    """Un arbre : un houppier sur son tronc, posé sur le terrain qui le porte.
+
+    Un houppier, et non un rectangle, qui se lirait comme un bâtiment.
+    """
+    tronc = max(couronne * 0.12, dessin.metres(0.4))
+    dessin.rectangle(
+        centre - tronc / 2.0, sol, tronc, hauteur * 0.35,
+        type(TRAIT_FIN)(trait="#5a4020", epaisseur_mm=0.2, remplissage="#8a6a3a"),
+    )
+    demi = couronne / 2.0
+    bas = sol + hauteur * 0.3
+    sommet = sol + hauteur
+    dessin.polyligne(
+        [
+            (centre - demi, bas),
+            (centre - demi * 0.85, sommet - hauteur * 0.22),
+            (centre - demi * 0.35, sommet),
+            (centre + demi * 0.35, sommet),
+            (centre + demi * 0.85, sommet - hauteur * 0.22),
+            (centre + demi, bas),
+        ],
+        style,
+        fermer=True,
+    )
+
+
 def _vegetation_sur_le_profil(dessin, contrat: Contrat, profil, ligne) -> list:
     """Haies et arbres traversés par la coupe, à hauteur conventionnelle.
 
@@ -1352,41 +1395,39 @@ def _vegetation_sur_le_profil(dessin, contrat: Contrat, profil, ligne) -> list:
     haie de deux mètres devant une rangée change pourtant la perception du
     projet, et c'est ce qu'un instructeur regarde : elle doit apparaître, et sa
     hauteur doit être annoncée pour ce qu'elle est.
+
+    Une zone est un **peuplement, pas un sujet**. Le bureau d'études légende
+    « arbres existants » ou « végétation » un bois entier ; la coupe le
+    dessinait d'un seul houppier, ce qui donnait un arbre unique large de cent
+    mètres et haut de huit (signalé le 26/09/2026). Elle y pose désormais autant
+    d'arbres que la largeur de la zone en contient, chacun sur l'altitude du
+    terrain qui le porte — un houppier unique, posé sur l'altitude du milieu,
+    flottait ou s'enterrait dès que la coupe était en pente.
     """
     messages = []
     employees = False
-    for categorie, hauteur in VEGETATION_TRAVERSEE.items():
+    for categorie, (hauteur, couronne) in VEGETATION_TRAVERSEE.items():
         geometries = contrat.geometries(categorie)
         if not geometries:
             continue
         style = STYLES[categorie].style
         for debut, fin in _portions_traversees(ligne, geometries):
-            sol = _altitude_a(profil, (debut + fin) / 2.0)
-            largeur = max(fin - debut, dessin.metres(1.2))
-            centre = (debut + fin) / 2.0
-            # Un houppier sur son tronc, et non un rectangle, qui se lirait
-            # comme un bâtiment.
-            tronc = max(largeur * 0.12, dessin.metres(0.4))
-            dessin.rectangle(
-                centre - tronc / 2.0, sol, tronc, hauteur * 0.35,
-                type(TRAIT_FIN)(trait="#5a4020", epaisseur_mm=0.2,
-                                remplissage="#8a6a3a"),
-            )
-            demi = largeur / 2.0
-            bas = sol + hauteur * 0.3
-            sommet = sol + hauteur
-            dessin.polyligne(
-                [
-                    (centre - demi, bas),
-                    (centre - demi * 0.85, sommet - hauteur * 0.22),
-                    (centre - demi * 0.35, sommet),
-                    (centre + demi * 0.35, sommet),
-                    (centre + demi * 0.85, sommet - hauteur * 0.22),
-                    (centre + demi, bas),
-                ],
-                style,
-                fermer=True,
-            )
+            # Au moins un sujet, même là où la coupe ne fait qu'effleurer la
+            # zone : ce que le plan porte là est un arbre, pas un fragment.
+            largeur = max(fin - debut, couronne)
+            gauche = (debut + fin) / 2.0 - largeur / 2.0
+            nombre = max(1, round(largeur / couronne))
+            pas = largeur / nombre
+            for rang in range(nombre):
+                centre = gauche + (rang + 0.5) * pas
+                _sujet_de_vegetation(
+                    dessin,
+                    centre,
+                    _altitude_a(profil, centre),
+                    hauteur * PORTS_RELATIFS[rang % len(PORTS_RELATIFS)],
+                    pas * CHEVAUCHEMENT_COURONNES,
+                    style,
+                )
             employees = True
     if employees:
         messages.append(MESSAGE_VEGETATION)

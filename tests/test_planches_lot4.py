@@ -23,7 +23,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import box
+from shapely.geometry import LineString, box
 
 from dp_socle.assemblage import TAILLE_MAX_MO, generer_dossier
 from dp_socle.contrat import charger_contrat
@@ -33,6 +33,10 @@ from dp_socle.import_be import ORIGINE_HELIOSCOPE
 from dp_socle.planche import Planche
 from dp_socle.planches import dp3_coupes, dp4_ouvrages
 from dp_socle.planches.primitives import TRAIT_FORT, Dessin
+from dp_socle.planches.standards import (
+    HAUTEUR_ARBRE_M,
+    LARGEUR_ARBRE_M,
+)
 from dp_socle.projet import Projet
 
 from . import contrat_synthetique as synthese
@@ -323,6 +327,112 @@ def test_le_z_plat_dun_dossier_helioscope_est_signale(site):
     )
     assert any("RGE ALTI" in message for message in messages)
     assert any("hauteurs déclarées" in message for message in messages)
+
+
+# ---------------------------------------------------------------------------
+# La végétation traversée : un peuplement, et non un sujet géant
+# ---------------------------------------------------------------------------
+
+
+class _DessinEspion:
+    """Recueille houppiers et troncs, sans planche : on mesure ce qui est tracé."""
+
+    def __init__(self):
+        self.planche = None
+        self.houppiers = []
+        self.troncs = []
+
+    def metres(self, valeur):
+        return valeur
+
+    def rectangle(self, x, y, largeur, hauteur, style=None):
+        self.troncs.append((x, y, largeur, hauteur))
+
+    def polyligne(self, points, style=None, fermer=False):
+        self.houppiers.append([(float(x), float(y)) for x, y in points])
+
+
+class _ContratDeVegetation:
+    """Le strict nécessaire à `_vegetation_sur_le_profil` : des couches."""
+
+    def __init__(self, **couches):
+        self._couches = couches
+
+    def geometries(self, categorie):
+        return self._couches.get(categorie, [])
+
+
+#: Une coupe de 200 m sur une pente de 2 %, dans le repère de la ligne.
+_LIGNE_DE_COUPE = LineString([(0.0, 0.0), (200.0, 0.0)])
+_PROFIL = [(float(x), 100.0 + 0.02 * x) for x in range(0, 201, 5)]
+
+
+def _vegetation(**couches) -> _DessinEspion:
+    dessin = _DessinEspion()
+    dessin.messages = dp3_coupes._vegetation_sur_le_profil(
+        dessin, _ContratDeVegetation(**couches), _PROFIL, _LIGNE_DE_COUPE
+    )
+    return dessin
+
+
+def _largeur(houppier) -> float:
+    return max(x for x, _ in houppier) - min(x for x, _ in houppier)
+
+
+def test_une_zone_boisee_porte_autant_d_arbres_qu_elle_en_contient():
+    """Une zone légendée « arbres existants » est un peuplement, pas un sujet.
+
+    Elle se dessinait d'un seul houppier étiré sur toute sa largeur : un bois de
+    120 m donnait un arbre unique de 120 m de large et de 8 m de haut, ce qu'un
+    instructeur ne peut pas lire autrement que comme une erreur (signalé le
+    26/09/2026 sur la coupe de Sarnois).
+    """
+    dessin = _vegetation(arbre_existant=[box(0.0, -10.0, 120.0, 10.0)])
+
+    assert len(dessin.houppiers) == round(120.0 / LARGEUR_ARBRE_M)
+    # Aucun sujet plus large qu'un arbre, recouvrement des couronnes compris.
+    assert max(_largeur(h) for h in dessin.houppiers) == pytest.approx(
+        LARGEUR_ARBRE_M * dp3_coupes.CHEVAUCHEMENT_COURONNES, abs=0.01
+    )
+    # Le peuplement couvre la zone d'un bout à l'autre, sans la déborder de
+    # plus d'une demi-couronne.
+    gauches = [min(x for x, _ in h) for h in dessin.houppiers]
+    droites = [max(x for x, _ in h) for h in dessin.houppiers]
+    assert min(gauches) == pytest.approx(0.0, abs=LARGEUR_ARBRE_M / 2.0)
+    assert max(droites) == pytest.approx(120.0, abs=LARGEUR_ARBRE_M / 2.0)
+    # Et aucun ne dépasse la hauteur conventionnelle annoncée au rapport : le
+    # bloc de la planche est dimensionné sur elle.
+    assert max(y for h in dessin.houppiers for _, y in h) <= max(
+        altitude for _, altitude in _PROFIL
+    ) + HAUTEUR_ARBRE_M
+    assert any("autant qu'elle en contient" in message for message in dessin.messages)
+
+
+def test_chaque_arbre_est_pose_sur_le_terrain_qui_le_porte():
+    """Le houppier unique se posait sur l'altitude du milieu de la zone.
+
+    Sur une pente de 2 %, un bois de 120 m voyait donc ses arbres de bout
+    s'enterrer d'un mètre ou flotter d'autant.
+    """
+    dessin = _vegetation(arbre_existant=[box(0.0, -10.0, 120.0, 10.0)])
+
+    for x_tronc, pied, largeur_tronc, _hauteur in dessin.troncs:
+        centre = x_tronc + largeur_tronc / 2.0
+        assert pied == pytest.approx(100.0 + 0.02 * centre, abs=0.05)
+
+
+def test_un_sujet_isole_reste_un_arbre_entier():
+    """La coupe effleure un bosquet d'un mètre : ce qui est là est un arbre.
+
+    Sa couronne ne se réduit pas à la largeur traversée, sinon un arbre frôlé
+    par la coupe se dessinerait comme un buisson.
+    """
+    dessin = _vegetation(arbre_existant=[box(60.0, -0.5, 61.0, 0.5)])
+
+    assert len(dessin.houppiers) == 1
+    assert _largeur(dessin.houppiers[0]) == pytest.approx(
+        LARGEUR_ARBRE_M * dp3_coupes.CHEVAUCHEMENT_COURONNES, abs=0.01
+    )
 
 
 # ---------------------------------------------------------------------------

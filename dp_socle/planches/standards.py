@@ -43,11 +43,25 @@ PASSAGE_FAUNE_HAUTEUR_M = 0.15
 HAUTEUR_HAIE_M = 2.00
 HAUTEUR_ARBRE_M = 8.00
 
+#: Largeurs conventionnelles de couronne, en mètres.
+#:
+#: Une zone légendée « arbres existants » ou « végétation » est un peuplement,
+#: pas un sujet : elle contient autant d'arbres que sa largeur en porte. La
+#: coupe la dessinait d'un seul houppier, ce qui donnait un arbre unique large
+#: de cent mètres et haut de huit — relevé le 26/09/2026 sur la coupe de
+#: Sarnois. Le port moyen d'un arbre de haut-jet fait les trois quarts de sa
+#: hauteur ; une haie se lit à ses touffes, de la largeur de sa hauteur.
+LARGEUR_ARBRE_M = 6.00
+LARGEUR_HAIE_M = 2.00
+
 MESSAGE_VEGETATION = (
     "Coupe du terrain : la végétation traversée est dessinée à des hauteurs "
     f"conventionnelles ({nombre_fr(HAUTEUR_HAIE_M)} m pour une haie, "
-    f"{nombre_fr(HAUTEUR_ARBRE_M)} m pour un arbre). Ni le tableau bilan ni le "
-    "plan ne portent de hauteur de végétation."
+    f"{nombre_fr(HAUTEUR_ARBRE_M)} m pour un arbre), et une zone plus large "
+    "qu'un sujet en porte autant qu'elle en contient : un arbre tous les "
+    f"{nombre_fr(LARGEUR_ARBRE_M)} m, une touffe de haie tous les "
+    f"{nombre_fr(LARGEUR_HAIE_M)} m. Ni le tableau bilan ni le plan ne portent "
+    "de hauteur de végétation, ni le nombre de sujets d'une zone."
 )
 
 #: La hauteur de clôture et de portail ne se lit nulle part au contrat — le

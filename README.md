@@ -2654,6 +2654,27 @@ Et le contrôle s'inverse : si la table dessinée perce le gabarit, ce n'est plu
 une incohérence de tableau mais un dépassement d'autorisation, et le rapport le
 dit en ces termes.
 
+#### La végétation traversée est un peuplement, pas un sujet
+
+La coupe montre les haies et les arbres qu'elle traverse, à des hauteurs
+conventionnelles — 2 m pour une haie, 8 m pour un arbre — parce que ni le
+tableau bilan ni le plan n'en portent, et l'emploi de ces valeurs s'écrit au
+rapport. Une haie de deux mètres devant une rangée change la perception du
+projet, et c'est ce qu'un instructeur regarde.
+
+Ce que ces zones ne sont pas, c'est un seul sujet. Le bureau d'études légende
+« Arbres existants » ou « Zone boisée » un bois entier — 6 360 m² sur le plan de
+Bray. Dessinée d'un unique houppier étiré sur toute la largeur traversée, une
+telle zone donnait un **arbre de cent mètres de large et de huit de haut**
+(signalé le 26/09/2026). La coupe y pose donc autant d'arbres que la largeur en
+contient, un tous les 6 m, une touffe de haie tous les 2 m, chacun posé sur
+l'altitude du terrain qui le porte — un houppier unique, assis sur l'altitude du
+milieu de la zone, flottait ou s'enterrait dès que la coupe était en pente.
+
+Les ports varient selon une suite fixe : une rangée de silhouettes identiques se
+lit comme un peigne, et un tirage au hasard donnerait deux planches différentes
+pour un même dossier régénéré.
+
 ### DP 4 — Ouvrages techniques
 
 Chaque planche est partagée en deux : le plan de repérage à gauche, les dessins
