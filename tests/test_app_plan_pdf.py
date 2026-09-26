@@ -139,9 +139,13 @@ def test_le_plan_pdf_s_importe_et_se_cale(tmp_path, monkeypatch):
         "le titre des choix du plan",
     )
     carte = _rang(ordre, _est_la_carte_de_la_coupe, "le titre de la carte")
+    # Cherchée par son texte et non par son composant : depuis le 26/09/2026,
+    # les remarques de l'import ne font plus un pavé jaune chacune, elles se
+    # lisent en liste sous un bandeau unique. Ce qui se mesure ici est la place
+    # de l'alerte sur la page, pas ce qui la porte.
     alerte = _rang(
         ordre,
-        lambda e: e.type == "warning" and _texte(e).startswith("Pistes de 5 m"),
+        lambda e: "Pistes de 5 m" in _texte(e),
         "l'alerte des pistes",
     )
     validation = _rang(ordre, lambda e: _texte(e) == "### Validation", "le titre de la validation")

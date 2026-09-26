@@ -595,6 +595,32 @@ MOTIFS_DE_ROUTINE = (
 MARQUEUR_BUREAU_ETUDES = "à demander au bureau d'études"
 
 
+def _en_puces(messages) -> str:
+    """Les messages en liste markdown, une puce chacun."""
+    return "\n".join(f"- {message}" for message in messages)
+
+
+def _lister_les_avertissements(titre: str, messages) -> None:
+    """Un seul bandeau jaune, puis les messages en liste sous lui.
+
+    Un `st.warning` par message donnait autant de pavés jaunes à picto qu'il y
+    avait de remarques — des dizaines sur un plan bavard. L'œil n'y distinguait
+    plus la première de la dernière, et le jaune ne signalait plus rien puisqu'il
+    était partout (retour d'usage du 26/09/2026). Le bandeau dit ce qui commence
+    et combien il y en a ; les messages, en dessous, se lisent comme une liste.
+
+    Une vraie liste à puces, et non des lignes séparées par des retours : en
+    markdown, deux lignes qui se suivent forment un seul paragraphe, et les
+    messages se seraient enchaînés bout à bout. Aucun n'a de retour à la ligne —
+    ils sont écrits d'un tenant dans `import_be` et `sortie_pptx` —, chacun tient
+    donc sur sa puce.
+    """
+    if not messages:
+        return
+    st.warning(f"**{titre}**", icon="⚠️")
+    st.markdown(_en_puces(messages))
+
+
 def _trier_les_avertissements(messages) -> tuple[list, list, list]:
     """Range les remarques en trois : pour le BE, à lire, fonctionnement normal.
 
@@ -650,8 +676,11 @@ def _recouper_les_voiries(import_be, tranche) -> None:
             icon="✅",
         )
         return
-    for controle in ecarts:
-        st.warning(f"{controle.libelle} : {controle.message}", icon="⚠️")
+    _lister_les_avertissements(
+        f"{len(ecarts)} surface(s) de voirie ne concordent pas avec le tableau "
+        "bilan",
+        [f"**{controle.libelle}** : {controle.message}" for controle in ecarts],
+    )
 
 
 def _trancher_les_voiries(import_be) -> None:
@@ -2505,11 +2534,15 @@ if import_be_courant is not None and commune.strip():
         ).exists()
         if a_lire and deja_valide:
             with st.expander(f"Les remarques de l'import ({len(a_lire)})"):
-                for message in a_lire:
-                    st.warning(message, icon="⚠️")
+                # Le titre du dépliant annonce déjà la liste : un bandeau de
+                # plus, à l'intérieur, ne dirait rien qu'il ne dise.
+                st.markdown(_en_puces(a_lire))
         else:
-            for message in a_lire:
-                st.warning(message, icon="⚠️")
+            _lister_les_avertissements(
+                f"{len(a_lire)} remarque(s) sur l'import, à lire avant de "
+                "valider",
+                a_lire,
+            )
         if routine:
             with st.expander(
                 f"Ce que l'import a écarté, comme prévu ({len(routine)} message(s))"
@@ -2917,8 +2950,11 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
                 width="stretch",
             )
 
-    for message in rapport_pptx.avertissements:
-        st.warning(message, icon="⚠️")
+    _lister_les_avertissements(
+        f"{len(rapport_pptx.avertissements)} point(s) à savoir avant de "
+        "finaliser le dossier",
+        rapport_pptx.avertissements,
+    )
 
     st.dataframe(
         [

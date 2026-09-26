@@ -249,6 +249,23 @@ def _valider_l_import(application):
     return application
 
 
+def _alertes_affichees(application) -> list:
+    """Tout ce qui s'affiche en alerte : les bandeaux jaunes, et les puces sous eux.
+
+    Les remarques ne font plus un `st.warning` chacune depuis le 26/09/2026 : un
+    bandeau unique les annonce et les compte, et elles se lisent en liste sous
+    lui. Ce qui compte ici est qu'elles soient à l'écran, pas le composant qui
+    les porte.
+    """
+    messages = [bloc.value for bloc in application.warning]
+    for bloc in application.markdown:
+        if bloc.value.startswith("- "):
+            messages.extend(
+                ligne[2:] for ligne in bloc.value.split("\n") if ligne.startswith("- ")
+            )
+    return messages
+
+
 def _bouton_present(application, libelle_partiel: str) -> bool:
     return any(
         libelle_partiel.lower() in bouton.label.lower() for bouton in application.button
@@ -527,13 +544,47 @@ def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
     application = _plan_importe(tmp_path, monkeypatch)
 
     assert not application.exception, [str(e.value) for e in application.exception]
-    messages = [avertissement.value for avertissement in application.warning]
+    messages = _alertes_affichees(application)
     # Un message du bloc de coupe, écrit après que le conteneur a été réservé :
     # c'est celui-là qui arrivait avec une exécution de retard. Il portait sur le
     # RGE ALTI jusqu'au 26/09/2026, quand un relevé déposé le remplaçait et que
     # ce remplacement se disait ; le champ retiré, c'est la coupe proposée qui
     # tient ce rôle.
     assert any("Coupe par défaut" in message for message in messages), messages
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_les_remarques_de_l_import_tiennent_sous_un_seul_bandeau(tmp_path, monkeypatch):
+    """Un pavé jaune par remarque, et le jaune ne signale plus rien.
+
+    Sarnois en produit vingt-deux : autant de blocs jaunes à picto, où l'œil ne
+    distinguait plus le premier du dernier (retour d'usage du 26/09/2026). Elles
+    tiennent sous un bandeau qui les annonce et les compte, et se lisent en liste
+    sous lui.
+    """
+    application = _plan_importe(tmp_path, monkeypatch)
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    bandeaux = [
+        bloc.value
+        for bloc in application.warning
+        if "remarque(s) sur l'import" in bloc.value
+    ]
+    assert len(bandeaux) == 1, [bloc.value for bloc in application.warning]
+
+    annonce = int(bandeaux[0].lstrip("*").split()[0])
+    listes = [
+        bloc.value
+        for bloc in application.markdown
+        if bloc.value.startswith("- ") and bloc.value.count("\n- ") + 1 == annonce
+    ]
+    assert listes, [bloc.value[:60] for bloc in application.markdown]
+    # Et aucune remarque ne se redouble en pavé jaune à côté de sa puce.
+    assert all(
+        puce not in bloc.value
+        for bloc in application.warning
+        for puce in listes[0].split("\n")
+    )
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")

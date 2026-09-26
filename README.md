@@ -1154,6 +1154,13 @@ reste appariable à la main. Un calque vraiment inconnu, lui, garde son
 avertissement propre — c'est là qu'une décision est attendue. Après tri, Sarnois
 descend à 22 avertissements et Saint-Cyr reste à zéro.
 
+Ces restantes s'affichent sous **un seul bandeau jaune**, qui les annonce et les
+compte, puis en liste sous lui. Un pavé jaune par message, avec son picto,
+donnait vingt-deux blocs où l'œil ne distinguait plus le premier du dernier, et
+le jaune ne signalait plus rien puisqu'il était partout (26/09/2026). Il en va
+de même des points laissés à faire par la sortie PowerPoint et des surfaces de
+voirie qui ne concordent pas.
+
 Deux détails du tri méritent d'être dits. « cosntruction » est la faute de
 frappe du fichier réel, reprise telle quelle : la normalisation efface les
 accents et les séparateurs, pas les fautes. Et `GREY` et `Edges`, 1 594 et 195
