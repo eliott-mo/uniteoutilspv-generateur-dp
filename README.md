@@ -1896,6 +1896,33 @@ couches tombent juste — 1 280 m² relevés pour 1 280 déclarés en voie lourd
 interne sur l'indice A, 3 424 pour 3 424 en piste légère, 2 446 pour 2 447 sur
 l'indice B.
 
+#### Les rangées livrées en segments sont refermées
+
+Relevé le 26/09/2026 sur le plan d'Auzainvilliers : son calque
+`PVcase PV Modules (optimised)` porte **316 `LINE`** là où celui de Saint-Cyr
+porte **96 `POLYLINE`**. Les segments forment pourtant 79 rectangles complets de
+20,75 × 6,94 m — quatre segments chacun, chaque sommet touché exactement deux
+fois. Mais une ligne n'a pas de surface : l'import ne trouvait aucune table, ne
+pouvait pas orienter la coupe A-A' et refusait le plan entier, alors que la
+géométrie y était tout entière.
+
+`polygonize` les recompose, avec le même recollement à 1 cm que les contours
+ouverts du lot 4. C'est lui qui fait le tri, et c'est pourquoi il est préféré à
+un parcours de segments écrit à la main : ce qui ne se referme pas ne donne
+aucune surface et reste tel quel ; deux rangées mitoyennes qui partagent un côté
+donnent deux surfaces, et non une figure en huit.
+
+**Le Z est rendu aux sommets** depuis les segments d'origine — 334 à 347 m sur
+ce plan. Sans lui, `z_reel` tomberait à faux et la coupe DP 3 reposerait les
+tables sur des hauteurs de catalogue : la reconstruction aurait réparé une chose
+en en cassant une autre, sans le dire.
+
+Comme l'aire de grutage ci-dessous, elle ne s'applique **qu'à défaut de
+polygone** — un contour dessiné fait toujours foi, et un plan qui passait
+continue de passer par le même chemin qu'avant — et elle est signalée à chaque
+import, avec ce qu'il faut demander au BE : des polylignes fermées, une par
+rangée.
+
 #### L'aire de grutage se dessine en voie lourde
 
 Ce n'est pas un ouvrage distinct mais un **élargissement ponctuel de la voie

@@ -1055,6 +1055,7 @@ def lire_plan_be(
         )
 
     entites = _reconstruire_aires_grutage(entites, avertissements)
+    entites = _refermer_les_tables(entites, avertissements)
 
     for entite in entites:
         if entite.categorie != "cloture" or entite.geometrie.geom_type != "LineString":
@@ -1204,6 +1205,117 @@ def _reconstruire_aires_grutage(
     )
     gardes = {id(e) for e in aires}
     return [e for e in entites if id(e) not in gardes] + rectangles
+
+#: Recollement admis entre deux segments d'une même rangée, en mètres. Même
+#: valeur que `palette.TOLERANCE_CONTOUR_M`, pour la même raison : la CAO ne
+#: referme pas ses contours au point près.
+TOLERANCE_TABLE_M = 0.01
+
+#: Surface en deçà de laquelle un contour recomposé n'est pas une rangée. Une
+#: rangée fait quelques dizaines de mètres carrés ; le seuil écarte les figures
+#: parasites que deux traits qui se croisent suffisent à refermer.
+AIRE_TABLE_MINIMALE_M2 = 1.0
+
+
+def _refermer_les_tables(
+    entites: list[EntiteBE], avertissements: list[str]
+) -> list[EntiteBE]:
+    """Recompose les rangées livrées en segments séparés, faute de polyligne.
+
+    Relevé le 26/09/2026 sur le plan d'Auzainvilliers : son calque
+    « PVcase PV Modules (optimised) » porte 316 `LINE` là où celui de Saint-Cyr
+    porte 96 `POLYLINE`. Les segments forment pourtant 79 rectangles de
+    20,75 x 6,94 m, complets et fermés — mais une ligne n'a pas de surface :
+    l'import ne trouvait aucune table, ne pouvait pas orienter la coupe A-A' et
+    refusait le plan entier.
+
+    Comme pour les aires de grutage, la recomposition **ne s'applique qu'à
+    défaut de polygone** : un contour dessiné fait toujours foi, et un plan qui
+    passait continue de passer par le même chemin qu'avant.
+
+    `polygonize` fait le tri lui-même, et c'est pourquoi il est préféré à un
+    parcours de segments écrit à la main : ce qui ne se referme pas ne donne
+    aucune surface et reste tel quel ; deux rangées mitoyennes qui partagent un
+    côté donnent deux surfaces, et non une figure en huit.
+
+    Le Z est rendu aux sommets depuis les segments d'origine. Sans lui, les
+    rangées perdraient l'altitude de terrain que le DXF leur donne — 334 à
+    347 m sur ce plan —, `z_reel` tomberait à faux, et la coupe DP 3 les
+    reposerait sur des hauteurs de catalogue. La reconstruction aurait alors
+    réparé une chose en en cassant une autre, sans le dire.
+    """
+    tables = [e for e in entites if e.categorie == "tables_pv"]
+    if not tables or any(e.geometrie.geom_type == "Polygon" for e in tables):
+        return entites
+
+    segments = [
+        e for e in tables
+        if e.geometrie.geom_type in ("LineString", "LinearRing")
+    ]
+    if len(segments) < 3:
+        return entites
+
+    from shapely import snap
+    from shapely.ops import polygonize
+
+    lignes = [e.geometrie for e in segments]
+    reseau = unary_union(lignes)
+    surfaces = [
+        surface
+        for surface in polygonize(unary_union(snap(reseau, reseau, TOLERANCE_TABLE_M)))
+        if surface.area >= AIRE_TABLE_MINIMALE_M2
+    ]
+    if not surfaces:
+        return entites
+
+    # L'altitude de chaque sommet, relevée sur les segments avant qu'ils ne
+    # soient mis à plat par l'union.
+    altitudes = {}
+    for ligne in lignes:
+        for sommet in ligne.coords:
+            if len(sommet) > 2:
+                altitudes[(round(sommet[0], 2), round(sommet[1], 2))] = sommet[2]
+
+    calques = sorted({e.calque for e in segments})
+    calque = calques[0] if len(calques) == 1 else " + ".join(calques)
+
+    refermees, sans_altitude = [], 0
+    for surface in surfaces:
+        sommets = [(x, y) for x, y, *_ in surface.exterior.coords]
+        zs = [altitudes.get((round(x, 2), round(y, 2))) for x, y in sommets]
+        if all(z is not None for z in zs):
+            geometrie = Polygon([(x, y, z) for (x, y), z in zip(sommets, zs)])
+        else:
+            geometrie = Polygon(sommets)
+            sans_altitude += 1
+        refermees.append(
+            EntiteBE(
+                categorie="tables_pv",
+                calque=calque,
+                geometrie=geometrie,
+                z_reel=_z_varie(geometrie),
+            )
+        )
+
+    # Les segments qui bordent une surface recomposée ne sont plus importés à
+    # part : leur tracé est devenu le contour du polygone. Ceux qui ne se sont
+    # refermés sur rien restent, et le compte les signale.
+    contour = unary_union(surfaces).buffer(TOLERANCE_TABLE_M)
+    orphelins = [e for e in segments if not contour.contains(e.geometrie)]
+    surface_totale = sum(e.geometrie.area for e in refermees)
+    avertissements.append(
+        f"{len(refermees)} rangée(s) de tables recomposée(s) depuis "
+        f"{len(lignes)} segments du calque « {calque} », faute de polyligne "
+        f"fermée : {surface_totale:.0f} m² au total"
+        + (f", {sans_altitude} sans altitude de terrain rendue" if sans_altitude else "")
+        + (f", {len(orphelins)} segment(s) refermé(s) sur rien" if orphelins else "")
+        + ". La recomposition lit le dessin, elle ne le remplace pas — à "
+        "demander au bureau d'études : les tables en polylignes fermées, une "
+        "par rangée, comme sur les plans précédents."
+    )
+    gardes = {id(e) for e in segments if id(e) not in {id(o) for o in orphelins}}
+    return [e for e in entites if id(e) not in gardes] + refermees
+
 
 def _detecter_unite(entites_par_calque: dict[str, list], nom: str) -> tuple[str, float]:
     """Unité du dessin, déduite de l'ordre de grandeur des coordonnées.

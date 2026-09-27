@@ -126,6 +126,108 @@ def _ajouter_table(espace, origine) -> None:
     )
 
 
+def _ajouter_table_en_segments(espace, origine, altitude=100.0) -> None:
+    """La même table, mais éclatée en quatre segments cotés en Z.
+
+    C'est ce que porte le plan d'Auzainvilliers du 23/09/2026 : 316 `LINE` là
+    où Saint-Cyr porte 96 `POLYLINE`. Les altitudes montent d'un coin à l'autre
+    comme sur un terrain en pente, pour que `z_reel` ait quelque chose à lire.
+    """
+    x, y = origine
+    coins = [
+        (x, y, altitude),
+        (x + 15, y, altitude + 0.3),
+        (x + 15, y + 4.6, altitude + 0.5),
+        (x, y + 4.6, altitude + 0.2),
+    ]
+    for depart, arrivee in zip(coins, coins[1:] + coins[:1]):
+        espace.add_line(depart, arrivee, dxfattribs={"layer": CALQUE_TABLES})
+
+
+def _dxf_de_tables(chemin: Path, en_segments: bool, refermees=True) -> Path:
+    """Un plan réduit à sa clôture et à deux rangées, dessinées d'une façon ou de l'autre."""
+    document = ezdxf.new(setup=True)
+    document.layers.add(CALQUE_TABLES)
+    espace = document.modelspace()
+    x, y = 622_900.0, 6_750_700.0
+    espace.add_lwpolyline(
+        [(x - 5, y - 5), (x + 25, y - 5), (x + 25, y + 35), (x - 5, y + 35)],
+        close=True,
+        dxfattribs={"layer": "UNI_Clôture"},
+    )
+    for rang in range(2):
+        origine = (x, y + rang * 12)
+        if not en_segments:
+            _ajouter_table(espace, origine)
+        elif refermees:
+            _ajouter_table_en_segments(espace, origine)
+        else:
+            # Trois côtés sur quatre : rien ne se referme, rien n'est une table.
+            xa, ya = origine
+            coins = [(xa, ya, 100.0), (xa + 15, ya, 100.0), (xa + 15, ya + 4.6, 100.0)]
+            for depart, arrivee in zip(coins, coins[1:]):
+                espace.add_line(depart, arrivee, dxfattribs={"layer": CALQUE_TABLES})
+    document.saveas(str(chemin))
+    return chemin
+
+
+def test_les_tables_livrees_en_segments_sont_refermees(tmp_path):
+    """Un calque de tables éclaté en segments donne quand même des rangées.
+
+    Relevé sur le plan d'Auzainvilliers le 26/09/2026 : les 316 `LINE` du
+    calque formaient 79 rectangles complets, mais une ligne n'a pas de surface.
+    L'import ne trouvait aucune table, ne pouvait pas orienter la coupe A-A' et
+    refusait le plan entier, alors que la géométrie y était tout entière.
+    """
+    plan = lire_plan_be(_dxf_de_tables(tmp_path / "segments.dxf", en_segments=True))
+
+    assert len(plan.tables) == 2
+    for table in plan.tables:
+        assert table.area == pytest.approx(15.0 * 4.6, rel=1e-6)
+    assert plan.azimut_tables_deg == pytest.approx(0.0, abs=1e-9)
+
+    # Le Z des segments est rendu aux sommets : sans lui, la coupe DP 3
+    # reposerait les tables sur des hauteurs de catalogue.
+    entites = [e for e in plan.entites if e.categorie == "tables_pv"]
+    assert len(entites) == 2
+    assert all(e.z_reel for e in entites)
+    assert min(e.z_min for e in entites) == pytest.approx(100.0)
+    assert max(e.z_max for e in entites) == pytest.approx(100.5)
+
+    # Et la reconstruction se dit, avec ce qu'il faut demander au BE.
+    recompositions = [m for m in plan.avertissements if "recomposée" in m]
+    assert len(recompositions) == 1
+    assert "2 rangée(s)" in recompositions[0]
+    # La formule que l'interface reconnaît pour rassembler les demandes en un
+    # bloc recopiable, comme pour les contrôles croisés plus bas.
+    assert "à demander au bureau d'études" in recompositions[0]
+
+
+def test_un_contour_de_table_dessine_fait_foi(tmp_path):
+    """Une polyligne fermée ne passe pas par la recomposition, et rien ne le dit.
+
+    Même garde-fou que pour les aires de grutage : la reconstruction ne vaut
+    qu'à défaut de polygone. Un plan qui passait doit continuer de passer par
+    le même chemin qu'avant.
+    """
+    plan = lire_plan_be(_dxf_de_tables(tmp_path / "polylignes.dxf", en_segments=False))
+
+    assert len(plan.tables) == 2
+    assert not [m for m in plan.avertissements if "recomposée" in m]
+
+
+def test_des_segments_qui_ne_referment_rien_ne_deviennent_pas_des_tables(tmp_path):
+    """Trois côtés sur quatre : le plan est refusé, pas complété d'office.
+
+    `polygonize` ne rend une surface que de ce qui se referme. Inventer le
+    quatrième côté donnerait une rangée que le BE n'a pas dessinée, et une
+    surface de modules fausse dans les contrôles croisés.
+    """
+    chemin = _dxf_de_tables(tmp_path / "ouverts.dxf", en_segments=True, refermees=False)
+    with pytest.raises(ErreurImportBE, match="Aucune table de modules"):
+        lire_plan_be(chemin)
+
+
 def _dxf_minimal(chemin: Path, calque: str, origine=(622_900.0, 6_750_700.0)) -> Path:
     """DXF d'un rectangle de 10 x 4 m sur `calque`, plus une table, pour les cas d'erreur."""
     document = ezdxf.new(setup=True)
