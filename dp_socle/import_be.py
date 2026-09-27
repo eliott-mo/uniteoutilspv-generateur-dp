@@ -1762,13 +1762,15 @@ def _voirie_en_attente(
     contre le total déclaré. Ce qui ne l'est pas — la répartition entre lourde
     et légère — est annoncé comme suspendu, et non comme un écart.
     """
+    # Import local : `tableau_bilan` prend `normaliser` d'ici, et un import en
+    # tête de module refermerait le cycle.
+    from .tableau_bilan import surface_piste_legere_m2
+
     dessinee_totale = _surface_dessinee(
         plan, tuple(CATEGORIES_VOIE_LOURDE) + tuple(CATEGORIES_PISTE_LEGERE) + ("voirie",)
     )
-    declaree_totale = (
-        (pistes.get("surface_piste_lourde_m2") or 0.0)
-        + (pistes.get("surface_piste_legere_interne_m2") or 0.0)
-        + (pistes.get("surface_piste_legere_externe_m2") or 0.0)
+    declaree_totale = (pistes.get("surface_piste_lourde_m2") or 0.0) + (
+        surface_piste_legere_m2(pistes)
     )
     attente = (
         f"{en_attente} objet(s) de voirie n'ont pas encore de type — leur calque "
@@ -1847,6 +1849,10 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict, voirie=None) -> list[Controle
     contrôle dit maintenant ce qui l'empêche de conclure. Saint-Cyr, dont le
     calque nomme ses voies « à créer », continue de se recouper à 0,1 % près.
     """
+    # Import local : `tableau_bilan` prend `normaliser` d'ici, et un import en
+    # tête de module refermerait le cycle.
+    from .tableau_bilan import surface_piste_legere_m2
+
     controles: list[Controle] = []
     # Les objets déjà rangés par le chef de projet ne sont plus en attente : le
     # contrôle rejoué après le tranchage doit conclure, pas se suspendre encore.
@@ -1867,8 +1873,7 @@ def _surfaces_de_piste(plan: PlanBE, pistes: dict, voirie=None) -> list[Controle
         (
             "Surface de piste légère",
             CATEGORIES_PISTE_LEGERE,
-            (pistes.get("surface_piste_legere_interne_m2") or 0.0)
-            + (pistes.get("surface_piste_legere_externe_m2") or 0.0),
+            surface_piste_legere_m2(pistes),
         ),
     ):
         dessinee = _surface_dessinee(plan, categories) + sum(

@@ -1312,8 +1312,14 @@ Les convertisseurs sont tolérants sur la forme — `0°` avec le symbole degré
 `13 / 26` pour les deux longueurs de table, dates en `datetime` — et
 **échouent explicitement** quand le motif ne correspond pas.
 
-L'onglet `Dimensions postes et pieux` fournit les cotes normalisées pour la
-génération paramétrique des DP 4 au lot 4. **L'ordre des cotes n'est pas le même
+L'onglet des cotes se cherche sous **deux noms** : `Dimensions postes et pieux`,
+celui de Saint-Cyr, et `Dimensions postes`, celui du classeur des gabarits UNITe
+que certains tableaux recopient tel quel — c'est le cas de celui d'Auzainvilliers
+(V3), aux mêmes sections et aux mêmes lignes, une colonne plus à droite. Ne
+chercher que le premier privait le dossier de **toutes** ses cotes DP 4, et
+l'avertissement accusait un onglet absent qui était là (relevé le 27/09/2026).
+Il fournit les cotes normalisées pour la génération paramétrique des DP 4 au
+lot 4. **L'ordre des cotes n'est pas le même
 d'une section à l'autre** : « largeur x longueur x hauteur » pour le PTR,
 « longueur x largeur x hauteur » pour le PDL/PTR. Il est conservé avec chaque
 cote ; le lot 4 doit le lire, pas le supposer.
@@ -1412,6 +1418,20 @@ les lignes « interne » et « externe », qui ne le sont pas. Une troisième li
 celle qui porte le libellé ambigu, n'est pas lue — si un projet y range sa piste
 légère, ce contrôle le montrera plutôt que de le taire. « Surface piste lourde
 (m²) », elle, n'apparaît qu'une fois et se lit directement.
+
+Toutes les mises en page ne découpent pas l'enherbé. Celle du tableau
+d'Auzainvilliers n'en porte **qu'une ligne**, sans ambiguïté, et les deux lignes
+découpées y manquent : le lecteur les exigeait et arrêtait le dossier entier sur
+une ligne qui, sur ce projet, était vide. Elles sont donc devenues facultatives,
+et la ligne unique est lue quand elle existe. L'index des libellés fait le tri
+seul — un libellé présent deux fois en est écarté —, si bien qu'une ligne rendue
+par lui est par construction sans ambiguïté : celle de Saint-Cyr ne passera
+jamais par là, et son découpage continue d'y faire foi.
+
+Tous les consommateurs passent par `tableau_bilan.surface_piste_legere_m2` : un
+seul endroit sait que ce total s'écrit tantôt en deux lignes, tantôt en une. Un
+contrôle qui referait l'addition lui-même retomberait à zéro sur les tableaux
+qui ne la découpent pas — et accuserait le plan.
 
 #### Le champ « Azimut (°) » n'a pas de convention
 

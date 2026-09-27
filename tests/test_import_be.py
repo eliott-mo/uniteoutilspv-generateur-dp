@@ -414,6 +414,111 @@ def test_standards_du_type_de_projet(tableau):
     assert tableau.standards["Inclinaison"] == 15
 
 
+#: De quoi remplir chaque paramètre selon son convertisseur.
+_VALEURS_D_ESSAI = {
+    "_texte": "APS",
+    "_entier": 1,
+    "_nombre": 1.0,
+    "_date": "01/01/2026",
+}
+
+
+def _tableau_fabrique(chemin, decoupees: bool, onglet_cotes: str | None = None):
+    """Un tableau bilan complet, écrit depuis la liste des paramètres attendus.
+
+    Fabriqué et non recopié : le jeu réel pèse 7 Mo, et un fixture qui figerait
+    sa mise en page cesserait de suivre `PARAMETRES` le jour où un paramètre s'y
+    ajoute. `decoupees` choisit la mise en page de la piste enherbée — deux
+    lignes interne et externe, comme Saint-Cyr, ou une seule, comme le tableau
+    d'Auzainvilliers.
+    """
+    import openpyxl
+
+    from dp_socle.tableau_bilan import PARAMETRES, normaliser
+
+    classeur = openpyxl.Workbook()
+    feuille = classeur.active
+    feuille.title = "Projet"
+    feuille["A1"] = "Projet d'essai"
+    feuille["B1"] = "IND03"
+
+    rang, vus = 2, set()
+    for definitions in PARAMETRES.values():
+        for _cle, libelle, convertir, obligatoire in definitions:
+            if normaliser(libelle) in vus or (not obligatoire and not decoupees):
+                continue
+            vus.add(normaliser(libelle))
+            feuille.cell(rang, 1, libelle)
+            feuille.cell(rang, 2, _VALEURS_D_ESSAI.get(convertir.__name__, 1.0))
+            rang += 1
+    if not decoupees:
+        feuille.cell(rang, 1, "Surface piste enherbée (m²)")
+        feuille.cell(rang, 2, 420.0)
+
+    if onglet_cotes is not None:
+        cotes = classeur.create_sheet(onglet_cotes)
+        cotes.cell(3, 3, "Poste de transformation - PTR")
+        cotes.cell(4, 3, "Dimensions  (largeur x longueur x hauteur)")
+        cotes.cell(4, 4, "Surface (m²)")
+        cotes.cell(4, 5, "Surface plateforme (m²)")
+        cotes.cell(5, 3, "10 x 3 x 3m")
+        cotes.cell(5, 4, 30)
+        cotes.cell(5, 5, 115)
+
+    classeur.save(chemin)
+    return chemin
+
+
+def test_un_tableau_qui_ne_decoupe_pas_la_piste_enherbee_se_lit(tmp_path):
+    """Une seule ligne « Surface piste enherbée (m²) » suffit.
+
+    Le tableau d'Auzainvilliers (V3, onglet « Projet ») ne porte ni interne ni
+    externe. Le lecteur exigeait les deux et arrêtait le dossier entier sur une
+    ligne qui, sur ce projet, était vide — alors que tout le reste du tableau
+    était lisible (relevé le 27/09/2026).
+    """
+    from dp_socle.tableau_bilan import surface_piste_legere_m2
+
+    chemin = _tableau_fabrique(tmp_path / "unique.xlsx", decoupees=False)
+    tableau = lire_tableau(chemin, "IND03")
+
+    assert surface_piste_legere_m2(tableau.pistes) == pytest.approx(420.0)
+    # La lecture se dit : lire un total sur une ligne unique n'est pas la même
+    # chose que l'additionner depuis deux lignes.
+    assert any("ligne unique" in m for m in tableau.avertissements)
+
+
+def test_le_decoupage_interne_externe_fait_foi_quand_il_existe(tmp_path):
+    """Sur la mise en page de Saint-Cyr, rien ne change : le détail est lu."""
+    from dp_socle.tableau_bilan import surface_piste_legere_m2
+
+    chemin = _tableau_fabrique(tmp_path / "decoupe.xlsx", decoupees=True)
+    tableau = lire_tableau(chemin, "IND03")
+
+    assert tableau.pistes["surface_piste_legere_interne_m2"] == pytest.approx(1.0)
+    assert surface_piste_legere_m2(tableau.pistes) == pytest.approx(2.0)
+    assert not [m for m in tableau.avertissements if "ligne unique" in m]
+
+
+@pytest.mark.parametrize("onglet", ["Dimensions postes et pieux", "Dimensions postes"])
+def test_les_cotes_se_trouvent_sous_les_deux_noms_d_onglet(tmp_path, onglet):
+    """Certains tableaux recopient la table des gabarits sous son nom d'origine.
+
+    Celui d'Auzainvilliers porte « Dimensions postes », aux mêmes sections et
+    aux mêmes lignes que le « Dimensions postes et pieux » de Saint-Cyr. Ne
+    chercher que le second privait le dossier de toutes ses cotes DP 4, et
+    l'avertissement accusait un onglet absent qui était là.
+    """
+    chemin = _tableau_fabrique(
+        tmp_path / f"cotes_{onglet[-6:]}.xlsx", decoupees=True, onglet_cotes=onglet
+    )
+    tableau = lire_tableau(chemin, "IND03")
+
+    assert [c.ouvrage for c in tableau.cotes] == ["Poste de transformation - PTR"]
+    assert tableau.cotes[0].dimensions == "10 x 3 x 3m"
+    assert tableau.cotes[0].surface_m2 == pytest.approx(30.0)
+
+
 def test_paramètre_absent_leve_plutot_que_de_rendre_une_valeur_par_defaut(tmp_path):
     """Un tableau dont la mise en page a changé doit échouer, pas deviner."""
     import openpyxl

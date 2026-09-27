@@ -43,6 +43,16 @@ ONGLET_STANDARDS = "Standards UNITe"
 #: page, mêmes sections, mêmes en-têtes « Dimensions (…) ».
 ONGLET_GABARITS = "Dimensions postes"
 
+#: Noms sous lesquels l'onglet des cotes se cherche dans un tableau bilan.
+#:
+#: Certains tableaux recopient la table des gabarits **sous son nom d'origine** :
+#: relevé le 27/09/2026 sur celui d'Auzainvilliers (V3), qui porte un onglet
+#: « Dimensions postes » aux mêmes sections et aux mêmes lignes que le
+#: « Dimensions postes et pieux » de Saint-Cyr, une colonne plus à droite. Ne
+#: chercher que le premier nom privait le dossier de toutes ses cotes DP 4, et
+#: l'avertissement accusait un onglet absent qui était là.
+ONGLETS_DIMENSIONS = (ONGLET_DIMENSIONS, ONGLET_GABARITS)
+
 #: Motif de l'indice de révision, tel qu'il apparaît en en-tête de colonne et
 #: dans le nom du fichier DXF (`20260903_SCV_IND06.dxf`).
 #:
@@ -274,26 +284,53 @@ PARAMETRES = {
         # Le total, supplément d'aire de grutage compris. Ce libellé-ci n'est
         # présent qu'une fois, contrairement à son équivalent enherbé.
         ("surface_piste_lourde_m2", "Surface piste lourde (m²)", _nombre, True),
-        # « Surface piste enherbée (m²) » apparaît **deux fois** au tableau, une
-        # fois en cours de section et une fois au total : le lecteur refuse par
-        # principe un libellé ambigu, et le total se recompose donc depuis les
-        # deux lignes qui ne le sont pas. Une troisième ligne, celle qui porte
-        # le libellé ambigu, n'est pas lue — si un projet y met sa piste
-        # légère, le contrôle de surface le montrera plutôt que de le taire.
+        # Sur la mise en page de Saint-Cyr et de Sarnois, « Surface piste
+        # enherbée (m²) » apparaît **deux fois** — une fois en cours de section,
+        # une fois au total. Le lecteur refuse par principe un libellé ambigu, et
+        # le total se recompose donc depuis les deux lignes qui ne le sont pas.
+        #
+        # Toutes les mises en page ne découpent pas l'enherbé en interne et
+        # externe : celle du tableau d'Auzainvilliers (V3, onglet « Projet »)
+        # n'en porte qu'une ligne, et sans ambiguïté. Ces deux paramètres ne
+        # sont donc plus obligatoires — le refus arrêtait un dossier entier sur
+        # une ligne qui, sur ce projet, était vide — et `_piste_enherbee_unique`
+        # lit la ligne unique quand elle existe. Voir `surface_piste_legere_m2`,
+        # par où passent tous les consommateurs.
         (
             "surface_piste_legere_interne_m2",
             "Surface piste enherbée interne (m²)",
             _nombre,
-            True,
+            False,
         ),
         (
             "surface_piste_legere_externe_m2",
             "Surface piste enherbée externe (m²)",
             _nombre,
-            True,
+            False,
         ),
     ),
 }
+
+#: Libellé de la surface enherbée sur les mises en page qui ne la découpent pas.
+LIBELLE_PISTE_ENHERBEE = "Surface piste enherbée (m²)"
+
+
+def surface_piste_legere_m2(pistes: dict) -> float:
+    """Total de piste légère déclaré, quelle que soit la mise en page du tableau.
+
+    Un seul endroit sait que ce total s'écrit tantôt en deux lignes — interne et
+    externe — tantôt en une seule. Les contrôles croisés passent par ici plutôt
+    que d'additionner eux-mêmes deux clés : c'est la répartition qui change d'un
+    tableau à l'autre, pas le total, et un contrôle qui referait l'addition
+    retomberait à zéro sur les tableaux qui ne la découpent pas.
+    """
+    detail = (
+        pistes.get("surface_piste_legere_interne_m2"),
+        pistes.get("surface_piste_legere_externe_m2"),
+    )
+    if any(valeur is not None for valeur in detail):
+        return sum(valeur or 0.0 for valeur in detail)
+    return pistes.get("surface_piste_legere_m2") or 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +494,10 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
                 continue
             valeurs[groupe][cle] = convertir(brut, f"{libelle} ({indice})")
 
+    _piste_enherbee_unique(
+        valeurs["pistes"], feuille, lignes, colonne, nom_onglet, avertissements
+    )
+
     nom_projet = str(feuille.cell(1, 1).value or "").strip()
     if not nom_projet:
         avertissements.append(
@@ -484,6 +525,59 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
         standards=standards,
         source=chemin.name,
         avertissements=avertissements,
+    )
+
+
+def _piste_enherbee_unique(
+    pistes: dict, feuille, lignes: dict, colonne: int, nom_onglet: str,
+    avertissements: list,
+) -> None:
+    """Lit la surface enherbée des tableaux qui ne la découpent pas.
+
+    Relevé le 27/09/2026 sur le tableau d'Auzainvilliers (V3, onglet
+    « Projet ») : il ne porte ni « interne » ni « externe », mais une ligne
+    unique « Surface piste enherbée (m²) » — et, sur ce projet, vide. Le
+    lecteur exigeait les deux lignes découpées et arrêtait le dossier entier.
+
+    L'index des libellés fait le tri tout seul : un libellé qui apparaît deux
+    fois en est écarté. Un `get` qui rend une ligne est donc, par construction,
+    un libellé sans ambiguïté — celui de Saint-Cyr, présent deux fois, ne
+    passera jamais par ici, et le détail découpé continue d'y faire foi.
+
+    La lecture est dite : ce n'est pas la même chose de lire un total découpé en
+    deux lignes et de lire une ligne unique, et le contrôle de surface qui en
+    découle doit pouvoir se relire.
+    """
+    if any(
+        pistes.get(cle) is not None
+        for cle in ("surface_piste_legere_interne_m2", "surface_piste_legere_externe_m2")
+    ):
+        return
+
+    ligne = lignes.get(normaliser(LIBELLE_PISTE_ENHERBEE))
+    if ligne is None:
+        avertissements.append(
+            f"Aucune surface de piste enherbée lisible dans l'onglet "
+            f"« {nom_onglet} » : ni « {LIBELLE_PISTE_ENHERBEE} » sans "
+            "ambiguïté, ni son découpage interne/externe. La piste légère "
+            "dessinée sera recoupée avec une surface déclarée nulle."
+        )
+        return
+
+    brut = feuille.cell(ligne, colonne).value
+    if brut is None:
+        avertissements.append(
+            f"« {LIBELLE_PISTE_ENHERBEE} » est vide pour cet indice : le projet "
+            "ne déclare pas de piste légère. Toute piste légère dessinée au "
+            "plan ressortira donc en écart."
+        )
+        return
+
+    pistes["surface_piste_legere_m2"] = _nombre(brut, LIBELLE_PISTE_ENHERBEE)
+    avertissements.append(
+        f"Piste légère lue sur la ligne unique « {LIBELLE_PISTE_ENHERBEE} » "
+        f"({pistes['surface_piste_legere_m2']:.0f} m²) : ce tableau ne la "
+        "découpe pas en interne et externe."
     )
 
 
@@ -549,7 +643,7 @@ MOTIF_AIRE_ASPIRATION = re.compile(
 
 
 def _lire_cotes(
-    classeur, chemin: Path, onglet: str = ONGLET_DIMENSIONS, lire_valeur=None
+    classeur, chemin: Path, onglet=ONGLETS_DIMENSIONS, lire_valeur=None
 ) -> tuple[list[CoteNormalisee], list[str]]:
     """Table des cotes normalisées, pour la génération paramétrique du lot 4.
 
@@ -561,10 +655,17 @@ def _lire_cotes(
     la même table sous un autre nom et l'écrit autrement — voir `lire_gabarits`.
     """
     avertissements: list[str] = []
-    if onglet not in classeur.sheetnames:
+    noms = (onglet,) if isinstance(onglet, str) else tuple(onglet)
+    presents = {normaliser(nom): nom for nom in classeur.sheetnames}
+    onglet = next(
+        (presents[normaliser(nom)] for nom in noms if normaliser(nom) in presents),
+        None,
+    )
+    if onglet is None:
         return [], [
-            f"Onglet « {onglet} » absent de {chemin.name} : les cotes "
-            "normalisées des postes ne seront pas disponibles pour les planches DP 4."
+            f"Onglet « {" » ni « ".join(noms)} » absent de {chemin.name} : les "
+            "cotes normalisées des postes ne seront pas disponibles pour les "
+            "planches DP 4."
         ]
     feuille = classeur[onglet]
 
