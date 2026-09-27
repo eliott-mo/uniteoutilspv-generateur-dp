@@ -197,6 +197,39 @@ def test_les_categories_exclues_ne_figurent_jamais(categorie):
     assert construire_legende((categorie, "cloture")) == construire_legende(("cloture",))
 
 
+def test_le_contour_d_une_geometrie_recousue_reste_traçable():
+    """Une `GeometryCollection` n'a pas de `boundary`, et le dessin en a besoin.
+
+    C'est ce que `make_valid` produit d'un contour qui se replie sur lui-même :
+    le polygone d'un côté, l'éperon détaché de l'autre. Relevé le 27/09/2026 sur
+    le calque « UNI_BESS_Refroidissement » du plan d'Auzainvilliers — un contour
+    de 603 sommets dont `make_valid` faisait un `GeometryCollection[Polygon,
+    MultiLineString]`. La génération s'arrêtait en `AttributeError` au milieu
+    des DP 4, sur un plan dont l'import avait pourtant nommé le calque fautif.
+    """
+    from shapely import make_valid
+    from shapely.geometry import LineString, Polygon
+
+    from dp_socle.planches.palette import contour_de
+
+    # Un carré de 10 m prolongé d'un éperon de 5 m qui revient sur lui-même.
+    recousue = make_valid(
+        Polygon([(0, 0), (10, 0), (10, 10), (0, 10), (0, 0), (-5, 0), (0, 0)])
+    )
+    assert recousue.geom_type == "GeometryCollection"
+    assert recousue.boundary is None, "shapely a changé : le piège a disparu"
+
+    contour = contour_de(recousue)
+    assert contour is not None and not contour.is_empty
+    # Les 40 m du carré, plus l'éperon parcouru dans les deux sens.
+    assert contour.length == pytest.approx(45.0)
+
+    # Un linéaire est son propre contour : `boundary` n'en rendrait que les
+    # deux extrémités, soit deux points là où on attend un trait.
+    ligne = LineString([(0, 0), (3, 4)])
+    assert contour_de(ligne) is ligne
+
+
 def test_la_voirie_na_pas_dentree_propre():
     """Elle est rattachée à la voie lourde ou à la piste légère, jamais dessinée
     sous son propre nom (D5)."""

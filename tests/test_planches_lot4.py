@@ -329,6 +329,42 @@ def test_le_z_plat_dun_dossier_helioscope_est_signale(site):
     assert any("hauteurs déclarées" in message for message in messages)
 
 
+def test_un_contour_replie_sur_lui_meme_se_dessine_sans_planter():
+    """La planche doit sortir même d'une géométrie que `make_valid` a recousue.
+
+    Le plan d'Auzainvilliers porte un contour de citerne de refroidissement qui
+    se replie sur lui-même ; `make_valid` en fait un `GeometryCollection`, dont
+    `boundary` vaut None, et le tracé du filet s'arrêtait en `AttributeError`
+    au milieu des DP 4 (27/09/2026). Le plan était fautif — l'import le disait,
+    calque nommé — mais un dossier ne s'interrompt pas sur une trace Python :
+    il se produit, et ce qui cloche se lit au rapport.
+    """
+    from shapely import make_valid
+    from shapely.geometry import Polygon, box
+
+    from dp_socle.planches.palette import STYLES
+
+    planche = _planche_nue()
+    planche.definir_echelle(500, centre_l93=(622_905.0, 6_750_705.0))
+    recousue = make_valid(
+        Polygon([
+            (622_900, 6_750_700), (622_910, 6_750_700), (622_910, 6_750_710),
+            (622_900, 6_750_710), (622_900, 6_750_700), (622_895, 6_750_700),
+            (622_900, 6_750_700),
+        ])
+    )
+    assert recousue.boundary is None
+
+    tracee = dp4_ouvrages._tracer_decoupe(
+        planche,
+        recousue,
+        STYLES["citerne_refroidissement"].style,
+        box(622_890, 6_750_690, 622_920, 6_750_720),
+    )
+    assert tracee, "ni surface ni filet n'ont été tracés"
+    assert "<path" in planche.svg()
+
+
 # ---------------------------------------------------------------------------
 # La végétation traversée : un peuplement, et non un sujet géant
 # ---------------------------------------------------------------------------

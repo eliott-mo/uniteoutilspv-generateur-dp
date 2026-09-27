@@ -752,6 +752,31 @@ def fermer_les_contours(geometries, categorie: str, messages: list) -> list:
     return restantes + surfaces
 
 
+def contour_de(geometrie):
+    """Le contour à tracer d'une géométrie, quelle que soit sa nature.
+
+    `boundary` rend **None** sur une `GeometryCollection`, et c'est exactement
+    ce que `make_valid` produit d'un contour auto-intersectant : le polygone
+    d'un côté, les bouts de ligne que l'auto-intersection a détachés de
+    l'autre. Relevé le 27/09/2026 sur le calque « UNI_BESS_Refroidissement »
+    du plan d'Auzainvilliers — la génération s'arrêtait en `AttributeError` au
+    milieu des DP 4, sur un plan dont l'import avait pourtant signalé la
+    géométrie invalide et nommé le calque. Le contour de chaque partie est donc
+    repris une à une.
+
+    Le contour d'un linéaire est le linéaire lui-même : `boundary` en rendrait
+    les deux extrémités, soit deux points là où on attend un trait.
+    """
+    if geometrie.geom_type in _LINEAIRES:
+        return geometrie
+    if geometrie.geom_type == "GeometryCollection":
+        contours = [contour_de(partie) for partie in geometrie.geoms]
+        return unary_union(
+            [c for c in contours if c is not None and not c.is_empty]
+        )
+    return geometrie.boundary
+
+
 def _fermee(ligne) -> bool:
     coords = list(ligne.coords)
     return len(coords) > 3 and coords[0][:2] == coords[-1][:2]

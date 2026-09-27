@@ -39,7 +39,13 @@ from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
-from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
+from .palette import (
+    STYLES,
+    construire_legende,
+    contour_de,
+    objets_a_dessiner,
+    style_de,
+)
 from .standards import (
     ESPACEMENT_POTEAUX_M,
     HAUTEUR_CLOTURE_M,
@@ -698,7 +704,7 @@ def _tracer_decoupe(planche, geometrie, style, fenetre) -> bool:
             )
             tracee = True
 
-    contour = geometrie.boundary if geometrie.geom_type != "LineString" else geometrie
+    contour = contour_de(geometrie)
     visible = contour.intersection(fenetre)
     if not visible.is_empty:
         planche.ajouter_geometrie(

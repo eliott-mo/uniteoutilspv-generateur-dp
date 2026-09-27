@@ -1998,6 +1998,17 @@ cette échelle :
   les bornes de chaque géométrie, ce qui est plus rapide et marche sur
   n'importe quelle forme. Une géométrie invalide est signalée à l'import : les
   surfaces qu'on en tire sont douteuses.
+
+  La génération, elle, plantait plus loin sur la même famille de formes. Un
+  contour qui se replie sur lui-même — le calque « UNI_BESS_Refroidissement »
+  d'Auzainvilliers, 603 sommets — ressort de `make_valid` en
+  `GeometryCollection[Polygon, MultiLineString]`, et **`boundary` y vaut
+  `None`** : le tracé du filet s'arrêtait en `AttributeError` au milieu des
+  DP 4 (27/09/2026). `palette.contour_de` reprend le contour partie par
+  partie ; le plan de repérage des DP 4 et la clôture en élévation de DP 3,
+  seuls endroits à demander un `boundary`, passent par lui. Le plan reste
+  fautif et l'import le dit, calque nommé — mais un dossier ne s'interrompt pas
+  sur une trace Python.
 - **L'écran de correspondance alignait les 55 calques à plat**, obligeant à
   faire défiler le fond cadastral pour trouver ce qui compte. Il est désormais
   en trois blocs : appariés, à décider, écartés d'office repliés. Sur Sarnois :

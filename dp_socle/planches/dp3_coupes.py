@@ -40,7 +40,7 @@ from ..planche import GRIS, PT, Planche
 from ..planche import nombre_fr
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
-from .palette import STYLES
+from .palette import STYLES, contour_de
 from .standards import (
     HAUTEUR_ARBRE_M,
     HAUTEUR_CLOTURE_M,
@@ -1279,8 +1279,10 @@ def _cloture_sur_le_profil(dessin, contrat: Contrat, profil) -> list:
 
     passages = []
     for geometrie in geometries:
-        contour = geometrie.boundary
-        croisement = contour.intersection(ligne)
+        # Même précaution qu'au plan de repérage : une clôture dont le contour
+        # s'auto-intersecte ressort du contrat en `GeometryCollection`, dont le
+        # `boundary` est None.
+        croisement = contour_de(geometrie).intersection(ligne)
         if croisement.is_empty:
             continue
         parties = (
