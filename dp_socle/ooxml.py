@@ -27,7 +27,7 @@ from __future__ import annotations
 import copy
 import io
 
-from pptx.enum.shapes import PP_PLACEHOLDER
+from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from pptx.opc.constants import CONTENT_TYPE as CT
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.opc.package import Part
@@ -196,6 +196,32 @@ def poser_fond(mise_en_page, image_matricielle, svg: bytes | None = None,
     if svg is not None:
         _greffer_svg(mise_en_page.part, pic, svg)
     return pic
+
+
+def remplacer_fond(mise_en_page, image_matricielle, svg: bytes | None = None,
+                   nom: str = "Fond de planche"):
+    """Échange le fond d'une mise en page, en laissant tout le reste.
+
+    Le lot 7 redessine la page de garde d'un dossier déjà fini, pour que son
+    sommaire porte enfin la notice. Seul le fond change : la réservation
+    d'image où le chef de projet a pu déposer sa perspective est une forme de
+    la **diapo**, pas de la mise en page, et n'est donc pas touchée.
+
+    Les images du fond précédent restent dans le paquet, orphelines. C'est le
+    comportement d'OOXML — une partie ne se supprime pas tant qu'une relation
+    peut la viser — et PowerPoint les ignore ; les garder coûte le poids d'une
+    planche, les traquer coûterait un bogue.
+    """
+    formes = mise_en_page.shapes
+    anciens = [forme for forme in formes if forme.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    if not anciens:
+        raise ErreurMontagePPTX(
+            f"La mise en page « {mise_en_page.name} » ne porte aucun fond à "
+            "remplacer : ce n'est pas une planche produite par l'outil."
+        )
+    for forme in anciens:
+        forme._element.getparent().remove(forme._element)
+    return poser_fond(mise_en_page, image_matricielle, svg, nom)
 
 
 def _greffer_svg(partie, pic, svg: bytes) -> None:

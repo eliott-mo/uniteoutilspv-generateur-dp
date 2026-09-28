@@ -16,7 +16,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 4 | DP 2, DP 3, DP 4 | livré |
 | 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
 | 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré ; saisie retirée de l'interface au lot 8 |
-| 7 | Ajout de la notice à un dossier déjà finalisé | à venir, brief révisé le 28/09/2026 |
+| 7 | Ajout de la notice à un dossier déjà finalisé | livré |
 | 8 | Sortie PowerPoint à finaliser, pour le volet photographique | livré |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne

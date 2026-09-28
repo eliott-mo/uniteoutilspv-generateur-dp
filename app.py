@@ -10,6 +10,7 @@ import io
 import json
 import zipfile
 from datetime import date as _date
+from datetime import datetime
 from pathlib import Path
 
 import folium
@@ -68,6 +69,7 @@ from dp_socle.sortie_pptx import (
     generer_pptx,
     nom_telechargement,
 )
+from dp_socle.ajout_notice import ajouter_la_notice, lire_le_dossier
 from dp_socle.import_be import SEUIL_DP_MWC
 from dp_socle.planches import dp11_notice
 from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
@@ -168,6 +170,183 @@ if etat.disponible:
     st.caption(f"✅ {etat.message}")
 else:
     st.warning(f"Police : {etat.message}", icon="⚠️")
+
+def _en_puces(messages) -> str:
+    """Les messages en liste markdown, une puce chacun."""
+    return "\n".join(f"- {message}" for message in messages)
+
+
+def _lister_les_avertissements(titre: str, messages) -> None:
+    """Un seul bandeau jaune, puis les messages en liste sous lui.
+
+    Un `st.warning` par message donnait autant de pavés jaunes à picto qu'il y
+    avait de remarques — des dizaines sur un plan bavard. L'œil n'y distinguait
+    plus la première de la dernière, et le jaune ne signalait plus rien puisqu'il
+    était partout (retour d'usage du 26/09/2026). Le bandeau dit ce qui commence
+    et combien il y en a ; les messages, en dessous, se lisent comme une liste.
+
+    Une vraie liste à puces, et non des lignes séparées par des retours : en
+    markdown, deux lignes qui se suivent forment un seul paragraphe, et les
+    messages se seraient enchaînés bout à bout. Aucun n'a de retour à la ligne —
+    ils sont écrits d'un tenant dans `import_be` et `sortie_pptx` —, chacun tient
+    donc sur sa puce.
+    """
+    if not messages:
+        return
+    st.warning(f"**{titre}**", icon="⚠️")
+    st.markdown(_en_puces(messages))
+
+
+def _signaler_l_imprevu(erreur: Exception, pendant: str) -> None:
+    """Rend lisible une erreur que l'outil n'avait pas prévue.
+
+    Streamlit Community Cloud **masque** le message des exceptions non
+    attrapées : le chef de projet ne voit que « The original error message is
+    redacted », et la cause — un nom de calque, un fichier — reste dans des
+    journaux auxquels il n'a pas accès. Constaté le 27/09/2026 sur un
+    `AttributeError` qu'il a fallu aller chercher dans le tableau de bord pour
+    comprendre qu'un contour de citerne se repliait sur lui-même.
+
+    Le type et le message sont donc réécrits ici, **dans du texte à nous**, que
+    la censure ne touche pas — `st.exception` la subit, lui, puisqu'il dépend
+    de `client.showErrorDetails`. Il reste tout de même, pour le poste de
+    développement où il affiche la trace complète.
+
+    Ce n'est pas un rattrapage : rien n'est repris, rien n'est deviné, le
+    dossier ne sort pas. C'est la règle du dépôt appliquée à ce qu'on n'a pas
+    prévu — ce qui échoue doit se lire, et ici ça ne se lisait pas.
+
+    `st.rerun()` et `st.stop()` traversent : leurs exceptions dérivent de
+    `BaseException` et non d'`Exception` (vérifié sur Streamlit 1.57.0).
+
+    L'incident reste visible d'`AppTest`, qui voit les éléments `st.exception`
+    d'où qu'ils viennent : les quarante-et-un `assert not
+    application.exception` de la suite continuent donc de protéger.
+    """
+    st.error(
+        f"**L'outil s'est arrêté {pendant}, sur un cas qu'il ne sait pas "
+        f"traiter.** {type(erreur).__name__} : {erreur}",
+        icon="🚫",
+    )
+    st.caption(
+        "Transmettez ce message **avec les fichiers d'entrée du projet** — le "
+        "plan, le tableau bilan et l'emprise. Le message dit où ça s'est "
+        "arrêté ; seuls les fichiers disent pourquoi."
+    )
+    with st.expander("Le détail technique"):
+        st.exception(erreur)
+
+
+# ---------------------------------------------------------------------------
+# Le chemin court : verser la notice dans un dossier déjà fini (lot 7)
+# ---------------------------------------------------------------------------
+#
+# En tête de page, et **avant** le `st.stop()` qui ferme tout tant que la
+# commune et l'emprise ne sont pas renseignées : un chef de projet qui revient
+# seulement poser sa notice n'a ni l'une ni l'autre sous la main. Ce n'est pas
+# un choix de mise en page, c'est ce qui rend le chemin praticable.
+#
+# Replié par défaut : le parcours normal, d'une traite, reste le parcours.
+with st.expander(
+    "📄 Je souhaite juste ajouter la notice à mon dossier finalisé", expanded=False
+):
+    st.caption(
+        "Pour un dossier **déjà généré et fini sur PowerPoint** — photographies "
+        "posées, photomontage inséré, diapos surnuméraires supprimées — dont la "
+        "notice n'était pas prête. Elle s'ajoute ici sans rien regénérer : votre "
+        "travail est conservé."
+    )
+    _depot_dossier = st.file_uploader(
+        "Le dossier fini (.pptx)", type=["pptx"], key="reprise_pptx"
+    )
+    _dossier_fini = None
+    if _depot_dossier is not None:
+        try:
+            _dossier_fini = lire_le_dossier(_depot_dossier.getvalue())
+        except ErreurDP as erreur:
+            st.error(f"{type(erreur).__name__} : {erreur}", icon="🚫")
+
+    if _dossier_fini is not None:
+        _identite = _dossier_fini.identite
+        st.success(
+            f"**{_identite['libelle']}** — dossier du "
+            f"{_date.fromisoformat(_identite['date']).strftime('%d/%m/%Y')}, "
+            f"{_dossier_fini.nb_diapos} diapos. La notice prendra la page "
+            f"{_dossier_fini.premiere_page_de_la_notice}.",
+            icon="📄",
+        )
+        # La pagination est lue dans le fichier déposé, pas dans une mémoire du
+        # serveur — qui n'en a aucune. Elle porte donc les diapos surnuméraires
+        # que le chef de projet a déjà supprimées, et c'est elle qui fera le
+        # sommaire.
+        with st.expander("Ce que l'outil a lu dans votre dossier"):
+            st.dataframe(
+                [
+                    {"Pièce": code or "—", "Titre": titre, "Page": page}
+                    for code, titre, page in _dossier_fini.pagination()
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+        if _dossier_fini.porte_la_notice:
+            st.warning(
+                f"Ce dossier porte déjà une notice de "
+                f"{_dossier_fini.pages_de_la_notice} page(s). Pour la remplacer, "
+                "regénérez le dossier avec la bonne notice.",
+                icon="⚠️",
+            )
+        else:
+            _depot_notice = st.file_uploader(
+                "La notice DP 11 (.pdf)", type=["pdf"], key="reprise_notice"
+            )
+            st.caption(
+                f"Le dossier gardera sa date du "
+                f"{_date.fromisoformat(_identite['date']).strftime('%d/%m/%Y')} : "
+                "elle est dessinée dans le cartouche de chaque planche, et la "
+                "changer sur la seule couverture donnerait un dossier dont la "
+                "première page contredit les suivantes."
+            )
+            if _depot_notice is not None and st.button(
+                "Ajouter la notice au dossier", type="primary", width="stretch"
+            ):
+                try:
+                    with st.spinner(
+                        "Rastérisation de la notice et remise à jour du sommaire…"
+                    ):
+                        _travail = DOSSIER_SORTIE / "_reprise"
+                        _travail.mkdir(parents=True, exist_ok=True)
+                        _notice = _travail / _depot_notice.name
+                        _notice.write_bytes(_depot_notice.getvalue())
+                        st.session_state["dossier_avec_notice"] = {
+                            "octets": ajouter_la_notice(
+                                _depot_dossier.getvalue(), _notice, _travail
+                            ),
+                            "libelle": _identite["libelle"],
+                        }
+                except ErreurDP as erreur:
+                    st.session_state.pop("dossier_avec_notice", None)
+                    st.error(f"{type(erreur).__name__} : {erreur}", icon="🚫")
+                except Exception as erreur:
+                    st.session_state.pop("dossier_avec_notice", None)
+                    _signaler_l_imprevu(erreur, "pendant l'ajout de la notice")
+
+    _complet = st.session_state.get("dossier_avec_notice")
+    if _complet is not None:
+        st.download_button(
+            f"⬇️ Télécharger le dossier complété "
+            f"({len(_complet['octets']) / (1024 * 1024):.1f} Mo, .pptx)",
+            data=_complet["octets"],
+            file_name=nom_telechargement(
+                identifiant_de_dossier(_complet["libelle"]), datetime.now()
+            ),
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "presentationml.presentation"
+            ),
+            type="primary",
+            on_click="ignore",
+            width="stretch",
+        )
 
 # La barre latérale « Contrôles » a été retirée le 26/09/2026, au premier
 # déploiement chez les chefs de projet. Elle portait trois choses, dont deux
@@ -595,72 +774,6 @@ MOTIFS_DE_ROUTINE = (
 #: remarques ni connaître le DXF : « comme je ne serai pas toujours là pour
 #: vérifier les plans ».
 MARQUEUR_BUREAU_ETUDES = "à demander au bureau d'études"
-
-
-def _en_puces(messages) -> str:
-    """Les messages en liste markdown, une puce chacun."""
-    return "\n".join(f"- {message}" for message in messages)
-
-
-def _lister_les_avertissements(titre: str, messages) -> None:
-    """Un seul bandeau jaune, puis les messages en liste sous lui.
-
-    Un `st.warning` par message donnait autant de pavés jaunes à picto qu'il y
-    avait de remarques — des dizaines sur un plan bavard. L'œil n'y distinguait
-    plus la première de la dernière, et le jaune ne signalait plus rien puisqu'il
-    était partout (retour d'usage du 26/09/2026). Le bandeau dit ce qui commence
-    et combien il y en a ; les messages, en dessous, se lisent comme une liste.
-
-    Une vraie liste à puces, et non des lignes séparées par des retours : en
-    markdown, deux lignes qui se suivent forment un seul paragraphe, et les
-    messages se seraient enchaînés bout à bout. Aucun n'a de retour à la ligne —
-    ils sont écrits d'un tenant dans `import_be` et `sortie_pptx` —, chacun tient
-    donc sur sa puce.
-    """
-    if not messages:
-        return
-    st.warning(f"**{titre}**", icon="⚠️")
-    st.markdown(_en_puces(messages))
-
-
-def _signaler_l_imprevu(erreur: Exception, pendant: str) -> None:
-    """Rend lisible une erreur que l'outil n'avait pas prévue.
-
-    Streamlit Community Cloud **masque** le message des exceptions non
-    attrapées : le chef de projet ne voit que « The original error message is
-    redacted », et la cause — un nom de calque, un fichier — reste dans des
-    journaux auxquels il n'a pas accès. Constaté le 27/09/2026 sur un
-    `AttributeError` qu'il a fallu aller chercher dans le tableau de bord pour
-    comprendre qu'un contour de citerne se repliait sur lui-même.
-
-    Le type et le message sont donc réécrits ici, **dans du texte à nous**, que
-    la censure ne touche pas — `st.exception` la subit, lui, puisqu'il dépend
-    de `client.showErrorDetails`. Il reste tout de même, pour le poste de
-    développement où il affiche la trace complète.
-
-    Ce n'est pas un rattrapage : rien n'est repris, rien n'est deviné, le
-    dossier ne sort pas. C'est la règle du dépôt appliquée à ce qu'on n'a pas
-    prévu — ce qui échoue doit se lire, et ici ça ne se lisait pas.
-
-    `st.rerun()` et `st.stop()` traversent : leurs exceptions dérivent de
-    `BaseException` et non d'`Exception` (vérifié sur Streamlit 1.57.0).
-
-    L'incident reste visible d'`AppTest`, qui voit les éléments `st.exception`
-    d'où qu'ils viennent : les quarante-et-un `assert not
-    application.exception` de la suite continuent donc de protéger.
-    """
-    st.error(
-        f"**L'outil s'est arrêté {pendant}, sur un cas qu'il ne sait pas "
-        f"traiter.** {type(erreur).__name__} : {erreur}",
-        icon="🚫",
-    )
-    st.caption(
-        "Transmettez ce message **avec les fichiers d'entrée du projet** — le "
-        "plan, le tableau bilan et l'emprise. Le message dit où ça s'est "
-        "arrêté ; seuls les fichiers disent pourquoi."
-    )
-    with st.expander("Le détail technique"):
-        st.exception(erreur)
 
 
 def _trier_les_avertissements(messages) -> tuple[list, list, list]:

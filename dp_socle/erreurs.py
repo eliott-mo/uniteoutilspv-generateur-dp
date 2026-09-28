@@ -130,6 +130,16 @@ class ErreurSortiePPTX(ErreurDP):
     """La sortie PowerPoint à finaliser n'a pas pu être écrite (lot 8)."""
 
 
+class ErreurReprise(ErreurDP):
+    """Un dossier déjà produit qu'on ne peut pas compléter tel quel.
+
+    Lot 7 : le chef de projet redépose son `.pptx` fini pour y verser la notice.
+    Ce qui s'y refuse — un fichier qui n'est pas un dossier de l'outil, un
+    dossier qui porte déjà sa notice, une notice illisible — se dit ici, parce
+    qu'il a une action à faire et non un défaut à subir.
+    """
+
+
 class ErreurMontagePPTX(ErreurSortiePPTX):
     """Une propriété réglée dans le paquet OOXML ne s'y retrouve pas.
 

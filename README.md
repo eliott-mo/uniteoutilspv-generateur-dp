@@ -554,6 +554,52 @@ Trois précisions qui font tenir l'ensemble :
   `assert not application.exception` de la suite continuent donc d'attraper un
   vrai plantage : attraper l'erreur à l'écran n'a pas émoussé le filet.
 
+## Verser la notice dans un dossier fini (lot 7)
+
+Le chef de projet travaille en trois temps : il génère **sans notice** pour
+valider son plan au plus tôt et transmettre le GeoPackage au photomontage ; il
+finit son `.pptx` à la main — photographies dans les cadres, photomontage reçu,
+diapos surnuméraires supprimées — pendant que la notice se rédige ; la notice
+n'arrive qu'à la fin.
+
+Un dépliant en tête de page, **avant** le `st.stop()` qui ferme tout tant que la
+commune et l'emprise ne sont pas renseignées : celui qui revient seulement poser
+sa notice n'a ni l'une ni l'autre sous la main. Deux dépôts, un bouton, et le
+dossier complété redescend.
+
+### Ce qui rend la chose possible, et qui a été mesuré
+
+**Le fichier dit sa propre pagination.** Chaque diapo porte une mise en page
+nommée d'après sa pièce, et ces noms survivent à l'enregistrement par
+PowerPoint — relevé le 28/09/2026 sur un dossier revenu d'un chef de projet,
+dont les trois diapos surnuméraires avaient disparu. C'est donc le fichier
+déposé qui fait foi, et non une mémoire du serveur, qui n'en a aucune.
+
+**L'identité du projet voyage dans le fichier.** `core_properties` plafonne à
+255 caractères par champ : le `projet.json` entier, 2 000 octets, n'y entre pas.
+Les quatre champs dont la page de garde a besoin — libellé, commune, code
+postal, date — en font **cent**, et PowerPoint les conserve. Un dossier produit
+avant ce lot ne les porte pas : il est refusé en le disant, plutôt que de faire
+ressaisir une date qui, retapée de travers, donnerait une couverture mentant sur
+ses propres planches.
+
+**La photo de couverture survit.** Le fond est posé sur la mise en page, la
+réservation d'image est une forme de la diapo : `ooxml.remplacer_fond` échange
+l'un sans toucher l'autre.
+
+### Ce que le lot ne fait pas
+
+Il ne redessine **que** la page de garde, et seulement parce que son sommaire
+est dans l'image : sans ce redessin, la ligne DP 11 resterait à « — » alors que
+la notice est là.
+
+**La date ne bouge pas.** Elle est dans le cartouche de chaque planche : la
+changer sur la seule couverture donnerait un dossier dont la première page
+contredit les douze suivantes. Le brief du 24/09 voulait l'inverse ; il parlait
+d'un dossier entièrement régénéré, ce que ce chemin-ci évite précisément.
+
+Un dossier qui porte déjà sa notice est refusé : remplacer n'est pas ajouter.
+
 ## Tests
 
 ```bash

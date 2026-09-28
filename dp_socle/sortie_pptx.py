@@ -52,7 +52,7 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Mm, Pt
 
-from . import ooxml, rendu_pptx
+from . import ajout_notice, ooxml, rendu_pptx
 from .contrat import charger_contrat
 from .dossier import codes_produits, piece
 from .erreurs import ErreurContrat, ErreurDP, ErreurSortiePPTX
@@ -695,6 +695,12 @@ def _ecrire(projet, groupes, notice, dossier, travail) -> Path:
             )
             _poser_diapo(presentation, planches, diapo)
             groupe.diapos.append(diapo)
+
+    # L'identité du projet est gravée dans le fichier : c'est elle qui permettra
+    # d'y verser la notice plus tard sans tout régénérer (lot 7). Cent
+    # caractères, que PowerPoint conserve à l'enregistrement — mesuré le
+    # 28/09/2026 sur un dossier revenu d'un chef de projet.
+    ajout_notice.ecrire_identite(presentation, projet)
 
     fichier = dossier / nom_sortie(projet)
     presentation.save(str(fichier))
