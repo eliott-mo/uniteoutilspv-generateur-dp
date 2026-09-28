@@ -98,37 +98,16 @@ st.caption(
     "l'échelle vraie."
 )
 
-# Les quatre sections n'apparaissent qu'au fur et à mesure : rassembler les
-# fichiers d'abord évite de découvrir en cours de route qu'il en manque un, et
-# de repartir avec un dossier incomplet.
-with st.expander("🗂️ À rassembler avant de commencer", expanded=False):
-    st.markdown(
-        """**Obligatoire pour tout dossier**
-- **Emprise cadastrale** — le shapefile du géomètre : `.shp` + `.shx` + `.dbf`
-  + `.prj`, ou le ZIP qui les contient. Le `.prj` en fait partie : sans lui, le
-  système de coordonnées est inconnu et la génération est refusée.
-
-**Obligatoire pour les planches DP 2, DP 3 et DP 4** — plan de masse, coupes et
-ouvrages techniques, c'est-à-dire l'essentiel du dossier
-- **Plan du bureau d'études** — le DXF exporté d'AutoCAD, géoréférencé en
-  Lambert 93.
-- **Tableau bilan** — le `.xlsx` du bureau d'études, **au même indice que le
-  plan**. C'est lui qui engage les surfaces et les puissances déclarées.
-
-**Attendu de tout dossier déposable**
-- **Notice DP 11** — le PDF que vous avez rédigé. L'outil ne l'écrit pas : il
-  l'habille du cadre et du cartouche du dossier, et la pagine avec les autres
-  pièces. Il ne l'exige pas encore — le dossier sort sans elle et le rapport le
-  signale — mais un dossier déposé sans notice est incomplet.
-
-**Facultatif**
-- **Relevé altimétrique** — `.txt` ou `.csv`, trois colonnes « X Y Z » en
-  Lambert 93. Il remplace le RGE ALTI, plus précis qu'un relevé national.
-- **Plan du BE en PDF** — pour comparer l'aperçu à ce que le BE a dessiné.
-- **Photographies** — DP 6 insertion paysagère (en JPG ou PNG si elle doit
-  monter en page de garde), DP 7 environnement proche, DP 8 paysage lointain.
-""" 
-    )
+# Les pièces d'entrée, en une ligne. Un volet déplié les détaillait jusqu'au
+# 28/09/2026 ; personne ne le relisait, et il annonçait encore le relevé
+# altimétrique et les photographies, dont le dépôt a été retiré au lot 8. Une
+# ligne sous le titre se relit à chaque ouverture, donc se corrige.
+st.caption(
+    "À réunir avant de commencer : l'emprise cadastrale (ZIP du shapefile, "
+    "`.prj` compris), le plan du BE en DXF et son tableau bilan au même "
+    "indice — ou, sans plan BE, l'export HelioScope et le plan projet en PDF "
+    "— et la notice DP 11 en PDF."
+)
 
 
 @st.cache_resource
@@ -165,10 +144,11 @@ travail = _etat_travail()
 if travail.synchronise:
     st.warning(travail.message, icon="⚠️")
 
+# La police ne se dit que lorsqu'elle manque. La confirmation verte était du
+# bruit à chaque ouverture ; une substitution, elle, fausserait toutes les
+# chasses du dossier et doit se voir avant de travailler.
 etat = _etat_polices()
-if etat.disponible:
-    st.caption(f"✅ {etat.message}")
-else:
+if not etat.disponible:
     st.warning(f"Police : {etat.message}", icon="⚠️")
 
 def _en_puces(messages) -> str:

@@ -369,26 +369,19 @@ def test_les_sections_apparaissent_au_fur_et_a_mesure(tmp_path, monkeypatch):
     assert _bouton_present(application, "Générer le dossier")
 
 
-def test_les_prerequis_sont_annonces_avant_toute_saisie(tmp_path, monkeypatch):
-    """Le chef de projet sait ce qu'il doit rassembler avant de commencer.
+def test_les_pieces_a_reunir_sont_nommees_sous_le_titre(tmp_path, monkeypatch):
+    """Le chef de projet sait ce qu'il doit avoir sous la main.
 
-    Replié depuis le 24/09/2026 : qui connaît l'outil n'a pas à le relire à
-    chaque ouverture, et qui ne le connaît pas le déplie. Le contenu, lui,
-    ne change pas — c'est lui qu'on mesure ici.
+    Un volet déplié le disait jusqu'au 28/09/2026 : replié par défaut, il a
+    vieilli sans qu'on le relise — il annonçait encore le relevé altimétrique
+    et les photographies, retirés au lot 8. Ce qui est mesuré ici est donc la
+    ligne visible sous le titre, et non un contenu à déplier.
     """
     application = _application(tmp_path, monkeypatch).run()
 
-    annonce = "\n".join(bloc.value for bloc in application.get("markdown"))
-    titres = "".join(bloc.label for bloc in application.get("expander"))
-    assert "À rassembler avant de commencer" in titres, titres
-    for attendu in (
-        "Emprise cadastrale",
-        "Plan du bureau d'études",
-        "Tableau bilan",
-        "Notice DP 11",
-    ):
-        assert attendu in annonce, attendu
-    assert ".prj" in annonce, "le fichier qui manque le plus souvent"
+    lignes = "\n".join(legende.value for legende in application.caption)
+    for attendu in ("emprise cadastrale", ".prj", "DXF", "tableau bilan", "DP 11"):
+        assert attendu in lignes, attendu
 
 
 @pytest.mark.skipif(not TABLEAU.exists(), reason="jeu de référence absent")
