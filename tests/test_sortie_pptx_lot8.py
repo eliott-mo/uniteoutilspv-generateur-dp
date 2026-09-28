@@ -63,11 +63,25 @@ def sans_geoplateforme():
 
     Portée module, comme le dossier produit : la substitution doit tenir pendant
     la génération, qui n'a lieu qu'une fois.
+
+    Les planches écrivent `from ..ign import telecharger_fond` : le nom est lié
+    à l'import, et remplacer le seul attribut du module `ign` ne les atteint
+    pas. Mesuré le 29/09/2026 — la doublure n'était jamais appelée, ces tests
+    interrogeaient la Géoplateforme à chaque passage sans porter la marque
+    `reseau`, et la CI est tombée deux fois de suite le 28/09 pendant que le
+    poste restait vert. La substitution suit donc chaque module qui tient une
+    référence, et le compteur rendu ici sert à vérifier qu'elle a servi.
     """
+    import sys
+    from collections import Counter
+
     from dp_socle import ign
+
+    appels = Counter()
 
     def fond(couche, bbox, largeur_mm, hauteur_mm, dpi=200, format_image="image/jpeg",
              timeout=120):
+        appels["telecharger_fond"] += 1
         return FondRaster(
             image=Image.new("RGB", (240, 170), (232, 230, 226)),
             bbox=tuple(bbox), couche=couche, dpi=dpi, format=format_image,
@@ -81,6 +95,7 @@ def sans_geoplateforme():
         photographique, donc de la voie de rendu retenue. Un fond vide aurait
         fait passer ces planches en vectoriel sans rien prouver.
         """
+        appels["telecharger_parcelles"] += 1
         minx, miny, maxx, maxy = bbox
         cote = 60.0
         return [
@@ -97,11 +112,27 @@ def sans_geoplateforme():
             for rang_y in range(int((maxy - miny) // cote) + 1)
         ]
 
+    def batiments(*args, **kwargs):
+        appels["telecharger_batiments"] += 1
+        return []
+
+    doublures = {
+        "telecharger_fond": fond,
+        "telecharger_parcelles": parcelles,
+        "telecharger_batiments": batiments,
+    }
+    originaux = {nom: getattr(ign, nom) for nom in doublures}
+
     with pytest.MonkeyPatch.context() as substitution:
-        substitution.setattr(ign, "telecharger_fond", fond)
-        substitution.setattr(ign, "telecharger_parcelles", parcelles)
-        substitution.setattr(ign, "telecharger_batiments", lambda *a, **k: [])
-        yield
+        for module in list(sys.modules.values()):
+            if not getattr(module, "__name__", "").startswith("dp_socle"):
+                continue
+            for nom, doublure in doublures.items():
+                # `is` et non `hasattr` : on ne remplace que la vraie fonction,
+                # jamais une doublure déjà posée ni un homonyme.
+                if getattr(module, nom, None) is originaux[nom]:
+                    substitution.setattr(module, nom, doublure)
+        yield appels
 
 
 @pytest.fixture(scope="module")
@@ -177,6 +208,18 @@ def presentation(rapport):
 # ---------------------------------------------------------------------------
 # Le fichier, et ce qu'il porte
 # ---------------------------------------------------------------------------
+
+
+def test_les_doublures_ont_bien_remplace_la_geoplateforme(rapport, sans_geoplateforme):
+    """Ce fichier mesure le montage, pas le service : il ne demande rien dehors.
+
+    Sans ce contrôle, une doublure qui n'atteint plus les planches les laisse
+    repartir vers la Géoplateforme, et tout reste vert — jusqu'au jour où le
+    service tousse. C'est ce qui est arrivé le 28/09/2026 : deux CI rouges
+    d'affilée, vertes le lendemain, sans qu'une ligne du dépôt ait changé.
+    """
+    assert sans_geoplateforme["telecharger_fond"] >= 2, sans_geoplateforme
+    assert sans_geoplateforme["telecharger_parcelles"] >= 1, sans_geoplateforme
 
 
 def test_le_fichier_se_nomme_pour_ce_qu_il_est(rapport):
