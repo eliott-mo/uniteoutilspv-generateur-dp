@@ -55,4 +55,24 @@ jobs:
       # au premier appel. Ce pas ne fait que le dire : si fontconfig ne la voyait
       # pas, `test_typographie.py` le montrerait.
       - name: La suite, tests réseau exclus
-        run: python -m pytest -q -m "not reseau"
+        run: python -m pytest -q -rf -m "not reseau" | tee pytest.log
+
+      # Les journaux d'un run demandent des droits d'administration sur le
+      # dépôt ; les annotations et le résumé du job, non. Relevé le
+      # 28/09/2026 : la suite était tombée depuis deux poussées et la page
+      # publique n'en disait que « exit code 1 ». Un rouge qu'on ne peut pas
+      # lire ne vaut pas mieux que pas de CI du tout.
+      - name: Dire ce qui est tombé
+        if: failure()
+        run: |
+          {
+            echo "### Ce qui est tombé"
+            echo '```'
+            if grep -q "short test summary" pytest.log; then
+              sed -n '/short test summary/,$p' pytest.log | head -60
+            else
+              tail -60 pytest.log
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(FAILED|ERROR)' pytest.log | head -10 | sed 's|^|::error::|' || true

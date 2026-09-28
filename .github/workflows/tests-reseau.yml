@@ -51,4 +51,23 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Les tests réseau, et eux seuls
-        run: python -m pytest -q -m "reseau" -rf
+        run: python -m pytest -q -m "reseau" -rf | tee pytest.log
+
+      # Comme dans `tests.yml` : les journaux demandent des droits
+      # d'administration, le résumé et les annotations non. Un rendez-vous
+      # du lundi qui tombe sans dire lequel des services IGN a lâché ne sert
+      # à rien.
+      - name: Dire ce qui est tombé
+        if: failure()
+        run: |
+          {
+            echo "### Ce qui est tombé"
+            echo '```'
+            if grep -q "short test summary" pytest.log; then
+              sed -n '/short test summary/,$p' pytest.log | head -60
+            else
+              tail -60 pytest.log
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(FAILED|ERROR)' pytest.log | head -10 | sed 's|^|::error::|' || true
