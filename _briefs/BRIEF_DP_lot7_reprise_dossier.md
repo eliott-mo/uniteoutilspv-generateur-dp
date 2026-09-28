@@ -1,5 +1,12 @@
 # BRIEF CLAUDE CODE — Générateur de dossier DP, lot 7 : reprise d'un dossier pour le compléter
 
+> **CADUC, remplacé le 28/09/2026 par `BRIEF_DP_lot7_ajout_notice.md`.** Jamais
+> construit. Sa décision D3 — régénération complète, jamais sélective — tenait
+> quand la sortie était un PDF que l'outil assemblait ; depuis le lot 8, c'est
+> un `.pptx` que le chef de projet finit lui-même, et régénérer détruit son
+> travail. Conservé pour ce qui reste vrai : D0 (le serveur ne garde rien) et
+> la note sur les chemins de `projet.json`.
+
 > Lots 1, 2, 2bis, 2ter, 4, 5 et 6 livrés. Un dossier se génère aujourd'hui d'une
 > traite : si une pièce manque, il faut tout refaire. Ce lot permet de **rouvrir
 > un dossier déjà produit** pour y verser ce qui manquait.
