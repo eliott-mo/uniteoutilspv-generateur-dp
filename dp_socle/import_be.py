@@ -133,6 +133,17 @@ CATEGORIES = (
 CORRESPONDANCE_DEFAUT = {
     "PVcase PV Modules (optimised)": "tables_pv",
     "UNI_Clôture": "cloture",
+    # Tous les plans ne viennent pas du BE interne. Celui de Joux-la-Ville
+    # (24/09/2026) est dessiné par ORKANE, dont les calques portent leur propre
+    # préfixe : trois des cinq restaient non appariés, dont la clôture, et le
+    # chef de projet a reçu une trace Python plutôt qu'un dossier — l'emprise
+    # clôturée manquante arrêtait le placement de la coupe.
+    #
+    # Ces deux noms-là sont assez spécifiques pour ne rien recouvrir d'autre.
+    # La correspondance reste soumise à confirmation à l'écran : elle propose,
+    # le chef de projet tranche.
+    "ORKANE_Cloture": "cloture",
+    "ORKANE_Local Technique": "local_technique",
     "UNI_portail": "portail",
     # Le calque s'appelle « PDL » mais porte un poste de livraison **et** de
     # transformation : sur Saint-Cyr comme sur Sarnois, le tableau bilan compte

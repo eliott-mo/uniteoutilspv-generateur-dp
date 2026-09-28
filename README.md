@@ -1309,6 +1309,14 @@ chacune** :
 | `UNI_PDL-PDT_Zone_Ombre` | étude d'ombrage |
 | `VAL-PDL` | doublon du remplissage des plateformes |
 
+**Tous les plans ne viennent pas du BE interne.** Celui de Joux-la-Ville, dessiné
+par ORKANE, porte ses propres noms de calques : trois des cinq restaient non
+appariés, dont la clôture — et sans emprise clôturée, le placement de la coupe
+s'arrêtait sur une trace Python. `ORKANE_Cloture` et `ORKANE_Local Technique`
+sont donc reconnus d'office depuis le 28/09/2026. `PVcase Road`, lui, ne l'est
+pas : lourde ou légère ne se devine pas, et c'est une question posée au chef de
+projet.
+
 `VAL-PDL` a demandé une mesure pour être identifié : ses deux boucles ont le
 même centre et la même aire que celles de `UNI_VRD_Plateforme`, à 1 m² près
 (81,8 contre 82,9 m², 94,4 contre 95,5 m²). Les importer dessinerait chaque

@@ -103,6 +103,26 @@ def test_les_calques_vides_sont_ignores_sans_message(plan):
     assert plan.avertissements == []
 
 
+def test_les_calques_d_un_autre_bureau_d_etudes_sont_reconnus():
+    """Tous les plans ne viennent pas du BE interne.
+
+    Celui de Joux-la-Ville (24/09/2026) est dessiné par ORKANE : trois de ses
+    cinq calques restaient non appariés, dont la clôture. Sans emprise
+    clôturée, le placement de la coupe s'arrêtait sur un `AttributeError`, et
+    le chef de projet recevait une trace Python au lieu d'un dossier.
+
+    La tolérance de `normaliser` vaut ici comme ailleurs : accent, casse et
+    séparateurs ne doivent pas décider de ce qui entre au dossier.
+    """
+    assert categorie_proposee("ORKANE_Cloture") == "cloture"
+    assert categorie_proposee("ORKANE_Clôture") == "cloture"
+    assert categorie_proposee("orkane cloture") == "cloture"
+    assert categorie_proposee("ORKANE_Local Technique") == "local_technique"
+    # Le calque de voirie de PVcase reste à trancher : lourde ou légère ne se
+    # devine pas, et c'est une question posée au chef de projet.
+    assert categorie_proposee("PVcase Road") is None
+
+
 def test_correspondance_tolerante_aux_accents_et_separateurs():
     """L'apostrophe de « aire d'aspiration » est un tiret dans le fichier BE."""
     assert normaliser("UNI_Clôture") == normaliser("UNI_Cloture")
