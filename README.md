@@ -144,12 +144,18 @@ chaque reconstruction du conteneur.
    qu'après l'import. Le fichier produit se **télécharge** : l'application tourne
    sur un serveur, `sortie/` y reste, hors de portée du chef de projet.
 
-   **Trois téléchargements, et un seul suffit.** Le groupé — le dossier et le
-   contrat en une archive — est là pour le cas qui coûte cher : le chef de projet
-   qui emporte le `.pptx`, ferme l'onglet, et découvre le lendemain qu'il lui
-   fallait aussi le contrat. Le serveur n'a rien gardé, et tout est à refaire.
-   Les deux séparés restent parce que le contrat ne sert qu'à qui monte les
-   photomontages, et que le `.pptx` seul est plus léger à renvoyer.
+   **Un seul téléchargement**, depuis le 28/09/2026 : une archive qui porte le
+   `.pptx` et, déplié à côté de lui, le contrat du dossier. Ils étaient trois —
+   le groupé, le dossier seul, le contrat seul —, et le plus évident des trois
+   laissait le contrat derrière. Ce que l'oubli coûte : le serveur ne garde
+   rien, l'onglet fermé emporte `sortie/`, et le contrat perdu se repaie par une
+   génération entière.
+
+   Ce que la fusion coûte en retour, et qu'elle assume : il faut dézipper pour
+   ouvrir le `.pptx`. Un clic de plus à chaque dossier contre une régénération
+   complète de temps en temps. Le contrat entre dans l'archive **déplié**, et
+   non comme un ZIP dans un ZIP : le destinataire ouvre une fois et trouve les
+   deux côte à côte.
 
    Les fichiers descendent **horodatés** — `..._20260926-1432.pptx` — pour
    s'empiler sans se confondre dans un dossier de téléchargements. Le fichier

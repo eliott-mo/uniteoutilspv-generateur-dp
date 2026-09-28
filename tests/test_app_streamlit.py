@@ -553,6 +553,50 @@ def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
     assert any("Coupe par défaut" in message for message in messages), messages
 
 
+def test_l_archive_porte_le_dossier_et_le_contrat_deplie():
+    """Un seul téléchargement depuis le 28/09/2026 : il doit tout porter.
+
+    Trois boutons descendaient auparavant — le groupé, le dossier seul, le
+    contrat seul — et le plus évident des trois laissait le contrat derrière.
+    Le serveur ne gardant rien, l'onglet fermé le perdait et la génération
+    entière était à refaire.
+
+    Le contrat entre **déplié**, et non comme un ZIP dans un ZIP : le
+    destinataire ouvre une fois et trouve le dossier du contrat à côté du
+    `.pptx`, prêt pour l'outil de photomontage.
+    """
+    import io
+    import zipfile
+
+    source = (RACINE / "app.py").read_text(encoding="utf-8")
+    debut = source.index("def _tout_en_une_archive(")
+    espace = {"io": io, "zipfile": zipfile}
+    exec(  # noqa: S102 — la fonction est extraite du script, qui ne s'importe pas
+        source[debut : source.index(chr(10) + "def ", debut + 1)], espace
+    )
+
+    contrat = io.BytesIO()
+    with zipfile.ZipFile(contrat, "w") as archive:
+        archive.writestr("PV-Essai/geometries.gpkg", b"le geopackage")
+        archive.writestr("PV-Essai/projet.json", b"{}")
+
+    paquet = espace["_tout_en_une_archive"](
+        b"le pptx", "PV-Essai_DP_a_finaliser_20260928-1030.pptx", contrat.getvalue()
+    )
+
+    with zipfile.ZipFile(io.BytesIO(paquet)) as lu:
+        membres = lu.namelist()
+        assert lu.read("PV-Essai_DP_a_finaliser_20260928-1030.pptx") == b"le pptx"
+        assert lu.read("PV-Essai/geometries.gpkg") == b"le geopackage"
+    assert sorted(membres) == [
+        "PV-Essai/geometries.gpkg",
+        "PV-Essai/projet.json",
+        "PV-Essai_DP_a_finaliser_20260928-1030.pptx",
+    ]
+    # Rien d'imbriqué : aucun ZIP à rouvrir une fois l'archive ouverte.
+    assert not [nom for nom in membres if nom.endswith(".zip")], membres
+
+
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_un_imprevu_a_la_generation_se_lit_a_l_ecran(tmp_path, monkeypatch):
     """Streamlit Cloud masque les exceptions non attrapées : pas celles-ci.
@@ -1247,7 +1291,7 @@ def test_un_dossier_sans_notice_se_produit_quand_meme(tmp_path, monkeypatch):
     l'interface produise.
     """
     application = _import_valide(tmp_path, monkeypatch)
-    _cliquer(application, "Générer le dossier à finaliser")
+    _cliquer(application, "Générer le dossier")
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1277,7 +1321,7 @@ def test_la_notice_deposee_se_retrouve_dans_le_pptx(tmp_path, monkeypatch):
         application, "DP 11", ("notice.pdf", _notice_pdf(pages=2), "application/pdf")
     )
     application = application.run()
-    _cliquer(application, "Générer le dossier à finaliser")
+    _cliquer(application, "Générer le dossier")
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 
@@ -1314,18 +1358,18 @@ def test_le_dossier_reste_telechargeable_apres_un_premier_clic(
         application, "DP 11", ("notice.pdf", _notice_pdf(), "application/pdf")
     )
     application = application.run()
-    _cliquer(application, "Générer le dossier à finaliser")
+    _cliquer(application, "Générer le dossier")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
     intitules = [bouton.label for bouton in application.get("download_button")]
-    assert any("PowerPoint" in intitule for intitule in intitules), intitules
+    assert any("dossier et son contrat" in i for i in intitules), intitules
 
     # La réexécution que provoquerait un clic dessus.
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
     survivants = [bouton.label for bouton in application.get("download_button")]
-    assert any("PowerPoint" in intitule for intitule in survivants), survivants
+    assert any("dossier et son contrat" in i for i in survivants), survivants
 
 
 def test_les_intitules_de_legende_se_corrigent_avant_de_generer(tmp_path, monkeypatch):
@@ -1393,7 +1437,7 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
     from dp_socle.sortie_pptx import AVERTISSEMENTS_DE_PRINCIPE
 
     application = _import_valide(tmp_path, monkeypatch)
-    _cliquer(application, "Générer le dossier à finaliser")
+    _cliquer(application, "Générer le dossier")
     application.run()
 
     assert not application.exception, [str(e.value) for e in application.exception]
@@ -1403,14 +1447,24 @@ def test_la_sortie_powerpoint_se_telecharge_sans_photographie(tmp_path, monkeypa
     for phrase in AVERTISSEMENTS_DE_PRINCIPE:
         assert phrase in rapport.avertissements
 
+    # Un seul téléchargement depuis le 28/09/2026, et il porte les deux :
+    # l'application tourne sur un serveur, et ce qui n'est pas emporté est perdu
+    # à la fermeture de l'onglet. Le contrat est ce que lit le dépôt voisin
+    # `photomontage` ; le prendre ici garantit que le photomontage sera monté
+    # sur la géométrie de ce dossier-ci.
     intitules = [bouton.label for bouton in application.get("download_button")]
-    assert any("PowerPoint" in intitule for intitule in intitules), intitules
-
-    # Le contrat redescend avec le dossier : l'application tourne sur un serveur,
-    # et ce qui n'est pas téléchargé est perdu à la fermeture de l'onglet. C'est
-    # lui que lit le dépôt voisin `photomontage`, et le prendre ici garantit que
-    # le photomontage sera monté sur la géométrie de ce dossier-ci.
-    assert any("contrat du dossier" in intitule for intitule in intitules), intitules
+    # Un seul bouton pour emporter le dossier, et plus de « dossier seul » ni
+    # de « contrat seul » à côté. Le GeoPackage reste offert plus haut, replié
+    # dans la section de vérification de l'import : c'est pour contrôler dans
+    # un SIG, pas pour emporter, et sa légende renvoie à cette archive-ci.
+    emportables = [i for i in intitules if "dossier" in i.lower()]
+    assert len(emportables) == 1, intitules
+    assert "dossier et son contrat" in emportables[0], intitules
+    assert not [i for i in intitules if "seul" in i.lower()], intitules
+    # Ce que l'archive porte se mesure ailleurs, sans réseau :
+    # `test_l_archive_porte_le_dossier_et_le_contrat_deplie`. `AppTest` ne rend
+    # pas les octets d'un bouton de téléchargement — ils passent par une URL de
+    # média —, et c'est le contenu qui compte, pas l'intitulé.
 
 
 @pytest.mark.reseau
@@ -1429,7 +1483,7 @@ def test_un_intitule_corrige_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
     champ.set_value("Voie de desserte")
     application = application.run()
 
-    _cliquer(application, "Générer le dossier à finaliser")
+    _cliquer(application, "Générer le dossier")
     application.run()
     assert not application.exception, [str(e.value) for e in application.exception]
 

@@ -45,7 +45,6 @@ from dp_socle.coupe import (
     translater_ligne_coupe,
 )
 from dp_socle.contrat import (
-    MOTIF_ARCHIVE,
     NOM_GEOPACKAGE,
     VOIRIES_ADMISES,
     archiver_le_contrat,
@@ -2925,78 +2924,70 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
         f"{rapport_pptx.taille_mo:.1f} Mo. Les planches y sont dessinées, les "
         "photographies restent à poser."
     )
-    # Trois téléchargements, et un seul suffit. Le groupé est là pour le cas qui
-    # coûte cher : le chef de projet qui emporte le `.pptx`, ferme l'onglet, et
-    # découvre le lendemain qu'il lui fallait aussi le contrat — le serveur a
-    # oublié son dossier, et tout est à refaire. Les deux séparés restent parce
-    # que le contrat ne sert qu'à qui monte les photomontages, et que le `.pptx`
-    # seul est plus léger à renvoyer par courriel.
+    # Un seul téléchargement depuis le 28/09/2026. Le `.pptx` seul et le contrat
+    # seul étaient offerts à côté du groupé : trois boutons pour un geste, et
+    # l'un d'eux — le plus évident, le dossier — laissait le contrat derrière.
+    # Ce que l'oubli coûte : le serveur ne garde rien, et le contrat perdu se
+    # repaie par une génération entière.
+    #
+    # Ce que la fusion coûte en retour, et qu'elle assume : il faut dézipper
+    # pour ouvrir le `.pptx`. Un clic de plus à chaque dossier contre une
+    # régénération complète de temps en temps.
     _horodatage = rapport_pptx.produit_le.strftime(FORMAT_HORODATAGE)
     _contrat_emporte = archiver_le_contrat(
         rapport_pptx.dossier, _genere_pptx["nom"]
     )
     _pptx = rapport_pptx.fichier.read_bytes()
+    _nom_pptx = nom_telechargement(_genere_pptx["nom"], rapport_pptx.produit_le)
 
     if _contrat_emporte is not None:
         st.download_button(
-            f"⬇️ **Tout** — le dossier et le contrat "
+            f"⬇️ Télécharger le dossier et son contrat "
             f"({(len(_pptx) + len(_contrat_emporte)) / (1024 * 1024):.1f} Mo, ZIP)",
-            data=_tout_en_une_archive(
-                _pptx,
-                nom_telechargement(_genere_pptx["nom"], rapport_pptx.produit_le),
-                _contrat_emporte,
-            ),
+            data=_tout_en_une_archive(_pptx, _nom_pptx, _contrat_emporte),
             file_name=MOTIF_TOUT.format(
                 nom=_genere_pptx["nom"], horodatage=_horodatage
             ),
             mime="application/zip",
             type="primary",
-            help="Le plus sûr : tout descend d'un clic. Le contrat oublié se "
-            "repaie par une génération entière, le serveur ne gardant rien.",
+            help=(
+                "L'archive porte le `.pptx` et, à côté de lui, le contrat du "
+                "dossier. Dans le PowerPoint : déposez vos photographies dans "
+                "les cadres vides, déplacez et orientez les repères de vue, "
+                "puis supprimez les diapos surnuméraires et leurs bandeaux "
+                "rouges avant d'exporter en PDF. Le contrat, lui, est à "
+                "transmettre pour faire monter les photomontages — c'est la "
+                "géométrie exacte de ce dossier-ci."
+            ),
             on_click="ignore",
             width="stretch",
         )
-
-    colonne_dossier, colonne_contrat = st.columns(2)
-    with colonne_dossier:
+        st.caption(
+            "Le dossier et le contrat descendent ensemble : le serveur ne garde "
+            "rien, et ce qui n'est pas emporté maintenant se repaie par une "
+            "génération entière."
+        )
+    else:
+        # Sans contrat, il n'y a rien à grouper — mais le dire, plutôt que de
+        # laisser croire que le dossier descend complet.
+        st.warning(
+            "**Aucun contrat à joindre au dossier.** Le `.pptx` descend seul : "
+            "les photomontages ne pourront pas être montés sur la géométrie de "
+            "ce dossier sans lui.",
+            icon="⚠️",
+        )
         st.download_button(
-            f"⬇️ Le dossier seul ({rapport_pptx.taille_mo:.1f} Mo, .pptx)",
+            f"⬇️ Télécharger le dossier seul ({rapport_pptx.taille_mo:.1f} Mo, .pptx)",
             data=_pptx,
-            file_name=nom_telechargement(
-                _genere_pptx["nom"], rapport_pptx.produit_le
-            ),
+            file_name=_nom_pptx,
             mime=(
                 "application/vnd.openxmlformats-officedocument."
                 "presentationml.presentation"
             ),
-            help=(
-                "Déposez vos photographies dans les cadres vides, déplacez et "
-                "orientez les repères de vue, puis supprimez les diapos "
-                "surnuméraires et leurs bandeaux rouges avant d'exporter en PDF."
-            ),
+            type="primary",
             on_click="ignore",
             width="stretch",
         )
-    with colonne_contrat:
-        if _contrat_emporte is not None:
-            st.download_button(
-                f"⬇️ Le contrat seul "
-                f"({len(_contrat_emporte) / (1024 * 1024):.1f} Mo, ZIP)",
-                data=_contrat_emporte,
-                file_name=MOTIF_ARCHIVE.format(
-                    nom=_genere_pptx["nom"], horodatage=_horodatage
-                ),
-                mime="application/zip",
-                help=(
-                    "La géométrie importée du plan et les paramètres du projet, "
-                    "tels que ces planches les ont employés. À transmettre pour "
-                    "faire monter les photomontages : c'est ce que l'outil de "
-                    "photomontage lit, et le prendre ici garantit qu'il "
-                    "travaillera sur la géométrie de ce dossier-ci."
-                ),
-                on_click="ignore",
-                width="stretch",
-            )
 
     _lister_les_avertissements(
         f"{len(rapport_pptx.avertissements)} point(s) à savoir avant de "
