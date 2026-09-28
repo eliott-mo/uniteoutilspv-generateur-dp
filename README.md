@@ -486,6 +486,31 @@ individuellement, à partir des chasses mesurées par cairo lui-même
 justification est exacte et non approchée. `tests/test_typographie.py` vérifie
 que le bord droit des lignes justifiées tombe sur la largeur demandée.
 
+### Ce que l'outil fait d'une erreur qu'il n'avait pas prévue
+
+Streamlit Community Cloud **masque le message des exceptions non attrapées**.
+Le chef de projet ne voit que « The original error message is redacted », et la
+cause — un nom de calque, un fichier — reste dans des journaux auxquels il n'a
+pas accès. Le 27/09/2026, il a fallu ouvrir le tableau de bord pour découvrir
+qu'un `AttributeError` venait d'un contour de citerne replié sur lui-même.
+
+`app._signaler_l_imprevu` réécrit donc le type et le message **dans du texte à
+nous**, que la censure ne touche pas, aux deux endroits qui travaillent sur des
+fichiers inconnus : l'import du plan et la génération. `st.exception` reste, mais
+il dépend de `client.showErrorDetails` et ne sert qu'au poste de développement.
+
+Trois précisions qui font tenir l'ensemble :
+
+- ce n'est **pas un rattrapage**. Rien n'est repris, rien n'est deviné, le
+  dossier ne sort pas. C'est la règle du dépôt appliquée à l'imprévu : ce qui
+  échoue doit se lire, et ici ça ne se lisait pas ;
+- `st.rerun()` et `st.stop()` traversent, leurs exceptions dérivant de
+  `BaseException` et non d'`Exception` (vérifié sur Streamlit 1.57.0) ;
+- l'incident **reste visible d'`AppTest`**, qui voit les éléments `st.exception`
+  d'où qu'ils viennent, expander compris. Les quarante-et-un
+  `assert not application.exception` de la suite continuent donc d'attraper un
+  vrai plantage : attraper l'erreur à l'écran n'a pas émoussé le filet.
+
 ## Tests
 
 ```bash

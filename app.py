@@ -624,6 +624,46 @@ def _lister_les_avertissements(titre: str, messages) -> None:
     st.markdown(_en_puces(messages))
 
 
+def _signaler_l_imprevu(erreur: Exception, pendant: str) -> None:
+    """Rend lisible une erreur que l'outil n'avait pas prévue.
+
+    Streamlit Community Cloud **masque** le message des exceptions non
+    attrapées : le chef de projet ne voit que « The original error message is
+    redacted », et la cause — un nom de calque, un fichier — reste dans des
+    journaux auxquels il n'a pas accès. Constaté le 27/09/2026 sur un
+    `AttributeError` qu'il a fallu aller chercher dans le tableau de bord pour
+    comprendre qu'un contour de citerne se repliait sur lui-même.
+
+    Le type et le message sont donc réécrits ici, **dans du texte à nous**, que
+    la censure ne touche pas — `st.exception` la subit, lui, puisqu'il dépend
+    de `client.showErrorDetails`. Il reste tout de même, pour le poste de
+    développement où il affiche la trace complète.
+
+    Ce n'est pas un rattrapage : rien n'est repris, rien n'est deviné, le
+    dossier ne sort pas. C'est la règle du dépôt appliquée à ce qu'on n'a pas
+    prévu — ce qui échoue doit se lire, et ici ça ne se lisait pas.
+
+    `st.rerun()` et `st.stop()` traversent : leurs exceptions dérivent de
+    `BaseException` et non d'`Exception` (vérifié sur Streamlit 1.57.0).
+
+    L'incident reste visible d'`AppTest`, qui voit les éléments `st.exception`
+    d'où qu'ils viennent : les quarante-et-un `assert not
+    application.exception` de la suite continuent donc de protéger.
+    """
+    st.error(
+        f"**L'outil s'est arrêté {pendant}, sur un cas qu'il ne sait pas "
+        f"traiter.** {type(erreur).__name__} : {erreur}",
+        icon="🚫",
+    )
+    st.caption(
+        "Transmettez ce message **avec les fichiers d'entrée du projet** — le "
+        "plan, le tableau bilan et l'emprise. Le message dit où ça s'est "
+        "arrêté ; seuls les fichiers disent pourquoi."
+    )
+    with st.expander("Le détail technique"):
+        st.exception(erreur)
+
+
 def _trier_les_avertissements(messages) -> tuple[list, list, list]:
     """Range les remarques en trois : pour le BE, à lire, fonctionnement normal.
 
@@ -2373,6 +2413,8 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             st.rerun()
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
+    except Exception as erreur:
+        _signaler_l_imprevu(erreur, "pendant l'import du plan")
 
 if not plan_du_be and commune.strip():
     _importer_le_plan_pdf(
@@ -2866,6 +2908,9 @@ if lancer_pptx:
     except ErreurDP as erreur:
         st.session_state.pop("pptx_genere", None)
         st.error(f"{type(erreur).__name__} : {erreur}")
+    except Exception as erreur:
+        st.session_state.pop("pptx_genere", None)
+        _signaler_l_imprevu(erreur, "pendant la génération du dossier")
 
 
 # Le compte rendu de la sortie PowerPoint, au même régime que celui du PDF : il

@@ -554,6 +554,39 @@ def test_les_avertissements_de_l_import_s_affichent(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_un_imprevu_a_la_generation_se_lit_a_l_ecran(tmp_path, monkeypatch):
+    """Streamlit Cloud masque les exceptions non attrapées : pas celles-ci.
+
+    Le chef de projet ne voyait que « The original error message is redacted »,
+    et la cause restait dans des journaux auxquels il n'a pas accès — il a fallu
+    aller les chercher pour découvrir qu'un contour de citerne se repliait sur
+    lui-même (27/09/2026). Le type et le message sont donc réécrits dans du
+    texte à nous, que la censure ne touche pas.
+    """
+    application = _import_valide(tmp_path, monkeypatch)
+
+    def echouer(*_args, **_kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'intersection'")
+
+    monkeypatch.setattr("dp_socle.sortie_pptx.generer_pptx", echouer)
+    _cliquer(application, "Générer le dossier")
+    application.run()
+
+    refus = [erreur.value for erreur in application.error]
+    assert any("cas qu'il ne sait pas traiter" in message for message in refus), refus
+    assert any("AttributeError" in message for message in refus), refus
+    # Le message d'origine, celui que le cloud aurait masqué.
+    assert any("no attribute 'intersection'" in message for message in refus), refus
+    # Et de quoi agir : le message dit où, les fichiers disent pourquoi.
+    assert any(
+        "fichiers d'entrée" in legende.value for legende in application.caption
+    )
+    # L'incident reste visible du harnais : les `assert not
+    # application.exception` de ce fichier continuent de protéger.
+    assert application.exception
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_les_remarques_de_l_import_tiennent_sous_un_seul_bandeau(tmp_path, monkeypatch):
     """Un pavé jaune par remarque, et le jaune ne signale plus rien.
 
