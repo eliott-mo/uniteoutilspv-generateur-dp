@@ -547,6 +547,22 @@ L'action installe les paquets système en lisant `packages.txt` lui-même : les
 deux ne peuvent pas diverger, et un `packages.txt` repassé en CRLF fait échouer
 apt bruyamment là où Streamlit l'ignore en silence.
 
+Les tests marqués `reseau` ont leur propre rendez-vous, `tests-reseau.yml`, le
+**lundi matin** — et un déclenchement à la main quand on veut. Ils sont exclus
+de la suite de chaque poussée à dessein : le vert du dépôt ne doit pas dépendre
+d'un service extérieur. Mais exclus de partout, ils meurent sans qu'on le sache.
+Les cinq du parcours applicatif cliquaient un bouton renommé le 26/09/2026 et
+échouaient dès leur première ligne ; personne ne l'a vu pendant deux jours, et
+ce sont les seuls à produire un dossier complet de bout en bout — exactement là
+où trois plans réels ont échoué cette semaine-là. Les seize passent en 15 min 27
+sur un poste (28/09/2026).
+
+Un rouge dans ce rendez-vous **ne bloque rien**, et il peut vouloir dire deux
+choses opposées : la Géoplateforme indisponible — l'échec tombe alors au
+téléchargement d'un fond, et il n'y a rien à corriger — ou une régression du
+dépôt, qui échoue sur une mesure. La fin du journal les sépare, et les confondre
+mène soit à ignorer une régression, soit à corriger une panne de service.
+
 La version de Python y est écrite en clair : **3.14**, celle du conteneur
 Streamlit Cloud relevée le 26/09/2026 dans « Manage app → Settings → Python
 version ». Ce n'est pas celle du poste de développement, qui est en 3.12, et

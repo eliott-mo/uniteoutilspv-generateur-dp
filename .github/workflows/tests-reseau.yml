@@ -1,0 +1,54 @@
+# Les tests qui interrogent vraiment la Géoplateforme, une fois par semaine.
+#
+# Ils sont exclus de `tests.yml` à dessein : le vert d'une poussée ne doit pas
+# dépendre d'un service extérieur. Mais exclus de partout, ils meurent sans
+# qu'on le sache — les cinq du parcours applicatif cliquaient un bouton renommé
+# le 26/09/2026 et échouaient dès leur première ligne ; personne ne l'a vu
+# pendant deux jours, et ce sont les seuls à produire un dossier complet de bout
+# en bout, exactement là où trois plans réels avaient échoué cette semaine-là.
+#
+# D'où ce rendez-vous : lundi matin, sans rien bloquer. Un rouge ici se lit, il
+# n'arrête rien — et il peut vouloir dire deux choses très différentes : une
+# régression du dépôt, ou l'IGN indisponible. Le journal les sépare ; une panne
+# de service échoue au téléchargement du fond, une régression sur une mesure.
+#
+# GitHub désactive un `schedule` après 60 jours sans activité sur le dépôt. Si
+# ce rendez-vous se tait longtemps, vérifier qu'il n'a pas été mis en sommeil.
+
+name: Tests réseau
+
+on:
+  schedule:
+    # Lundi 6 h UTC, soit 7 h ou 8 h à Paris selon la saison.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  reseau:
+    runs-on: ubuntu-latest
+    # Dix minutes sur le poste pour les cinq du parcours applicatif, davantage
+    # ici : les seize tirent tous leurs fonds de l'IGN, et un runner partagé est
+    # plus lent qu'un poste.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # La version du conteneur Streamlit Cloud, comme dans `tests.yml` : les
+      # deux fichiers doivent bouger ensemble.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Paquets système, depuis packages.txt
+        run: |
+          sudo apt-get update
+          xargs -a packages.txt sudo apt-get install --no-install-recommends -y
+
+      - name: Dépendances Python, aux versions épinglées
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Les tests réseau, et eux seuls
+        run: python -m pytest -q -m "reseau" -rf
