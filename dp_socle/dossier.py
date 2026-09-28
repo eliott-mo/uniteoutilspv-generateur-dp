@@ -42,6 +42,15 @@ PIECES = (
     Piece("DP 1-1", "Plan de situation", produite=True),
     Piece("DP 1-2", "Photo aérienne", produite=True),
     Piece("DP 1-3", "Plan de cadastre", produite=True),
+    # Planche annexe, produite **seulement** quand le tableau des parcelles
+    # d'assiette ne tient pas sur le plan — au-delà de deux colonnes il masque
+    # l'emprise qu'il décrit. Gannay-sur-Loire en a fait un cas réel le
+    # 28/09/2026 : 139 parcelles d'assiette, dont des dizaines de 15 m².
+    #
+    # Une pièce facultative ne décale rien tant qu'elle n'est pas produite :
+    # `codes_produits` ne compte que ce qui existe, comme pour un projet sans
+    # poste qui n'a pas de DP 4-1.
+    Piece("DP 1-3 bis", "Plan de cadastre — tableau des parcelles", produite=True),
     Piece("DP 2", "Plan de masse", produite=True),
     Piece("DP 3", "Coupe des tables photovoltaïques et du terrain", produite=True),
     Piece("DP 4-1", "Poste de livraison/transformation", produite=True),

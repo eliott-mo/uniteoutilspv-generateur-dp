@@ -169,6 +169,20 @@ def position_de_coupe(
             "Aucune table au plan : la position de la coupe ne peut pas être "
             "choisie sur le nombre de rangées traversées."
         )
+    if emprise_cloturee is None or emprise_cloturee.is_empty:
+        # `plan.polygone_cloture` rend None quand le DXF ne porte aucune
+        # clôture, ou qu'elle ne se referme pas en polygone. Sans ce refus, le
+        # None descendait jusqu'à `_sommets` et l'import s'arrêtait sur un
+        # `AttributeError` — remonté par un chef de projet le 28/09/2026 sur le
+        # plan de Joux-la-Ville. L'outil savait pourtant le dire : le contrôle
+        # croisé « Surface clôturée » est bloquant dans ce cas, mais la trace
+        # tombait avant que l'écran ne l'affiche.
+        raise ErreurCoupe(
+            "Le plan ne porte aucun contour de clôture exploitable : la coupe "
+            "A-A' n'a pas d'emprise à traverser. Vérifiez que le calque de "
+            "clôture est apparié à l'import, et qu'il porte un contour fermé — "
+            "un tracé ouvert, ou de moins de quatre sommets, ne délimite rien."
+        )
     ux, uy = cos(radians(azimut_tables_deg)), sin(radians(azimut_tables_deg))
     sommets = list(_sommets(emprise_cloturee))
     if not sommets:

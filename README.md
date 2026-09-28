@@ -19,6 +19,7 @@ Le lot 1 couvre le moteur de planche et les trois planches cartographiques :
 | DP 1-1 | Plan de situation du terrain | 1:10 000 |
 | DP 1-2 | Photographie aérienne du terrain | 1:5 000 |
 | DP 1-3 | Plan de cadastre | adaptative |
+| DP 1-3 bis | Plan de cadastre — tableau des parcelles | — |
 
 Sortie dans `sortie/{nom_projet}/` : un PDF par planche plus
 `{nom_projet}_DP_complet.pdf`.
@@ -406,6 +407,42 @@ peuvent pas diverger.
   l'aire du polygone fourni ;
 - la **contenance** du tableau de DP 1-3 (276 270 m²) est la surface légale
   portée au cadastre, sommée sur les parcelles d'assiette.
+
+#### Quand le tableau ne tient plus sur le plan
+
+Le tableau des parcelles d'assiette est posé **par-dessus** le plan, en haut à
+droite, et non à côté de lui. Il tient sur deux colonnes ; au-delà, il masque
+l'emprise qu'il est censé décrire.
+
+Gannay-sur-Loire en a fait un cas réel le 28/09/2026 : **139 parcelles
+d'assiette** pour 4,3 ha, dont des dizaines de 15 m² — un micro-parcellaire
+régulier, entièrement compris dans l'emprise. Le tableau en demandait trois
+colonnes. Rendu tel quel, il couvrait plus de la moitié de la planche et
+l'emprise disparaissait derrière lui.
+
+Ces cas-là reportent le tableau sur **`DP 1-3 bis`**, sa propre planche, où il
+se centre et prend jusqu'à cinq colonnes — 290 parcelles. Le plan, lui, dit où
+il est passé : « Tableau des 139 parcelles d'assiette : voir…,
+planche suivante ». Sans cette mention, un lecteur qui ne trouve pas le tableau
+croirait la pièce incomplète.
+
+Avant le 28/09/2026, ce cas levait `ErreurRendu` et **la pièce entière
+disparaissait du dossier** — une pièce obligatoire, sans que rien d'autre que le
+rapport ne le dise.
+
+`DP 1-3 bis` est une pièce **facultative** : elle ne décale la numérotation que
+des dossiers qui la portent. C'est la mécanique qui existait déjà pour un projet
+sans poste, qui n'a pas de DP 4-1 — `codes_produits` ne compte que ce qui est
+réellement produit. La planche annexe se compose depuis ce que le plan a déjà
+relevé, sans second appel au WFS : ce sont les mêmes parcelles, et les
+redemander exposerait le dossier à ce que l'IGN réponde autrement entre deux
+requêtes.
+
+**La hauteur de la note se réserve avant de compter les lignes.** Ajoutée après
+coup à la hauteur du cadre, elle le poussait de 1,3 mm par-dessus le cartouche —
+signalé le 28/09/2026 sur cette même planche annexe, la seule assez remplie pour
+que ça se voie. Sur le plan, le tableau est trop court pour atteindre le bas de
+la planche, et le défaut y dormait depuis le lot 1.
 
 L'écart est normal, et il va toujours dans le même sens : la contenance légale
 est inférieure à la surface graphique. Sur Bray-Saint-Aignan, le rapport est de

@@ -1720,3 +1720,22 @@ def test_la_coupe_par_defaut_refuse_un_plan_sans_table():
 
     with pytest.raises(ErreurCoupe, match="Aucune table"):
         coupe_par_defaut(0.0, box(0.0, 0.0, 100.0, 100.0), [])
+
+
+def test_sans_cloture_la_coupe_refuse_au_lieu_de_planter():
+    """Un plan sans contour de clôture arrête l'import, mais proprement.
+
+    `plan.polygone_cloture` rend None quand le DXF n'en porte aucune, ou
+    qu'elle ne se referme pas. Ce None descendait jusqu'aux sommets, et
+    l'import s'arrêtait sur `AttributeError: 'NoneType' object has no attribute
+    'geom_type'` — remonté par un chef de projet le 28/09/2026 sur le plan de
+    Joux-la-Ville.
+
+    Ce qui rendait la trace doublement fâcheuse : l'outil **sait** le dire. Le
+    contrôle croisé « Surface clôturée » est bloquant dans ce cas et nomme la
+    cause ; il n'atteignait simplement jamais l'écran.
+    """
+    from dp_socle.coupe import coupe_par_defaut
+
+    with pytest.raises(ErreurCoupe, match="aucun contour de clôture"):
+        coupe_par_defaut(0.0, None, [box(0.0, 0.0, 10.0, 4.6)])

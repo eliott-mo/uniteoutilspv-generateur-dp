@@ -133,6 +133,16 @@ def generer_dossier(
             dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi),
             dp1_3_cadastre.generer(projet, emprise, dossier),
         ]
+        # Le tableau des parcelles passe sur sa propre planche quand il ne tient
+        # pas sur le plan. On ne le sait qu'après avoir produit DP 1-3 : le
+        # nombre de parcelles d'assiette vient du WFS.
+        if sorties[-1].details.get("tableau_reporte"):
+            sorties.append(
+                dp1_3_cadastre.generer_tableau(
+                    projet, sorties[-1].details, dossier,
+                    numero=str(len(sorties) + 2),
+                )
+            )
         # Les planches du socle ont aussi des choses à dire : le contrôle du
         # découpage foncier vit dans DP 1-3, et son message n'atteignait pas le
         # rapport, qui ne collectait que celui des planches du lot 4.
@@ -140,7 +150,10 @@ def generer_dossier(
             avertissements.extend(sortie.details.get("avertissements", []))
         if contrat is not None:
             sorties.extend(
-                _planches_lot4(projet, contrat, emprise, dossier, avertissements)
+                _planches_lot4(
+                    projet, contrat, emprise, dossier, avertissements,
+                    rang_depart=len(sorties) + 2,
+                )
             )
             # Les pièces photographiques suivent les DP 4, dans l'ordre du
             # dossier. Elles vivent dans ce bloc parce qu'elles n'ont pas de sens
@@ -307,7 +320,8 @@ def _charger_contrat_eventuel(dossier: Path, projet: Projet):
         raise
 
 
-def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements):
+def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements,
+                   rang_depart: int = 5):
     """DP 2, DP 3 et les DP 4, dans l'ordre du dossier.
 
     Chaque planche non produite l'est pour une raison écrite au rapport. Le
@@ -315,7 +329,10 @@ def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements):
     produit : c'est `codes_produits` qui s'en charge, une fois la liste connue.
     """
     sorties = []
-    rang = 5  # page de garde, DP 1-1, DP 1-2, DP 1-3, puis DP 2.
+    # Page de garde, DP 1-1, DP 1-2, DP 1-3, puis DP 2 — sauf quand le cadastre
+    # a demandé sa planche de tableau, qui décale tout ce qui suit. L'appelant
+    # compte les planches déjà produites plutôt que de figer un 5.
+    rang = rang_depart
 
     sorties.append(
         dp2_plan_masse.generer(projet, contrat, emprise, dossier, numero=str(rang))

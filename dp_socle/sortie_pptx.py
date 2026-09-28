@@ -59,6 +59,7 @@ from .erreurs import ErreurContrat, ErreurDP, ErreurSortiePPTX
 from .geometrie import charger_emprise
 from .ign import DPI_DEFAUT
 from .planche import HAUTEUR_MM, LARGEUR_MM, Planche
+from .planches.dp1_3_cadastre import NUMERO_TABLEAU
 from .planches import (
     dp11_notice,
     dp1_1_situation,
@@ -323,6 +324,9 @@ class Groupe:
     titre: str
     planches: list
     diapos: list = field(default_factory=list)
+    #: Ce que le module de la pièce a rapporté. Seul le cadastre s'en sert
+    #: aujourd'hui : c'est là qu'il dit avoir reporté son tableau.
+    details: dict = field(default_factory=dict)
     #: Nombre de pages que la pièce occupe au dossier. Vaut 1 partout sauf pour
     #: la notice, seule pièce qui s'étend.
     pages: int = 1
@@ -365,26 +369,40 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
 
     produits = codes_produits(codes)
     groupes = []
-    for code in codes:
+    # Une boucle indexée plutôt qu'un parcours : le plan de cadastre peut
+    # demander sa planche de tableau, et on ne le sait qu'une fois produit — le
+    # nombre de parcelles d'assiette vient du WFS. Elle s'insère alors derrière
+    # lui, et `codes_produits` renumérote ce qui suit.
+    details_cadastre = {}
+    index = 0
+    while index < len(codes):
+        code = codes[index]
+        index += 1
         numero = produits.index(code) + 1
         if code == "DP 11":
             # La notice se compose à part : son PDF est fusionné, pas dessiné.
             groupes.append(Groupe(code, numero, piece(code).titre, planches=[]))
             continue
         try:
-            groupes.append(
-                _groupe_de_la_piece(
-                    projet, code, numero, contrat, emprise, emprise_cloturee,
-                    dossier, avertissements, dpi, fond_ign,
-                )
+            groupe = _groupe_de_la_piece(
+                projet, code, numero, contrat, emprise, emprise_cloturee,
+                dossier, avertissements, dpi, fond_ign, details_cadastre,
             )
         except ErreurDP as exc:
             avertissements.append(f"{code} n'est pas produite : {exc}")
+            continue
+        groupes.append(groupe)
+        if code == "DP 1-3":
+            details_cadastre.update(groupe.details)
+            if groupe.details.get("tableau_reporte"):
+                codes.insert(index, NUMERO_TABLEAU)
+                produits = codes_produits(codes)
     return groupes
 
 
 def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee,
-                        dossier, avertissements, dpi, fond_ign=True):
+                        dossier, avertissements, dpi, fond_ign=True,
+                        details_cadastre=None):
     """Les planches d'une pièce : une seule, ou plusieurs alternatives."""
     if code in PHOTO_PAR_CODE:
         emplacements, vues, alternatives, marge = PHOTO_PAR_CODE[code]
@@ -396,13 +414,18 @@ def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee
         return Groupe(code, numero, piece(code).titre, planches=planches)
 
     sortie = _planche_cartographique(
-        projet, code, numero, contrat, emprise, dossier, dpi
+        projet, code, numero, contrat, emprise, dossier, dpi, details_cadastre
     )
     avertissements.extend(sortie.details.get("avertissements", []) if sortie.details else [])
-    return Groupe(code, numero, piece(code).titre, planches=[PlanchePPTX(sortie.planche)])
+    return Groupe(
+        code, numero, piece(code).titre,
+        planches=[PlanchePPTX(sortie.planche)],
+        details=sortie.details or {},
+    )
 
 
-def _planche_cartographique(projet, code, numero, contrat, emprise, dossier, dpi):
+def _planche_cartographique(projet, code, numero, contrat, emprise, dossier, dpi,
+                            details_cadastre=None):
     """Une planche que les lots 1 à 4 dessinent déjà, produite telle quelle.
 
     Le module de la pièce écrit toujours un PDF ; celui-ci part dans le dossier de
@@ -420,6 +443,10 @@ def _planche_cartographique(projet, code, numero, contrat, emprise, dossier, dpi
         return dp1_2_aerienne.generer(projet, emprise, dossier, dpi=dpi)
     if code == "DP 1-3":
         return dp1_3_cadastre.generer(projet, emprise, dossier)
+    if code == NUMERO_TABLEAU:
+        return dp1_3_cadastre.generer_tableau(
+            projet, details_cadastre or {}, dossier, numero=str(numero)
+        )
     if code == "DP 2":
         return dp2_plan_masse.generer(
             projet, contrat, emprise, dossier, numero=str(numero)

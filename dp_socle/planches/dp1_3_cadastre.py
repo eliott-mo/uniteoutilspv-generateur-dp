@@ -42,6 +42,14 @@ from .commun import Sortie, nouvelle_planche
 NUMERO = "DP 1-3"
 TITRE = piece("DP 1-3").titre
 
+#: La planche annexe, produite seulement quand le tableau ne tient pas sur le
+#: plan. Voir `generer_tableau`.
+NUMERO_TABLEAU = "DP 1-3 bis"
+TITRE_TABLEAU = piece("DP 1-3 bis").titre
+
+#: D'où viennent les parcelles, porté sur les deux planches.
+SOURCE_IGN = "Source : IGN — Parcellaire Express (PCI), WFS Géoplateforme"
+
 #: Échelles autorisées pour cette planche.
 ECHELLES_CADASTRE = (500, 1000, 2000, 5000)
 
@@ -73,6 +81,12 @@ PART_MIN_ASSIETTE = 0.02
 PART_PLEINE_ASSIETTE = 0.98
 
 LARGEUR_TABLEAU_MM = 72.0
+
+#: Colonnes que le tableau peut prendre sur le plan lui-même, et sur sa planche
+#: dédiée. Au-delà de deux, il masque l'emprise qu'il est censé décrire ; seul
+#: un plan vide, celui de la planche annexe, en porte davantage.
+COLONNES_SUR_LE_PLAN = 2
+COLONNES_SUR_SA_PLANCHE = 5
 
 
 def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
@@ -166,11 +180,22 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         + ([("Bâtiment", STYLE_BATIMENT)] if batiments else [])
     )
 
-    _tableau_parcelles(planche, concernees, emprise.surface_m2)
+    tableau_reporte = not _tableau_parcelles(planche, concernees, emprise.surface_m2)
+    if tableau_reporte:
+        # Le plan ne dit pas où est passé son tableau : un lecteur qui ne le
+        # trouve pas croirait la pièce incomplète.
+        zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+        planche.ajouter_texte(
+            zone_x + zone_l - 3.0, zone_y + 5.0,
+            f"Tableau des {len(concernees)} parcelles d'assiette : "
+            f"voir « {TITRE_TABLEAU} », planche suivante.",
+            taille=TAILLE_COURANTE, ancre="end", gras=True, couleur=BLEU_UNITE,
+            halo=True,
+        )
     planche.ajouter_texte(
         zone[0] + 3.0,
         zone[1] + zone[3] - 2.5,
-        "Source : IGN — Parcellaire Express (PCI), WFS Géoplateforme",
+        SOURCE_IGN,
         taille=1.9,
         couleur="#333333",
         halo=True,
@@ -185,6 +210,8 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
         planche=planche,
         details={
             "avertissements": avertissements,
+            "tableau_reporte": tableau_reporte,
+            "surface_emprise_m2": emprise.surface_m2,
             "nb_parcelles_tracees": len(parcelles),
             "nb_batiments": len(batiments),
             "parcelles_echardes": [p.designation for p in _triees(echardes)],
@@ -199,6 +226,68 @@ def generer(projet: Projet, emprise: Emprise, dossier: Path) -> Sortie:
                 for p in _triees(concernees)
             ],
         },
+    )
+
+
+class _Ligne:
+    """Une parcelle telle que le tableau la lit : trois champs, pas de géométrie.
+
+    Reconstruite depuis les `details` de la planche du plan plutôt que d'un
+    second appel au WFS : ce sont les mêmes parcelles, et les redemander
+    exposerait le dossier à ce que l'IGN réponde autrement entre deux requêtes.
+    """
+
+    __slots__ = ("section", "numero", "contenance_m2")
+
+    def __init__(self, donnees: dict):
+        self.section = donnees["section"]
+        self.numero = donnees["numero"]
+        self.contenance_m2 = donnees["contenance_m2"] or 0.0
+
+
+def generer_tableau(
+    projet: Projet, details: dict, dossier: Path, numero: str | None = None
+) -> Sortie:
+    """La planche annexe : le tableau des parcelles d'assiette, seul.
+
+    Produite **seulement** quand `generer` a reporté son tableau, c'est-à-dire
+    quand il demandait plus de deux colonnes sur le plan. Là, sans plan
+    au-dessous, il en prend jusqu'à cinq et part du bord gauche.
+
+    `details` est celui de la `Sortie` du plan : la liste des parcelles
+    d'assiette y est déjà, et la surface de l'emprise avec elle.
+    """
+    parcelles = [_Ligne(d) for d in details["parcelles_assiette"]]
+    if not parcelles:
+        raise ErreurRendu(
+            "Aucune parcelle d'assiette à porter au tableau : la planche "
+            "annexe n'a pas lieu d'être."
+        )
+
+    planche = nouvelle_planche(projet, NUMERO_TABLEAU, numero=numero)
+    if not _tableau_parcelles(
+        planche, parcelles, details.get("surface_emprise_m2", 0.0),
+        colonnes_max=COLONNES_SUR_SA_PLANCHE, au_centre=True,
+        note_source=SOURCE_IGN,
+    ):
+        zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+        par_colonne = int((zone_h - 6.0 - 18.8) // 4.2)
+        raise ErreurRendu(
+            f"{len(parcelles)} parcelles d'assiette : le tableau ne tient pas "
+            f"même sur sa propre planche (au plus "
+            f"{COLONNES_SUR_SA_PLANCHE * par_colonne}). Il faudrait le porter "
+            "sur plusieurs planches, ce que l'outil ne sait pas encore faire."
+        )
+
+    chemin = planche.rendre_pdf(
+        Path(dossier) / "DP_1-3bis_tableau_des_parcelles.pdf"
+    )
+    return Sortie(
+        numero=NUMERO_TABLEAU,
+        titre=TITRE_TABLEAU,
+        chemin=chemin,
+        planche=planche,
+        details={"nb_parcelles": len(parcelles)},
     )
 
 
@@ -245,11 +334,26 @@ def _triees(parcelles):
     return sorted(parcelles, key=lambda p: (p.section, p.numero))
 
 
-def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
-    """Tableau récapitulatif section / numéro / contenance, en haut à droite.
+def _tableau_parcelles(
+    planche, concernees, surface_emprise_m2: float,
+    colonnes_max: int = COLONNES_SUR_LE_PLAN, au_centre: bool = False,
+    note_source: str | None = None,
+) -> bool:
+    """Tableau récapitulatif section / numéro / contenance.
 
     Le tableau bascule sur deux colonnes plutôt que de déborder du cadre : une
     liste tronquée passerait inaperçue à la relecture.
+
+    Il est **posé par-dessus le plan**, en haut à droite, et non à côté de lui :
+    au-delà de deux colonnes il masquerait l'emprise elle-même — mesuré le
+    28/09/2026 sur Gannay-sur-Loire, dont les 139 parcelles d'assiette en
+    demandaient trois. Ces cas-là reportent le tableau sur sa propre planche,
+    où il se centre et prend jusqu'à cinq colonnes (`au_centre`, `colonnes_max`
+    relevé).
+
+    Rend **faux** quand la liste ne tient pas dans `colonnes_max` : l'appelant
+    décide alors de la reporter, plutôt que de recevoir une exception pour une
+    situation qui a une issue.
     """
     zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
     lignes = _triees(concernees)
@@ -262,21 +366,34 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
         "Contenance : surface légale portée au cadastre. Surface graphique de "
         f"l'emprise dessinée : {_contenance(surface_emprise_m2)}."
     )
-    hauteur_dispo = zone_h - 6.0
+    if note_source:
+        # Sur la planche annexe, le tableau occupe toute la hauteur : une
+        # mention de source posée au bas du cadre tomberait sur cette note-ci.
+        note = f"{note} {note_source}"
+    # La note vient sous le total, et sa hauteur doit être réservée **avant**
+    # de décider combien de lignes tiennent. Ajoutée après coup, elle poussait
+    # le cadre du tableau par-dessus le cartouche — visible le 28/09/2026 sur la
+    # planche annexe de Gannay, la seule assez remplie pour que ça se voie. Le
+    # repli est mesuré sur une seule colonne, le cas le plus étroit et donc le
+    # plus haut : réserver trop vaut mieux que déborder.
+    hauteur_note_reservee = 2.0 + taille_note * interligne_note * len(
+        planche.decouper_en_lignes(note, LARGEUR_TABLEAU_MM - 4.4, taille_note)
+    )
+    hauteur_dispo = zone_h - 6.0 - hauteur_note_reservee
 
     par_colonne = max(1, int((hauteur_dispo - hauteur_entete - hauteur_ligne)
                              // hauteur_ligne))
     nb_colonnes = -(-len(lignes) // par_colonne)
-    if nb_colonnes > 2:
-        raise ErreurRendu(
-            f"{len(lignes)} parcelles d'assiette : le tableau récapitulatif ne "
-            f"tient pas sur la planche (au plus {2 * par_colonne}). Reportez-le "
-            "sur une planche dédiée."
-        )
+    if nb_colonnes > colonnes_max:
+        return False
     nb_colonnes = max(1, nb_colonnes)
 
     largeur = LARGEUR_TABLEAU_MM * nb_colonnes
-    x = zone_x + zone_l - largeur - 3.0
+    x = (
+        zone_x + (zone_l - largeur) / 2.0
+        if au_centre
+        else zone_x + zone_l - largeur - 3.0
+    )
     y = zone_y + 3.0
     # La note est repliée sur la largeur du tableau : mesurée avec le moteur de
     # rendu, elle ne peut pas déborder du cadre.
@@ -343,6 +460,7 @@ def _tableau_parcelles(planche, concernees, surface_emprise_m2: float) -> None:
         taille=taille_note, interligne=interligne_note, justifie=False,
         couleur=GRIS,
     )
+    return True
 
 
 def _contenance(valeur_m2: float) -> str:

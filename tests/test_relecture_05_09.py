@@ -550,3 +550,173 @@ def test_l_indice_fait_partie_du_nom_du_projet():
     # Sans indice — le plan n'a pas encore été importé — le nom reste utilisable.
     assert nom_de_projet("Sarnois") == "PV Sarnois"
     assert nom_de_projet("Sarnois", "  ") == "PV Sarnois"
+
+
+# ---------------------------------------------------------------------------
+# Le cadastre hors norme — Gannay-sur-Loire, 28/09/2026
+# ---------------------------------------------------------------------------
+
+
+def _parcelles_fictives(nombre: int) -> list:
+    """`nombre` parcelles d'assiette, telles que le tableau les lit."""
+    from dp_socle.planches.dp1_3_cadastre import _Ligne
+
+    return [
+        _Ligne({"section": "AN", "numero": f"{rang:04d}", "contenance_m2": 256.0})
+        for rang in range(134, 134 + nombre)
+    ]
+
+
+def _planche_nue():
+    from dp_socle.planche import Planche
+
+    return Planche(
+        titre="ESSAI", numero="T", projet="Essai", date="28/09/2026",
+        avec_cartouche=True,
+    )
+
+
+def test_le_tableau_des_parcelles_dit_quand_il_ne_tient_pas():
+    """Au-delà de deux colonnes, il masquerait l'emprise qu'il décrit.
+
+    Relevé le 28/09/2026 sur Gannay-sur-Loire : 139 parcelles d'assiette, dont
+    des dizaines de 15 m² — un micro-parcellaire régulier. Le tableau en
+    demandait trois colonnes, et rendu tel quel il couvrait plus de la moitié
+    de la planche, emprise comprise. Il se reporte donc sur sa propre planche,
+    où il en prend cinq.
+
+    L'ancien code levait `ErreurRendu`, et la pièce entière disparaissait du
+    dossier — une pièce obligatoire, sans que rien d'autre que le rapport ne le
+    dise.
+    """
+    from dp_socle.planches.dp1_3_cadastre import (
+        COLONNES_SUR_LE_PLAN,
+        COLONNES_SUR_SA_PLANCHE,
+        _tableau_parcelles,
+    )
+
+    parcelles = _parcelles_fictives(139)
+    assert not _tableau_parcelles(
+        _planche_nue(), parcelles, 43_485.0, colonnes_max=COLONNES_SUR_LE_PLAN
+    )
+    assert _tableau_parcelles(
+        _planche_nue(), parcelles, 43_485.0,
+        colonnes_max=COLONNES_SUR_SA_PLANCHE, au_centre=True,
+    )
+    # Ce qui tient sur le plan continue d'y tenir : deux colonnes, pas de report.
+    assert _tableau_parcelles(
+        _planche_nue(), _parcelles_fictives(80), 43_485.0,
+        colonnes_max=COLONNES_SUR_LE_PLAN,
+    )
+
+
+def test_la_planche_du_tableau_porte_ses_parcelles(tmp_path):
+    """La planche annexe se compose depuis ce que le plan a déjà relevé.
+
+    Pas d'appel au WFS pour la produire : ce sont les mêmes parcelles, et les
+    redemander exposerait le dossier à ce que l'IGN réponde autrement entre
+    deux requêtes.
+    """
+    pytest.importorskip("cairosvg")
+    from dp_socle.environnement import preparer_cairo
+
+    preparer_cairo()
+    from dp_socle.planches import dp1_3_cadastre
+    from dp_socle.projet import Projet
+
+    projet = Projet(
+        nom="PV-Essai", commune="Essai", code_postal="01000",
+        date="2026-09-28", emprise=None,
+    )
+    details = {
+        "surface_emprise_m2": 43_485.0,
+        "parcelles_assiette": [
+            {"section": "AN", "numero": f"{rang:04d}", "contenance_m2": 256.0}
+            for rang in range(134, 273)
+        ],
+    }
+    sortie = dp1_3_cadastre.generer_tableau(projet, details, tmp_path, numero="5")
+
+    assert sortie.numero == "DP 1-3 bis"
+    assert sortie.details["nb_parcelles"] == 139
+    assert sortie.chemin.exists()
+    # Le total est celui des contenances, pas celui de l'emprise dessinée.
+    svg = sortie.planche.svg()
+    assert "Total (139 parcelles)" in svg
+
+
+def test_la_planche_du_tableau_refuse_de_sortir_pour_rien(tmp_path):
+    """Sans parcelle d'assiette, l'annexe n'a pas lieu d'être."""
+    from dp_socle.erreurs import ErreurRendu
+    from dp_socle.planches import dp1_3_cadastre
+    from dp_socle.projet import Projet
+
+    projet = Projet(
+        nom="PV-Essai", commune="Essai", code_postal="01000",
+        date="2026-09-28", emprise=None,
+    )
+    with pytest.raises(ErreurRendu, match="n'a pas lieu d'être"):
+        dp1_3_cadastre.generer_tableau(
+            projet, {"parcelles_assiette": []}, tmp_path
+        )
+
+
+def test_la_planche_du_tableau_ne_decale_rien_tant_qu_elle_n_existe_pas():
+    """Une pièce facultative ne renumérote que les dossiers qui la portent.
+
+    Même mécanique qu'un projet sans poste, qui n'a pas de DP 4-1 : c'est
+    `codes_produits` qui compte, et il ne compte que ce qui existe.
+    """
+    from dp_socle.dossier import codes_produits, numero_planche
+
+    sans = codes_produits(["DP 1-1", "DP 1-2", "DP 1-3", "DP 2", "DP 3"])
+    avec = codes_produits(
+        ["DP 1-1", "DP 1-2", "DP 1-3", "DP 1-3 bis", "DP 2", "DP 3"]
+    )
+    assert numero_planche("DP 1-3", sans) == numero_planche("DP 1-3", avec) == 4
+    assert numero_planche("DP 2", sans) == 5
+    assert numero_planche("DP 1-3 bis", avec) == 5
+    assert numero_planche("DP 2", avec) == 6
+
+
+def test_le_cadre_du_tableau_ne_deborde_pas_sur_le_cartouche():
+    """La note se réserve **avant** qu'on décide combien de lignes tiennent.
+
+    Ajoutée après coup à la hauteur du cadre, elle le poussait par-dessus le
+    cartouche — signalé le 28/09/2026 sur la planche annexe de Gannay, la seule
+    assez remplie pour que ça se voie. Sur le plan, le tableau est trop court
+    pour atteindre le bas de la planche, et le défaut y dormait.
+    """
+    import re
+
+    from dp_socle.planches.dp1_3_cadastre import (
+        COLONNES_SUR_SA_PLANCHE,
+        LARGEUR_TABLEAU_MM,
+        _tableau_parcelles,
+    )
+
+    planche = _planche_nue()
+    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+    # De quoi remplir les cinq colonnes jusqu'au bord.
+    assert _tableau_parcelles(
+        planche, _parcelles_fictives(280), 43_485.0,
+        colonnes_max=COLONNES_SUR_SA_PLANCHE, au_centre=True,
+    )
+
+    cadres = [
+        (float(x), float(y), float(largeur), float(hauteur))
+        for x, y, largeur, hauteur in re.findall(
+            r'<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)" height="([\d.-]+)"',
+            planche.svg(),
+        )
+    ]
+    tableaux = [
+        c for c in cadres
+        if abs(c[2] % LARGEUR_TABLEAU_MM) < 0.01 and c[2] >= LARGEUR_TABLEAU_MM
+    ]
+    assert tableaux, [c[2] for c in cadres]
+    bas_du_tableau = max(y + hauteur for _x, y, _l, hauteur in tableaux)
+    assert bas_du_tableau <= zone_y + zone_h, (
+        f"le cadre descend à {bas_du_tableau:.1f} mm, "
+        f"la zone de dessin s'arrête à {zone_y + zone_h:.1f} mm"
+    )
