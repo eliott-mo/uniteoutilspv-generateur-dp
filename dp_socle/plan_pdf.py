@@ -111,6 +111,9 @@ CORRESPONDANCE_LEGENDE = {
     "Bac de rétention": "bac_retention",
     "Bac de rétention des eaux": "bac_retention",
     "Bac de récupération des eaux": "bac_retention",
+    # Le béton en place, quand la légende du plan PDF le nomme. Traçé et
+    # élargi comme une piste : c'est une voie, dont le plan donne le fil.
+    "Chemin existant": "chemin_existant",
     "Piste lourde existante": "piste_lourde_existante",
     "Piste lourde à créer": "piste_lourde_a_creer",
     "Piste légère": "piste_legere",
@@ -142,6 +145,7 @@ CATEGORIES_TRACEES = (
     "cloture",
     "haie",
     "haie_existante",
+    "chemin_existant",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     "piste_lourde",
@@ -153,6 +157,7 @@ CATEGORIES_TRACEES = (
 #: type, et `pistes.py` en fait une piste de 5 m aux virages arrondis
 #: (instruction du chef de projet du 23/09/2026).
 CATEGORIES_PISTES = (
+    "chemin_existant",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     "piste_lourde",

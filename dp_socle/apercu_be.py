@@ -62,6 +62,11 @@ STYLES = {
     "ptr": StyleCategorie("Poste de transformation", (90, 214, 160), (0, 0, 0)),
     "pdl": StyleCategorie("Poste de livraison", (176, 255, 224), (0, 0, 0)),
     "bache_incendie": StyleCategorie("Citerne incendie", (63, 191, 191), (0, 0, 0)),
+    # Le jaune du plan du bureau d'études, sous lequel le chef de projet lit
+    # déjà ces chemins : l'aperçu sert à recoupler l'un sur l'autre.
+    "chemin_existant": StyleCategorie(
+        "Chemin existant", (221, 196, 79), (138, 111, 30)
+    ),
     "piste_lourde_existante": StyleCategorie(
         "Piste lourde existante", (162, 162, 162), (110, 110, 110)
     ),
@@ -142,6 +147,7 @@ STYLES = {
 ORDRE_DESSIN = (
     "zone_evitee",
     "plateforme",
+    "chemin_existant",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     "piste_legere",

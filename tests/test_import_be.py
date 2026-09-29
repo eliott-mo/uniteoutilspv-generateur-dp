@@ -945,6 +945,25 @@ def test_portail_d_exploitation_distinct_du_portail_d_acces():
     assert "portail_exploitant" in CATEGORIES
 
 
+def test_le_calque_des_chemins_existants_est_reconnu_sans_gonfler_la_voie_lourde():
+    """Le béton déjà en place entre au dossier sans entrer dans les comptes.
+
+    Saint-Cyr, 29/09/2026 : le chef de projet demande que les chemins bétonnés
+    existants figurent au plan. Le tableau bilan ne les compte pas — 3 362 m²
+    de voie lourde au plan pour 3 365 déclarés, soit l'anneau seul. Les
+    additionner à la voie lourde ferait échouer un contrôle qui a raison.
+    """
+    from dp_socle.import_be import (
+        CATEGORIES,
+        CATEGORIES_VOIE_LOURDE,
+        categorie_proposee,
+    )
+
+    assert categorie_proposee("UNI_VRD_Chemin_existant") == "chemin_existant"
+    assert "chemin_existant" in CATEGORIES
+    assert "chemin_existant" not in CATEGORIES_VOIE_LOURDE
+
+
 def test_noms_de_calque_de_sarnois_apparies():
     """La charte du BE n'est pas figée d'un projet à l'autre."""
     from dp_socle.import_be import categorie_proposee

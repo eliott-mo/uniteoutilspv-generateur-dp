@@ -168,6 +168,49 @@ def test_une_categorie_non_dessinee_ne_figure_pas():
     assert libelles == ["Panneaux photovoltaïques", "Clôture du projet solaire"]
 
 
+def test_le_chemin_existant_a_sa_propre_entree():
+    """Le béton en place n'est ni une voie du projet ni de la grave compactée.
+
+    Demandé le 29/09/2026 sur Saint-Cyr : le terrain porte un réseau de chemins
+    bétonnés que le bureau d'études dessine en jaune et que son tableau bilan ne
+    compte pas — 3 362 m² de voie lourde au plan pour 3 365 déclarés, chemins
+    exclus des deux côtés. Les confondre avec la piste lourde existante ferait
+    lire au dossier des voies du projet là où il n'y a que l'état du terrain.
+    """
+    legende = construire_legende(("piste_lourde_existante", "chemin_existant"))
+
+    assert [e.libelle for e in legende] == [
+        "Chemin existant",
+        "Piste lourde existante (à renforcer si nécessaire)",
+    ]
+
+
+def test_le_chemin_existant_se_dessine_sous_les_voies_du_projet():
+    """Le sol qui préexiste passe dessous : ce que le projet pose se voit."""
+    assert STYLES["chemin_existant"].rang < STYLES["piste_lourde_existante"].rang
+    assert STYLES["plateforme"].rang < STYLES["chemin_existant"].rang
+
+
+def test_le_chemin_existant_ne_partage_le_gris_d_aucune_voie():
+    """Il n'a pas de `matiere` : le béton n'est pas de la grave compactée.
+
+    Conséquence mesurée : sa teinte doit tenir seule le critère d'écart, là où
+    les trois statuts de voie lourde en sont dispensés entre eux. Aucun
+    quatrième neutre ne le tenait — balayé le 29/09/2026, le meilleur gris
+    clair plafonnait à 10,5 ΔE contre 12 exigés — d'où le jaune, celui sous
+    lequel le bureau d'études dessine déjà ces chemins.
+    """
+    fiche = STYLES["chemin_existant"]
+    assert fiche.matiere is None
+    assert fiche.style.remplissage != STYLES["piste_lourde_existante"].style.remplissage
+
+    ecart = ecart_perceptuel(
+        couleur_significative(fiche),
+        couleur_significative(STYLES["piste_lourde_existante"]),
+    )
+    assert ecart >= ECART_MINIMAL, f"ΔE {ecart:.1f}"
+
+
 def test_deux_categories_de_meme_intitule_ne_font_quune_entree():
     """`piste_lourde` et `aire_grutage` sont toutes deux « Voie lourde »."""
     legende = construire_legende(("piste_lourde", "aire_grutage"))

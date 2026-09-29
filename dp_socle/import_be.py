@@ -85,6 +85,9 @@ CATEGORIES = (
     "ptr",
     "pdl",
     "plateforme",
+    # Le béton déjà en place, distinct des voies du projet : il ne se compte
+    # pas au tableau bilan et ne s'additionne donc pas à la voie lourde.
+    "chemin_existant",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
     # Le BE de Sarnois ne sépare pas l'existant du créé mais le lourd du léger,
@@ -153,6 +156,11 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_PDL": "pdl_ptr",
     "UNI_VRD_Plateforme": "plateforme",
     "UNI_VRD_Piste_lourde_existante": "piste_lourde_existante",
+    # Nom demandé au bureau d'études le 29/09/2026 pour Saint-Cyr, où les
+    # chemins bétonnés existants n'étaient pas exportés du tout. À confirmer
+    # sur le premier plan qui en portera : l'écran de correspondance reste le
+    # recours si le calque arrive sous un autre nom.
+    "UNI_VRD_Chemin_existant": "chemin_existant",
     "UNI_VRD_Piste_lourde_à_créer": "piste_lourde_a_creer",
     "UNI_SDIS_Bache_incendie": "bache_incendie",
     "UNI_SDIS_Aire_d-aspiration": "aire_aspiration",

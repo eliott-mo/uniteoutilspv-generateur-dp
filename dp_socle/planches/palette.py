@@ -122,49 +122,63 @@ STYLES = {
     "plateforme": StyleDP(
         "Plateforme", 2, _remplie("#e4e4e4", "#6e6e6e")
     ),
+    # Le béton déjà en place, que le bureau d'études appelle « chemin
+    # existant » et dessine en jaune. Ce n'est ni de la grave compactée ni un
+    # ouvrage du projet : c'est l'état du terrain, et le tableau bilan ne le
+    # compte pas — mesuré sur Saint-Cyr IND07 le 29/09/2026, 3 362 m² de voie
+    # lourde au plan pour 3 365 déclarés, chemins exclus des deux côtés.
+    #
+    # La teinte n'est pas un gris : les trois gris de sol occupent déjà toute
+    # la bande neutre, et aucun quatrième ne tient les 12 ΔE du critère —
+    # balayé le 29/09/2026, le meilleur neutre clair plafonne à 10,5. Le jaune
+    # est celui sous lequel le chef de projet et le bureau d'études lisent déjà
+    # ces chemins sur leur plan, et il tient le critère avec 17,8.
+    "chemin_existant": StyleDP(
+        "Chemin existant", 3, _remplie("#ddc44f", "#8a6f1e")
+    ),
     # L'intitulé est celui de la légende du plan du bureau d'études, relevé sur
     # le PDF de Saint-Cyr le 04/09/2026 : « Piste lourde existante (à renforcer
     # si nécessaire) ». Le renforcement d'une piste existante n'est pas la
     # création d'une piste, et c'est la distinction qui compte à l'instruction.
     "piste_lourde_existante": StyleDP(
-        "Piste lourde existante (à renforcer si nécessaire)", 3,
+        "Piste lourde existante (à renforcer si nécessaire)", 4,
         _remplie("#979797", "#6e6e6e"), matiere="voie_lourde",
     ),
     "piste_lourde_a_creer": StyleDP(
-        "Piste lourde à créer", 4, _remplie("#979797", "#000000"),
+        "Piste lourde à créer", 5, _remplie("#979797", "#000000"),
         matiere="voie_lourde",
     ),
     "piste_legere": StyleDP(
-        "Piste légère", 5, _remplie("#bdbdbd", "#8c8c8c")
+        "Piste légère", 6, _remplie("#bdbdbd", "#8c8c8c")
     ),
     "piste_lourde": StyleDP(
-        "Voie lourde", 6, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
+        "Voie lourde", 7, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
     ),
     # Même intitulé et même style que la voie lourde, délibérément : une aire de
     # grutage est un élargissement de voie, que le tableau bilan compte en
     # « supplément piste lourde » et que la légende du dossier ne distingue pas.
     # Une seule entrée en sort.
     "aire_grutage": StyleDP(
-        "Voie lourde", 7, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
+        "Voie lourde", 8, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
     ),
     # Dérivée : le gris 215 du contrat la confondait avec la plateforme, dont
     # elle est toujours voisine. Bleu clair, comme l'ouvrage SDIS qu'elle sert.
     "aire_aspiration": StyleDP(
-        "Aire d'aspiration", 8, _remplie("#c3dcef", "#3f7f9f")
+        "Aire d'aspiration", 9, _remplie("#c3dcef", "#3f7f9f")
     ),
-    "espace_vert": StyleDP("Espace vert", 9, _remplie("#c9dfa8", "#7d9b55")),
+    "espace_vert": StyleDP("Espace vert", 10, _remplie("#c9dfa8", "#7d9b55")),
     "arbre_existant": StyleDP(
-        "Arbres existants", 10, _remplie("#5a8f4a", "#37592c"),
+        "Arbres existants", 11, _remplie("#5a8f4a", "#37592c"),
         symbole="vegetation",
     ),
     # Installations de chantier : temporaires. Elles ne sont ni dessinées ni
     # portées en légende (décision D3), et gardent un style pour le seul cas où
     # une planche de contrôle voudrait les montrer.
     "base_vie": StyleDP(
-        "Base vie (chantier)", 11, _remplie("#e8d8be", "#967646"), dessinee=False
+        "Base vie (chantier)", 12, _remplie("#e8d8be", "#967646"), dessinee=False
     ),
     "stockage_chantier": StyleDP(
-        "Stockage logistique (chantier)", 12, _remplie("#e8d8be", "#967646"),
+        "Stockage logistique (chantier)", 13, _remplie("#e8d8be", "#967646"),
         dessinee=False,
     ),
     # Le symbole est une **bande**, et non le houppier bosselé des arbres : au
@@ -172,14 +186,14 @@ STYLES = {
     # ainsi que le dossier de référence la dessine. Un houppier en légende pour
     # une bande au plan faisait chercher des arbres qui n'y sont pas.
     "haie": StyleDP(
-        "Haie plantée", 13,
+        "Haie plantée", 14,
         Style(trait="#50780a", epaisseur_mm=0.4, remplissage="#6faa0b"),
         relevee=True, symbole="bande",
     ),
     # Dérivée : vert sombre, pour se lire contre la haie plantée sans lui
     # disputer sa teinte relevée.
     "haie_existante": StyleDP(
-        "Haie existante", 14,
+        "Haie existante", 15,
         Style(trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18"),
         symbole="vegetation",
     ),
@@ -188,52 +202,52 @@ STYLES = {
     # même teinte, même intitulé — celui du dossier de référence, « Panneaux
     # photovoltaïques » — donc une seule entrée de légende.
     "tables_pv": StyleDP(
-        "Panneaux photovoltaïques", 16,
+        "Panneaux photovoltaïques", 17,
         Style(trait="#2c4a8a", epaisseur_mm=0.2, remplissage="#97caca"),
         relevee=True,
     ),
     "modules_pv": StyleDP(
-        "Panneaux photovoltaïques", 17,
+        "Panneaux photovoltaïques", 18,
         Style(trait="#2c4a8a", epaisseur_mm=0.08, remplissage="#97caca"),
     ),
     # -- postes -------------------------------------------------------------
     "pdl_ptr": StyleDP(
-        "Poste de livraison / transformation", 18, _remplie("#7fffbf", "#000000"),
+        "Poste de livraison / transformation", 19, _remplie("#7fffbf", "#000000"),
         relevee=True,
     ),
     # Dérivées : trois postes distincts au tableau bilan, trois entrées de
     # légende au dossier. Le vert du PDL/PTR est relevé ; les deux autres s'en
     # écartent en clarté, ce qui reste lisible sur un objet de 12 x 3 mm.
-    "ptr": StyleDP("Poste de transformation", 19, _remplie("#2f9e6a", "#000000")),
-    "pdl": StyleDP("Poste de livraison", 20, _remplie("#d5f7e6", "#000000")),
+    "ptr": StyleDP("Poste de transformation", 20, _remplie("#2f9e6a", "#000000")),
+    "pdl": StyleDP("Poste de livraison", 21, _remplie("#d5f7e6", "#000000")),
     # Dérivée : le contrat lui donnait le vert du PDL/PTR, qu'elle ne peut pas
     # porter — les deux se côtoient sur le même plan. Un local technique n'est
     # pas un poste électrique : teinte neutre chaude.
     "local_technique": StyleDP(
-        "Local technique", 21, _remplie("#cfc0a8", "#7a6a50")
+        "Local technique", 22, _remplie("#cfc0a8", "#7a6a50")
     ),
-    "bess": StyleDP("Conteneurs BESS", 22, _remplie("#ffcd78", "#8a5a10")),
+    "bess": StyleDP("Conteneurs BESS", 23, _remplie("#ffcd78", "#8a5a10")),
     # Dérivée : le bac de rétention retient de l'huile, pas de l'eau. Le
     # cyan du contrat le confondait avec la citerne incendie, teinte relevée.
     "bac_retention": StyleDP(
-        "Bac de rétention", 23, _remplie("#6e96b4", "#2f4d66")
+        "Bac de rétention", 24, _remplie("#6e96b4", "#2f4d66")
     ),
     # Dérivée : cyan sombre, distinct de la citerne incendie (relevée, cyan
     # moyen) comme de la teinte des tables.
     "citerne_refroidissement": StyleDP(
-        "Citerne de refroidissement", 24, _remplie("#1d7d99", "#0d3f4f")
+        "Citerne de refroidissement", 25, _remplie("#1d7d99", "#0d3f4f")
     ),
     # Dérivée : orangé pâle, de la même famille que le BESS qu'elle dessert.
-    "zone_remise": StyleDP("Zone de remise", 25, _remplie("#ffe6bb", "#8a5a10")),
+    "zone_remise": StyleDP("Zone de remise", 26, _remplie("#ffe6bb", "#8a5a10")),
     "bac_equarrissage": StyleDP(
-        "Bac d'équarrissage", 26, _remplie("#a8703c", "#5c3c1e")
+        "Bac d'équarrissage", 27, _remplie("#a8703c", "#5c3c1e")
     ),
     "bache_incendie": StyleDP(
-        "Citerne incendie", 27, _remplie("#3fbfbf", "#000000"), relevee=True
+        "Citerne incendie", 28, _remplie("#3fbfbf", "#000000"), relevee=True
     ),
     # -- linéaires ----------------------------------------------------------
     "limite_paddock": StyleDP(
-        "Limite de paddock", 28,
+        "Limite de paddock", 29,
         Style(trait="#966e14", epaisseur_mm=0.3, remplissage="none",
               tirets="2.0 1.2"),
         symbole="ligne",
@@ -241,17 +255,17 @@ STYLES = {
     # Dérivée : ocre franc. Le beige pâle du contrat se confondait avec la
     # zone de remise, dont elle ne partage ni la fonction ni la planche.
     "zone_contention": StyleDP(
-        "Zone de contention", 29, _remplie("#d8bc72", "#7a5a10")
+        "Zone de contention", 30, _remplie("#d8bc72", "#7a5a10")
     ),
     # Tracés d'étude, exclus du dossier (décision D3) : seule la clôture
     # délimite le projet à l'instruction.
     "recul_implantation": StyleDP(
-        "Recul d'implantation (étude)", 30,
+        "Recul d'implantation (étude)", 31,
         Style(trait="#c87828", epaisseur_mm=0.2, remplissage="none"),
         dessinee=False, symbole="tirete",
     ),
     "zone_implantation_pv": StyleDP(
-        "Zone d'implantation (étude)", 31,
+        "Zone d'implantation (étude)", 32,
         Style(trait="#ff2d2d", epaisseur_mm=0.3, remplissage="none"),
         dessinee=False, symbole="tirete",
     ),
@@ -259,7 +273,7 @@ STYLES = {
     # **est** un trait rouge continu, et lui donner en légende un grillage sur
     # poteaux promettait un figuré que la planche ne porte pas.
     "cloture": StyleDP(
-        "Clôture du projet solaire", 32,
+        "Clôture du projet solaire", 33,
         Style(trait="#ff0000", epaisseur_mm=0.5, remplissage="none"),
         relevee=True, symbole="ligne",
     ),
@@ -269,14 +283,14 @@ STYLES = {
     # moteur est un rectangle, et la clôture comme le portail sont rouges au
     # dossier de référence. Deux entrées, deux libellés, un même rouge.
     "portail": StyleDP(
-        "Portail", 33,
+        "Portail", 34,
         Style(trait="#ff0000", epaisseur_mm=0.9, remplissage="none"),
         relevee=True, symbole="portail",
     ),
     # Dérivée : rouge sombre et tireté, pour ne pas se lire comme le portail
     # d'accès, que seul le tableau bilan compte.
     "portail_exploitant": StyleDP(
-        "Portail d'exploitation", 34,
+        "Portail d'exploitation", 35,
         Style(trait="#8a0000", epaisseur_mm=0.45, remplissage="none",
               tirets="1.4 0.8"),
         symbole="portail",
