@@ -98,6 +98,10 @@ class Style:
     remplissage: str | None = "none"
     opacite_remplissage: float = 1.0
     tirets: str | None = None
+    #: Référence `url(#…)` d'un motif posé par-dessus le remplissage, pour
+    #: distinguer deux statuts d'un même revêtement. La forme est alors tracée
+    #: deux fois : la couleur pleine, puis la hachure. Voir `MOTIFS`.
+    hachure: str | None = None
 
     def attributs(self) -> str:
         morceaux = [
@@ -122,6 +126,41 @@ MOTIF_BATIMENT = (
     '<path d="M 0 1 L 1 0" stroke="#4a4a4a" stroke-width="0.12" fill="none"/>'
     "</pattern>"
 )
+
+#: Hachures de l'ouvrage projeté, posées sur le gris de la voie lourde. Le
+#: remplissage reste la même grave compactée que l'existant — c'est le même
+#: revêtement — et c'est la hachure qui porte « à créer ». Mesuré le
+#: 29/09/2026 : les deux statuts ne différaient que par leur filet de 0,2 mm,
+#: soit rien du tout sur deux surfaces voisines, et leurs deux pastilles de
+#: légende étaient le même gris. Le lecteur avait deux entrées qu'il ne
+#: pouvait pas reporter sur le plan.
+#:
+#: Le motif ne porte que ses traits, et se pose **par-dessus** le
+#: remplissage : un `<pattern>` qui porte son propre fond laisse des coutures
+#: blanches entre tuiles au rendu PDF — cairo pave à la résolution du
+#: périphérique et le bord du rect s'y voit, mesuré le 29/09/2026. Celui des
+#: bâtiments, qui n'a que ses traits, ne les a pas. L'inclinaison est
+#: l'opposée de la leur, pour ne pas les confondre là où ils se touchent.
+MOTIF_PISTE_A_CREER = (
+    '<pattern id="hachures-piste-a-creer" width="1.4" height="1.4" '
+    'patternUnits="userSpaceOnUse">'
+    '<path d="M 0 0 L 1.4 1.4" stroke="#3a3a3a" stroke-width="0.25" fill="none"/>'
+    "</pattern>"
+)
+
+#: Référence SVG du motif, telle qu'un remplissage la porte.
+REF_PISTE_A_CREER = "url(#hachures-piste-a-creer)"
+
+#: Les motifs connus, par identifiant.
+#:
+#: Une référence `url(#id)` que `<defs>` ne porte pas **ne lève pas** : cairo
+#: dessine la forme sans remplissage, et une piste hachurée disparaîtrait du
+#: plan sans un mot. Le moteur pose donc la définition dès qu'il voit la
+#: référence, et refuse une référence qu'il ne connaît pas.
+MOTIFS = {
+    "hachures-bati": MOTIF_BATIMENT,
+    "hachures-piste-a-creer": MOTIF_PISTE_A_CREER,
+}
 
 #: Styles employés par les planches du socle.
 STYLE_EMPRISE = Style(trait="#d40000", epaisseur_mm=0.6, remplissage="#d40000",
@@ -262,6 +301,51 @@ class Planche:
             f'xlink:href="data:image/jpeg;base64,{donnees}"/>'
         )
 
+    def _attributs_hachure(self, style) -> str | None:
+        """Attributs de la seconde passe, ou None si le style n'en demande pas.
+
+        La hachure ne reprend pas le filet : il a déjà été tracé par la
+        première passe, et le repasser épaissirait le contour.
+        """
+        reference = getattr(style, "hachure", None)
+        if not reference:
+            return None
+        self._poser_le_motif(reference)
+        return f'fill="{reference}" stroke="none"'
+
+    def _attributs(self, style) -> str:
+        """Attributs SVG d'un style, motif déclaré au passage.
+
+        Passer par ici plutôt que par `_style_attributs` est ce qui garantit
+        qu'un remplissage hachuré trouve sa définition : voir `MOTIFS`.
+        """
+        if isinstance(style, Style):
+            remplissage = style.remplissage
+        elif isinstance(style, dict):
+            remplissage = style.get("fill")
+        else:
+            remplissage = None
+        if isinstance(remplissage, str) and remplissage.startswith("url(#"):
+            self._poser_le_motif(remplissage)
+        return _style_attributs(style)
+
+    def _poser_le_motif(self, reference: str) -> None:
+        """Déclare dans `<defs>` le motif qu'une référence appelle.
+
+        Une `url(#id)` que `<defs>` ne porte pas **ne lève pas** : cairo dessine
+        la forme sans remplissage, et elle disparaîtrait de la planche sans un
+        mot.
+        """
+        identifiant = reference[len("url(#"):].rstrip(")")
+        motif = MOTIFS.get(identifiant)
+        if motif is None:
+            raise ErreurRendu(
+                f"Remplissage « {reference} » sans motif connu : la forme serait "
+                "dessinée sans remplissage, et disparaîtrait de la planche sans "
+                f"erreur. Motifs déclarés : {', '.join(MOTIFS)}."
+            )
+        self.ajouter_definition(motif)
+
     def ajouter_definition(self, element_svg: str) -> None:
         """Ajoute un élément dans `<defs>` — motif, dégradé, masque.
 
@@ -275,7 +359,10 @@ class Planche:
         chemin = self._chemin(geom)
         if not chemin:
             return
-        self._carto.append(f'<path d="{chemin}" {_style_attributs(style)}/>')
+        self._carto.append(f'<path d="{chemin}" {self._attributs(style)}/>')
+        hachure = self._attributs_hachure(style)
+        if hachure:
+            self._carto.append(f'<path d="{chemin}" {hachure}/>')
 
     def ajouter_etiquettes(
         self,
@@ -429,17 +516,21 @@ class Planche:
         self, x_mm, y_mm, largeur_mm, hauteur_mm, style: Style | dict = Style(),
         habillage: bool = True,
     ) -> None:
-        element = (
+        cible = self._habillage if habillage else self._carto
+        forme = (
             f'<rect x="{_n(x_mm)}" y="{_n(y_mm)}" width="{_n(largeur_mm)}" '
-            f'height="{_n(hauteur_mm)}" {_style_attributs(style)}/>'
+            f'height="{_n(hauteur_mm)}" '
         )
-        (self._habillage if habillage else self._carto).append(element)
+        cible.append(forme + f"{self._attributs(style)}/>")
+        hachure = self._attributs_hachure(style)
+        if hachure:
+            cible.append(forme + f"{hachure}/>")
 
     def ajouter_ligne(self, x1, y1, x2, y2, style: Style | dict = Style(),
                       habillage: bool = True) -> None:
         element = (
             f'<line x1="{_n(x1)}" y1="{_n(y1)}" x2="{_n(x2)}" y2="{_n(y2)}" '
-            f'{_style_attributs(style)}/>'
+            f'{self._attributs(style)}/>'
         )
         (self._habillage if habillage else self._carto).append(element)
 
@@ -527,10 +618,14 @@ class Planche:
             curseur += hauteur_titre
         for entree in entrees:
             haut = curseur + 1.0
-            self._habillage.append(
+            pastille = (
                 f'<rect x="{_n(x_mm + marge)}" y="{_n(haut)}" width="6" '
-                f'height="3" {_style_attributs(entree.style)}/>'
+                f'height="3" '
             )
+            self._habillage.append(pastille + f"{self._attributs(entree.style)}/>")
+            hachure = self._attributs_hachure(entree.style)
+            if hachure:
+                self._habillage.append(pastille + f"{hachure}/>")
             self.ajouter_texte(
                 x_mm + marge + 8.0, haut + 2.6, entree.libelle,
                 taille=TAILLE_COURANTE,

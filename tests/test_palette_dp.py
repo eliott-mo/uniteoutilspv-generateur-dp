@@ -60,7 +60,11 @@ GRIS_DE_SOL = {
 
 @pytest.mark.parametrize("categorie, teintes", sorted(GRIS_DE_SOL.items()))
 def test_les_gris_de_sol_sont_etages(categorie, teintes):
-    """Ils ne sont plus relevés : l'écart au document de référence est assumé."""
+    """Ils ne sont plus relevés : l'écart au document de référence est assumé.
+
+    La piste à créer garde ce gris-là depuis qu'elle est hachurée : la hachure
+    se pose par-dessus, elle ne remplace pas le revêtement.
+    """
     retenue, relevee = teintes
     fiche = style(categorie)
     assert fiche.style.remplissage == retenue
@@ -399,6 +403,62 @@ def test_lintitule_de_la_piste_existante_est_celui_du_bureau_detudes():
         "Piste lourde existante (à renforcer si nécessaire)"
     )
     assert "à créer" in style("piste_lourde_a_creer").libelle
+
+
+def test_la_piste_a_creer_se_hachure_sur_le_plan_et_en_legende():
+    """Le même gris que l'existante, et la hachure qui les sépare.
+
+    Mesuré le 29/09/2026 : les deux statuts ne différaient que par un filet de
+    0,2 mm — ΔE 0,0 entre leurs remplissages — et leurs deux pastilles de
+    légende étaient le même gris. Le lecteur avait deux entrées qu'il ne
+    pouvait pas reporter sur le plan, ce qui est exactement ce qu'un dossier
+    d'instruction doit rendre lisible.
+
+    Mesuré dans le SVG de sortie, et des deux côtés : la forme du plan et la
+    pastille de la légende. Une hachure qui ne serait que dans la légende
+    mentirait autant que pas de hachure du tout.
+    """
+    from dp_socle.planche import REF_PISTE_A_CREER, Planche
+    from dp_socle.planches.legende import dessiner_legende
+
+    planche = Planche(
+        titre="T", numero="T", projet="T", date="29/09/2026", avec_cartouche=False
+    )
+    planche.ajouter_rectangle(
+        10.0, 40.0, 30.0, 20.0, STYLES["piste_lourde_a_creer"].style
+    )
+    dessiner_legende(
+        planche,
+        construire_legende(("piste_lourde_existante", "piste_lourde_a_creer")),
+        position=(10.0, 10.0),
+    )
+    svg = planche.svg()
+
+    assert svg.count(REF_PISTE_A_CREER) == 2, "le plan et la pastille"
+    assert svg.count('<pattern id="hachures-piste-a-creer"') == 1, "posé une fois"
+    # Et les deux gardent le même gris : la hachure se pose par-dessus le
+    # revêtement, elle ne le remplace pas.
+    assert STYLES["piste_lourde_existante"].style.remplissage == "#979797"
+    assert STYLES["piste_lourde_a_creer"].style.remplissage == "#979797"
+
+
+def test_un_remplissage_sans_motif_connu_est_refuse():
+    """Une référence que `defs` ne porte pas ne lève pas d'elle-même.
+
+    Cairo dessine alors la forme **sans remplissage** : la piste disparaîtrait
+    du plan sans un mot, ce qui est le repli silencieux que le dépôt refuse.
+    """
+    from dp_socle.erreurs import ErreurRendu
+    from dp_socle.planche import Planche, Style
+
+    planche = Planche(
+        titre="T", numero="T", projet="T", date="29/09/2026", avec_cartouche=False
+    )
+
+    with pytest.raises(ErreurRendu, match="sans motif connu"):
+        planche.ajouter_rectangle(
+            0.0, 0.0, 10.0, 10.0, Style(remplissage="url(#hachures-inventees)")
+        )
 
 
 def test_la_legende_dessinee_a_la_hauteur_quelle_annonce():

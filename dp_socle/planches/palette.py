@@ -37,7 +37,7 @@ from dataclasses import dataclass as _dataclass
 from shapely.ops import unary_union
 
 from ..erreurs import ErreurComposition
-from ..planche import STYLE_BATIMENT, STYLE_PARCELLE, Style
+from ..planche import REF_PISTE_A_CREER, STYLE_BATIMENT, STYLE_PARCELLE, Style
 from .primitives import union_valide
 
 #: Écart perceptuel minimal entre deux teintes susceptibles de se retrouver sur
@@ -144,8 +144,13 @@ STYLES = {
         "Piste lourde existante (à renforcer si nécessaire)", 4,
         _remplie("#979797", "#6e6e6e"), matiere="voie_lourde",
     ),
+    # Même gris que l'existante — c'est la même grave compactée — et une
+    # hachure par-dessus. Le filet seul ne suffisait pas : 0,2 mm de noir
+    # contre 0,2 mm de gris moyen, et deux pastilles de légende identiques.
     "piste_lourde_a_creer": StyleDP(
-        "Piste lourde à créer", 5, _remplie("#979797", "#000000"),
+        "Piste lourde à créer", 5,
+        Style(trait="#000000", epaisseur_mm=0.2, remplissage="#979797",
+              hachure=REF_PISTE_A_CREER),
         matiere="voie_lourde",
     ),
     "piste_legere": StyleDP(
