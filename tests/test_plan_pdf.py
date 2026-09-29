@@ -21,6 +21,7 @@ from dp_socle.erreurs import (
     ErreurRecouvrementInsuffisant,
 )
 from dp_socle.plan_pdf import (
+    FIDELITE_MIN,
     CHEMIN_GABARITS,
     ChoixDuPlan,
     ImageDeFond,
@@ -273,6 +274,23 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
 
 
 @besoin_gannay
+def test_le_calage_porte_la_fidelite_des_deux_damiers(lecture_gannay, import_gannay):
+    """Ce qui fonde le calage se lit dans le calage lui-même.
+
+    Le recouvrement de Jaccard ne sépare plus rien dès que la copie d'écran est
+    fruste : mesuré le 30/09/2026, 52,1 % pour le damier de Gannay amputé
+    d'une table sur deux, 52,2 % pour le calage **juste** de
+    Saint-Aubin-sur-Loire. La part du plan qui tombe sur une table du DXF les
+    sépare — 56,8 % contre 92,5 % — et c'est elle que `FIDELITE_MIN` retient.
+    """
+    calage = caler_sur_tables(lecture_gannay, import_gannay.implantation)
+
+    assert calage.fidelite >= FIDELITE_MIN
+    assert calage.fidelite > calage.recouvrement
+    assert calage.nb_rangees_plan == calage.nb_rangees_dxf == 16
+
+
+@besoin_gannay
 def test_un_calepinage_qui_n_est_pas_celui_du_plan_est_refuse(
     lecture_gannay, import_gannay
 ):
@@ -292,7 +310,13 @@ def test_un_calepinage_qui_n_est_pas_celui_du_plan_est_refuse(
     amputee = replace(
         implantation, tables=[t for i, t in enumerate(implantation.tables) if i in gardees]
     )
-    with pytest.raises(ErreurRecouvrementInsuffisant, match="Jaccard"):
+    # Ce qui l'attrape n'est plus le recouvrement — il vaut 52,1 % ici, et
+    # 52,2 % sur le calage juste de Saint-Aubin, dont la copie d'écran est
+    # grossière — mais la part du plan qui tombe sur une table du DXF : 56,8 %
+    # contre 92,5 %, mesuré le 30/09/2026. Voir `FIDELITE_MIN`.
+    with pytest.raises(
+        ErreurRecouvrementInsuffisant, match="ne tombent sur aucune table du DXF"
+    ):
         caler_sur_tables(lecture_gannay, amputee)
 
 

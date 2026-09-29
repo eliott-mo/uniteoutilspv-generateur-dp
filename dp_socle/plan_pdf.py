@@ -321,9 +321,50 @@ TEINTE_TABLES_DEG = (225.0, 262.0)
 SATURATION_TABLES_MIN = 0.25
 VALEUR_TABLES_MIN = 0.20
 
-#: Recouvrement minimal des tables du plan et du DXF une fois calées
-#: (décision D7). Mesuré à Gannay : 88,3 % sur le rendu à 300 dpi du prototype.
+#: Recouvrement des tables attendu d'une copie d'écran fine (décision D7).
+#: Mesuré à Gannay : 88,3 % sur le rendu à 300 dpi du prototype. En deçà, le
+#: calage n'est plus refusé mais signalé : voir `ECART_RANGEES_MAX`.
 RECOUVREMENT_MIN = 0.70
+
+#: Écart admis entre le nombre de rangées du plan et celui du DXF.
+#:
+#: C'est **ce compte-là** qui dit qu'un plan a bien été dressé sur ce
+#: calepinage, et non le recouvrement : mesuré le 29/09/2026, 16 rangées
+#: contre 16 à Gannay, 35 contre 35 à Saint-Aubin-sur-Loire. Le recouvrement
+#: de Jaccard, lui, dépend de la finesse de la copie d'écran : sur des barres
+#: de quatre pixels, un demi-pixel de décalage coûte un quart de l'union, et
+#: Saint-Aubin plafonnait à 52 % avec un calage juste et 35 rangées sur 35.
+#: Un seuil de recouvrement refusait donc un plan correct parce que sa copie
+#: d'écran était grossière.
+#:
+#: 1 : une rangée d'un bout peut passer sous la légende ou sortir du cadre.
+#: Au-delà, ce n'est plus le même calepinage.
+ECART_RANGEES_MAX = 1
+
+#: Plancher de recouvrement, sous lequel la direction est peut-être bonne mais
+#: la place ne l'est pas. Il ne juge plus la finesse de l'image, seulement
+#: l'aberration : un calage posé à côté tombe à quelques pour cent.
+RECOUVREMENT_PLANCHER = 0.25
+
+#: Part minimale des tables du plan qui doivent tomber sur une table du DXF,
+#: à un pixel près.
+#:
+#: C'est la mesure qui dit qu'un plan a bien été dressé sur ce calepinage, là
+#: où le recouvrement de Jaccard n'y arrive pas. Mesuré le 30/09/2026 sur
+#: trois cas :
+#:
+#: | cas                              | Jaccard | cette mesure |
+#: |----------------------------------|---------|--------------|
+#: | Gannay, plan et DXF concordants  |  95,4 % |      100,0 % |
+#: | Saint-Aubin, copie d'écran fruste |  52,2 % |       92,5 % |
+#: | Gannay, une table sur deux ôtée   |  52,1 % |       56,8 % |
+#:
+#: Le Jaccard ne sépare pas les deux derniers — 52,2 contre 52,1 — parce
+#: qu'il compte l'épaisseur des barres autant que leur place : sur une copie
+#: d'écran où les rangées font quatre pixels, un demi-pixel de débord coûte un
+#: quart de l'union. La tolérance d'un pixel absorbe ce débord et ne comble
+#: pas l'absence d'une table entière, qui fait dix pixels.
+FIDELITE_MIN = 0.75
 
 #: Écart admis entre l'échelle mesurée sur le pas des rangées et celle qu'implique
 #: l'emprise des tables, dans chacune des deux directions (décision D7). Une
@@ -1614,6 +1655,30 @@ def _profil(points: np.ndarray, normale_deg: float, pas: float):
     return np.bincount(indices), origine, projection
 
 
+def _peigne(points, angle: float, pas: float) -> tuple[int, float]:
+    """Ce qu'un profil a de rangées, et à défaut ce qu'il a de concentration.
+
+    La direction des rangées se cherchait sur la seule concentration du profil
+    — `_nettete`, qui vaut Σh²/(Σh)² et culmine quand la masse tient en peu de
+    cases. Sur un champ d'un seul tenant, c'est bien en travers des rangées
+    qu'elle culmine : le peigne y occupe la moitié des cases, là où le profil
+    en long les remplit toutes.
+
+    Un projet en **deux zones décalées** casse ce raisonnement. Relevé le
+    29/09/2026 sur Saint-Aubin-sur-Loire : à 20,55°, les nuages des deux zones
+    se superposent et la masse se concentre, pour une note de 0,0113 et **une
+    seule bande** ; à 90°, la vraie direction, le profil montre **35 rangées**
+    pour une note de 0,0069. La concentration gagnait contre la périodicité, et
+    le plan était refusé faute de rangées.
+
+    On compte donc les rangées d'abord, et la concentration ne tranche plus que
+    les égalités — ce qu'elle fait très bien au dixième de degré près, où le
+    compte de bandes ne bouge plus.
+    """
+    histogramme = _profil(points, angle, pas)[0]
+    return len(_bandes(histogramme)), _nettete(histogramme)
+
+
 def _nettete(histogramme: np.ndarray) -> float:
     h = histogramme.astype(float)
     return float((h * h).sum() / max(h.sum(), 1.0) ** 2)
@@ -1696,11 +1761,11 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
     echantillon = points[:: max(1, len(points) // 60_000)]
     grossiere = max(
         np.arange(0.0, 180.0, 0.5),
-        key=lambda a: _nettete(_profil(echantillon, a, pas)[0]),
+        key=lambda a: _peigne(echantillon, a, pas),
     )
     normale = max(
         np.arange(grossiere - 0.75, grossiere + 0.75, 0.05),
-        key=lambda a: _nettete(_profil(echantillon, a, pas)[0]),
+        key=lambda a: _peigne(echantillon, a, pas),
     )
 
     histogramme, origine, projection = _profil(points, normale, pas)
@@ -1810,6 +1875,9 @@ class CalagePlan:
     echelle_en_travers_m_par_pt: float
     #: Recouvrement de Jaccard des tables du plan et du DXF, une fois calées.
     recouvrement: float
+    #: Part des tables du plan qui tombent sur une table du DXF, à un pixel
+    #: près. C'est elle qui fonde le calage : voir `FIDELITE_MIN`.
+    fidelite: float
     #: Le même, le plan tourné d'un demi-tour : ce qui a départagé les deux
     #: sens possibles d'une direction de rangées.
     recouvrement_retourne: float
@@ -1877,6 +1945,38 @@ def _sommet_parabolique(gauche: float, centre: float, droite: float) -> float:
     if denominateur >= 0:
         return 0.0
     return max(-0.5, min(0.5, 0.5 * (gauche - droite) / denominateur))
+
+
+def _part_du_plan_sur_les_tables(
+    fond, rangees, tables_dxf, echelle, rotation, translation, rayon
+) -> float:
+    """Part des tables du plan qui tombent sur une table du DXF, au pixel près.
+
+    Le pixel de tolérance est ce qui distingue cette mesure du recouvrement :
+    il absorbe le débord qu'une copie d'écran grossière donne aux barres, et
+    ne comble pas l'absence d'une table. Voir `FIDELITE_MIN`.
+    """
+    from PIL import Image, ImageFilter
+
+    cos_r, sin_r = math.cos(math.radians(rotation)), math.sin(math.radians(rotation))
+
+    def vers_pixels(x, y):
+        dx, dy = (x - translation[0]) / echelle, (y - translation[1]) / echelle
+        return fond.vers_pixels(cos_r * dx + sin_r * dy, -sin_r * dx + cos_r * dy)
+
+    marge = int(math.ceil(rayon)) + 2
+    du_plan = np.pad(rangees.masque, marge)
+    du_dxf = _rasteriser(tables_dxf, vers_pixels, fond.taille, marge)
+    voisinage = (
+        np.asarray(
+            Image.fromarray((du_dxf * 255).astype(np.uint8)).filter(
+                ImageFilter.MaxFilter(3)
+            )
+        )
+        > 127
+    )
+    total = float(du_plan.sum())
+    return float((du_plan & voisinage).sum()) / total if total else 0.0
 
 
 def _essai_de_sens(fond, rangees, tables_dxf, echelle, rotation, rayon):
@@ -2012,13 +2112,31 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         key=lambda essai: -essai[0],
     )
     recouvrement, translation, sens = essais[0]
-    if recouvrement < RECOUVREMENT_MIN:
+    nb_plan, nb_dxf = len(rangees.centres), implantation.calepinage.nb_rangees
+    if abs(nb_plan - nb_dxf) > ECART_RANGEES_MAX:
+        raise ErreurRecouvrementInsuffisant(
+            f"Le plan montre {nb_plan} rangée(s) de tables et le DXF en porte "
+            f"{nb_dxf} : le plan n'a pas été dressé sur ce calepinage. Vérifiez "
+            "que le DXF HelioScope et le plan PDF décrivent la même version du "
+            "projet."
+        )
+    if recouvrement < RECOUVREMENT_PLANCHER:
         raise ErreurRecouvrementInsuffisant(
             f"Une fois calées, les tables du plan et celles du DXF ne se "
-            f"recouvrent qu'à {recouvrement:.1%} (Jaccard ; {RECOUVREMENT_MIN:.0%} "
-            "au moins). Le plan n'a probablement pas été dressé sur ce "
-            "calepinage : vérifiez que le DXF HelioScope et le plan PDF décrivent "
-            "la même version du projet."
+            f"recouvrent qu'à {recouvrement:.1%} ({RECOUVREMENT_PLANCHER:.0%} au "
+            f"moins), alors que leurs {nb_plan} rangées se répondent : le calage "
+            "a trouvé la direction des rangées mais pas leur place."
+        )
+    fidelite = _part_du_plan_sur_les_tables(
+        plan.fond, rangees, tables_dxf, echelle, sens, translation, rayon
+    )
+    if fidelite < FIDELITE_MIN:
+        raise ErreurRecouvrementInsuffisant(
+            f"{1 - fidelite:.0%} des tables que montre le plan ne tombent sur "
+            f"aucune table du DXF ({FIDELITE_MIN:.0%} de concordance au moins, "
+            f"recouvrement de Jaccard {recouvrement:.1%}). Le plan n'a pas été "
+            "dressé sur ce calepinage : vérifiez que le DXF HelioScope et le plan "
+            "PDF décrivent la même version du projet."
         )
     return CalagePlan(
         echelle_m_par_pt=echelle,
@@ -2032,6 +2150,7 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         echelle_le_long_m_par_pt=echelle_long,
         echelle_en_travers_m_par_pt=echelle_travers,
         recouvrement=recouvrement,
+        fidelite=fidelite,
         recouvrement_retourne=essais[1][0],
         direction_plan_deg=rangees.direction_deg,
         direction_dxf_deg=direction_dxf,
@@ -3748,13 +3867,25 @@ class ImportPlanPDF:
                 round(self.calage.recouvrement, 4),
                 None,
                 "",
-                OK,
-                f"Les tables du plan et celles du DXF se recouvrent à "
-                f"{self.calage.recouvrement:.1%} une fois calées "
-                f"({RECOUVREMENT_MIN:.0%} au moins), à l'échelle de "
+                OK if self.calage.recouvrement >= RECOUVREMENT_MIN else AVERTISSEMENT,
+                f"Les {self.calage.nb_rangees_plan} rangées du plan répondent aux "
+                f"{self.calage.nb_rangees_dxf} du DXF, à l'échelle de "
                 f"{self.calage.m_par_px_reference:.4f} m/px à {DPI_REFERENCE:.0f} dpi "
-                f"mesurée sur le pas de {self.calage.nb_rangees_plan} rangées.",
-                f"{RECOUVREMENT_MIN:.0%}",
+                f"mesurée sur leur pas. {self.calage.fidelite:.0%} des tables "
+                f"du plan tombent sur une table du DXF, et les deux damiers se "
+                f"recouvrent à {self.calage.recouvrement:.1%}"
+                + (
+                    "."
+                    if self.calage.recouvrement >= RECOUVREMENT_MIN
+                    else (
+                        f", sous les {RECOUVREMENT_MIN:.0%} d'une copie d'écran "
+                        "fine : à cette résolution les rangées ne font que "
+                        "quelques pixels, et un demi-pixel de décalage coûte un "
+                        "quart de l'union. Le calage tient sur l'accord des "
+                        "rangées — vérifiez-le sur l'aperçu."
+                    )
+                ),
+                f"{self.calage.nb_rangees_dxf} rangées",
             ),
         ]
 
