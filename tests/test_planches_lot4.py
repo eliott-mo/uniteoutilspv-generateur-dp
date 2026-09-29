@@ -704,7 +704,26 @@ def test_le_vide_ne_se_partage_pas_quand_il_n_y_en_a_pas():
     assert repartir_hauteurs([80.0, 60.0], 100.0) == [80.0, 60.0]
 
 
-def test_le_plan_de_reperage_ne_descend_pas_sous_le_1_300(site, tmp_path):
+@pytest.fixture
+def parcellaire_double(monkeypatch):
+    """Le parcellaire du plan de repérage, sans interroger la Géoplateforme.
+
+    Ce test-là sortait pour de vrai. Il passait hors ligne parce que
+    `_parcelles_du_cadre` rattrape une panne du service et produit la planche
+    sans fond cadastral : le défaut de mesure était donc invisible, et le vert
+    dépendait de la Géoplateforme. Relevé le 29/09/2026 par la coupure des
+    sockets, voir `tests/sans_reseau.py`.
+
+    C'est la référence de `dp4_ouvrages` qu'on remplace, et non l'attribut du
+    module `ign` : le module écrit `from ..ign import telecharger_parcelles`,
+    et le nom est lié à l'import.
+    """
+    monkeypatch.setattr(dp4_ouvrages, "telecharger_parcelles", lambda *a, **k: [])
+
+
+def test_le_plan_de_reperage_ne_descend_pas_sous_le_1_300(
+    site, tmp_path, parcellaire_double
+):
     """Retour de relecture : au 1:200 le zoom colle aux ouvrages.
 
     À cette échelle le cadre serre les ouvrages de si près qu'on ne les situe

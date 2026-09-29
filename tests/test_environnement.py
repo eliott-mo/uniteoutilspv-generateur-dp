@@ -187,6 +187,27 @@ def test_tout_module_importe_par_le_socle_est_declare():
     )
 
 
+def test_un_test_non_marque_ne_peut_pas_joindre_un_service():
+    """Le garde-fou qui rend la marque `reseau` vraie, verifie sur lui-meme.
+
+    Sans lui, un test qui sort sans le declarer passe tant que le service
+    repond. C'est arrive : le 28/09/2026 la CI est tombee deux fois de suite
+    sur du code sain, parce que `test_sortie_pptx_lot8.py` interrogeait la
+    Geoplateforme en croyant employer une doublure. Voir `tests/sans_reseau.py`.
+
+    Ce test-ci ne porte pas la marque : la coupure doit donc l'atteindre.
+    """
+    import socket
+
+    from .sans_reseau import ReseauCoupe
+
+    with pytest.raises(ReseauCoupe, match="marque `reseau`"):
+        socket.create_connection(("data.geopf.fr", 443), timeout=1)
+
+    with pytest.raises(ReseauCoupe, match="data.geopf.fr:443"):
+        socket.socket().connect(("data.geopf.fr", 443))
+
+
 def test_tout_module_importe_par_les_tests_est_declare():
     """Les tests ont le droit d'en importer plus, pas d'en importer sans le dire.
 

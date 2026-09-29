@@ -8,8 +8,14 @@
 # Windows dans les deux cas. Ils seraient tombés ici.
 #
 # Les tests marqués `reseau` sont exclus : ils interrogent la Géoplateforme, ce
-# qui ferait dépendre le vert d'un service extérieur. Ils restent à jouer à la
-# main avant un lot.
+# qui ferait dépendre le vert d'un service extérieur. `tests-reseau.yml` les
+# joue seuls, le lundi.
+#
+# Et la séparation est tenue par la machine depuis le 29/09/2026 : les sockets
+# sont coupées pour tout test qui ne porte pas la marque (`tests/sans_reseau.py`).
+# Sans cela elle était déclarative, et un test qui sortait sans le dire passait
+# tant que le service répondait — jusqu'aux deux rouges du 28/09, tombés sur du
+# code sain.
 
 name: Tests
 
