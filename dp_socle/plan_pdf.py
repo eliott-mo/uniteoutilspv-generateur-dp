@@ -1735,9 +1735,20 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
     centres.sort()
     ecarts_rangees = np.diff(centres)
     if len(ecarts_rangees) < 2:
+        # La cause est presque toujours la finesse de la copie d'écran, et le
+        # chef de projet ne peut pas la deviner du seul compte de rangées.
+        # Mesuré le 29/09/2026 : Saint-Aubin-sur-Loire, 807 x 645 pixels et
+        # 9 539 pixels de table, une seule bande ; Gannay, 1 232 x 995 et
+        # 147 470 pixels de table, quinze rangées séparées. Le message dit donc
+        # ce qui a été mesuré et ce qu'il y a à faire.
+        hauteur_px, largeur_px = masque.shape
         raise ErreurPlanPDF(
             f"{len(centres)} rangée(s) de tables reconnue(s) sur la copie d'écran "
-            "du plan : il en faut trois au moins pour mesurer un pas (décision D3)."
+            "du plan : il en faut trois au moins pour mesurer un pas (décision "
+            f"D3). La copie d'écran fait {largeur_px} x {hauteur_px} pixels et "
+            f"les tables n'y occupent que {int(masque.sum())} pixels : à cette "
+            "finesse les rangées ne se séparent pas. Refaites-la en plein écran, "
+            "zoomée sur le site, et remontez le plan par-dessus."
         )
     # Le pas est la pente des centres de rangée sur leur rang, et non la
     # médiane de leurs écarts. Chaque centre porte l'arrondi des bords de sa
