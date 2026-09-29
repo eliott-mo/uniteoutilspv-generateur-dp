@@ -33,7 +33,7 @@ import shapely
 from ezdxf.document import Drawing
 from ezdxf.layouts import Modelspace
 from pyproj import CRS, Transformer
-from shapely.geometry import LineString, Polygon, mapping
+from shapely.geometry import LineString, MultiPolygon, Polygon, mapping
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize, unary_union
 
@@ -264,7 +264,10 @@ class Implantation:
     calage: Calage
     calepinage: Calepinage
     #: Géométries dans le repère DXF local, en mètres sol.
-    zone_implantation: Polygon
+    #: Une zone d'un seul tenant, ou leur réunion quand le projet en porte
+    #: plusieurs disjointes. Tout ce qu'on en demande — centre, étendue,
+    #: surface, tracé — vaut de l'une comme de l'autre.
+    zone_implantation: Polygon | MultiPolygon
     reculs: list[Polygon]
     zones_evitees: list[Polygon]
     tables: list[Polygon]
@@ -586,8 +589,12 @@ def _assembler(polylignes, couche: str) -> tuple[list[Polygon], list[str]]:
 
 def extraire_geometries(
     msp: Modelspace,
-) -> tuple[Polygon, list[Polygon], list[Polygon], list[str]]:
-    """Lit la zone d'implantation, les reculs et les zones évitées."""
+) -> tuple[Polygon | MultiPolygon, list[Polygon], list[Polygon], list[str]]:
+    """Lit la zone d'implantation, les reculs et les zones évitées.
+
+    La zone rendue peut être un multipolygone : un projet tient parfois sur
+    des parcelles qui ne se touchent pas.
+    """
     avertissements: list[str] = []
 
     zones, avert = _assembler(
@@ -600,14 +607,23 @@ def extraire_geometries(
             "Le calage et la surface du projet en dépendent."
         )
     if len(zones) > 1:
-        union = unary_union(zones)
-        if union.geom_type != "Polygon":
-            raise ErreurHelioScope(
-                f"Le calque « {COUCHE_ZONE} » porte {len(zones)} polygones "
-                "disjoints. Le générateur ne traite qu'une zone d'implantation "
-                "d'un seul tenant."
+        zone = unary_union(zones)
+        if zone.geom_type != "Polygon":
+            # Trois zones disjointes sur Saint-Aubin-sur-Loire, relevées le
+            # 29/09/2026 : un même projet réparti sur des parcelles qui ne se
+            # touchent pas, ce qui est courant. Le refus coûtait le dossier
+            # entier, et rien en aval n'en dépendait vraiment — la clôture est
+            # déclarée impossible à tirer de la zone, la ligne de coupe s'étend
+            # sur l'emprise cadastrale, et le dessin de l'aperçu parcourt déjà
+            # les anneaux d'un multipolygone. Ce qui reste vrai d'une zone
+            # éclatée — son centre, son étendue, sa surface — l'est de leur
+            # réunion, et c'est tout ce que la suite en demande.
+            avertissements.append(
+                f"Le calque « {COUCHE_ZONE} » porte {len(zone.geoms)} zones "
+                "d'implantation disjointes. Elles sont traitées ensemble : le "
+                "calage est-ouest se fait sur leur centre commun, et la surface "
+                "annoncée est leur total."
             )
-        zone = union
     else:
         zone = zones[0]
 
@@ -731,28 +747,51 @@ def extraire_calepinage(doc: Drawing, msp: Modelspace) -> tuple[Calepinage, list
 
     avertissements: list[str] = []
 
-    noms_table = {e.dxf.name for e in inserts}
-    if len(noms_table) > 1:
+    # HelioScope nomme un bloc table **par zone d'implantation** : un projet
+    # réparti sur trois parcelles porte trois blocs `fs_…_full`. Refuser sur le
+    # nom refusait donc le dossier pour une différence qui n'en était pas une
+    # — mesuré le 29/09/2026 sur Saint-Aubin-sur-Loire : deux blocs, le même
+    # bloc module, 24 modules chacun, 25,0° paysage des deux côtés, et les 188
+    # insertions à la même rotation. Ce qui doit être unique, c'est la **table
+    # décrite**, pas son nom, et c'est elle qu'on compare.
+    noms_table = sorted({e.dxf.name for e in inserts})
+    signatures: dict[str, tuple[str, int]] = {}
+    for nom in noms_table:
+        bloc = doc.blocks.get(nom)
+        if bloc is None:
+            raise ErreurHelioScope(f"Bloc table « {nom} » introuvable dans le DXF.")
+        modules = [e for e in bloc if e.dxftype() == "INSERT"]
+        if not modules:
+            raise ErreurModulesAbsents(MESSAGE_MODULES_ABSENTS)
+        noms_module = {e.dxf.name for e in modules}
+        if len(noms_module) > 1:
+            raise ErreurHelioScope(
+                f"La table « {nom} » mélange {len(noms_module)} modules "
+                f"différents ({', '.join(sorted(noms_module))})."
+            )
+        signatures[nom] = (noms_module.pop(), len(modules))
+
+    if len(set(signatures.values())) > 1:
+        detail = " ; ".join(
+            f"« {nom} » : {module}, {nombre} modules"
+            for nom, (module, nombre) in sorted(signatures.items())
+        )
         raise ErreurHelioScope(
             f"Le calque « {COUCHE_MODULES} » référence {len(noms_table)} blocs "
-            f"table différents ({', '.join(sorted(noms_table))}). Le générateur "
+            f"table qui ne décrivent pas la même table ({detail}). Le générateur "
             "ne traite qu'un type de table."
         )
-    nom_table = noms_table.pop()
-    bloc_table = doc.blocks.get(nom_table)
-    if bloc_table is None:
-        raise ErreurHelioScope(f"Bloc table « {nom_table} » introuvable dans le DXF.")
-
-    modules_du_bloc = [e for e in bloc_table if e.dxftype() == "INSERT"]
-    if not modules_du_bloc:
-        raise ErreurModulesAbsents(MESSAGE_MODULES_ABSENTS)
-    noms_module = {e.dxf.name for e in modules_du_bloc}
-    if len(noms_module) > 1:
-        raise ErreurHelioScope(
-            f"La table « {nom_table} » mélange {len(noms_module)} modules "
-            f"différents ({', '.join(sorted(noms_module))})."
+    if len(noms_table) > 1:
+        avertissements.append(
+            f"{len(noms_table)} blocs table sur le calque « {COUCHE_MODULES} » "
+            f"({', '.join(noms_table)}), décrivant la même table : HelioScope en "
+            "nomme un par zone d'implantation. Ils sont traités ensemble."
         )
-    nom_module = noms_module.pop()
+
+    nom_table = noms_table[0]
+    bloc_table = doc.blocks.get(nom_table)
+    modules_du_bloc = [e for e in bloc_table if e.dxftype() == "INSERT"]
+    nom_module = signatures[nom_table][0]
     bloc_module = doc.blocks.get(nom_module)
     if bloc_module is None:
         raise ErreurHelioScope(f"Bloc module « {nom_module} » introuvable dans le DXF.")

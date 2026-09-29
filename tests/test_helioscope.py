@@ -588,6 +588,133 @@ def test_les_deux_designs_s_accordent_une_fois_le_centre_de_l_image_compte(
 # ---------------------------------------------------------------------------
 
 
+def test_plusieurs_zones_disjointes_passent_et_se_disent():
+    """Un projet tient parfois sur des parcelles qui ne se touchent pas.
+
+    Trois zones sur Saint-Aubin-sur-Loire, relevées le 29/09/2026 : le
+    générateur refusait le dossier entier. Rien en aval n'en dépendait — la
+    clôture est déclarée impossible à tirer de la zone, la ligne de coupe
+    s'étend sur l'emprise cadastrale — et ce qu'on demande à la zone, son
+    centre et sa surface, vaut de leur réunion.
+
+    L'écart se dit au rapport : traiter trois zones comme une n'est pas rien,
+    et le chef de projet doit le lire.
+    """
+    import ezdxf
+
+    from dp_socle.helioscope import COUCHE_ZONE
+
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    for decalage in (0.0, 500.0):
+        msp.add_polyline3d(
+            [
+                (decalage, 0, 0),
+                (decalage + 100, 0, 0),
+                (decalage + 100, 80, 0),
+                (decalage, 80, 0),
+            ],
+            close=True,
+            dxfattribs={"layer": COUCHE_ZONE},
+        )
+
+    zone, _, _, avertissements = extraire_geometries(msp)
+
+    assert zone.geom_type == "MultiPolygon"
+    assert len(zone.geoms) == 2
+    assert zone.area == pytest.approx(2 * 100 * 80)
+    assert any("2 zones d'implantation disjointes" in m for m in avertissements)
+
+
+def test_deux_zones_jointives_ne_font_qu_une_et_ne_disent_rien():
+    """Le constat ne doit paraître que quand les zones sont vraiment séparées."""
+    import ezdxf
+
+    from dp_socle.helioscope import COUCHE_ZONE
+
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    for decalage in (0.0, 100.0):
+        msp.add_polyline3d(
+            [
+                (decalage, 0, 0),
+                (decalage + 100, 0, 0),
+                (decalage + 100, 80, 0),
+                (decalage, 80, 0),
+            ],
+            close=True,
+            dxfattribs={"layer": COUCHE_ZONE},
+        )
+
+    zone, _, _, avertissements = extraire_geometries(msp)
+
+    assert zone.geom_type == "Polygon"
+    assert not [m for m in avertissements if "disjointes" in m]
+
+
+def _doubler_le_bloc_table(doc, msp, modules_en_moins: int = 0) -> tuple[str, int]:
+    """Ajoute un second bloc table, copie du premier, et lui confie la moitié.
+
+    C'est ce que HelioScope produit pour une seconde zone d'implantation : un
+    bloc `fs_…_full` par zone, décrivant la même table. `modules_en_moins`
+    sert à fabriquer le cas où les deux blocs décrivent des tables différentes.
+    """
+    from dp_socle.helioscope import COUCHE_MODULES
+
+    inserts = list(msp.query(f'INSERT[layer=="{COUCHE_MODULES}"]'))
+    nom = inserts[0].dxf.name
+    modules = [e for e in doc.blocks.get(nom) if e.dxftype() == "INSERT"]
+
+    copie = doc.blocks.new(name=nom + "_bis")
+    for entite in modules[: len(modules) - modules_en_moins]:
+        copie.add_blockref(
+            entite.dxf.name,
+            entite.dxf.insert,
+            dxfattribs={"rotation": entite.dxf.rotation},
+        )
+    for insert in inserts[: len(inserts) // 2]:
+        insert.dxf.name = nom + "_bis"
+    return nom, len(inserts)
+
+
+@besoin_export_complet
+def test_deux_blocs_table_qui_decrivent_la_meme_table_passent():
+    """HelioScope nomme un bloc table **par zone**, pas par type de table.
+
+    Mesuré le 29/09/2026 sur Saint-Aubin-sur-Loire : deux blocs `fs_…_full`,
+    le même bloc module, 24 modules chacun, 25,0° paysage des deux côtés, et
+    les 188 insertions à la même rotation. Refuser sur le nom refusait le
+    dossier pour une différence qui n'en était pas une.
+    """
+    from dp_socle.helioscope import extraire_calepinage
+
+    doc = lire_dxf(ouvrir_export(EXPORT_COMPLET).dxf)
+    msp = doc.modelspace()
+    _, nb_inserts = _doubler_le_bloc_table(doc, msp)
+
+    calepinage, avertissements = extraire_calepinage(doc, msp)
+
+    assert calepinage.nb_tables == nb_inserts
+    assert any("décrivant la même table" in m for m in avertissements)
+
+
+@besoin_export_complet
+def test_deux_blocs_table_qui_decrivent_des_tables_differentes_sont_refuses():
+    """La tolérance porte sur le nom, jamais sur ce qu'il décrit.
+
+    Un bloc à 23 modules et un à 24 ne sont pas la même table : le calepinage
+    en tirerait un nombre de modules faux, et la notice avec.
+    """
+    from dp_socle.helioscope import extraire_calepinage
+
+    doc = lire_dxf(ouvrir_export(EXPORT_COMPLET).dxf)
+    msp = doc.modelspace()
+    _doubler_le_bloc_table(doc, msp, modules_en_moins=1)
+
+    with pytest.raises(ErreurHelioScope, match="ne décrivent pas la même table"):
+        extraire_calepinage(doc, msp)
+
+
 def _azimuts(polygone) -> set[float]:
     """Azimuts des côtés, ramenés modulo 90° et arrondis.
 
