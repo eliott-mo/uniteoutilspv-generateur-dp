@@ -7,6 +7,7 @@ format n'ont pas changé.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,57 @@ def test_nombre_de_tables_modifie_bloque(plan, tableau):
     controle = next(c for c in controles if c.libelle == "Nombre de tables")
     assert controle.statut == BLOQUANT
     assert "96 au plan contre 95 au tableau" in controle.message
+
+
+def test_un_comptage_a_zero_dit_qu_aucun_calque_ne_l_alimente(plan, tableau):
+    """« 0 au plan contre 3 au tableau » envoyait chercher au mauvais endroit.
+
+    Relevé le 29/09/2026 sur Joux-la-Ville : le chef de projet voyait ses deux
+    portails sur son plan papier, et l'écart chiffré lui laissait croire à un
+    défaut de comptage. Le DXF n'en portait aucun — huit calques déclarés,
+    pas un seul portail, et aucun bloc. Le message doit distinguer « rien à
+    compter » de « compté autrement ».
+    """
+    sans_portail = replace(
+        plan,
+        entites=[e for e in plan.entites if e.categorie != "portail"],
+        correspondance={
+            calque: categorie
+            for calque, categorie in plan.correspondance.items()
+            if categorie != "portail"
+        },
+    )
+
+    controle = next(
+        c
+        for c in controler(sans_portail, tableau)
+        if c.libelle == "Nombre de portails"
+    )
+
+    assert controle.statut == BLOQUANT
+    assert "0 au plan contre 3 au tableau" in controle.message
+    assert "Aucun calque n'est apparié à la catégorie « portail »" in controle.message
+
+
+def test_un_ecart_avec_son_calque_garde_l_explication_du_comptage(plan, tableau):
+    """Le constat d'absence ne doit pas accuser l'appariement à tort.
+
+    Le plan de référence porte bien son calque de portails : un écart y vient
+    d'un portail ajouté ou retiré d'un seul côté, et c'est ce que le message
+    doit continuer de dire.
+    """
+    tableau_modifie = lire_tableau(TABLEAU, "IND06")
+    tableau_modifie.generalites["nb_portails"] = 4
+
+    controle = next(
+        c
+        for c in controler(plan, tableau_modifie)
+        if c.libelle == "Nombre de portails"
+    )
+
+    assert controle.statut == BLOQUANT
+    assert "regroupées par contact" in controle.message
+    assert "Aucun calque" not in controle.message
 
 
 def test_surface_cloturee_hors_tolerance_bloque(plan, tableau):

@@ -458,6 +458,20 @@ class PlanBE:
     def geometries(self, categorie: str) -> list[BaseGeometry]:
         return [e.geometrie for e in self.par_categorie(categorie)]
 
+    def calques_de(self, categorie: str) -> list[str]:
+        """Calques appariés à cette catégorie. Vide : rien ne l'alimente.
+
+        Un « 0 au plan » ne dit pas la même chose selon qu'un calque a été
+        apparié et s'est révélé vide — un problème de tracé — ou qu'aucun
+        calque ne porte la catégorie — un problème de nommage, ou un élément
+        que le bureau d'études n'a pas dessiné.
+        """
+        return sorted(
+            calque
+            for calque, cible in self.correspondance.items()
+            if cible == categorie
+        )
+
     @property
     def tables(self) -> list[BaseGeometry]:
         return [g for g in self.geometries("tables_pv") if g.geom_type == "Polygon"]
@@ -1617,6 +1631,24 @@ SEUIL_DP_MWC = 3.0
 
 
 
+def _rien_a_compter(plan: PlanBE, categorie: str, explication: str) -> str:
+    """L'explication d'un écart, ou le constat qu'il n'y a rien à compter.
+
+    Relevé le 29/09/2026 sur Joux-la-Ville : le contrôle annonçait « 0 au plan
+    contre 2 au tableau », le chef de projet voyait ses deux portails sur son
+    plan papier, et a cherché un défaut de comptage. Le DXF n'en portait aucun
+    — huit calques déclarés, pas un seul portail, et aucun bloc. Dire l'écart
+    sans dire qu'il n'y a rien à compter fait chercher au mauvais endroit.
+    """
+    if plan.calques_de(categorie):
+        return explication
+    return (
+        f"Aucun calque n'est apparié à la catégorie « {categorie} » : le plan "
+        "n'a rien à compter. Soit le DXF ne porte pas cet élément, soit son "
+        "calque est resté non apparié à l'écran de correspondance."
+    )
+
+
 def controler(
     plan: PlanBE,
     tableau,
@@ -1644,8 +1676,12 @@ def controler(
             plan.nb_tables,
             structures["nb_tables"],
             "tables",
-            "Le plan et le tableau ne décrivent pas la même implantation : l'un "
-            "des deux n'a pas été mis à jour.",
+            _rien_a_compter(
+                plan,
+                "tables_pv",
+                "Le plan et le tableau ne décrivent pas la même implantation : "
+                "l'un des deux n'a pas été mis à jour.",
+            ),
         )
     )
     controles.append(
@@ -1654,8 +1690,12 @@ def controler(
             plan.nb_portails,
             generalites["nb_portails"],
             "portails",
-            "Les entités du calque portail sont regroupées par contact ; un "
-            "écart signale un portail ajouté ou retiré d'un seul côté.",
+            _rien_a_compter(
+                plan,
+                "portail",
+                "Les entités du calque portail sont regroupées par contact ; un "
+                "écart signale un portail ajouté ou retiré d'un seul côté.",
+            ),
         )
     )
 
