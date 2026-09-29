@@ -118,9 +118,14 @@ def test_les_calques_d_un_autre_bureau_d_etudes_sont_reconnus():
     assert categorie_proposee("ORKANE_Clôture") == "cloture"
     assert categorie_proposee("orkane cloture") == "cloture"
     assert categorie_proposee("ORKANE_Local Technique") == "local_technique"
-    # Le calque de voirie de PVcase reste à trancher : lourde ou légère ne se
-    # devine pas, et c'est une question posée au chef de projet.
-    assert categorie_proposee("PVcase Road") is None
+    # « PVcase Road » allait à rien le 28/09, au motif que lourde ou légère ne se
+    # devine pas. La décision était juste et la conséquence fausse : un calque
+    # non apparié n'est pas importé du tout, et deux plans sont sortis sans
+    # leur voirie — Joux-la-Ville et Bédarieux. La catégorie `voirie` existe
+    # précisément pour ça : elle fait entrer la géométrie au dossier **et**
+    # pose la question au chef de projet, au lieu de perdre l'élément en
+    # silence.
+    assert categorie_proposee("PVcase Road") == "voirie"
 
 
 def test_correspondance_tolerante_aux_accents_et_separateurs():
@@ -986,6 +991,38 @@ def test_saint_cyr_reste_sans_avertissement(plan):
     """La charte élargie ne doit rien changer au jeu de référence."""
     assert plan.avertissements == []
     assert len(plan.correspondance) == 9
+
+
+def test_variantes_de_nommage_du_premier_lot_de_dossiers_reels():
+    """Quatre calques non appariés, quatre éléments absents du plan de masse.
+
+    Relevé le 29/09/2026 sur Auzainvilliers et Bédarieux : le chef de projet
+    remontait « pas de PDL », « pas de zone de remisage », « piste lourde
+    inexistante », « haie à créer inexistante » comme autant de défauts de
+    l'outil. C'étaient quatre noms de calque que la correspondance ne
+    connaissait pas, et l'import les avait tous nommés.
+
+    `PVcase Road` va à `voirie` et non à une piste : son nom ne dit pas si
+    elle est lourde ou légère, et `voirie` est la catégorie qui pose la
+    question plutôt que d'y répondre.
+    """
+    from dp_socle.import_be import categorie_proposee
+
+    attendus = {
+        "UNI_PDL-PTR": "pdl_ptr",
+        "UNI_Zone de remise": "zone_remise",
+        "UNI_VRD_Piste_lourde_créée": "piste_lourde_a_creer",
+        "UNI_Haie créée": "haie",
+        "PVcase Road": "voirie",
+    }
+    for calque, categorie in attendus.items():
+        assert categorie_proposee(calque) == categorie, calque
+
+    # Et les noms voisins déjà connus n'ont pas bougé : les deux chartes
+    # coexistent, chaque projet employant la sienne.
+    assert categorie_proposee("UNI_PDL") == "pdl_ptr"
+    assert categorie_proposee("UNI_VRD_Piste_lourde_à_créer") == "piste_lourde_a_creer"
+    assert categorie_proposee("UNI_Haie") == "haie"
 
 
 def test_categories_de_chantier_agri_et_bess():

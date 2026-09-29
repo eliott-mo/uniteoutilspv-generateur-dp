@@ -201,6 +201,23 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_Limite paddock": "limite_paddock",
     "UNI_Bac d'équarissage": "bac_equarrissage",
     "ESPACE VERT": "espace_vert",
+    # Relevés le 29/09/2026 sur Auzainvilliers et Bédarieux, au premier lot de
+    # dossiers réels. Quatre calques non appariés, et quatre éléments absents du
+    # plan de masse que le chef de projet a pris pour des défauts de l'outil.
+    # L'import le disait — « calque non apparié, son contenu n'est pas
+    # importé » — mais personne ne peut deviner qu'« UNI_PDL-PTR » est le
+    # poste de livraison. La charte du bureau d'études bouge d'un projet à
+    # l'autre : c'est le nom exact qu'il faut connaître, pas une règle.
+    "UNI_PDL-PTR": "pdl_ptr",
+    "UNI_Zone de remise": "zone_remise",
+    "UNI_VRD_Piste_lourde_créée": "piste_lourde_a_creer",
+    "UNI_Haie créée": "haie",
+    # Le calque de voirie de PVcase ne dit pas si la piste est lourde ou
+    # légère, et c'est exactement ce que la catégorie `voirie` sert à poser :
+    # elle pose la question au chef de projet plutôt que d'y répondre à sa
+    # place. Vu sur Bédarieux et sur Joux-la-Ville, où il portait toute la
+    # voirie du site et où le plan est sorti sans piste.
+    "PVcase Road": "voirie",
 }
 
 #: Types d'entités traités. Les `HATCH` sont écartés : ce sont des remplissages
