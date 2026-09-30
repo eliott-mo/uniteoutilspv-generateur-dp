@@ -273,6 +273,46 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
+def test_le_plan_ne_porte_que_les_haies_du_projet():
+    """Décision du chef de projet du 30/09/2026, et sa raison.
+
+    Le plan PDF ne porte que les haies de l'emprise du projet, en bord de
+    clôture. Celles qui s'en écartent relèvent de l'aménagement paysager et
+    vont à la notice : dessiner des plantations sur des parcelles sans
+    maîtrise foncière se reproche à l'instruction.
+
+    C'est aussi ce qui rend le recalage tenable — une haie du bord suit la
+    clôture, et il n'y a plus de bloc qui dépasse. Mesuré sur Gannay, dont le
+    plan en porte quatre qui n'y ont pas leur place, de 7 à 77 m hors emprise.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.plan_pdf import _controle_des_haies
+
+    emprise = box(0.0, 0.0, 100.0, 100.0)
+    cloture = box(10.0, 10.0, 90.0, 90.0)
+
+    au_bord = LineString([(20.0, 13.0), (80.0, 13.0)])
+    dehors = LineString([(20.0, -5.0), (80.0, -5.0)])
+    a_l_ecart = LineString([(20.0, 50.0), (80.0, 50.0)])
+
+    hors_emprise, loin = _controle_des_haies(
+        [
+            ("haie", "Haie du bord", au_bord),
+            ("haie", "Haie hors emprise", dehors),
+            ("haie_a_renforcer", "Haie à l'écart", a_l_ecart),
+        ],
+        cloture,
+        emprise,
+    )
+
+    assert [nom for nom, _ in hors_emprise] == ["Haie hors emprise"]
+    assert [nom for nom, _ in loin] == ["Haie à l'écart"]
+
+    # Celle du bord ne figure nulle part : c'est la seule qui a sa place au plan.
+    assert "Haie du bord" not in [nom for nom, _ in hors_emprise + loin]
+
+
 def test_une_haie_qui_longe_la_cloture_la_suit_en_gardant_son_ecart():
     """Ce que le recalage des haies devait être, et ce qu'il ne devait pas être.
 

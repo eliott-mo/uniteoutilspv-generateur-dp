@@ -2305,6 +2305,11 @@ CATEGORIES_HAIE = ("haie", "haie_existante", "haie_a_renforcer")
 #: Le seuil sépare les deux sans hésitation.
 HAIE_LE_LONG_CLOTURE_M = 5.0
 
+#: Longueur de haie hors emprise en deçà de laquelle on ne dit rien, en mètres.
+#: Absorbe l'imprécision du tracé au plan ; un vrai débord se compte en
+#: dizaines de mètres.
+LONGUEUR_HAIE_NEGLIGEABLE_M = 2.0
+
 #: Écart à la limite de propriété en deçà duquel un sommet de la clôture y est
 #: ramené, en mètres. Mesuré le 24/09/2026 sur le plan de Bray : onze de ses
 #: quatorze sommets sont à 0,2 à 2,2 m de la limite — le tracé la longe sans
@@ -3086,6 +3091,36 @@ def _cloture_sur_la_limite(enceinte_l93: Polygon, emprise: BaseGeometry, libelle
         ),
         geometrie_l93=recalee,
     ), None
+
+
+def _controle_des_haies(traces_l93, cloture: Polygon | None, emprise) -> tuple:
+    """Les haies du plan qui n'ont pas leur place sur une planche de DP.
+
+    Décision du chef de projet du 30/09/2026 : **le plan PDF ne porte que les
+    haies de l'emprise du projet, en bord de clôture**. Celles qui s'en
+    écartent relèvent de l'aménagement paysager et vont à la notice, pas au
+    plan — un dossier qui dessine des plantations sur des parcelles dont on
+    n'a pas la maîtrise foncière se le fait reprocher à l'instruction.
+
+    C'est aussi ce qui rend le recalage tenable : une haie du bord de clôture
+    suit la clôture, et il n'y a plus de bloc qui dépasse.
+
+    Rend (hors_emprise, loin_de_la_cloture), deux listes de (libellé, mesure).
+    """
+    hors_emprise, loin = [], []
+    for categorie, libelle, ligne in traces_l93:
+        if categorie not in CATEGORIES_HAIE:
+            continue
+        if emprise is not None and not emprise.is_empty:
+            dehors = ligne.difference(emprise).length
+            if dehors > LONGUEUR_HAIE_NEGLIGEABLE_M:
+                hors_emprise.append((libelle, dehors))
+                continue
+        if cloture is not None:
+            ecart = cloture.exterior.distance(ligne)
+            if ecart > HAIE_LE_LONG_CLOTURE_M:
+                loin.append((libelle, ecart))
+    return hors_emprise, loin
 
 
 def _haies_qui_suivent(traces_l93, avant: Polygon, apres: Polygon) -> dict:
@@ -3963,7 +3998,7 @@ class ImportPlanPDF:
 
     def _recouper(self) -> list:
         """Le calcul de `controles`, sans mémoire."""
-        from .helioscope import limites_helioscope, rangees
+        from .helioscope import limites_helioscope, projeter, rangees
         from .import_be import (
             AVERTISSEMENT,
             DEBORDEMENT_NEGLIGEABLE_M2,
@@ -3973,7 +4008,58 @@ class ImportPlanPDF:
             _emprise,
         )
 
+        haies_l93 = [
+            (categorie, libelle, projeter(ligne, self.implantation.calage))
+            for categorie, libelle, ligne in self.construction.traces
+            if categorie in CATEGORIES_HAIE
+        ]
+        enceinte_plan = self.construction.enceinte
+        cloture_l93 = (
+            projeter(enceinte_plan.polygone, self.implantation.calage)
+            if enceinte_plan is not None and enceinte_plan.anneau is not None
+            else None
+        )
+        hors_emprise, loin = _controle_des_haies(
+            haies_l93, cloture_l93, self.emprise_cadastrale
+        )
+        if hors_emprise or loin:
+            detail = []
+            if hors_emprise:
+                detail.append(
+                    "hors de l'emprise cadastrale : "
+                    + " ; ".join(f"« {n} » sur {d:.0f} m" for n, d in hors_emprise)
+                )
+            if loin:
+                detail.append(
+                    f"à plus de {HAIE_LE_LONG_CLOTURE_M:.0f} m de la clôture : "
+                    + " ; ".join(f"« {n} » à {e:.0f} m" for n, e in loin)
+                )
+            message_haies = (
+                f"{len(hors_emprise) + len(loin)} haie(s) du plan ne sont pas en "
+                "bord de clôture dans l'emprise du projet — "
+                + ", et ".join(detail)
+                + ". Un plan de DP ne porte que les haies du projet : celles-là "
+                "relèvent de l'aménagement paysager et vont à la notice. En "
+                "dessiner sur des parcelles sans maîtrise foncière se reproche à "
+                "l'instruction. Retirez-les du plan PDF et refaites l'import."
+            )
+        else:
+            message_haies = (
+                f"{len(haies_l93)} haie(s) au plan, toutes en bord de clôture dans "
+                "l'emprise du projet."
+                if haies_l93
+                else "Le plan ne porte aucune haie."
+            )
+
         controles = [
+            Controle(
+                "Haies du plan",
+                None,
+                None,
+                "",
+                AVERTISSEMENT if (hors_emprise or loin) else OK,
+                message_haies,
+            ),
             Controle(
                 "Recoupement avec le tableau bilan",
                 None,
