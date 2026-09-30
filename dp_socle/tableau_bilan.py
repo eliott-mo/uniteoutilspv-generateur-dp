@@ -483,10 +483,20 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
             ligne = lignes.get(normaliser(libelle))
             if ligne is None:
                 if obligatoire:
+                    voisins = _libelles_voisins(feuille, libelle)
                     raise ErreurTableauBilan(
                         f"Paramètre « {libelle} » introuvable en colonne A de "
-                        f"l'onglet « {nom_onglet} » de {chemin.name}. "
-                        "La mise en page du tableau a probablement changé."
+                        f"l'onglet « {nom_onglet} » de {chemin.name}."
+                        + (
+                            " Le tableau porte à la place : "
+                            + " ; ".join(f"« {v} »" for v in voisins)
+                            + ". C'est une autre mise en page que celle que "
+                            "l'outil sait lire — signalez-la plutôt que de "
+                            "renommer les lignes, qui en casserait d'autres."
+                            if voisins
+                            else " La mise en page du tableau a probablement "
+                            "changé."
+                        )
                     )
                 continue
             brut = feuille.cell(ligne, colonne).value
@@ -579,6 +589,62 @@ def _piste_enherbee_unique(
         f"({pistes['surface_piste_legere_m2']:.0f} m²) : ce tableau ne la "
         "découpe pas en interne et externe."
     )
+
+
+#: Mots trop communs pour rapprocher deux libellés du tableau.
+_MOTS_VIDES = frozenset(
+    {"de", "du", "des", "la", "le", "les", "en", "et", "a", "au", "aux", "dont",
+     "m", "m2", "ml", "ha", "nombre", "total"}
+)
+
+
+def _mots(libelle: str) -> set:
+    """Mots significatifs d'un libellé, accents et ponctuation ôtés.
+
+    `normaliser` ne convient pas ici : elle retire aussi les espaces, et rend
+    un seul bloc dont on ne peut plus compter les mots communs.
+    """
+    import unicodedata
+
+    sans_accent = "".join(
+        c
+        for c in unicodedata.normalize("NFD", libelle or "")
+        if unicodedata.category(c) != "Mn"
+    ).casefold()
+    bruts = re.split(r"[^a-z0-9²]+", sans_accent)
+    return {
+        mot.replace("²", "2")
+        for mot in bruts
+        if mot and mot.replace("²", "2") not in _MOTS_VIDES
+    }
+
+
+def _libelles_voisins(feuille, attendu: str, maximum: int = 6) -> list[str]:
+    """Libellés de la colonne A qui parlent de la même chose que `attendu`.
+
+    Un tableau dont la mise en page a changé laissait le chef de projet devant
+    « paramètre introuvable » sans savoir quoi regarder. Relevé le 30/09/2026
+    sur Auzainvilliers : l'outil cherchait « Surface piste lourde (m²) », et le
+    classeur portait cinq lignes voisines — à renforcer, externe, existante,
+    d'accès, à créer. Le chef de projet a renommé une ligne pour s'en sortir,
+    ce qui en a cassé une autre.
+
+    Deux mots significatifs en commun suffisent à rapprocher : c'est assez pour
+    que « Surface piste lourde à renforcer (m²) » sorte, et pas assez pour que
+    « Surface clôturée (ha) » sorte avec.
+    """
+    mots_attendus = _mots(attendu)
+    if not mots_attendus:
+        return []
+    voisins: list[tuple[int, str]] = []
+    for ligne in range(1, feuille.max_row + 1):
+        brut = feuille.cell(ligne, 1).value
+        if not isinstance(brut, str) or not brut.strip():
+            continue
+        communs = len(_mots(brut) & mots_attendus)
+        if communs >= 2:
+            voisins.append((-communs, brut.strip()))
+    return [libelle for _, libelle in sorted(voisins)[:maximum]]
 
 
 def _index_des_libelles(feuille, nom_fichier: str) -> dict[str, int]:
