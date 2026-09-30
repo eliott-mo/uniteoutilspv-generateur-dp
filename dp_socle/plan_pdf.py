@@ -101,6 +101,12 @@ CORRESPONDANCE_LEGENDE = {
     "Arbres existants": "arbre_existant",
     "Poste combiné de Livraison/transformation": "pdl_ptr",
     "Poste de Livraison/transfo": "pdl_ptr",
+    # Relevé sur Lachapelle-sous-Aubenas le 30/09/2026 : le poste n'était pas
+    # importé du tout, faute de cette graphie. « Local de stockage BESS », de
+    # la même légende, reste à trancher — il peut désigner le conteneur de
+    # batteries comme l'abri qui le couvre, et l'écran de correspondance est
+    # là pour ça.
+    "Poste de Livraison/Transformation": "pdl_ptr",
     "Poste de livraison et de transformation": "pdl_ptr",
     "Poste de livraison": "pdl",
     "Poste de transformation": "ptr",
@@ -968,6 +974,43 @@ def _figure_un_trait(objet: Objet, seuil: float) -> bool:
     return largeur <= 0 or longueur / largeur >= seuil
 
 
+def _pastilles_de_meme_couleur(entrees) -> list[str]:
+    """Ce qu'il y a à dire quand deux pastilles portent la même couleur.
+
+    Deux pastilles de la même couleur rendent la carte indéchiffrable : une
+    forme qui la porte peut venir de l'une comme de l'autre, et `_choisir` ne
+    peut plus trancher que sur l'allure — trait ou aplat. Il se trompe alors
+    dès qu'un tracé coude, un morceau de clôture à angle droit ayant une boîte
+    englobante carrée.
+
+    Relevé le 30/09/2026 sur Lachapelle-sous-Aubenas, dont la légende donne le
+    même orangé à « Clôture » et à « Poste de transformation » : dix-huit
+    morceaux de grillage sont sortis en postes de transformation, posés au
+    gabarit et éparpillés le long de l'enceinte.
+
+    `entrees` est une suite de (libellé, couleur, catégorie) : la fonction ne
+    lit rien d'autre de la légende, et le dire ici permet de la mesurer sans
+    fabriquer de fausse pastille.
+    """
+    par_couleur: dict = {}
+    for libelle, couleur, categorie in entrees:
+        if categorie is not None:
+            par_couleur.setdefault(couleur, []).append(libelle)
+    messages = []
+    for couleur, libelles in sorted(par_couleur.items()):
+        if len(libelles) > 1:
+            messages.append(
+                f"La légende donne la même couleur {couleur} à "
+                f"{len(libelles)} entrées — "
+                + " ; ".join(f"« {n} »" for n in sorted(libelles))
+                + ". Une forme de la carte qui la porte peut venir de n'importe "
+                "laquelle : le rattachement se fait alors sur la seule allure, et "
+                "il se trompe dès qu'un tracé coude. Donnez-leur des couleurs "
+                "distinctes sur le plan, et refaites l'import."
+            )
+    return messages
+
+
 def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende | None, str]:
     """Parmi ces entrées, celle dont la forme porte la couleur, ou None et pourquoi."""
     candidates = [(_distance(objet.couleur, e.pastille.couleur), e) for e in legende]
@@ -1213,6 +1256,12 @@ def lire_plan_pdf(
                 "clôture, le plan ne délimite pas le projet ; c'est souvent la "
                 "marque d'une version antérieure du plan."
             )
+    avertissements.extend(
+        _pastilles_de_meme_couleur(
+            [(e.libelle, e.pastille.couleur, e.categorie) for e in legende]
+        )
+    )
+
     for entree in legende:
         if entree.categorie is None:
             avertissements.append(

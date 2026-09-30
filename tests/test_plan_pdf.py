@@ -273,6 +273,44 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
+def test_deux_pastilles_de_meme_couleur_se_disent():
+    """La carte devient indéchiffrable, et l'outil ne doit pas deviner.
+
+    Relevé le 30/09/2026 sur Lachapelle-sous-Aubenas : la légende donne le même
+    orangé à « Clôture » et à « Poste de transformation ». Une forme qui porte
+    cette couleur peut venir de l'une comme de l'autre, et le rattachement ne
+    tranche plus que sur l'allure — trait ou aplat. Il se trompe dès qu'un
+    tracé coude, un morceau de clôture à angle droit ayant une boîte
+    englobante carrée : **dix-huit morceaux de grillage sont sortis en postes
+    de transformation**, posés au gabarit et éparpillés le long de l'enceinte.
+
+    Le même plan donne aussi un seul cyan à trois citernes et bacs.
+    """
+    from dp_socle.plan_pdf import _pastilles_de_meme_couleur
+
+    messages = _pastilles_de_meme_couleur(
+        [
+            ("Clôture", (255, 192, 0), "cloture"),
+            ("Poste de transformation", (255, 192, 0), "ptr"),
+            ("Citerne Incendie", (0, 176, 240), "bache_incendie"),
+            ("Bac de rétention", (0, 176, 240), "bac_retention"),
+            ("Citerne de refroidissement", (0, 176, 240), "citerne_refroidissement"),
+            ("Portail", (21, 96, 130), "portail"),
+            # Sans catégorie : rien n'est importé sous elle, rien à dire.
+            ("Local de stockage BESS", (21, 96, 130), None),
+        ]
+    )
+
+    assert len(messages) == 2
+    cyan = next(m for m in messages if "(0, 176, 240)" in m)
+    orange = next(m for m in messages if "(255, 192, 0)" in m)
+    assert "3 entrées" in cyan
+    assert "« Clôture »" in orange and "« Poste de transformation »" in orange
+    # Le portail garde sa couleur pour lui : la pastille sans catégorie
+    # n'importe rien, et ne rend donc rien ambigu.
+    assert not [m for m in messages if "Portail" in m]
+
+
 def test_le_plan_ne_porte_que_les_haies_du_projet():
     """Décision du chef de projet du 30/09/2026, et sa raison.
 
