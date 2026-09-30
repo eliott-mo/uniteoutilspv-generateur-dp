@@ -273,6 +273,43 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
+def test_une_tache_hors_du_champ_ne_fait_pas_l_emprise():
+    """La page porte d'autres bleus que les tables, et l'emprise s'y prenait.
+
+    Relevé le 30/09/2026 sur Lachapelle-sous-Aubenas : sept taches à la teinte
+    HelioScope hors du champ — pastille de légende, flèche du nord, échelle —
+    de 76 à 1 131 pixels, pour un champ de 489 034. Les rangées n'en étaient pas
+    troublées, mais l'emprise se prend au minimum et au maximum : elle passait
+    de 976 à 1 976 pixels, et le recoupement d'échelle tombait à -50,6 % pour
+    2 % tolérés.
+
+    Les deux conditions comptent : un groupe n'est écarté que s'il est **à la
+    fois** loin et négligeable. Un projet en plusieurs zones, comme
+    Saint-Aubin-sur-Loire, a des groupes éloignés qui pèsent chacun leur part,
+    et les garde.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _sans_les_isolats
+
+    champ = np.array([[x, 0.0] for x in np.linspace(0.0, 100.0, 1000)])
+    tache = np.array([[500.0, 0.0], [501.0, 0.0]])
+    deuxieme_zone = np.array([[x, 0.0] for x in np.linspace(400.0, 500.0, 800)])
+
+    points = np.vstack([champ, tache])
+    retenus = np.ones(len(points), dtype=bool)
+    filtre, ecartes = _sans_les_isolats(points, retenus, 0.0, 1.0)
+    assert ecartes == 2
+    assert filtre[: len(champ)].all()
+    assert not filtre[len(champ) :].any()
+
+    points = np.vstack([champ, deuxieme_zone])
+    retenus = np.ones(len(points), dtype=bool)
+    filtre, ecartes = _sans_les_isolats(points, retenus, 0.0, 1.0)
+    assert ecartes == 0
+    assert filtre.all()
+
+
 @besoin_gannay
 def test_le_calage_porte_la_fidelite_des_deux_damiers(lecture_gannay, import_gannay):
     """Ce qui fonde le calage se lit dans le calage lui-même.

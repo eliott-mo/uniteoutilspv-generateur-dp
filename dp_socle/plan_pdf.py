@@ -1639,6 +1639,52 @@ class RangeesDuPlan:
     points: np.ndarray
     #: Pixels de l'image retenus comme tables, restreints aux rangées.
     masque: np.ndarray
+    #: Pixels à la teinte des tables écartés comme étrangers au champ.
+    isolats_ecartes: int = 0
+
+
+#: Part des pixels de table sous laquelle un groupe isolé n'est pas le champ.
+PART_ISOLAT_MAX = 0.01
+
+#: Écart, en pixels, au-delà duquel deux groupes de tables ne se touchent plus.
+ECART_ISOLAT_PX = 20.0
+
+
+def _sans_les_isolats(points, retenus, direction: float, pas: float):
+    """Écarte les taches à la teinte des tables qui ne sont pas le champ.
+
+    Relevé le 30/09/2026 sur Lachapelle-sous-Aubenas : la page porte sept
+    taches de la teinte HelioScope hors du champ — pastille de légende, flèche
+    du nord, échelle — de 76 à 1 131 pixels pour un champ de 489 034. Elles ne
+    changent rien aux rangées, qui se mesurent sur des bandes de vingt points
+    au moins, mais l'emprise se prend au minimum et au maximum : elles la
+    faisaient passer de 976 à 1 976 pixels, soit le facteur deux exact qui
+    faisait échouer le recoupement d'échelle (« -50,6 % » pour 2 % tolérés).
+
+    Le champ pèse 99 % des pixels : ce qui pèse moins d'un centième **et** se
+    tient à plus de vingt pixels du reste n'en fait pas partie. Les deux
+    conditions comptent — un projet en plusieurs zones, comme
+    Saint-Aubin-sur-Loire, a des groupes éloignés qui pèsent chacun leur part.
+    """
+    if not retenus.any():
+        return retenus, 0
+    angle = math.radians(direction)
+    le_long = points[:, 0] * math.cos(angle) + points[:, 1] * math.sin(angle)
+    ordre = np.argsort(le_long[retenus])
+    indices = np.nonzero(retenus)[0][ordre]
+    valeurs = le_long[indices]
+
+    coupures = np.nonzero(np.diff(valeurs) > ECART_ISOLAT_PX * pas)[0]
+    groupes = np.split(indices, coupures + 1)
+    minimum = PART_ISOLAT_MAX * len(indices)
+    gardes = [groupe for groupe in groupes if len(groupe) >= minimum]
+    if len(gardes) == len(groupes):
+        return retenus, 0
+
+    filtre = np.zeros_like(retenus)
+    for groupe in gardes:
+        filtre[groupe] = True
+    return filtre, int(retenus.sum() - filtre.sum())
 
 
 def _pas_pixel(fond: ImageDeFond) -> float:
@@ -1838,6 +1884,9 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
             f"s'en écarte de {np.abs(residus).max():.2f} pt pour un pas de "
             f"{pente:.2f} pt. Le pas ne se mesure pas (décision D3)."
         )
+    dans_une_bande, isolats = _sans_les_isolats(
+        points, dans_une_bande, direction, pas
+    )
     masque_rangees = np.zeros_like(masque)
     masque_rangees[lignes_px[dans_une_bande], colonnes_px[dans_une_bande]] = True
     return RangeesDuPlan(
@@ -1847,6 +1896,7 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
         centres=centres,
         points=points[dans_une_bande],
         masque=masque_rangees,
+        isolats_ecartes=isolats,
     )
 
 
@@ -1878,6 +1928,8 @@ class CalagePlan:
     #: Part des tables du plan qui tombent sur une table du DXF, à un pixel
     #: près. C'est elle qui fonde le calage : voir `FIDELITE_MIN`.
     fidelite: float
+    #: Pixels à la teinte des tables écartés comme étrangers au champ.
+    isolats_ecartes: int
     #: Le même, le plan tourné d'un demi-tour : ce qui a départagé les deux
     #: sens possibles d'une direction de rangées.
     recouvrement_retourne: float
@@ -2151,6 +2203,7 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         echelle_en_travers_m_par_pt=echelle_travers,
         recouvrement=recouvrement,
         fidelite=fidelite,
+        isolats_ecartes=rangees.isolats_ecartes,
         recouvrement_retourne=essais[1][0],
         direction_plan_deg=rangees.direction_deg,
         direction_dxf_deg=direction_dxf,
@@ -3884,6 +3937,14 @@ class ImportPlanPDF:
                         "quart de l'union. Le calage tient sur l'accord des "
                         "rangées — vérifiez-le sur l'aperçu."
                     )
+                )
+                + (
+                    f" {self.calage.isolats_ecartes} pixel(s) à la teinte "
+                    "des tables ont été écartés hors du champ : pastille de "
+                    "légende, flèche du nord ou échelle, qui fausseraient "
+                    "l'emprise mesurée."
+                    if self.calage.isolats_ecartes
+                    else ""
                 ),
                 f"{self.calage.nb_rangees_dxf} rangées",
             ),
