@@ -179,11 +179,18 @@ def generer(
     hors_cadre = []
     tables_visibles = []
     for categorie, geometries in objets:
+        # Une catégorie qui dessine aussi une surface ici : ses traits y sont
+        # des détails posés dessus, et se tracent au filet.
+        avec_surface = any(
+            g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
+        )
         for geometrie in geometries:
             if not cadre_planche.intersects(geometrie):
                 hors_cadre.append(categorie)
                 continue
-            planche.ajouter_geometrie(geometrie, style_de(categorie, geometrie))
+            planche.ajouter_geometrie(
+                geometrie, style_de(categorie, geometrie, avec_surface)
+            )
             if categorie == "tables_pv":
                 tables_visibles.append(geometrie)
 

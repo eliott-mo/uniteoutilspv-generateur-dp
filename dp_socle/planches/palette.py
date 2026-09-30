@@ -833,13 +833,22 @@ EPAISSEUR_TRACE_MM = 0.8
 _LINEAIRES = ("LineString", "LinearRing", "MultiLineString")
 
 
-def style_de(categorie: str, geometrie) -> Style:
-    """Style d'un objet : l'aplat de sa catégorie, ou un trait s'il n'est qu'un axe."""
+def style_de(categorie: str, geometrie, sur_sa_surface: bool = False) -> Style:
+    """Style d'un objet : l'aplat de sa catégorie, ou un trait s'il n'est qu'un axe.
+
+    `sur_sa_surface` dit que la catégorie dessine aussi une surface sur cette
+    planche. Le trait y est alors un détail **posé dessus**, et il se trace au
+    filet et non au remplissage — sinon il disparaît dedans. Relevé le
+    30/09/2026 sur Bédarieux : l'aire d'aspiration arrive en un rectangle de
+    8 x 4 m et ses deux diagonales, la croix des sapeurs-pompiers. Tracée au
+    bleu pâle du remplissage sur ce même bleu pâle, elle était invisible — le
+    chef de projet a signalé une croix qu'on ne voit pas.
+    """
     style = STYLES[categorie].style
     if style.remplissage in (None, "none") or geometrie.geom_type not in _LINEAIRES:
         return style
     return Style(
-        trait=style.remplissage,
+        trait=style.trait if sur_sa_surface else style.remplissage,
         epaisseur_mm=max(style.epaisseur_mm, EPAISSEUR_TRACE_MM),
         remplissage="none",
         tirets=style.tirets,

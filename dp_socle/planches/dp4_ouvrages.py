@@ -966,8 +966,13 @@ def _plan_de_reperage(planche, contrat, panneau, categories, libelles=None):
     # entière : sans découpe, la clôture d'un site de 5 ha traversait le
     # panneau des ouvrages et passait par-dessus la légende.
     for categorie, geometries in visibles:
+        avec_surface = any(
+            g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
+        )
         for geometrie in geometries:
-            _tracer_decoupe(planche, geometrie, style_de(categorie, geometrie), fenetre)
+            _tracer_decoupe(
+                planche, geometrie, style_de(categorie, geometrie, avec_surface), fenetre
+            )
         if categorie == "tables_pv":
             _tracer_tables(planche, contrat, geometries, fenetre, avertissements)
 

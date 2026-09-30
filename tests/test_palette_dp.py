@@ -172,6 +172,31 @@ def test_une_categorie_non_dessinee_ne_figure_pas():
     assert libelles == ["Panneaux photovoltaïques", "Clôture du projet solaire"]
 
 
+def test_un_trait_pose_sur_sa_propre_surface_se_trace_au_filet():
+    """La croix des sapeurs-pompiers disparaissait dans son aire d'aspiration.
+
+    Relevé le 30/09/2026 sur Bédarieux par le chef de projet : « on ne voit pas
+    la croix, elle est de la même couleur que le fond ». L'aire arrive du plan
+    du bureau d'études en un rectangle de 8 x 4 m **et ses deux diagonales**,
+    longues de 8,9 m chacune — la croix. Un tracé linéaire se dessinait au
+    remplissage de sa catégorie, donc en bleu pâle sur ce même bleu pâle.
+
+    Un trait qui n'est qu'un axe garde le remplissage : c'est lui qui donne sa
+    couleur à une piste dont le plan ne livre que le fil.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.planches.palette import style_de
+
+    fiche = STYLES["aire_aspiration"]
+    croix = LineString([(0.0, 0.0), (8.0, 4.0)])
+
+    assert style_de("aire_aspiration", box(0.0, 0.0, 8.0, 4.0)) is fiche.style
+    assert style_de("aire_aspiration", croix, True).trait == fiche.style.trait
+    assert style_de("aire_aspiration", croix).trait == fiche.style.remplissage
+    assert fiche.style.trait != fiche.style.remplissage
+
+
 def test_la_haie_a_renforcer_garde_le_vert_de_l_existante_et_s_interrompt():
     """Une haie qu'on complète n'est ni une plantation neuve ni un état des lieux.
 

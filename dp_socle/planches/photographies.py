@@ -418,6 +418,9 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
             "lui a été transmis. Seul le contour du site y figure."
         ]
     for categorie, geometries in objets_a_dessiner(contrat, messages):
+        avec_surface = any(
+            g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
+        )
         for geometrie in geometries:
             # Découpé, et non pas seulement écarté s'il est dehors : un objet à
             # cheval sur le bord du panneau était dessiné en entier et débordait
@@ -425,7 +428,9 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
             # sa zone de dessin, dont le panneau n'est qu'une part.
             visible = geometrie.intersection(fenetre)
             if not visible.is_empty:
-                planche.ajouter_geometrie(visible, style_de(categorie, geometrie))
+                planche.ajouter_geometrie(
+                    visible, style_de(categorie, geometrie, avec_surface)
+                )
     return messages
 
 
