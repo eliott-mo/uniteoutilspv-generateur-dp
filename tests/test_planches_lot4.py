@@ -721,6 +721,43 @@ def parcellaire_double(monkeypatch):
     monkeypatch.setattr(dp4_ouvrages, "telecharger_parcelles", lambda *a, **k: [])
 
 
+def test_la_legende_cede_le_coin_quand_le_plan_l_occupe():
+    """Une planche qui cache une partie de ce qu'elle montre est fausse.
+
+    Relevé le 30/09/2026 sur Auzainvilliers : le bloc de légende se posait
+    toujours en haut à gauche, et le site y passait dessous — le cadre blanc
+    couvrait une piste et une plateforme.
+
+    Ce qui est mesuré ici : la légende **garde** son coin quand il est libre,
+    et n'en change que s'il est occupé. Une planche où elle ne gênait pas ne
+    doit pas changer d'allure.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.planche import Planche
+    from dp_socle.planches.dp2_plan_masse import _coin_de_legende
+
+    planche = Planche(titre="T", numero="T", projet="T", date="30/09/2026")
+    planche.definir_echelle(1000, centre_l93=(700000.0, 6900000.0))
+    zone = planche.zone_dessin()
+    haut_gauche = (zone[0] + 3.0, zone[1] + 3.0)
+
+    # Rien de dessiné au coin habituel : la légende y reste.
+    minx, miny, maxx, maxy = planche.emprise_terrain()
+    au_sud_est = box((minx + maxx) / 2, miny, maxx, (miny + maxy) / 2)
+    assert _coin_de_legende(
+        planche, zone, [("tables_pv", [au_sud_est])], 70.0, 40.0
+    ) == haut_gauche
+
+    # Le dessin occupe le coin habituel : elle en change.
+    au_nord_ouest = box(minx, (miny + maxy) / 2, (minx + maxx) / 2, maxy)
+    autre = _coin_de_legende(
+        planche, zone, [("tables_pv", [au_nord_ouest])], 70.0, 40.0
+    )
+    assert autre != haut_gauche
+    assert zone[0] <= autre[0] and zone[1] <= autre[1]
+
+
 def test_le_plan_de_reperage_ne_descend_pas_sous_le_1_300(
     site, tmp_path, parcellaire_double
 ):

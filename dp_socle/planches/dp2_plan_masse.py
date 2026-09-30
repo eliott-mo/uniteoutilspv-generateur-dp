@@ -34,7 +34,7 @@ from ..planche import (
 from ..projet import Projet
 from .commun import Sortie, nouvelle_planche
 from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
-from .legende import dessiner_legende
+from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
 from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
 from .primitives import TRAIT_AXE, repere_coupe
@@ -53,6 +53,70 @@ MARGE = 0.10
 RECUL_REPERE_MM = 4.0
 
 LARGEUR_LEGENDE_MM = 82.0
+
+
+#: Part du bloc de légende que le dessin peut occuper sans qu'on le déplace.
+#: Sous ce seuil, la légende garde le coin du dossier de référence : une
+#: planche où elle ne gênait pas ne doit pas changer d'allure.
+RECOUVREMENT_LEGENDE_TOLERE = 0.02
+
+#: Rayon dont on épaissit le dessin avant de mesurer ce que la légende
+#: couvrirait, en mètres. Une clôture est une ligne, d'aire nulle : sans cette
+#: épaisseur elle passerait pour de la place libre.
+EPAISSEUR_MESURE_LEGENDE_M = 2.0
+
+
+def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm) -> tuple:
+    """Coin de la zone de dessin où la légende masque le moins le plan.
+
+    Le bloc se posait toujours en haut à gauche. Relevé le 30/09/2026 sur
+    Auzainvilliers : le site passe dessous, et le cadre blanc de la légende
+    couvre une piste et une plateforme. Une planche d'instruction qui cache une
+    partie de ce qu'elle montre est fausse par omission.
+
+    L'ordre des coins est celui du dossier de référence — haut-gauche d'abord —
+    et la légende n'en bouge que si le dessin l'occupe vraiment.
+    """
+    from shapely.geometry import box as _boite
+    from shapely.ops import unary_union as _union
+
+    transformation = planche.transformation
+    if transformation is None:
+        return (zone[0] + 3.0, zone[1] + 3.0)
+
+    dessin = [g for _, geometries in objets for g in geometries]
+    if not dessin:
+        return (zone[0] + 3.0, zone[1] + 3.0)
+    couvert = _union(dessin).buffer(EPAISSEUR_MESURE_LEGENDE_M)
+
+    def vers_l93(x_mm, y_mm):
+        return (
+            transformation._origine_x
+            + (x_mm - transformation._x_mm) / transformation.mm_par_metre,
+            transformation._origine_y
+            - (y_mm - transformation._y_mm) / transformation.mm_par_metre,
+        )
+
+    x, y, largeur_zone, hauteur_zone = zone
+    coins = (
+        (x + 3.0, y + 3.0),
+        (x + largeur_zone - largeur_mm - 3.0, y + 3.0),
+        (x + 3.0, y + hauteur_zone - hauteur_mm - 3.0),
+        (x + largeur_zone - largeur_mm - 3.0, y + hauteur_zone - hauteur_mm - 3.0),
+    )
+
+    parts = []
+    for coin in coins:
+        x0, y0 = vers_l93(coin[0], coin[1])
+        x1, y1 = vers_l93(coin[0] + largeur_mm, coin[1] + hauteur_mm)
+        boite = _boite(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        aire = boite.area
+        parts.append(boite.intersection(couvert).area / aire if aire else 0.0)
+
+    for coin, part in zip(coins, parts):
+        if part <= RECOUVREMENT_LEGENDE_TOLERE:
+            return coin
+    return coins[parts.index(min(parts))]
 
 
 def generer(
@@ -153,18 +217,21 @@ def generer(
 
     # 6. La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
     categories_tracees = [c for c, _ in objets]
+    entrees = construire_legende(
+        categories_tracees,
+        avec_parcelles=True,
+        avec_batiments=bool(batiments_visibles),
+        # Les intitulés que le chef de projet a corrigés à l'écran, s'il en a
+        # corrigé : la légende est dans l'image de la planche, elle ne se
+        # retouche donc pas après coup.
+        libelles=projet.legendes,
+    )
     dessiner_legende(
         planche,
-        construire_legende(
-            categories_tracees,
-            avec_parcelles=True,
-            avec_batiments=bool(batiments_visibles),
-            # Les intitulés que le chef de projet a corrigés à l'écran, s'il en a
-            # corrigé : la légende est dans l'image de la planche, elle ne se
-            # retouche donc pas après coup.
-            libelles=projet.legendes,
+        entrees,
+        position=_coin_de_legende(
+            planche, zone, objets, LARGEUR_LEGENDE_MM, hauteur_bloc(len(entrees))
         ),
-        position=(zone[0] + 3.0, zone[1] + 3.0),
         largeur_mm=LARGEUR_LEGENDE_MM,
     )
     planche.ajouter_texte(
