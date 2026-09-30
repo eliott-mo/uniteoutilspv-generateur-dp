@@ -993,6 +993,80 @@ def test_saint_cyr_reste_sans_avertissement(plan):
     assert len(plan.correspondance) == 9
 
 
+def test_un_remplissage_sans_contour_porte_quand_meme_sa_surface():
+    """Six surfaces bétonnées sur sept disparaissaient sans un mot.
+
+    Les HATCH sont écartés partout, et pour une raison mesurée : sur le fichier
+    de référence, chacun doublait une polyligne du même calque, à l'aire
+    identique au centième de mètre carré. Relevé le 30/09/2026 sur Saint-Cyr :
+    le calque « ENV_Surface bétonnée » porte **sept** remplissages — 2 796,
+    3 261, 394, 415, 412, 460 et 192 m² — et **une seule** polyligne, qui
+    double le premier. 5 134 m² de béton étaient perdus, et le chef de projet
+    ne voyait pas ses pistes.
+
+    Ce qui est repris, c'est le contour que le remplissage porte lui-même :
+    lire, et non inventer. Trois garde-fous le bornent, mesurés ici.
+    """
+    from shapely.geometry import LineString, Polygon
+
+    from dp_socle.import_be import EntiteBE, _contours_des_remplissages
+
+    class _Chemin:
+        def __init__(self, sommets):
+            self.vertices = sommets
+
+    class _Remplissage:
+        def __init__(self, sommets):
+            self.paths = [_Chemin(sommets)]
+
+    def carre(x, y, cote):
+        return [(x, y), (x + cote, y), (x + cote, y + cote), (x, y + cote)]
+
+    def entite(geometrie):
+        return EntiteBE(
+            categorie="piste_lourde_existante",
+            calque="ENV_Surface bétonnée",
+            geometrie=geometrie,
+            z_reel=False,
+        )
+
+    messages = []
+    # Un remplissage à l'écart de tout tracé : il entre.
+    repris = _contours_des_remplissages(
+        [_Remplissage(carre(0.0, 0.0, 10.0)), _Remplissage(carre(100.0, 0.0, 20.0))],
+        [entite(Polygon(carre(0.0, 0.0, 10.0)))],
+        1.0,
+        "ENV_Surface bétonnée",
+        messages,
+    )
+    assert [round(p.area) for p in repris] == [400], "le doublon reste dehors"
+    assert any("1 remplissage(s) repris" in m for m in messages)
+
+    # Le doublon se mesure sur le plus petit des deux : une polyligne
+    # discrétisée est plus petite que le remplissage aux bords droits.
+    messages = []
+    assert not _contours_des_remplissages(
+        [_Remplissage(carre(0.0, 0.0, 10.0))],
+        [entite(Polygon(carre(0.5, 0.5, 9.0)))],
+        1.0,
+        "ENV_Surface bétonnée",
+        messages,
+    )
+    assert not messages
+
+    # Un calque qui n'a que des traits est un calque de symbole : le
+    # remplissage n'y est que la teinte du dessin.
+    messages = []
+    assert not _contours_des_remplissages(
+        [_Remplissage(carre(0.0, 0.0, 10.0))],
+        [entite(LineString([(0.0, 0.0), (10.0, 10.0)]))],
+        1.0,
+        "UNI_portail",
+        messages,
+    )
+    assert not messages
+
+
 def test_variantes_de_nommage_du_premier_lot_de_dossiers_reels():
     """Quatre calques non appariés, quatre éléments absents du plan de masse.
 

@@ -941,14 +941,14 @@ def lire_plan_be(
     avertissements: list[str] = []
 
     entites_par_calque: dict[str, list] = {}
-    hatch_par_calque: dict[str, int] = {}
+    hatch_par_calque: dict[str, list] = {}
     types_ecartes: dict[str, set[str]] = {}
     annotations: dict[str, int] = {}
     anomalies: dict = {}
     for calque, entite in _developper(modelspace, None, 0, anomalies):
         type_dxf = entite.dxftype()
         if type_dxf == "HATCH":
-            hatch_par_calque[calque] = hatch_par_calque.get(calque, 0) + 1
+            hatch_par_calque.setdefault(calque, []).append(entite)
             continue
         if type_dxf in TYPES_ANNOTATION:
             annotations.setdefault(type_dxf, 0)
@@ -1008,7 +1008,8 @@ def lire_plan_be(
 
     # Un calque qui n'existe qu'en remplissage perdrait son élément : les HATCH
     # sont écartés partout, donc un calque qui n'a que ça ne produit rien.
-    for calque, nombre in sorted(hatch_par_calque.items()):
+    for calque, remplissages in sorted(hatch_par_calque.items()):
+        nombre = len(remplissages)
         if calque not in entites_par_calque and motif_ecart(calque) is None:
             avertissements.append(
                 f"Calque « {calque} » : {nombre} remplissage(s) HATCH et aucune "
@@ -1089,6 +1090,25 @@ def lire_plan_be(
                     calque=calque,
                     geometrie=geometrie,
                     z_reel=_z_varie(geometrie),
+                )
+            )
+
+    # Les remplissages qu'aucune polyligne ne double portent une surface que
+    # personne d'autre ne porte : ils entrent, et la reprise se dit.
+    for calque, categorie in correspondance.items():
+        remplissages = hatch_par_calque.get(calque)
+        if not remplissages:
+            continue
+        deja = [e for e in entites if e.calque == calque]
+        for polygone in _contours_des_remplissages(
+            remplissages, deja, facteur, calque, avertissements
+        ):
+            entites.append(
+                EntiteBE(
+                    categorie=categorie,
+                    calque=calque,
+                    geometrie=polygone,
+                    z_reel=False,
                 )
             )
 
@@ -2296,6 +2316,114 @@ ORIGINES = (ORIGINE_IMPORT_BE, ORIGINE_HELIOSCOPE, ORIGINE_PLAN_PDF)
 #: `origine` peut désormais valoir « helioscope ». Les sorties en version 1
 #: restent lisibles ; l'inverse ne l'est pas, d'où la montée de version.
 VERSION_CONTRAT = 2
+
+
+#: Part d'un remplissage qu'un tracé du même calque doit recouvrir pour qu'on
+#: le tienne pour son doublon.
+#:
+#: 90 % du plus petit des deux, et non l'égalité des aires : un remplissage et
+#: le tracé qui le double ne coïncident pas toujours au centième. Sur
+#: Saint-Cyr, la piste enherbée arrive en une polyligne à bulges que l'import
+#: discrétise — 605 m² — quand son remplissage, aux bords droits, en fait 693.
+#: L'un contient l'autre, et c'est cela qui les identifie ; comparer les aires
+#: aurait fait entrer la surface deux fois, et le dossier aurait déclaré le
+#: double.
+COUVERTURE_DOUBLON_HATCH = 0.90
+
+#: Jeu autour d'un tracé pour le recouvrement, en mètres. Absorbe l'épaisseur
+#: du trait et le décalage de numérisation entre un remplissage et son contour.
+JEU_DOUBLON_HATCH_M = 0.2
+
+
+def _contours_des_remplissages(
+    remplissages, deja: list, facteur: float, calque: str, avertissements: list
+) -> list:
+    """Les remplissages d'un calque qu'aucune polyligne ne double, en polygones.
+
+    Les HATCH sont écartés partout, et pour une raison mesurée : sur le fichier
+    de référence, chacun doublait une polyligne du même calque, à l'aire
+    identique au centième de mètre carré. Ce n'est pas toujours vrai. Relevé le
+    30/09/2026 sur Saint-Cyr : le calque « ENV_Surface bétonnée » porte sept
+    remplissages — 2 796, 3 261, 394, 415, 412, 460 et 192 m² — et **une seule**
+    polyligne, qui double le premier. Six surfaces sur sept, 5 134 m² de béton,
+    disparaissaient sans un mot, et le chef de projet ne voyait pas ses pistes.
+
+    Un remplissage porte son propre contour : le reprendre, ce n'est pas
+    inventer une géométrie, c'est lire celle que le fichier donne. Ce qui est
+    repris se dit au rapport.
+    """
+    from shapely.geometry import Polygon
+
+    # Un remplissage appartient à un calque de surface. Là où le calque n'a que
+    # des traits — les arcs et les segments d'un portail, par exemple —, le
+    # remplissage n'est que la teinte du symbole, et le reprendre ajouterait
+    # des polygones parasites là où le dessin est déjà complet.
+    if deja and not any(e.geometrie.geom_type == "Polygon" for e in deja):
+        return []
+
+    # Ce que le calque porte déjà, en surfaces : une polyligne fermée rendue en
+    # ligne compte pour ce qu'elle entoure, sans quoi son remplissage entrerait
+    # une seconde fois.
+    couvert = []
+    for entite in deja:
+        polygone = _polygoniser(entite.geometrie)
+        couvert.append(
+            polygone
+            if polygone is not None and not polygone.is_empty
+            else entite.geometrie.buffer(JEU_DOUBLON_HATCH_M)
+        )
+    repris, illisibles = [], 0
+    for remplissage in remplissages:
+        contours = []
+        for chemin in remplissage.paths:
+            sommets = [
+                (v[0] * facteur, v[1] * facteur)
+                for v in getattr(chemin, "vertices", [])
+            ]
+            if len(sommets) >= 3:
+                contours.append(Polygon(sommets))
+        if not contours:
+            illisibles += 1
+            continue
+        polygone = max(contours, key=lambda p: p.area)
+        if not polygone.is_valid:
+            polygone = polygone.buffer(0)
+        if polygone.is_empty or polygone.geom_type != "Polygon":
+            illisibles += 1
+            continue
+        # Le doublon se mesure sur le **plus petit** des deux : un remplissage
+        # et le tracé qui le double ne coïncident pas toujours au centième —
+        # sur Saint-Cyr, la piste enherbée arrive en une polyligne à bulges que
+        # l'import discrétise, et son remplissage, aux bords droits, fait 13 %
+        # de plus. L'un contient l'autre, et c'est cela qui les identifie.
+        if any(
+            polygone.intersection(autre).area
+            >= COUVERTURE_DOUBLON_HATCH * min(polygone.area, autre.area)
+            for autre in couvert
+            if autre.area > 0
+        ):
+            continue
+        repris.append(polygone)
+
+    if repris:
+        avertissements.append(
+            f"Calque « {calque} » : {len(repris)} remplissage(s) repris comme "
+            f"contour, faute de polyligne pour les porter — "
+            f"{sum(p.area for p in repris):.0f} m² au total. Le tracé vient du "
+            "remplissage lui-même ; à demander au bureau d'études : le contour de "
+            "ces éléments en polyligne fermée, comme pour les autres calques."
+        )
+    # Un contour illisible ne se signale que si le calque a moins de tracés que
+    # de remplissages : là où chacun double une polyligne — trois remplissages
+    # pour trois polylignes au poste de Saint-Cyr —, l'élément est dessiné, et
+    # prévenir d'une perte qui n'a pas lieu userait l'attention pour rien.
+    if illisibles and len(remplissages) > len(deja):
+        avertissements.append(
+            f"Calque « {calque} » : {illisibles} remplissage(s) dont le contour "
+            "ne se lit pas (bords en arcs ou en splines). L'élément est perdu — "
+            "à demander au bureau d'études."
+        )
+    return repris
 
 
 def ecrire_geopackage(
