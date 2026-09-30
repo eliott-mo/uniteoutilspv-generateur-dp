@@ -172,6 +172,46 @@ def test_une_categorie_non_dessinee_ne_figure_pas():
     assert libelles == ["Panneaux photovoltaïques", "Clôture du projet solaire"]
 
 
+def test_la_haie_a_renforcer_garde_le_vert_de_l_existante_et_s_interrompt():
+    """Une haie qu'on complète n'est ni une plantation neuve ni un état des lieux.
+
+    Demandé le 30/09/2026 après Gannay, dont le plan légende « haie à crée »
+    en noir et « haie à renforcer » en bleu clair : les deux allaient à
+    `haie`, et le dossier s'engageait sur une plantation là où il y a un
+    complètement.
+
+    C'est la même haie que l'existante, donc le même vert — le critère d'écart
+    ne s'applique pas entre deux statuts d'une même chose, comme pour les
+    voies lourdes. Ce qui les sépare est le tiret, et non une quatrième teinte
+    verte que la palette n'a plus.
+
+    Un tiret et non une hachure : une haie se trace en ligne, où une hachure
+    ne se verrait pas. `style_de` reporte le tiret du remplissage au trait.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.planches.palette import style_de
+
+    legende = construire_legende(("haie", "haie_a_renforcer", "haie_existante"))
+    assert [e.libelle for e in legende] == [
+        "Haie plantée",
+        "Haie existante",
+        "Haie à renforcer",
+    ]
+
+    a_renforcer, existante = STYLES["haie_a_renforcer"], STYLES["haie_existante"]
+    assert a_renforcer.style.remplissage == existante.style.remplissage
+    assert a_renforcer.matiere == existante.matiere is not None
+    assert a_renforcer.style.tirets and not existante.style.tirets
+
+    # Et le tiret survit au passage en trait, qui est la façon dont une haie
+    # est dessinée sur le plan.
+    trace = style_de("haie_a_renforcer", LineString([(0, 0), (10, 0)]))
+    assert trace.remplissage == "none"
+    assert trace.trait == existante.style.remplissage
+    assert trace.tirets == a_renforcer.style.tirets
+
+
 def test_le_chemin_existant_a_sa_propre_entree():
     """Le béton en place n'est ni une voie du projet ni de la grave compactée.
 

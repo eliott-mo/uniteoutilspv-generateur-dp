@@ -84,10 +84,12 @@ CORRESPONDANCE_LEGENDE = {
     # Faute du modèle, relevée à Gannay : la normalisation efface les accents
     # et les séparateurs, pas les fautes.
     "Haie à crée": "haie",
-    # Une haie existante que l'on complète est une plantation : c'est un
-    # aménagement au même titre qu'une haie créée, et le dossier s'y engage.
-    # Le libellé d'origine reste au contrat, dans la colonne `calque`.
-    "Haie à renforcer": "haie",
+    # Une haie qu'on complète n'est ni une plantation neuve ni un simple état
+    # des lieux : elle a sa catégorie depuis le 30/09/2026. Les deux allaient
+    # à `haie`, et le dossier s'engageait sur une plantation là où le plan du
+    # bureau d'études distingue « à crée » (noir) de « à renforcer » (bleu
+    # clair) — relevé sur Gannay.
+    "Haie à renforcer": "haie_a_renforcer",
     "Haie existante": "haie_existante",
     # Végétation en place, ajoutée au plan de Bray le 24/09/2026 : une surface
     # dont l'étendue dessinée est l'information. Elle rejoint les houppiers du
@@ -145,6 +147,7 @@ CATEGORIES_TRACEES = (
     "cloture",
     "haie",
     "haie_existante",
+    "haie_a_renforcer",
     "chemin_existant",
     "piste_lourde_existante",
     "piste_lourde_a_creer",
@@ -2292,6 +2295,20 @@ GLISSEMENT_MAX_M = 40.0
 #: cadastrale, en Lambert 93, donc au calage courant.
 PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
 
+#: Préfixe des corrections qui ramènent une haie sur la limite de propriété.
+PREFIXE_HAIE_EN_LIMITE = "haie_en_limite"
+
+#: Distance en deçà de laquelle un sommet de haie se ramène sur la limite.
+#:
+#: Plus étroite que celle de la clôture (5 m) : une haie se plante **sur** la
+#: limite ou pas du tout, là où une clôture garde souvent un retrait
+#: d'entretien. Au-delà de trois mètres, c'est que le plan la voulait ailleurs,
+#: et la ramener inventerait une plantation que personne n'a décidée.
+HAIE_EN_LIMITE_M = 3.0
+
+#: Les catégories qu'un recalage de haie concerne.
+CATEGORIES_HAIE = ("haie", "haie_existante", "haie_a_renforcer")
+
 #: Écart à la limite de propriété en deçà duquel un sommet de la clôture y est
 #: ramené, en mètres. Mesuré le 24/09/2026 sur le plan de Bray : onze de ses
 #: quatorze sommets sont à 0,2 à 2,2 m de la limite — le tracé la longe sans
@@ -3075,6 +3092,119 @@ def _cloture_sur_la_limite(enceinte_l93: Polygon, emprise: BaseGeometry, libelle
     ), None
 
 
+@dataclass
+class CorrectionHaieEnLimite:
+    """Une haie ramenée sur la limite de propriété là où elle la longe de près.
+
+    Même mécanique que la clôture, et pour la même raison : le plan trace la
+    haie à un ou deux mètres à l'intérieur de la limite, alors qu'elle sera
+    plantée dessus. Demandé le 30/09/2026, avec son garde-fou : elle ne se
+    propose que si le tracé longe vraiment une limite, et ne s'applique que
+    cochée.
+    """
+
+    identifiant: str
+    libelle: str
+    #: Le plus grand écart rattrapé, en mètres.
+    retrait_m: float
+    #: Le linéaire de haie que le recalage déplace, en mètres.
+    lineaire_m: float
+    raison: str
+    #: La haie recalée, en Lambert 93.
+    geometrie_l93: LineString
+    categorie: str = "haie"
+
+    @property
+    def intitule(self) -> str:
+        return f"Recaler « {self.libelle} » sur la limite de propriété"
+
+
+def _haie_sur_la_limite(
+    ligne_l93: LineString, emprise: BaseGeometry, libelle: str, categorie: str, rang: int
+):
+    """La haie recalée sur la limite de propriété, ou None.
+
+    Un sommet se ramène s'il est à moins de `HAIE_EN_LIMITE_M` d'une limite
+    **et** si l'un de ses deux segments la longe : un sommet isolé qui passe
+    près d'elle sans la suivre reste où le plan l'a mis. C'est le garde-fou
+    demandé — une haie qui traverse le site ne bouge pas parce qu'elle frôle
+    une limite en un point.
+
+    La haie est une ligne ouverte : pas de bouclage, et pas de contrôle de
+    validité de polygone. Un tracé qui se croiserait après recalage reste un
+    tracé : on le dit, on ne le refuse pas.
+    """
+    anneaux = [polygone.exterior for polygone in getattr(emprise, "geoms", [emprise])]
+
+    def sur_la_limite(point: Point) -> Point:
+        anneau = min(anneaux, key=lambda a: a.distance(point))
+        return nearest_points(anneau, point)[0]
+
+    def direction_limite(point: Point) -> float:
+        return _direction_de_ligne(min(anneaux, key=lambda a: a.distance(point)), point)
+
+    sommets = list(ligne_l93.coords)
+    if len(sommets) < 2:
+        return None
+
+    le_long = []
+    for a, b in zip(sommets, sommets[1:]):
+        segment = LineString([a, b])
+        milieu = segment.interpolate(0.5, normalized=True)
+        ecart = _dans_demi_tour(
+            direction_limite(milieu)
+            - math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+        )
+        # Le milieu doit être près d'une limite, et pas seulement parallèle à
+        # une limite lointaine : une haie qui traverse le site du nord au sud
+        # est parallèle aux bords est et ouest sans les longer, et son premier
+        # sommet, posé près du bord sud, partait s'y coller.
+        pres = min(anneau.distance(milieu) for anneau in anneaux) <= HAIE_EN_LIMITE_M
+        le_long.append(
+            pres
+            and segment.length >= SEGMENT_LE_LONG_M
+            and abs(ecart) <= CLOTURE_LE_LONG_DEG
+        )
+
+    places, ecarts = [], []
+    for rang_sommet, sommet in enumerate(sommets):
+        point = Point(sommet)
+        distance = min(anneau.distance(point) for anneau in anneaux)
+        avant = le_long[rang_sommet - 1] if rang_sommet else False
+        apres = le_long[rang_sommet] if rang_sommet < len(le_long) else False
+        if distance <= HAIE_EN_LIMITE_M and (avant or apres):
+            sur = sur_la_limite(point)
+            places.append((sur.x, sur.y))
+            ecarts.append(distance)
+        else:
+            places.append(sommet)
+            ecarts.append(0.0)
+    if not any(ecarts):
+        return None
+
+    recalee = LineString(places)
+    lineaire = sum(
+        LineString([a, b]).length
+        for (a, ea), (b, eb) in zip(zip(places, ecarts), list(zip(places, ecarts))[1:])
+        if ea and eb
+    )
+    bouges = [e for e in ecarts if e]
+    return CorrectionHaieEnLimite(
+        identifiant=f"{PREFIXE_HAIE_EN_LIMITE}:{rang}",
+        libelle=libelle,
+        retrait_m=max(bouges),
+        lineaire_m=lineaire,
+        raison=(
+            f"« {libelle} » longe la limite de propriété sans la suivre : "
+            f"{len(bouges)} de ses {len(sommets)} sommets s'en écartent de "
+            f"{min(bouges):.1f} à {max(bouges):.1f} m. Les y ramener déplace "
+            f"{lineaire:.0f} m de tracé sur {ligne_l93.length:.0f}."
+        ),
+        geometrie_l93=recalee,
+        categorie=categorie,
+    )
+
+
 def _enceinte_jusqu_au_poste(enceinte: Polygon, poste: Polygon) -> Polygon:
     """L'enceinte prolongée jusqu'au poste, qui en tient lieu de clôture sur sa longueur.
 
@@ -3397,7 +3527,9 @@ def construire(
     inconnues = {
         i
         for i in choix.corrections
-        if not i.startswith((PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE))
+        if not i.startswith(
+            (PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE, PREFIXE_HAIE_EN_LIMITE)
+        )
     } - {c.identifiant for c in proposees}
     if inconnues:
         raise ErreurPlanPDF(
@@ -3602,7 +3734,22 @@ class ImportPlanPDF:
             if enceinte is not None and enceinte.anneau is not None
             else None
         )
-        # La clôture d'abord : recalée sur la limite, c'est elle que le poste
+        # Les haies : une par une, chacune sa correction. Elles ne dépendent de
+        # rien d'autre — ni du poste, ni de la clôture — et le chef de projet
+        # coche celles qu'il veut.
+        if emprise is not None and not emprise.is_empty:
+            for rang, (categorie, libelle, ligne) in enumerate(
+                self.construction.traces
+            ):
+                if categorie not in CATEGORIES_HAIE:
+                    continue
+                correction = _haie_sur_la_limite(
+                    projeter(ligne, calage), emprise, libelle, categorie, rang
+                )
+                if correction is not None:
+                    corrections.append(correction)
+
+        # La clôture ensuite : recalée sur la limite, c'est elle que le poste
         # doit rejoindre, et c'est d'elle que se lit le côté d'un couloir de
         # portail. L'ordre inverse calait le poste sur un tracé périmé.
         if enceinte_l93 is not None and emprise is not None and not emprise.is_empty:
@@ -3655,7 +3802,9 @@ class ImportPlanPDF:
         sans_objet = {
             i
             for i in self.choix.corrections
-            if i.startswith((PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE))
+            if i.startswith(
+                (PREFIXE_EN_LIMITE, PREFIXE_CLOTURE_EN_LIMITE, PREFIXE_HAIE_EN_LIMITE)
+            )
         } - {c.identifiant for c in corrections}
         for identifiant in sorted(sans_objet):
             notes.append(
@@ -3726,7 +3875,23 @@ class ImportPlanPDF:
             else:
                 for ligne in enceinte.lignes:
                     ajouter("cloture", libelle, ligne)
-        for categorie, libelle, ligne in construction.traces:
+        haies_recalees = {
+            i: c for i, c in en_limite.items() if i.startswith(PREFIXE_HAIE_EN_LIMITE)
+        }
+        for rang, (categorie, libelle, ligne) in enumerate(construction.traces):
+            correction = haies_recalees.get(f"{PREFIXE_HAIE_EN_LIMITE}:{rang}")
+            if correction is not None:
+                # Déjà en Lambert 93, comme le poste et la clôture recalés :
+                # repasser par la projection la remettrait où le plan l'avait.
+                entites.append(
+                    EntiteBE(
+                        categorie=categorie,
+                        calque=libelle,
+                        geometrie=correction.geometrie_l93,
+                        z_reel=False,
+                    )
+                )
+                continue
             ajouter(categorie, libelle, ligne)
         # Une piste est une surface, comme au calque du BE : un polygone par
         # morceau, la couche n'en mélangeant pas les types.
@@ -3820,6 +3985,12 @@ class ImportPlanPDF:
                         if voisin
                         else ""
                     )
+                )
+            elif correction.identifiant.startswith(PREFIXE_HAIE_EN_LIMITE):
+                messages.append(
+                    f"« {correction.libelle} » recalée sur la limite de "
+                    f"propriété : {correction.lineaire_m:.0f} m de tracé la "
+                    f"suivent, d'au plus {correction.retrait_m:.1f} m."
                 )
             elif correction.identifiant.startswith(PREFIXE_CLOTURE_EN_LIMITE):
                 messages.append(

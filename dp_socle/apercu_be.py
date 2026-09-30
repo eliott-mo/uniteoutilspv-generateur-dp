@@ -92,6 +92,9 @@ STYLES = {
     "haie_existante": StyleCategorie(
         "Haie existante", (74, 112, 24), (45, 70, 12), epaisseur=2
     ),
+    "haie_a_renforcer": StyleCategorie(
+        "Haie à renforcer", (74, 112, 24), (45, 70, 12), epaisseur=2
+    ),
     "voirie": StyleCategorie("Voirie (type non précisé)", (188, 188, 188), (90, 90, 90)),
     "portail_exploitant": StyleCategorie(
         "Portail d'exploitation", None, (170, 0, 0), epaisseur=2
@@ -160,6 +163,7 @@ ORDRE_DESSIN = (
     "stockage_chantier",
     "haie",
     "haie_existante",
+    "haie_a_renforcer",
     "voirie",
     "tables_pv",
     # Les modules par-dessus la silhouette des rangées : c'est leur trame qui

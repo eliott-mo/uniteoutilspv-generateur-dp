@@ -200,7 +200,24 @@ STYLES = {
     "haie_existante": StyleDP(
         "Haie existante", 15,
         Style(trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18"),
-        symbole="vegetation",
+        symbole="vegetation", matiere="haie_en_place",
+    ),
+    # La haie qui existe **et** qu'on complète : même vert que l'existante —
+    # c'est la même haie — et le tiret dit le travail qu'on y fait. Demandé le
+    # 30/09/2026 : le plan du bureau d'études légende « haie à crée » et
+    # « haie à renforcer » séparément, et les confondre engageait le dossier
+    # sur une plantation là où il y a un complètement.
+    #
+    # Un tiret et non une hachure : la hachure convient aux pistes, qui sont
+    # des surfaces ; une haie se trace en ligne de 0,8 mm, où une hachure ne
+    # se verrait pas. Le tiret dit la même chose sur un linéaire, et
+    # `style_de` le reporte du remplissage au trait.
+    "haie_a_renforcer": StyleDP(
+        "Haie à renforcer", 16, Style(
+            trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18",
+            tirets="2.4 1.2",
+        ),
+        matiere="haie_en_place", symbole="vegetation_tiretee",
     ),
     # -- structures ---------------------------------------------------------
     # Tables et modules décrivent le même ouvrage à deux niveaux de détail :

@@ -149,6 +149,44 @@ def _bande(planche, style, x, y, largeur, hauteur) -> None:
     )
 
 
+def _vegetation_tiretee(planche, style, x, y, largeur, hauteur) -> None:
+    """La bande plantée, interrompue : la haie en place qu'on complète.
+
+    Même symbole que la haie existante — c'est la même haie — la bande en
+    moins d'un morceau sur deux. Le plan la trace en ligne tiretée, et la
+    pastille doit montrer la même chose : c'est le vert qui s'interrompt, pas
+    son contour.
+    """
+    plein = Style(
+        trait=style.trait,
+        epaisseur_mm=style.epaisseur_mm,
+        remplissage=style.remplissage,
+    )
+    tiret, blanc = 1.6, 0.8
+    pose = 0.0
+    while pose < largeur - 0.1:
+        longueur = min(tiret, largeur - pose)
+        planche.ajouter_rectangle(
+            x + pose, y + hauteur * 0.35, longueur, hauteur * 0.65, plein
+        )
+        pose += tiret + blanc
+    houppier = Style(
+        trait=style.trait, epaisseur_mm=0.25, remplissage=style.remplissage
+    )
+    # Une touffe sur deux, comme la bande : les quatre houppiers la
+    # recouvraient, et la pastille redevenait celle de la haie existante —
+    # ce qu'on cherche précisément à distinguer (vu au rendu du 30/09/2026).
+    for index in range(0, 4, 2):
+        largeur_touffe = largeur / 4.0
+        planche.ajouter_rectangle(
+            x + index * largeur_touffe + 0.25,
+            y + hauteur * 0.1,
+            largeur_touffe - 0.5,
+            hauteur * 0.5,
+            houppier,
+        )
+
+
 def _vegetation(planche, style, x, y, largeur, hauteur) -> None:
     """Une bande plantée, bosselée : haie ou alignement d'arbres."""
     planche.ajouter_rectangle(x, y + hauteur * 0.35, largeur, hauteur * 0.65, style)
@@ -176,6 +214,7 @@ _SYMBOLES = {
     "surface": _surface,
     "ligne": _ligne,
     "bande": _bande,
+    "vegetation_tiretee": _vegetation_tiretee,
     "portail": _portail,
     "vegetation": _vegetation,
     "tirete": _tirete,

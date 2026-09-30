@@ -273,6 +273,62 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
+def test_une_haie_ne_se_recale_que_si_elle_longe_vraiment_la_limite():
+    """Le recalage des haies, et surtout son garde-fou.
+
+    Demandé le 30/09/2026, avec sa condition : que la proposition ne paraisse
+    que si le tracé est effectivement le long d'une limite. Une haie qui
+    traverse le site est parallèle aux bords est et ouest sans les longer, et
+    son premier sommet, posé près du bord sud, partait s'y coller : c'est ce
+    que la condition de proximité du segment empêche.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.plan_pdf import _haie_sur_la_limite
+
+    emprise = box(0.0, 0.0, 200.0, 200.0)
+
+    # Plantée à 1,50 m à l'intérieur du bord sud, sur 120 m : c'est le cas que
+    # le recalage sert, et elle finit sur la limite.
+    longeante = _haie_sur_la_limite(
+        LineString([(40.0, 1.5), (160.0, 1.5)]),
+        emprise,
+        "Haie à renforcer",
+        "haie_a_renforcer",
+        3,
+    )
+    assert longeante is not None
+    assert longeante.retrait_m == pytest.approx(1.5)
+    assert longeante.lineaire_m == pytest.approx(120.0)
+    assert longeante.geometrie_l93.distance(emprise.exterior) == pytest.approx(0.0)
+    assert longeante.categorie == "haie_a_renforcer"
+    assert longeante.identifiant.endswith(":3")
+
+    # Traversant le site, un seul sommet près du bord : rien n'est proposé.
+    assert (
+        _haie_sur_la_limite(
+            LineString([(100.0, 1.0), (100.0, 150.0)]),
+            emprise,
+            "Haie à crée",
+            "haie",
+            4,
+        )
+        is None
+    )
+
+    # Et une haie franchement à l'écart ne bouge pas davantage.
+    assert (
+        _haie_sur_la_limite(
+            LineString([(40.0, 20.0), (160.0, 20.0)]),
+            emprise,
+            "Haie à crée",
+            "haie",
+            5,
+        )
+        is None
+    )
+
+
 def test_une_tache_hors_du_champ_ne_fait_pas_l_emprise():
     """La page porte d'autres bleus que les tables, et l'emprise s'y prenait.
 
@@ -606,8 +662,13 @@ def test_le_contrat_porte_les_tables_du_lot_2_et_le_reste_du_plan(contrat_gannay
         assert contrat_gannay.presente(categorie), categorie
     # Les tracés gardent le libellé qui les a nommés : la haie à créer et la
     # haie à renforcer vont toutes deux à `haie`.
-    calques = {e.calque for e in contrat_gannay.entites("haie")}
-    assert calques == {"Haie à crée", "Haie à renforcer"}
+    assert {e.calque for e in contrat_gannay.entites("haie")} == {"Haie à crée"}
+    # « Haie à renforcer » a sa catégorie depuis le 30/09/2026 : une haie qu'on
+    # complète n'est ni une plantation neuve ni un simple état des lieux, et le
+    # plan du bureau d'études les légende séparément — noir contre bleu clair.
+    assert {e.calque for e in contrat_gannay.entites("haie_a_renforcer")} == {
+        "Haie à renforcer"
+    }
     assert not contrat_gannay.z_reel("tables_pv")
     donnees = contrat_gannay.donnees
     assert donnees["sources"]["plan_pdf"] == PLAN_GANNAY.name

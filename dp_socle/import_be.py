@@ -105,6 +105,9 @@ CATEGORIES = (
     # Distinguer la haie plantée de l'existante compte pour un dossier DP :
     # l'une est un aménagement, l'autre un état des lieux.
     "haie_existante",
+    # La haie en place que le projet complète : ni une plantation neuve, ni un
+    # simple état des lieux. Le plan du bureau d'études les légende séparément.
+    "haie_a_renforcer",
     # Voirie dont le calque ne dit pas si elle est lourde ou légère. Le tableau
     # bilan sépare les deux et le lot 4 doit trancher, plutôt que de supposer.
     "voirie",
