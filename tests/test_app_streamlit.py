@@ -327,6 +327,42 @@ def _plan_importe(tmp_path, monkeypatch):
     return application.run()
 
 
+def _bouton(application, libelle_partiel: str):
+    for bouton in application.button:
+        if libelle_partiel.lower() in bouton.label.lower():
+            return bouton
+    raise AssertionError(f"bouton « {libelle_partiel} » absent")
+
+
+@pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
+def test_corriger_un_calque_rallume_le_bouton_d_import(tmp_path, monkeypatch):
+    """Une correction d'appariement doit pouvoir prendre.
+
+    Le bouton se grise sur la signature de ce qui a servi — c'est ce qui
+    évite qu'un reclic refasse une minute de travail pour rien. Mais la
+    correspondance des calques n'en faisait pas partie : le chef de projet qui
+    appariait un calque **après** l'import trouvait le bouton éteint, sa
+    correction ne pouvait pas prendre, et le dossier gardait le premier choix.
+
+    Relevé le 30/09/2026 sur Gannay, où le même défaut vaut pour la légende du
+    plan PDF : « pas de différenciation des haies malgré la modification dans
+    la légende ».
+    """
+    application = _plan_importe(tmp_path, monkeypatch)
+    assert _bouton(application, "Importer et contrôler").disabled
+
+    # Le chef de projet change l'appariement d'un calque.
+    for boite in application.selectbox:
+        if boite.label and boite.label.lower().startswith("catégorie"):
+            boite.set_value("(ignorer)")
+            break
+    else:
+        raise AssertionError("aucune liste d'appariement de calque à l'écran")
+    application = application.run()
+
+    assert not _bouton(application, "Importer et contrôler").disabled
+
+
 def _import_valide(tmp_path, monkeypatch):
     """Étape 4 : le contrat est écrit, les sections 3 et 4 s'ouvrent."""
     application = _plan_importe(tmp_path, monkeypatch)

@@ -1744,7 +1744,17 @@ def _importer_le_plan_pdf(
             + ". « (ignorer) » l'écarte de l'import, en le disant.",
             icon="⚠️",
         )
-    source_pdf = (_empreinte(fichier_export), _empreinte(fichier_pdf))
+    # La correspondance de la légende fait partie de ce qui change le résultat,
+    # donc de la signature. Sans elle, le chef de projet qui corrigeait
+    # l'appariement d'un libellé après l'import trouvait le bouton grisé : sa
+    # correction ne pouvait pas prendre, et le dossier gardait le premier
+    # choix. Relevé le 30/09/2026 sur Gannay — « pas de différenciation des
+    # haies malgré la modification dans la légende du plan ».
+    source_pdf = (
+        _empreinte(fichier_export),
+        _empreinte(fichier_pdf),
+        tuple(sorted((correspondance or {}).items())),
+    )
     deja = _deja_fait("import_pdf_fait", source_pdf)
     if not st.button(
         "Importer et caler le plan",
@@ -2450,7 +2460,15 @@ if commune.strip() and fichier_dxf is not None and fichier_tableau is not None:
             st.session_state.correspondance_be = choix
 
 
-        _source_be = (_empreinte(fichier_dxf), _empreinte(fichier_tableau), indice)
+        # Même raison qu'au plan PDF : la correspondance des calques change le
+        # résultat, donc elle est dans la signature. Sans elle, apparier un
+        # calque après coup laissait le bouton grisé et l'import inchangé.
+        _source_be = (
+            _empreinte(fichier_dxf),
+            _empreinte(fichier_tableau),
+            indice,
+            tuple(sorted((st.session_state.correspondance_be or {}).items())),
+        )
         if st.button(
             "Importer et contrôler",
             type="primary",
