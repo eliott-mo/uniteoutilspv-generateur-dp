@@ -273,60 +273,49 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
-def test_une_haie_ne_se_recale_que_si_elle_longe_vraiment_la_limite():
-    """Le recalage des haies, et surtout son garde-fou.
+def test_une_haie_qui_longe_la_cloture_la_suit_en_gardant_son_ecart():
+    """Ce que le recalage des haies devait être, et ce qu'il ne devait pas être.
 
-    Demandé le 30/09/2026, avec sa condition : que la proposition ne paraisse
-    que si le tracé est effectivement le long d'une limite. Une haie qui
-    traverse le site est parallèle aux bords est et ouest sans les longer, et
-    son premier sommet, posé près du bord sud, partait s'y coller : c'est ce
-    que la condition de proximité du segment empêche.
+    Ramener une haie sur la limite de propriété était risqué, et c'est le chef
+    de projet qui l'a relevé le 30/09/2026 : **c'est souvent la clôture qui est
+    sur la limite**, la haie courant un peu en retrait. Mesuré à Gannay — le
+    grillage touche la limite, les haies sont trois mètres plus loin — la
+    correction les aurait posées sur le grillage.
+
+    Ce qui est juste : garder l'écart. Une haie qui longe la clôture sur toute
+    sa longueur suit son déplacement, en bloc pour ne pas se déformer. Une
+    haie dont un bout seulement la longe ne bouge pas : on ne sait pas ce que
+    le plan voulait de l'autre bout.
     """
     from shapely.geometry import LineString, box
 
-    from dp_socle.plan_pdf import _haie_sur_la_limite
+    from dp_socle.plan_pdf import _haies_qui_suivent
 
-    emprise = box(0.0, 0.0, 200.0, 200.0)
+    avant = box(0.0, 0.0, 100.0, 100.0)
+    apres = box(0.0, -1.0, 100.0, 100.0)  # le bord sud descend d'un mètre
 
-    # Plantée à 1,50 m à l'intérieur du bord sud, sur 120 m : c'est le cas que
-    # le recalage sert, et elle finit sur la limite.
-    longeante = _haie_sur_la_limite(
-        LineString([(40.0, 1.5), (160.0, 1.5)]),
-        emprise,
-        "Haie à renforcer",
-        "haie_a_renforcer",
-        3,
-    )
-    assert longeante is not None
-    assert longeante.retrait_m == pytest.approx(1.5)
-    assert longeante.lineaire_m == pytest.approx(120.0)
-    assert longeante.geometrie_l93.distance(emprise.exterior) == pytest.approx(0.0)
-    assert longeante.categorie == "haie_a_renforcer"
-    assert longeante.identifiant.endswith(":3")
+    longe = LineString([(20.0, -3.0), (80.0, -3.0)])
+    loin = LineString([(20.0, -20.0), (80.0, -20.0)])
+    un_bout = LineString([(20.0, -3.0), (20.0, -30.0)])
 
-    # Traversant le site, un seul sommet près du bord : rien n'est proposé.
-    assert (
-        _haie_sur_la_limite(
-            LineString([(100.0, 1.0), (100.0, 150.0)]),
-            emprise,
-            "Haie à crée",
-            "haie",
-            4,
-        )
-        is None
+    suivies = _haies_qui_suivent(
+        [
+            ("haie_a_renforcer", "Haie à renforcer", longe),
+            ("haie", "Haie à crée", loin),
+            ("haie", "Haie à crée", un_bout),
+        ],
+        avant,
+        apres,
     )
 
-    # Et une haie franchement à l'écart ne bouge pas davantage.
-    assert (
-        _haie_sur_la_limite(
-            LineString([(40.0, 20.0), (160.0, 20.0)]),
-            emprise,
-            "Haie à crée",
-            "haie",
-            5,
-        )
-        is None
-    )
+    assert set(suivies) == {0}, "seule la haie qui longe suit la clôture"
+    suivie = suivies[0]
+    # L'écart à la clôture est le même avant et après : trois mètres.
+    assert avant.exterior.distance(longe) == pytest.approx(3.0)
+    assert apres.exterior.distance(suivie) == pytest.approx(3.0)
+    # Et la haie n'est pas déformée : même longueur, translation pure.
+    assert suivie.length == pytest.approx(longe.length)
+    assert [round(y, 6) for _x, y in suivie.coords] == [-4.0, -4.0]
 
 
 def test_une_tache_hors_du_champ_ne_fait_pas_l_emprise():
