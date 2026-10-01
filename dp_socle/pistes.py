@@ -717,15 +717,50 @@ def _longueur_droite_en_bout(coords: list, bout: int) -> float:
     return longueur
 
 
+def _comble_du_coin(paire, rayon: float, coin):
+    """Le creux d'un angle rentrant entre deux bandes, comblé au rayon voulu.
+
+    Une fermeture morphologique — dilater de `rayon`, éroder d'autant — comble
+    exactement les creux qu'une bille de ce rayon ne peut pas atteindre, et ne
+    déborde jamais de ce que les bandes dessinent.
+
+    C'est ce qui manquait à l'arc posé sur la tangente de la piste rejointe :
+    sur une piste courbe, la tangente s'écarte de la bande, et l'évasement
+    partait en aiguille le long de la tangente, au-delà du bitume. Mesuré le
+    01/10/2026 sur la boucle de Gannay — une piste existante de 40 m de rayon —,
+    remonté par le chef de projet : deux aiguilles de 20 m de long pour 2 à 3 m
+    de large, de part et d'autre du raccord.
+
+    La fermeture comble tous les creux de `paire` ; on ne garde que celui du
+    coin demandé, les deux côtés d'un raccord étant séparés par la bande qui
+    arrive.
+    """
+    ferme = paire.buffer(rayon, join_style="round").buffer(-rayon, join_style="round")
+    creux = ferme.difference(paire)
+    morceaux = [
+        partie
+        for partie in getattr(creux, "geoms", [creux])
+        if partie.geom_type == "Polygon" and partie.area > 0.01
+    ]
+    if not morceaux:
+        return None
+    return min(morceaux, key=lambda m: m.distance(Point(coin)))
+
+
 def _evasements(
-    raccord: _RaccordEnT, axe: LineString, cible: LineString, disponible: float
+    raccord: _RaccordEnT,
+    axe: LineString,
+    cible: LineString,
+    disponible: float,
+    paire,
 ) -> tuple[list[Polygon], list[float]]:
     """Les deux angles rentrants d'un raccord en T, arrondis au rayon intérieur.
 
     Chaque angle est celui que font le bord de la piste qui arrive et le bord
-    de celle qu'elle rejoint ; l'arc qui l'arrondit est tangent aux deux. Il
-    prend au plus `disponible` le long de la piste qui arrive, et ce qui reste
-    de la piste rejointe jusqu'à son extrémité.
+    de celle qu'elle rejoint. Le rayon se calcule sur les tangentes — il prend
+    au plus `disponible` le long de la piste qui arrive, et ce qui reste de la
+    piste rejointe jusqu'à son extrémité —, mais la forme, elle, se taille dans
+    `paire`, les deux bandes réunies : voir `_comble_du_coin`.
     """
     coords = list(axe.coords)
     extremite = coords[raccord.bout]
@@ -764,17 +799,8 @@ def _evasements(
         if tangente <= 0.05:
             continue
         rayon = tangente * math.tan(ouverture / 2.0)
-        p1 = (coin[0] + retour[0] * tangente, coin[1] + retour[1] * tangente)
-        p2 = (coin[0] + long_cible[0] * tangente, coin[1] + long_cible[1] * tangente)
-        bissectrice = _direction((0.0, 0.0), (retour[0] + long_cible[0], retour[1] + long_cible[1]))
-        distance_centre = rayon / math.sin(ouverture / 2.0)
-        centre = (coin[0] + bissectrice[0] * distance_centre, coin[1] + bissectrice[1] * distance_centre)
-        debut = math.atan2(p1[1] - centre[1], p1[0] - centre[0])
-        fin = math.atan2(p2[1] - centre[1], p2[0] - centre[0])
-        balayage = (fin - debut + math.pi) % (2 * math.pi) - math.pi
-        arc = _arc(centre, rayon, debut, balayage)
-        forme = Polygon([coin] + arc + [coin])
-        if forme.is_valid and forme.area > 0.01:
+        forme = _comble_du_coin(paire, rayon, coin)
+        if forme is not None and forme.is_valid:
             evasements.append(forme)
             rayons.append(rayon)
     return evasements, rayons
@@ -907,7 +933,13 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
             _longueur_droite_en_bout(coords_axe, bout) - demi,
             (axe.length - demi * nombre) / nombre,
         )
-        evasements, rayons = _evasements(raccord_ici, axe, lignes[raccord.sur], max(0.0, disponible))
+        evasements, rayons = _evasements(
+            raccord_ici,
+            axe,
+            lignes[raccord.sur],
+            max(0.0, disponible),
+            unary_union([surfaces[raccord.axe], surfaces[raccord.sur]]),
+        )
         if evasements:
             # Un évasement ne touche la bande que le long de son bord, au
             # flottant près : sans un centimètre de recouvrement, l'union le

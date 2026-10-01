@@ -252,3 +252,57 @@ def test_un_moignon_contre_une_piste_ne_fait_pas_tomber_l_import():
     assert any("sans longueur" in note and "Moignon" in note for note in notes)
     # La bande de la piste qui reste est intacte : le moignon ne l'a pas élargie.
     assert pistes[0].surface.area == pytest.approx(500.0, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Le raccord sur une piste courbe (Gannay, 01/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_raccord_sur_une_piste_courbe_ne_part_pas_en_aiguille():
+    """L'évasement reste dans le creux de l'angle, sur une piste qui tourne.
+
+    Remonté par le chef de projet le 01/10/2026 sur la boucle de Gannay : le
+    raccord sortait deux aiguilles de 20 m de long pour 2 à 3 m de large, de
+    part et d'autre de la bretelle, bien au-delà du bitume. L'arc qui comblait
+    l'angle était posé sur la **tangente** de la piste rejointe ; sur une piste
+    de 40 m de rayon, la tangente s'écarte de la bande de plusieurs mètres en
+    quelques dizaines, et l'évasement s'en allait avec elle.
+
+    Ce qui se mesure ici est la propriété que l'aiguille viole : ce qu'on
+    ajoute au raccord ne dépasse pas de ce qu'une bille du rayon intérieur peut
+    atteindre, c'est-à-dire de la fermeture des deux bandes. Sur ce tracé,
+    l'ancien dessin en mettait 23,7 m² dehors.
+    """
+    import math
+
+    rayon_boucle = 40.0
+    boucle = [
+        (
+            rayon_boucle * math.cos(math.radians(angle)),
+            rayon_boucle * math.sin(math.radians(angle)),
+        )
+        for angle in range(-90, 91, 5)
+    ]
+    bretelle = [(rayon_boucle + 0.3, 0.0), (rayon_boucle + 60.0, 0.0)]
+    pistes, _ = _pistes(
+        ("piste_lourde_existante", "boucle", boucle),
+        ("piste_lourde_a_creer", "bretelle", bretelle),
+    )
+
+    union = unary_union([piste.surface for piste in pistes])
+    bandes = unary_union(
+        [
+            piste.axe.buffer(LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round")
+            for piste in pistes
+        ]
+    )
+    # Le lissage ôte le liseré que les arrondis de `buffer` laissent le long
+    # des bandes : ce qui reste est l'évasement, et lui seul.
+    ajout = union.difference(bandes).buffer(-0.01).buffer(0.01)
+    assert ajout.area > 10.0, "le raccord doit bien combler quelque chose"
+
+    fermeture = bandes.buffer(RAYON_INTERIEUR_M, join_style="round").buffer(
+        -RAYON_INTERIEUR_M, join_style="round"
+    )
+    assert ajout.difference(fermeture.buffer(0.05)).area == pytest.approx(0.0, abs=0.5)
