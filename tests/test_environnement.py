@@ -224,3 +224,28 @@ def test_tout_module_importe_par_les_tests_est_declare():
         ["requirements.txt", "requirements-dev.txt"],
         "requirements.txt et requirements-dev.txt",
     )
+
+
+# ---------------------------------------------------------------------------
+# La version déployée, lisible à l'écran
+# ---------------------------------------------------------------------------
+
+
+def test_la_version_deployee_porte_une_date_et_un_commit():
+    """Ce qui s'affiche doit suffire à trancher « quelle version tenez-vous ? ».
+
+    Trois chefs de projet en deux jours ont conclu à un défaut de l'outil alors
+    qu'ils tenaient une version antérieure. Le message porte donc une date au
+    format français, à la minute, et le commit quand le dépôt est là.
+    """
+    import re
+
+    from dp_socle.environnement import version_deployee
+
+    version = version_deployee()
+    assert re.fullmatch(r"\d{2}/\d{2}/\d{4} à \d{2}:\d{2}", version.date)
+    assert version.message.startswith(f"Version du {version.date}")
+    if (RACINE / ".git").exists():
+        # Le dépôt est là : le commit aussi, en sept caractères.
+        assert version.commit is not None and len(version.commit) == 7
+        assert version.message.endswith(f"({version.commit})")

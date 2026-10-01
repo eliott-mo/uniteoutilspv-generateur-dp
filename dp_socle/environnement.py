@@ -235,3 +235,78 @@ def etat_travail() -> EtatTravail:
         f"{VARIABLE_TRAVAIL} vers un dossier local, par exemple "
         r"« %LOCALAPPDATA%\UNITe\generateur-dp ».",
     )
+
+#: Racine du dépôt, d'où se lisent la date de déploiement et le commit.
+_RACINE = Path(__file__).resolve().parent.parent
+
+
+@dataclass(frozen=True)
+class VersionDeployee:
+    """Ce que l'outil en ligne porte, et depuis quand."""
+
+    date: str
+    commit: str | None
+
+    @property
+    def message(self) -> str:
+        return f"Version du {self.date}" + (f" ({self.commit})" if self.commit else "")
+
+
+def _commit_du_depot() -> str | None:
+    """Les sept premiers caractères du commit déployé, ou None.
+
+    Lu dans `.git` à la main plutôt que par un appel à `git` : la commande
+    n'est pas garantie présente dans le conteneur de déploiement, et une
+    version qui ne s'affiche pas vaut mieux qu'un sous-processus qui échoue.
+    """
+    git = _RACINE / ".git"
+    try:
+        tete = (git / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not tete.startswith("ref:"):
+        return tete[:7] or None
+    reference = tete.partition("ref:")[2].strip()
+    try:
+        return (git / reference).read_text(encoding="utf-8").strip()[:7] or None
+    except OSError:
+        pass
+    # Un dépôt fraîchement cloné range ses références dans un seul fichier.
+    try:
+        lignes = (git / "packed-refs").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for ligne in lignes:
+        if ligne.endswith(" " + reference):
+            return ligne.split(" ", 1)[0][:7] or None
+    return None
+
+
+def version_deployee() -> VersionDeployee:
+    """Date du code en ligne, et le commit s'il se lit.
+
+    Trois chefs de projet en deux jours ont conclu à un défaut de l'outil alors
+    qu'ils tenaient une version antérieure — un onglet resté ouvert, ou un
+    redéploiement qui n'avait pas pris. Chaque fois, le diagnostic a coûté des
+    heures et un aller-retour. La date se lit donc à l'écran.
+
+    Elle est celle du fichier source le plus récent : la cible de déploiement
+    recopie le dépôt à chaque mise en ligne, et c'est exactement la date qu'on
+    cherche. Prendre celle du commit dirait quand le code a été écrit, pas
+    quand il a été déployé — et c'est la seconde que le chef de projet doit
+    pouvoir confronter à l'heure de son test.
+    """
+    from datetime import datetime
+
+    sources = list((_RACINE / "dp_socle").rglob("*.py")) + [_RACINE / "app.py"]
+    horodatages = []
+    for chemin in sources:
+        try:
+            horodatages.append(chemin.stat().st_mtime)
+        except OSError:
+            continue
+    quand = datetime.fromtimestamp(max(horodatages)) if horodatages else None
+    return VersionDeployee(
+        date=quand.strftime("%d/%m/%Y à %H:%M") if quand else "inconnue",
+        commit=_commit_du_depot(),
+    )

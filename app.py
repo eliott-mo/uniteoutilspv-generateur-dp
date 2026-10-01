@@ -63,6 +63,7 @@ from dp_socle.import_be import (
 from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import DPI_DEFAUT
+from dp_socle.environnement import version_deployee
 from dp_socle.polices import etat_polices
 from dp_socle.sortie_pptx import (
     FORMAT_HORODATAGE,
@@ -88,6 +89,14 @@ EXTENSIONS_SHAPEFILE = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qmd")
 #: plusieurs les distingue dans sa barre d'onglets avant d'avoir lu un mot.
 PICTO = "🏗️"
 
+
+# Définie avant le titre, qui l'affiche : Streamlit rejoue le script de haut en
+# bas, et un appel placé avant sa fonction ne lèverait qu'en ligne.
+@st.cache_resource
+def _version_deployee():
+    return version_deployee()
+
+
 st.set_page_config(
     page_title="Générateur de dossier DP", page_icon=PICTO, layout="wide"
 )
@@ -108,6 +117,13 @@ st.caption(
     "indice — ou, sans plan BE, l'export HelioScope et le plan projet en PDF "
     "— et la notice DP 11 en PDF."
 )
+
+# La version en ligne, sous le titre. Trois chefs de projet en deux jours ont
+# conclu à un défaut de l'outil alors qu'ils tenaient une version antérieure —
+# un onglet resté ouvert, ou un redéploiement qui n'avait pas pris. Chaque fois
+# le diagnostic a coûté des heures. Elle se lit maintenant à l'écran, et se
+# confronte à l'heure d'un correctif annoncé.
+st.caption(f"🛠️ {_version_deployee().message}")
 
 
 @st.cache_resource
