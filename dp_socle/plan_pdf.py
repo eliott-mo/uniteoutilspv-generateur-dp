@@ -1029,6 +1029,55 @@ def _pastilles_de_meme_couleur(entrees) -> list[str]:
     return messages
 
 
+def _conseils_des_libelles_non_rattaches(entrees) -> list[str]:
+    """Ce qu'on dit d'un libellé que rien ne rattache, et qui soit praticable.
+
+    « Appariez-le à la main » ne vaut que si la couleur de l'entrée n'appartient
+    qu'à elle : les formes de la carte se rattachent par la couleur, et deux
+    entrées de la même teinte ne se départagent plus.
+
+    Mesuré le 01/10/2026 sur Saint-Aubin-sur-Loire : trois entrées — « Clôture »,
+    « PDL /PTR » et « Portail d'accès » — portent le même rouge, et les deux
+    dernières ne sont rattachées à rien. Suivi, le conseil aurait donné au poste
+    de livraison les morceaux de clôture : le défaut même qui avait sorti
+    dix-huit bouts de grillage en postes de transformation à Lachapelle.
+
+    `entrees` est une suite de (libellé, couleur, catégorie, à trancher) : la
+    fonction ne lit rien d'autre de la légende, et le dire ici permet de la
+    mesurer sans fabriquer de fausse pastille.
+    """
+    messages = []
+    for libelle, couleur, categorie, a_trancher in entrees:
+        if categorie is not None:
+            continue
+        voisines = sorted(
+            autre
+            for autre, teinte, _, _ in entrees
+            if autre != libelle and teinte == couleur
+        )
+        if voisines:
+            messages.append(
+                f"Libellé de légende « {libelle} » non rattaché, et sa couleur "
+                f"{couleur} est aussi celle de "
+                + " ; ".join(f"« {n} »" for n in voisines)
+                + ". L'apparier à la main ne suffirait pas — les formes se "
+                "rattachent par la couleur, et l'outil ne saurait pas de "
+                "laquelle elles viennent. Donnez-lui une couleur propre sur le "
+                "plan, et refaites l'import."
+            )
+            continue
+        messages.append(
+            f"Libellé de légende « {libelle} » "
+            + (
+                f"non rattaché : {a_trancher}. Appariez-le à la main."
+                if a_trancher
+                else "inconnu : ses formes ne sont pas importées. "
+                "Appariez-le à la main s'il désigne un ouvrage du projet."
+            )
+        )
+    return messages
+
+
 def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende | None, str]:
     """Parmi ces entrées, celle dont la forme porte la couleur, ou None et pourquoi."""
     candidates = [(_distance(objet.couleur, e.pastille.couleur), e) for e in legende]
@@ -1280,17 +1329,11 @@ def lire_plan_pdf(
         )
     )
 
-    for entree in legende:
-        if entree.categorie is None:
-            avertissements.append(
-                f"Libellé de légende « {entree.libelle} » "
-                + (
-                    f"non rattaché : {entree.a_trancher}. Appariez-le à la main."
-                    if entree.a_trancher
-                    else "inconnu : ses formes ne sont pas importées. "
-                    "Appariez-le à la main s'il désigne un ouvrage du projet."
-                )
-            )
+    avertissements.extend(
+        _conseils_des_libelles_non_rattaches(
+            [(e.libelle, e.pastille.couleur, e.categorie, e.a_trancher) for e in legende]
+        )
+    )
 
     fond = _image_de_fond(images, indice + 1, chemin.name)
     cadre = fond.cadre

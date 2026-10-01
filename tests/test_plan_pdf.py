@@ -1437,3 +1437,37 @@ def test_l_emprise_du_plan_ignore_une_trainee_de_pixels_egares():
     # Trente pixels sur quarante mille allongent l'emprise brute de 7 %.
     assert _etendues(points, 0.0)[0] == pytest.approx(107.0, abs=0.5)
     assert _etendues_denses(points, 0.0, 0.25)[0] == pytest.approx(100.0, abs=1.0)
+
+
+def test_un_libelle_non_rattache_qui_partage_sa_couleur_ne_s_apparie_pas_a_la_main():
+    """Le conseil donné au chef de projet doit être praticable.
+
+    Mesuré le 01/10/2026 sur Saint-Aubin-sur-Loire : trois entrées de la
+    légende — « Clôture », « PDL /PTR » et « Portail d'accès » — portent le
+    même rouge, et les deux dernières ne sont rattachées à rien. L'outil
+    conseillait « appariez-le à la main » : suivi, le conseil aurait donné au
+    poste de livraison les morceaux de clôture, puisque les formes se
+    rattachent par la couleur. C'est le défaut qui avait sorti dix-huit bouts
+    de grillage en postes de transformation à Lachapelle.
+
+    Le libellé dont la couleur n'appartient qu'à lui garde, lui, le conseil
+    d'origine : il est praticable.
+    """
+    from dp_socle.plan_pdf import _conseils_des_libelles_non_rattaches
+
+    messages = _conseils_des_libelles_non_rattaches(
+        [
+            ("Clôture", (255, 0, 0), "cloture", None),
+            ("PDL /PTR", (255, 0, 0), None, None),
+            ("Piste à renforcer", (255, 192, 0), None, None),
+        ]
+    )
+
+    # Rien à dire de l'entrée rattachée : elle importe ce qu'elle doit.
+    assert len(messages) == 2
+    partagee = next(m for m in messages if "PDL /PTR" in m)
+    assert "ne suffirait pas" in partagee and "« Clôture »" in partagee
+    assert "couleur propre" in partagee
+
+    seule = next(m for m in messages if "Piste à renforcer" in m)
+    assert "Appariez-le à la main" in seule
