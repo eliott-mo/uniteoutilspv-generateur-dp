@@ -1790,3 +1790,74 @@ def test_une_longue_liste_de_parcelles_est_tronquee_et_comptee():
     phrase = _enumerer_parcelles(parcelles)
     assert phrase.startswith(f"{nombre} parcelles, dont ZA 1,")
     assert phrase.endswith("et 4 autres")
+
+
+# ---------------------------------------------------------------------------
+# Un contour replié sur lui-même (Saint-Aubin-sur-Loire, 01/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_contour_sans_surface_ne_fait_pas_tomber_l_emprise_cloturee():
+    """La clôture se mesure sur l'anneau qui entoure quelque chose, et le dit.
+
+    Mesuré sur le plan de Saint-Aubin-sur-Loire : un tracé de clôture replié
+    sur lui-même n'entoure aucune surface, et l'union des contours tombait
+    dessus — « point array must contain 0 or >1 elements », sur le serveur
+    seulement, la suite restant verte sous Windows. Le chef de projet n'avait
+    ni emprise ni cause.
+    """
+    from shapely.geometry import LineString, MultiLineString
+
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    # Les deux anneaux arrivent dans la même entité, comme le plan les donne :
+    # une clôture en plusieurs tracés.
+    carre = LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)])
+    replie = LineString([(200, 200), (210, 200), (205, 200), (200, 200)])
+    plan = PlanBE(
+        entites=[
+            EntiteBE("cloture", "CLOTURE", MultiLineString([carre, replie]), False),
+        ],
+        azimut_tables_deg=0.0,
+        correspondance={"CLOTURE": "cloture"},
+        unite="m",
+        facteur_unite=1.0,
+        calques_ignores=[],
+        calques_vides=[],
+        source="essai.dxf",
+    )
+
+    assert plan.surface_cloturee_m2 == pytest.approx(10_000.0)
+    assert any("n'entourent aucune surface" in a for a in plan.avertissements)
+    # Une seconde lecture ne redit pas la même chose.
+    plan.polygone_cloture
+    assert sum("n'entourent aucune surface" in a for a in plan.avertissements) == 1
+
+
+def test_un_contour_qui_se_recoupe_est_mesure_et_signale():
+    """Un tracé de clôture en nœud papillon se mesure, au lieu de tout arrêter.
+
+    Mesuré sur le plan de Saint-Aubin-sur-Loire : l'union des contours tombait
+    sur `TopologyException: side location conflict`, et le chef de projet
+    n'avait ni dossier ni cause. GEOS découpe le nœud en anneaux : la surface
+    est conservée, et le tracé reste à reprendre au plan.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    noeud = LineString([(0, 0), (100, 100), (100, 0), (0, 100), (0, 0)])
+    plan = PlanBE(
+        entites=[EntiteBE("cloture", "CLOTURE", noeud, False)],
+        azimut_tables_deg=0.0,
+        correspondance={"CLOTURE": "cloture"},
+        unite="m",
+        facteur_unite=1.0,
+        calques_ignores=[],
+        calques_vides=[],
+        source="essai.dxf",
+    )
+
+    # Les deux lobes du nœud : 2 500 m² chacun.
+    assert plan.surface_cloturee_m2 == pytest.approx(5_000.0)
+    assert any("se recoupent" in a for a in plan.avertissements)

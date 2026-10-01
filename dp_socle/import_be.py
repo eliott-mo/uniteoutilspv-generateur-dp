@@ -32,6 +32,7 @@ from ezdxf import path as ezpath
 from shapely.geometry import LineString, MultiPoint, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
+from shapely.validation import make_valid
 
 from .erreurs import (
     ErreurControleCroise,
@@ -539,7 +540,7 @@ class PlanBE:
         geometrie = self.cloture
         if geometrie is None:
             return None
-        return _polygoniser(geometrie)
+        return _polygoniser(geometrie, self.avertissements)
 
     @property
     def surface_cloturee_m2(self) -> float | None:
@@ -585,17 +586,95 @@ def _perimetre(geometrie: BaseGeometry) -> float:
     return float(geometrie.length)
 
 
-def _polygoniser(geometrie: BaseGeometry) -> Polygon | None:
+def _polygoniser(
+    geometrie: BaseGeometry, avertissements: list[str] | None = None
+) -> Polygon | None:
     """Polygone d'un contour, qu'il arrive en polygone ou en ligne fermée."""
-    morceaux = []
+    morceaux, sans_surface, recoupes, ouverts = [], 0, 0, 0
     for partie in _parties(geometrie):
         if partie.geom_type == "Polygon":
-            morceaux.append(partie)
-        elif partie.geom_type == "LineString" and len(partie.coords) >= 4:
-            morceaux.append(Polygon([(x, y) for x, y, *_ in partie.coords]))
+            candidat = partie
+        elif (
+            partie.geom_type == "LineString"
+            and len(partie.coords) >= 4
+            and partie.is_closed
+        ):
+            candidat = Polygon([(x, y) for x, y, *_ in partie.coords])
+        else:
+            # Un tracé ouvert n'entoure rien. `Polygon()` le refermait d'un
+            # trait, et fabriquait une surface que personne n'avait dessinée :
+            # mesuré le 01/10/2026 sur Saint-Aubin-sur-Loire, dont la clôture
+            # ne se referme pas. L'outil annonçait « la surface clôturée n'est
+            # pas calculée » et la calculait quand même, sur trois tracés
+            # ouverts dont les faux anneaux se recoupaient.
+            ouverts += 1
+            continue
+        # Un contour sans surface n'entoure rien, et il fait tomber l'union :
+        # GEOS y effondre un anneau et lève « point array must contain 0 or >1
+        # elements ». Relevé le 01/10/2026 sur Saint-Aubin-sur-Loire, et sur le
+        # serveur seulement — l'union le supportait sous Windows, pas sous
+        # Linux. Écarté du calcul, et dit à qui le lit.
+        if not candidat.is_valid:
+            # Un contour qui se recoupe fait tomber l'union sur un
+            # « side location conflict », et la planche entière avec elle.
+            # Relevé le 01/10/2026 sur Saint-Aubin-sur-Loire. GEOS sait le
+            # découper en anneaux valides : la surface est conservée, et la
+            # reprise se dit — on ne redresse pas un tracé en silence.
+            #
+            # Le test de validité passe **avant** celui de l'aire : un nœud
+            # papillon a deux lobes d'orientations contraires, et son aire se
+            # lit à zéro avant d'être découpé.
+            parties = [
+                partie
+                for partie in _parties(make_valid(candidat))
+                if partie.geom_type == "Polygon" and partie.area > 0.0
+            ]
+            if not parties:
+                sans_surface += 1
+                continue
+            recoupes += 1
+            morceaux.extend(parties)
+            continue
+        if candidat.area <= 0.0:
+            sans_surface += 1
+            continue
+        morceaux.append(candidat)
+
+    if ouverts and avertissements is not None:
+        message = (
+            f"{ouverts} tracé(s) de contour ne se referment pas : ils n'entourent "
+            "aucune surface, et ne comptent pas dans l'emprise mesurée. À "
+            "reprendre au plan."
+        )
+        if message not in avertissements:
+            avertissements.append(message)
+    if recoupes and avertissements is not None:
+        message = (
+            f"{recoupes} contour(s) du plan se recoupent : ils ont été découpés "
+            "en anneaux pour être mesurés. La surface est conservée, mais le "
+            "tracé est à reprendre au plan."
+        )
+        if message not in avertissements:
+            avertissements.append(message)
+    if sans_surface and avertissements is not None:
+        message = (
+            f"{sans_surface} contour(s) du plan replié(s) sur eux-mêmes "
+            "n'entourent aucune surface : ils ne comptent pas dans l'emprise "
+            "mesurée. À vérifier au plan si une surface manque."
+        )
+        # Un même contour est polygonisé à chaque lecture de la propriété : le
+        # rapport le dirait autant de fois.
+        if message not in avertissements:
+            avertissements.append(message)
     if not morceaux:
         return None
-    union = unary_union(morceaux)
+    try:
+        union = unary_union(morceaux)
+    except Exception as cause:  # pragma: no cover - dépend de la version de GEOS
+        raise ErreurImportBE(
+            f"Union impossible de {len(morceaux)} contour(s) du plan : {cause}. "
+            "Un tracé se replie sur lui-même ou se recoupe ; à reprendre au plan."
+        ) from cause
     return union if union.geom_type in ("Polygon", "MultiPolygon") else None
 
 
@@ -2374,6 +2453,9 @@ def _contours_des_remplissages(
     # une seconde fois.
     couvert = []
     for entite in deja:
+        # Sans canal d'avertissements : ici, un tracé ouvert est la règle — un
+        # axe de piste, une haie —, et ce qu'on lui demande est seulement s'il
+        # entoure déjà une surface.
         polygone = _polygoniser(entite.geometrie)
         couvert.append(
             polygone

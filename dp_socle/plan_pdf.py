@@ -4234,7 +4234,11 @@ class ImportPlanPDF:
             # Une piste franchit la clôture à ses portails : ce n'est pas un
             # recouvrement.
             portails = unary_union(plan.geometries("portail")).buffer(0.5)
-            couverte = enceinte.exterior.intersection(surface)
+            # `boundary` et non `exterior` : une clôture en deux enceintes
+            # disjointes — le cas est prévu plus haut — arrive en MultiPolygon,
+            # qui n'a pas d'`exterior`. Mesuré le 01/10/2026 : le contrôle
+            # tombait sur un `AttributeError` au lieu de rendre son rapport.
+            couverte = enceinte.boundary.intersection(surface)
             if not portails.is_empty:
                 couverte = couverte.difference(portails)
             sur_cloture = float(couverte.length)
