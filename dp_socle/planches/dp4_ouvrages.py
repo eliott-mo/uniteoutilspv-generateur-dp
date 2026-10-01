@@ -699,8 +699,13 @@ def _tracer_decoupe(planche, geometrie, style, fenetre) -> bool:
         if not surface.is_empty:
             planche.ajouter_geometrie(
                 surface,
+                # La hachure voyage avec le remplissage : sans elle, la piste
+                # lourde à créer reparaissait toute grise sur DP 4-1 et 4-2,
+                # quand DP 2 la hachurait — deux planches du même dossier qui
+                # ne disaient pas la même chose (relevé le 01/10/2026).
                 Style(trait=None, epaisseur_mm=0.0, remplissage=remplissage,
-                      opacite_remplissage=style.opacite_remplissage),
+                      opacite_remplissage=style.opacite_remplissage,
+                      hachure=style.hachure),
             )
             tracee = True
 
