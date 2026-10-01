@@ -511,6 +511,28 @@ def _mener_jusqu_a(coords: list, bout: int, cible: LineString):
     return (proche.x, proche.y)
 
 
+def _garder_le_chemin(
+    chemins: list, chemin: _Chemin, troncons: list, degeneres: set
+) -> None:
+    """Ajoute un chemin à la liste, sauf s'il ne porte plus aucun segment.
+
+    Un chemin dont tous les sommets se confondent sort de
+    `_sans_sommet_confondu` avec un seul sommet et aucun tronçon. Mesuré le
+    01/10/2026 sur le plan de Saint-Aubin-sur-Loire : un moignon de deux
+    centimètres couché le long d'une piste, dont les deux bouts sont libres et
+    à portée de raccord, est mené jusqu'à l'axe voisin par chacun d'eux — et
+    les deux y tombent au même endroit.
+
+    Il ne porte aucune piste, et `_arrondir` s'arrêtait dessus sur un
+    `IndexError` qui ne nommait ni le tracé fautif ni quoi en faire. Écarté, et
+    dit au rapport.
+    """
+    if len(chemin.sommets) >= 2 and chemin.troncons:
+        chemins.append(chemin)
+        return
+    degeneres.update(chemin.troncons or troncons)
+
+
 def _raccorder(
     axes: list[AxePiste],
 ) -> tuple[list[_Chemin], list[_RaccordEnT], list[list], list[str]]:
@@ -580,10 +602,15 @@ def _raccorder(
     # Les chemins : chaque tracé fermé en est un ; les autres s'enchaînent.
     chemins = []
     vus = set()
+    # Les tracés dont tous les sommets se confondent : voir `_garder_le_chemin`.
+    degeneres: set = set()
     for i in range(len(axes)):
         if fermes[i]:
-            chemins.append(
-                _sans_sommet_confondu(coords[i][:-1], [i] * (len(coords[i]) - 1), ferme=True)
+            _garder_le_chemin(
+                chemins,
+                _sans_sommet_confondu(coords[i][:-1], [i] * (len(coords[i]) - 1), ferme=True),
+                [i],
+                degeneres,
             )
             vus.add(i)
     for i in range(len(axes)):
@@ -641,7 +668,22 @@ def _raccorder(
             # segment, déjà compté, devient celui qui referme la boucle.
             sommets[0] = sommet
             sommets.pop()
-        chemins.append(_sans_sommet_confondu(sommets, troncons, ferme))
+        _garder_le_chemin(
+            chemins, _sans_sommet_confondu(sommets, troncons, ferme), troncons, degeneres
+        )
+
+    if degeneres:
+        libelles = sorted({axes[t].libelle for t in degeneres})
+        notes.append(
+            f"{len(degeneres)} tracé(s) de piste sans longueur sur le plan "
+            f"(« {' / '.join(libelles)} ») : tous leurs sommets se confondent à "
+            "moins d'un centimètre, et aucune piste n'en sort. À reprendre au plan "
+            "si une piste manque."
+        )
+        # Un raccord vers un tracé écarté ne mène plus nulle part.
+        raccords = [
+            r for r in raccords if r.axe not in degeneres and r.sur not in degeneres
+        ]
     return chemins, raccords, coords, notes
 
 
@@ -804,7 +846,29 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
     """
     if not axes:
         return [], []
+    # Un axe réduit à un point ne porte aucune piste, et `LineString` lève sur
+    # un seul sommet. Relevé le 01/10/2026 sur Saint-Aubin-sur-Loire, dont le
+    # plan porte un tracé aux sommets confondus : l'import s'arrêtait sur une
+    # trace Python au lieu de le dire. Écartés **ici**, avant `_raccorder` :
+    # les rangs des axes servent d'identifiants de tronçon dans tout ce qui
+    # suit, et les décaler plus bas les ferait désigner un autre axe.
+    gardes = [
+        a for a in axes if len(_sans_doublons(list(a.ligne.coords), ferme=False)) >= 2
+    ]
+    ecartes = len(axes) - len(gardes)
+    axes = gardes
+    if not axes:
+        return [], [
+            f"{ecartes} tracé(s) de piste réduits à un point sur le plan : aucune "
+            "piste n'en sort. À reprendre au plan."
+        ]
     chemins, raccords, coords, notes = _raccorder(axes)
+    if ecartes:
+        notes.append(
+            f"{ecartes} tracé(s) de piste réduits à un point sur le plan : ils ne "
+            "portent aucune piste et sont écartés. À vérifier au plan si une "
+            "piste manque."
+        )
     axes_arrondis: dict = {}
     rayons_axe: dict = {}
     for chemin in chemins:

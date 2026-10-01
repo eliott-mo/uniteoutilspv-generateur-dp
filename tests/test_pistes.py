@@ -214,3 +214,41 @@ def test_deux_bouts_proches_sans_raccord_le_disent():
     )
     assert sum(p.rayons_axe_m == [] for p in pistes) == 2
     assert any("laissées sans raccord" in n for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# Les tracés dégénérés du plan (Saint-Aubin-sur-Loire, 01/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_trace_reduit_a_un_point_ne_fait_pas_tomber_l_import():
+    """Un tracé d'un seul sommet n'arrête pas les autres pistes.
+
+    Relevé sur le plan de Saint-Aubin-sur-Loire : l'import s'arrêtait sur
+    `GEOSException: point array must contain 0 or >1 elements`, une trace
+    Python qui ne disait ni le tracé fautif ni quoi en faire.
+    """
+    pistes, notes = _pistes(
+        ("piste_lourde_a_creer", "A", [(0, 0), (100, 0)]),
+        ("piste_lourde_a_creer", "Point", [(300, 300), (300, 300)]),
+    )
+    assert [piste.libelle for piste in pistes] == ["A"]
+    assert any("réduits à un point" in note for note in notes)
+
+
+def test_un_moignon_contre_une_piste_ne_fait_pas_tomber_l_import():
+    """Un tracé de 2 cm le long d'une piste s'écarte, et se dit.
+
+    Ses deux bouts sont libres et à portée de raccord : chacun est mené
+    jusqu'à l'axe voisin, et ils y tombent au même endroit. Le chemin sort
+    alors sans aucun segment, et `_arrondir` s'y arrêtait sur un `IndexError`
+    qui ne nommait ni le tracé fautif ni quoi en faire.
+    """
+    pistes, notes = _pistes(
+        ("piste_lourde_a_creer", "A", [(0, 0), (100, 0)]),
+        ("piste_lourde_a_creer", "Moignon", [(50, 0.3), (50, 0.32)]),
+    )
+    assert [piste.libelle for piste in pistes] == ["A"]
+    assert any("sans longueur" in note and "Moignon" in note for note in notes)
+    # La bande de la piste qui reste est intacte : le moignon ne l'a pas élargie.
+    assert pistes[0].surface.area == pytest.approx(500.0, rel=1e-6)
