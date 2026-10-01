@@ -63,7 +63,6 @@ from dp_socle.import_be import (
 from dp_socle.dossier import piece
 from dp_socle.geometrie import charger_emprise
 from dp_socle.ign import DPI_DEFAUT
-from dp_socle.environnement import version_deployee
 from dp_socle.polices import etat_polices
 from dp_socle.sortie_pptx import (
     FORMAT_HORODATAGE,
@@ -94,6 +93,24 @@ PICTO = "🏗️"
 # bas, et un appel placé avant sa fonction ne lèverait qu'en ligne.
 @st.cache_resource
 def _version_deployee():
+    """La version en ligne, ou None si le processus n'a pas encore rechargé.
+
+    L'import est ici et non en tête de fichier, et c'est une leçon payée cher
+    le 01/10/2026 : Streamlit rejoue `app.py` depuis le disque à chaque
+    interaction, mais garde en mémoire les modules déjà importés. Après une
+    mise en ligne, le processus exécute donc le nouvel `app.py` contre l'ancien
+    `dp_socle` — et l'import d'une fonction qui vient d'être ajoutée lève, en
+    tête de fichier, avant tout le reste. L'outil est resté planté pour tout le
+    monde sur une ligne d'affichage de confort.
+
+    Descendu dans la fonction, l'échec ne coûte plus que cette ligne, et il se
+    dit : c'est le seul endroit du dossier où une absence est sans conséquence
+    sur une planche.
+    """
+    try:
+        from dp_socle.environnement import version_deployee
+    except ImportError:
+        return None
     return version_deployee()
 
 
@@ -123,7 +140,14 @@ st.caption(
 # un onglet resté ouvert, ou un redéploiement qui n'avait pas pris. Chaque fois
 # le diagnostic a coûté des heures. Elle se lit maintenant à l'écran, et se
 # confronte à l'heure d'un correctif annoncé.
-st.caption(f"🛠️ {_version_deployee().message}")
+_version = _version_deployee()
+st.caption(
+    f"🛠️ {_version.message}"
+    if _version is not None
+    else "🛠️ Version indéterminée : l'application tourne encore sur le code "
+    "d'avant la dernière mise en ligne. Rechargez la page ; si le message "
+    "persiste, redémarrez l'application depuis « Manage app »."
+)
 
 
 @st.cache_resource
