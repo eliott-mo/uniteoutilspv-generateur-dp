@@ -115,6 +115,15 @@ moteur `Planche` du lot 1.
 - **Fins de ligne** : `.gitattributes` force le LF. Un `packages.txt` en CRLF est
   ignoré silencieusement par Streamlit Community Cloud.
 - **Streamlit** : utiliser le paramètre `width`, jamais `use_container_width`.
+- **Streamlit Community Cloud garde les modules en mémoire.** Il rejoue
+  `app.py` depuis le disque à chaque interaction, mais les modules déjà
+  importés restent ceux du démarrage : après une mise en ligne, le processus
+  exécute le **nouvel** `app.py` contre l'**ancien** `dp_socle`. Un
+  `from dp_socle.x import nouvelle_fonction` en tête de fichier lève alors
+  avant tout le reste, et l'outil est inutilisable pour tout le monde — arrivé
+  le 01/10/2026 pour une ligne d'affichage. Une fonction qu'`app.py` vient
+  d'ajouter au socle s'importe **dans la fonction qui l'appelle**, et son échec
+  ne coûte que ce qu'elle sert.
 - **PIL** : `.convert("RGB")` avant toute conversion PDF, et aplatir sur blanc
   les images à canal alpha — un `convert("RGB")` direct remplit de noir.
 
