@@ -381,6 +381,24 @@ FIDELITE_MIN = 0.75
 #: anisotrope, que le pas seul ne verrait pas.
 TOLERANCE_ECHELLE = 0.02
 
+#: Densité minimale d'une case du profil pour que l'emprise du plan s'y arrête,
+#: en part de la case médiane.
+#:
+#: 5 % : mesuré le 01/10/2026 sur Lachapelle-sous-Aubenas, dont la photo
+#: aérienne porte du terrain nu à la teinte des tables — 142 pixels épars sur
+#: 442 103, en traînée de 4,4 m au bout des rangées. Pris au minimum et au
+#: maximum, ils allongeaient l'emprise de 3,1 % et faisaient refuser un plan
+#: juste, calé à 99,9 % sur 17 rangées contre 17. Les cases du champ en portent
+#: 40 et plus, la traînée 3 à 4 : l'écart tombe à 0,2 %. À 10 % le champ même
+#: est rogné (+5,4 % à Lachapelle), à 20 % Gannay se perd (+7,6 %) ; à 5 %,
+#: Gannay ne bouge pas (+0,19 % contre +0,04 %).
+PART_BORD_MIN = 0.05
+
+#: Nombre de cases sur lesquelles le profil est lissé avant d'y chercher le
+#: bord du champ : une table fait au moins un demi-mètre de profondeur, cinq
+#: pixels à 300 dpi, et du bruit n'en fait pas.
+LARGEUR_LISSAGE_BORD = 5
+
 
 # ---------------------------------------------------------------------------
 # Modèle
@@ -2152,6 +2170,46 @@ def _etendues(points: np.ndarray, direction_deg: float) -> tuple[float, float]:
     return float(np.ptp(le_long)), float(np.ptp(en_travers))
 
 
+def _etendues_denses(points: np.ndarray, direction_deg: float, pixel: float):
+    """Les étendues d'un nuage de pixels, sans ses pixels égarés.
+
+    Le minimum et le maximum sont les deux statistiques les moins robustes qui
+    soient : un seul pixel les emporte. Sur une copie d'écran HelioScope, le
+    terrain nu prend par endroits la teinte des tables, et `_sans_les_isolats`
+    ne retire que les taches franchement détachées — pas une traînée éparse
+    dans le prolongement des rangées.
+
+    L'emprise se prend donc là où le champ est encore dense : on profile le
+    nuage en cases d'un pixel, et on s'arrête à la dernière case qui porte au
+    moins `PART_BORD_MIN` de la case médiane. Ce n'est pas un repli : c'est
+    l'estimateur, le même pour tous les plans, et il mesure la même chose en
+    présence de bruit comme en son absence.
+    """
+    angle = math.radians(direction_deg)
+    u = (math.cos(angle), math.sin(angle))
+    axes = (
+        points[:, 0] * u[0] + points[:, 1] * u[1],
+        -points[:, 0] * u[1] + points[:, 1] * u[0],
+    )
+    etendues = []
+    for valeurs in axes:
+        brute = float(np.ptp(valeurs))
+        cases = max(1, int(math.ceil(brute / pixel)))
+        histo, bords = np.histogram(valeurs, bins=cases)
+        pleines = histo[histo > 0]
+        # Lissé sur cinq cases : une table fait au moins un demi-mètre de
+        # profondeur, du bruit non. Sans ce lissage, une seule case un peu
+        # fournie dans la traînée rendait le bord au bruit.
+        lisse = np.convolve(histo, np.ones(LARGEUR_LISSAGE_BORD) / LARGEUR_LISSAGE_BORD, mode="same")
+        gardes = np.nonzero(lisse >= PART_BORD_MIN * np.median(pleines))[0]
+        etendues.append(
+            brute
+            if gardes.size == 0
+            else float(bords[gardes[-1] + 1] - bords[gardes[0]])
+        )
+    return etendues[0], etendues[1]
+
+
 def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
     """Cale la page du plan sur les tables que le lot 2 a lues dans le DXF.
 
@@ -2187,8 +2245,12 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         ]
     )
     long_dxf, travers_dxf = _etendues(sommets_dxf, direction_dxf)
-    long_plan, travers_plan = _etendues(rangees.points, rangees.direction_deg)
     pixel = _pas_pixel(plan.fond)
+    # Le DXF n'a pas de bruit : ses sommets sont ceux des tables. Le plan en a,
+    # et c'est son étendue seule qu'on prend au dense — voir `_etendues_denses`.
+    long_plan, travers_plan = _etendues_denses(
+        rangees.points, rangees.direction_deg, pixel
+    )
     echelle_long = long_dxf / (long_plan + pixel)
     echelle_travers = travers_dxf / (travers_plan + pixel)
     for nom, valeur in (

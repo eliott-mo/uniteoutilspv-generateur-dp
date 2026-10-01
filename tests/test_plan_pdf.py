@@ -1403,3 +1403,37 @@ def test_le_poste_cale_en_limite_rejoint_la_cloture_recalee(import_bray_2):
         ]
     finally:
         import_bray_2.changer_de_choix(ChoixDuPlan())
+
+
+# ---------------------------------------------------------------------------
+# L'emprise du plan, et les pixels égarés (Lachapelle, 01/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_l_emprise_du_plan_ignore_une_trainee_de_pixels_egares():
+    """Du terrain nu à la teinte des tables n'allonge plus l'emprise mesurée.
+
+    Mesuré sur Lachapelle-sous-Aubenas : la photo aérienne porte des pixels de
+    terrain nu à la teinte HelioScope — 142 sur 442 103, en traînée de 4,4 m
+    dans le prolongement des rangées. Pris au minimum et au maximum, ils
+    allongeaient l'emprise du plan de 3,1 % et faisaient refuser un plan juste,
+    calé à 99,9 % sur 17 rangées contre 17. Le chef de projet n'avait qu'un
+    message lui disant que son plan ne montrait pas le même calepinage.
+
+    Les deux mesures sont ici : l'étendue brute part avec la traînée, l'étendue
+    dense s'arrête au champ.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _etendues, _etendues_denses
+
+    tirage = np.random.default_rng(0)
+    champ = tirage.uniform([0.0, 0.0], [100.0, 50.0], size=(40_000, 2))
+    trainee = np.column_stack(
+        [tirage.uniform(103.0, 107.0, 30), tirage.uniform(20.0, 25.0, 30)]
+    )
+    points = np.vstack([champ, trainee])
+
+    # Trente pixels sur quarante mille allongent l'emprise brute de 7 %.
+    assert _etendues(points, 0.0)[0] == pytest.approx(107.0, abs=0.5)
+    assert _etendues_denses(points, 0.0, 0.25)[0] == pytest.approx(100.0, abs=1.0)
