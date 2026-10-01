@@ -993,6 +993,23 @@ def test_saint_cyr_reste_sans_avertissement(plan):
     assert len(plan.correspondance) == 9
 
 
+def test_le_beton_en_place_de_saint_cyr_ne_gonfle_pas_la_voie_lourde():
+    """« ENV_Surface bétonnée » va au chemin existant, pas à la piste lourde.
+
+    Relevé le 01/10/2026 : le bureau d'études a ajouté le calque à la demande
+    du chef de projet, qui l'appariait à la piste lourde existante — le choix
+    naturel au vu du libellé. Mais c'est du béton déjà en place, que le tableau
+    bilan ne compte pas : le contrôle de voie lourde passait à **135,7 %**
+    d'écart pour 5 % admis. En chemin existant il tombe à 0,1 %, et les
+    7 930 m² paraissent quand même au plan, sous leur propre entrée de légende.
+    """
+    from dp_socle.import_be import CATEGORIES_VOIE_LOURDE, categorie_proposee
+
+    assert categorie_proposee("ENV_Surface bétonnée") == "chemin_existant"
+    assert categorie_proposee("UNI_VRD_Piste_enherbée") == "piste_legere"
+    assert "chemin_existant" not in CATEGORIES_VOIE_LOURDE
+
+
 def test_un_remplissage_sans_contour_porte_quand_meme_sa_surface():
     """Six surfaces bétonnées sur sept disparaissaient sans un mot.
 

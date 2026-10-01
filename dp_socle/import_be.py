@@ -221,6 +221,14 @@ CORRESPONDANCE_DEFAUT = {
     # place. Vu sur Bédarieux et sur Joux-la-Ville, où il portait toute la
     # voirie du site et où le plan est sorti sans piste.
     "PVcase Road": "voirie",
+    # Relevés sur Saint-Cyr le 01/10/2026, après que le bureau d'études les a
+    # ajoutés à la demande du chef de projet. « ENV_Surface bétonnée » va à
+    # `chemin_existant` et non à la piste lourde : c'est du béton déjà en
+    # place, que le tableau bilan ne compte pas. L'y rattacher portait l'écart
+    # du contrôle de voie lourde à 135,7 % ; en chemin existant il tombe à
+    # 0,1 %, et les 7 930 m² paraissent quand même au plan.
+    "ENV_Surface bétonnée": "chemin_existant",
+    "UNI_VRD_Piste_enherbée": "piste_legere",
 }
 
 #: Types d'entités traités. Les `HATCH` sont écartés : ce sont des remplissages
