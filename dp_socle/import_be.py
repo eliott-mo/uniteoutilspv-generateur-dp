@@ -2271,13 +2271,24 @@ def _emprise(plan: PlanBE, emprise_cadastrale: BaseGeometry | None) -> Controle:
     """
     polygone = plan.polygone_cloture
     if polygone is None:
+        # Ce contrôle est le seul que les deux lots partagent : le 2bis lit un
+        # DXF, le 2ter un plan PDF. Le message nommait le DXF dans les deux
+        # cas, et annonçait « aucun contour » à qui voyait sa clôture sur son
+        # plan. Relevé le 01/10/2026 sur Saint-Aubin-sur-Loire, dont la clôture
+        # est bien là mais ne se referme pas : le chef de projet cherchait un
+        # calque manquant dans un fichier qu'il n'avait pas fourni.
         return Controle(
             "Clôture dans l'emprise cadastrale",
             None,
             None,
             "",
             AVERTISSEMENT,
-            "Aucun contour de clôture dans le DXF : contrôle impossible.",
+            "Aucun contour de clôture dans le plan importé : contrôle "
+            "impossible."
+            if not plan.geometries("cloture")
+            else "Le contour de clôture du plan ne se referme pas : le "
+            "débordement hors du foncier maîtrisé ne peut pas être mesuré. "
+            "Le plan est à reprendre.",
         )
 
     occupees = _parcelles_touchees(plan, polygone)

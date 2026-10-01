@@ -1861,3 +1861,68 @@ def test_un_contour_qui_se_recoupe_est_mesure_et_signale():
     # Les deux lobes du nœud : 2 500 m² chacun.
     assert plan.surface_cloturee_m2 == pytest.approx(5_000.0)
     assert any("se recoupent" in a for a in plan.avertissements)
+
+
+def test_le_controle_de_l_emprise_ne_parle_pas_du_dxf_a_qui_depose_un_pdf():
+    """Le seul contrôle partagé par les deux lots nomme la bonne source.
+
+    Le 2bis lit un DXF, le 2ter un plan PDF, et ce contrôle est le seul qu'ils
+    partagent. Il annonçait « aucun contour de clôture dans le DXF » dans les
+    deux cas — à qui n'avait déposé aucun DXF, et à qui voyait sa clôture sur
+    son plan. Relevé le 01/10/2026 sur Saint-Aubin-sur-Loire, dont la clôture
+    est bien là mais ne se referme pas.
+    """
+    from shapely.geometry import LineString, Polygon
+
+    from dp_socle.import_be import AVERTISSEMENT, EntiteBE, _emprise
+
+    def plan_avec(*entites):
+        from dp_socle.import_be import PlanBE
+
+        return PlanBE(
+            entites=list(entites),
+            azimut_tables_deg=0.0,
+            correspondance={"CLOTURE": "cloture"},
+            unite="m",
+            facteur_unite=1.0,
+            calques_ignores=[],
+            calques_vides=[],
+            source="Plan du projet.pdf sur HelioScope Export.zip",
+        )
+
+    # Rien du tout : le message ne nomme aucun format de fichier.
+    sans_rien = _emprise(plan_avec(), None)
+    assert sans_rien.statut == AVERTISSEMENT
+    assert "DXF" not in sans_rien.message
+    assert "Aucun contour de clôture dans le plan importé" in sans_rien.message
+
+    # Une clôture qui ne se referme pas : dire « aucun contour » envoyait
+    # chercher un calque manquant au lieu du tracé ouvert.
+    ouverte = _emprise(
+        plan_avec(
+            EntiteBE(
+                "cloture",
+                "CLOTURE",
+                LineString([(0, 0), (100, 0), (100, 100), (0, 100)]),
+                False,
+            )
+        ),
+        None,
+    )
+    assert ouverte.statut == AVERTISSEMENT
+    assert "DXF" not in ouverte.message
+    assert "ne se referme pas" in ouverte.message
+
+    # Et quand la clôture se referme, le contrôle se fait comme avant.
+    fermee = _emprise(
+        plan_avec(
+            EntiteBE(
+                "cloture",
+                "CLOTURE",
+                Polygon([(0, 0), (100, 0), (100, 100), (0, 100)]),
+                False,
+            )
+        ),
+        None,
+    )
+    assert "ne se referme pas" not in fermee.message
