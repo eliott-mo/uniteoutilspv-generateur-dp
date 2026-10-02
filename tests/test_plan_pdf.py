@@ -1538,3 +1538,56 @@ def test_un_ouvrage_annonce_en_legende_mais_absent_de_la_carte_est_nomme():
     reperes = {"ptr": [_Repere("Poste de transformation")], "portail": []}
 
     assert _ouvrages_annonces_sans_forme(lecture, reperes) == ["Portail (7 m)"]
+
+
+def test_le_message_d_une_cloture_ouverte_porte_la_formule_qui_le_fait_remonter():
+    """Le contrat de texte entre le socle et l'interface, figé ici.
+
+    L'interface range les remarques en trois niveaux et reconnaît un bloquant
+    à sa phrase finale (`app.MARQUEUR_BLOQUANT`). La changer ici sans la
+    changer là-bas renverrait ce message au milieu des remarques ordinaires —
+    il y arrivait dix-septième sur vingt-trois à La Chapelle-sous-Aubenas, et
+    personne ne lisait jusque-là.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _message_cloture_ouverte
+
+    anneau_ouvert = LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0, 6)])
+
+    message = _message_cloture_ouverte([anneau_ouvert], ["Portail (7 m)"])
+    # La formule que l'interface guette, mot pour mot.
+    assert "le dossier ne peut pas être généré" in message
+    # La mesure du trou, qui désigne l'endroit.
+    assert "il lui manque 6.0 m" in message
+    # Et l'ouvrage qu'on soupçonne, quand la légende en annonce un sans forme.
+    assert "« Portail (7 m) »" in message
+
+    # Sans ouvrage déclaré sans forme, on ne soupçonne rien : le message dit le
+    # trou et s'arrête là.
+    sobre = _message_cloture_ouverte([anneau_ouvert], [])
+    assert "probablement" not in sobre
+    assert "le dossier ne peut pas être généré" in sobre
+
+
+def test_un_repli_de_rattachement_repete_ne_fait_qu_une_ligne():
+    """Onze fois le même constat noyaient les sept qui demandaient une action.
+
+    Mesuré le 02/10/2026 sur La Chapelle-sous-Aubenas : la lecture du plan
+    sortait onze messages identiques — « un aplat de sa couleur, là où sa
+    pastille est un trait » — sur vingt-trois au total. Le chef de projet
+    « n'a plus envie de les lire et passe à la suite », et c'est la deuxième
+    fois qu'il le dit (déjà le 17/09/2026 sur Sarnois).
+
+    Les positions restent : c'est par elles qu'on retrouve la forme au plan.
+    """
+    from dp_socle.plan_pdf import lire_plan_pdf
+    from tests.jeux_plan_pdf import PLAN_GANNAY
+
+    plan = lire_plan_pdf(PLAN_GANNAY)
+    replis = [m for m in plan.avertissements if "on n'en garde que l'axe" in m]
+    # Un message par (libellé, raison) : jamais deux fois le même constat.
+    assert len(replis) == len({m.split(" — ")[0] for m in replis})
+    for message in replis:
+        # Le compte et les positions sont dans le message, pas dans sa répétition.
+        assert " pt" in message

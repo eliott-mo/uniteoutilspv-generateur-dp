@@ -1341,6 +1341,7 @@ def lire_plan_pdf(
     pastilles = {id(e.pastille) for e in legende}
 
     elements, non_reconnus = [], []
+    replis: dict = {}
     for objet in objets:
         if id(objet) in pastilles:
             continue
@@ -1358,11 +1359,30 @@ def lire_plan_pdf(
             non_reconnus.append((objet, raison))
             continue
         if raison:
-            avertissements.append(
-                f"« {entree.libelle} » : {raison} — vers "
-                f"({(b[0] + b[2]) / 2:.0f}, {(b[1] + b[3]) / 2:.0f}) pt."
+            replis.setdefault((entree.libelle, raison), []).append(
+                ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
             )
         elements.append(ElementPlan(entree=entree, objet=objet))
+
+    # Un même repli vaut pour toutes les formes qu'il concerne : le dire une
+    # fois par forme noyait le reste du rapport. Mesuré le 02/10/2026 sur
+    # La Chapelle-sous-Aubenas : onze lignes identiques pour la clôture sur
+    # vingt-trois messages, et le chef de projet « n'a plus envie de les lire ».
+    # Les positions restent, elles : c'est par elles qu'on retrouve la forme
+    # sur le plan.
+    for (libelle, raison), positions in replis.items():
+        lieux = " ; ".join(f"({x:.0f}, {y:.0f})" for x, y in positions[:3])
+        reste = len(positions) - 3
+        avertissements.append(
+            f"« {libelle} » : {raison} — "
+            + (
+                f"{len(positions)} fois, vers {lieux} pt"
+                + (f" et {reste} autre{'s' if reste > 1 else ''}" if reste > 0 else "")
+                if len(positions) > 1
+                else f"vers {lieux} pt"
+            )
+            + "."
+        )
 
     if non_reconnus:
         detail = "; ".join(
@@ -2828,6 +2848,35 @@ def _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie) -> list[str]:
     )
 
 
+def _message_cloture_ouverte(restes: list[LineString], manquants: list[str]) -> str:
+    """Ce qu'on dit d'une clôture qui ne se referme pas : la mesure et la cause.
+
+    La phrase finale — « le dossier ne peut pas être généré » — est le signal
+    que l'interface reconnaît pour remonter ce message en tête, avec les
+    contrôles croisés bloquants (`app.MARQUEUR_BLOQUANT`). La changer ici sans
+    la changer là-bas le renverrait au milieu des remarques ordinaires, où il
+    arrivait dix-septième sur vingt-trois à La Chapelle-sous-Aubenas.
+    """
+    trou = _trou_de_cloture(restes)
+    return (
+        f"Clôture ouverte : {len(restes)} tracé(s) ne se referment sur aucun "
+        "ouvrage"
+        + (f", et il lui manque {trou:.1f} m" if trou is not None else "")
+        + ". "
+        + (
+            "La légende annonce pourtant "
+            + " ; ".join(f"« {n} »" for n in manquants)
+            + " dont la carte ne porte aucune forme : c'est probablement là que "
+            "la clôture s'interrompt. Ajoutez l'ouvrage au plan et refaites "
+            "l'import. "
+            if manquants
+            else ""
+        )
+        + "Sans contour fermé, ni la surface clôturée ni la coupe A-A' ne se "
+        "calculent, et le dossier ne peut pas être généré."
+    )
+
+
 def _refermer(lignes: list[LineString], centres_ouvrages: list, libelles: list):
     """Referme une clôture interrompue au droit d'un ouvrage, en le disant.
 
@@ -3601,24 +3650,11 @@ def construire(
                 "dessine."
             )
         if restes:
-            trou = _trou_de_cloture(restes)
-            manquants = _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie)
             notes.append(
-                f"Clôture ouverte : {len(restes)} tracé(s) ne se referment sur "
-                "aucun ouvrage"
-                + (f", et il lui manque {trou:.1f} m" if trou is not None else "")
-                + ". "
-                + (
-                    "La légende annonce pourtant "
-                    + " ; ".join(f"« {n} »" for n in manquants)
-                    + " dont la carte ne porte aucune forme : c'est probablement "
-                    "là que la clôture s'interrompt. Ajoutez l'ouvrage au plan "
-                    "et refaites l'import. "
-                    if manquants
-                    else ""
+                _message_cloture_ouverte(
+                    restes,
+                    _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie),
                 )
-                + "Sans contour fermé, ni la surface clôturée ni la coupe A-A' "
-                "ne se calculent, et le dossier ne peut pas être généré."
             )
             enceinte.anneau = None
             enceinte.lignes = restes + ([anneau] if anneau is not None else [])

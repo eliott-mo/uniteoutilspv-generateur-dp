@@ -667,6 +667,12 @@ def test_les_remarques_de_l_import_tiennent_sous_un_seul_bandeau(tmp_path, monke
     distinguait plus le premier du dernier (retour d'usage du 26/09/2026). Elles
     tiennent sous un bandeau qui les annonce et les compte, et se lisent en liste
     sous lui.
+
+    Le bandeau annonçait « N remarque(s) sur l'import, à lire avant de valider »
+    jusqu'au 02/10/2026 ; il dit maintenant ce qu'il y a à en faire, les
+    remarques étant rangées en trois niveaux — bloquant, à corriger, pour
+    information. Ce qui se mesure ici n'a pas changé : un seul bandeau, et les
+    messages en liste sous lui.
     """
     application = _plan_importe(tmp_path, monkeypatch)
 
@@ -674,7 +680,7 @@ def test_les_remarques_de_l_import_tiennent_sous_un_seul_bandeau(tmp_path, monke
     bandeaux = [
         bloc.value
         for bloc in application.warning
-        if "remarque(s) sur l'import" in bloc.value
+        if "à corriger au plan" in bloc.value
     ]
     assert len(bandeaux) == 1, [bloc.value for bloc in application.warning]
 

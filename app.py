@@ -92,7 +92,13 @@ PICTO = "🏗️"
 
 # Définie avant le titre, qui l'affiche : Streamlit rejoue le script de haut en
 # bas, et un appel placé avant sa fonction ne lèverait qu'en ligne.
-@st.cache_resource
+#
+# **Sans cache**, et c'est tout l'objet de la fonction : `@st.cache_resource`
+# garde sa valeur pour la vie du processus, et Streamlit Community Cloud rejoue
+# `app.py` depuis le disque sans toujours redémarrer celui-ci. Mise en cache,
+# la ligne aurait affiché la version d'avant la mise en ligne — exactement le
+# mensonge qu'elle existe pour empêcher. Elle coûte 3,75 ms par exécution,
+# mesurées le 02/10/2026 : trente fichiers à dater et un `.git` à lire.
 def _version_deployee():
     """La version en ligne, ou None si le processus n'a pas encore rechargé.
 
@@ -784,7 +790,25 @@ MOTIFS_DE_ROUTINE = (
     "calque(s) écarté(s) —",
     "annotation(s) écartée(s)",
     "entité(s) sans calque écartée(s)",
+    # Chemin du plan PDF, ajoutés le 02/10/2026 : les trois motifs ci-dessus
+    # ne reconnaissaient que le vocabulaire du DXF, et les vingt-trois messages
+    # de La Chapelle-sous-Aubenas tombaient tous dans « à lire ». Ceux-ci
+    # disent ce que l'outil a fait de lui-même, et n'appellent qu'un coup d'œil.
+    "ont des modules disjoints",
+    "zone(s) évitée(s) reconstituée(s)",
+    "on n'en garde que l'axe",
+    "Gabarits UNITe",
 )
+
+
+#: La formule que porte un message qui empêche le dossier de sortir.
+#:
+#: Un bloquant noyé au milieu des remarques se lit comme elles, c'est-à-dire
+#: mal : celui de La Chapelle — la clôture qui ne se referme pas — arrivait en
+#: dix-septième position sur vingt-trois. Il remonte en tête, avec les
+#: contrôles croisés bloquants, parce que c'est la seule chose qui empêche
+#: d'avancer.
+MARQUEUR_BLOQUANT = "le dossier ne peut pas être généré"
 
 
 #: La formule que les messages destinés au bureau d'études portent tous.
@@ -797,21 +821,29 @@ MOTIFS_DE_ROUTINE = (
 MARQUEUR_BUREAU_ETUDES = "à demander au bureau d'études"
 
 
-def _trier_les_avertissements(messages) -> tuple[list, list, list]:
-    """Range les remarques en trois : pour le BE, à lire, fonctionnement normal.
+def _trier_les_avertissements(messages) -> tuple[list, list, list, list]:
+    """Range les remarques en quatre : bloquant, BE, à corriger, pour information.
 
-    L'ordre d'examen compte : une demande au bureau d'études prime sur tout, y
-    compris sur la forme d'un message de routine.
+    L'ordre d'examen compte. Un bloquant prime sur tout : c'est la seule chose
+    qui empêche d'avancer, et il doit se lire avant qu'on cherche quoi corriger.
+    Une demande au bureau d'études vient ensuite, y compris sur la forme d'un
+    message de routine.
+
+    Le classement se fait sur le texte, ce qui est fragile — mais le repli est
+    sûr : un message dont la forme change n'est plus reconnu, et reste donc
+    **à corriger**, c'est-à-dire visible. Jamais l'inverse.
     """
-    au_be, a_lire, routine = [], [], []
+    bloquants, au_be, a_corriger, information = [], [], [], []
     for message in messages:
-        if MARQUEUR_BUREAU_ETUDES in message:
+        if MARQUEUR_BLOQUANT in message:
+            bloquants.append(message)
+        elif MARQUEUR_BUREAU_ETUDES in message:
             au_be.append(message)
         elif any(motif in message for motif in MOTIFS_DE_ROUTINE):
-            routine.append(message)
+            information.append(message)
         else:
-            a_lire.append(message)
-    return au_be, a_lire, routine
+            a_corriger.append(message)
+    return bloquants, au_be, a_corriger, information
 
 
 def _demande_au_be(message: str) -> str:
@@ -2723,9 +2755,14 @@ if import_be_courant is not None and commune.strip():
                 )
 
     with emplacement_avertissements:
-        au_be, a_lire, routine = _trier_les_avertissements(
+        bloquants, au_be, a_lire, routine = _trier_les_avertissements(
             import_be_courant.avertissements
         )
+        # Avec les contrôles croisés bloquants, en tête et dans le même rouge :
+        # ce sont les seules remarques qui empêchent de générer, et les mettre
+        # ailleurs reviendrait à les cacher.
+        for message in bloquants:
+            st.error(message, icon="🚫")
         if au_be:
             st.error(
                 f"**{len(au_be)} point(s) à demander au bureau d'études** avant "
@@ -2755,19 +2792,19 @@ if import_be_courant is not None and commune.strip():
                 st.markdown(_en_puces(a_lire))
         else:
             _lister_les_avertissements(
-                f"{len(a_lire)} remarque(s) sur l'import, à lire avant de "
-                "valider",
+                f"{len(a_lire)} point(s) à corriger au plan avant de valider",
                 a_lire,
             )
         if routine:
             with st.expander(
-                f"Ce que l'import a écarté, comme prévu ({len(routine)} message(s))"
+                f"Ce que l'outil a fait de lui-même ({len(routine)} message(s))"
             ):
                 st.caption(
-                    "Calques de travail du BE, fond cadastral remplacé par le "
-                    "WFS IGN, annotations, cotations : rien de tout cela ne va "
-                    "sur une planche. Ces messages disent ce qui a été laissé de "
-                    "côté, et pourquoi — à lire si une catégorie manque au plan."
+                    "Calques de travail écartés, fond cadastral remplacé par le "
+                    "WFS IGN, formes ramenées à leur axe, zones évitées "
+                    "reconstituées : rien ici n'appelle d'action. Ces messages "
+                    "disent ce qui a été laissé de côté ou repris, et pourquoi — "
+                    "à lire si une catégorie manque au plan."
                 )
                 for message in routine:
                     st.caption(f"· {message}")
