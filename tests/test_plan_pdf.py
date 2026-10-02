@@ -1723,3 +1723,20 @@ def test_un_champ_regulier_garde_la_precision_de_la_droite():
     # Et bien plus proche du vrai pas que les deux rangées des extrémités.
     bouts = (centres[-1] - centres[0]) / 16.0
     assert abs(pente - vrai_pas) < abs(bouts - vrai_pas)
+
+
+def test_le_libelle_de_cloture_de_boisne_est_connu_de_la_charte():
+    """Un libellé de clôture inconnu fait échouer la lecture du plan, d'office.
+
+    La clôture est la seule catégorie attendue : son absence de la légende est
+    tenue pour la marque d'une version antérieure du plan, et la lecture lève.
+    Relevé le 02/10/2026 sur Boisné-La Tude, dont le modèle d'annexe 5 écrit
+    « Clôture extérieure » : le chef de projet devait l'apparier à la main à
+    chaque import, sur une erreur qui désignait une autre cause que la sienne.
+    """
+    from dp_socle.import_be import normaliser
+    from dp_socle.plan_pdf import CORRESPONDANCE_LEGENDE
+
+    connus = {normaliser(k): v for k, v in CORRESPONDANCE_LEGENDE.items()}
+    for libelle in ("Clôture", "Clôture extérieure"):
+        assert connus[normaliser(libelle)] == "cloture", libelle

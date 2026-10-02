@@ -79,6 +79,12 @@ from .pistes import (
 #: s'apparie à la main.
 CORRESPONDANCE_LEGENDE = {
     "Clôture": "cloture",
+    # Relevé sur Boisné-La Tude le 02/10/2026. Sans ce libellé, la lecture du
+    # plan **échoue d'office** : la clôture est la seule catégorie attendue, et
+    # son absence est tenue pour la marque d'une version antérieure du plan. Le
+    # chef de projet devait l'apparier à la main à chaque import, sur une erreur
+    # qui désignait une autre cause que la sienne.
+    "Clôture extérieure": "cloture",
     "Portail": "portail",
     "Haie à créer": "haie",
     # Faute du modèle, relevée à Gannay : la normalisation efface les accents
