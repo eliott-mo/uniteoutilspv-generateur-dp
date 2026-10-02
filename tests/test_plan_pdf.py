@@ -1471,3 +1471,70 @@ def test_un_libelle_non_rattache_qui_partage_sa_couleur_ne_s_apparie_pas_a_la_ma
 
     seule = next(m for m in messages if "Piste à renforcer" in m)
     assert "Appariez-le à la main" in seule
+
+
+# ---------------------------------------------------------------------------
+# Ce qu'on dit d'une clôture qui ne se referme pas (La Chapelle, 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_cloture_ouverte_dit_de_combien_et_ce_qui_manque_au_plan():
+    """« Elle ne se referme pas » laisse chercher ; « il manque 6 m » désigne.
+
+    Mesuré sur La Chapelle-sous-Aubenas : un seul tracé de clôture de 659,9 m
+    dont les deux bouts sont à 6,02 m l'un de l'autre — 0,9 % du périmètre — et
+    aucun ouvrage au droit. Le même plan annonce en légende un « Portail (7 m) »
+    dont la carte ne porte aucune forme : les deux anomalies n'en font qu'une,
+    et c'est au rapport de le dire plutôt qu'au chef de projet de le deviner.
+
+    Décision du chef de projet du 02/10/2026 : l'outil **ne referme pas** un
+    trou qu'aucun ouvrage n'explique. Une planche qui montrerait une clôture
+    continue sans portail laisserait déposer un dossier sans son accès.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _ouvrages_annonces_sans_forme, _trou_de_cloture
+
+    # Un anneau à qui il manque 6 m entre ses deux bouts.
+    ouverte = LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0, 6)])
+    assert _trou_de_cloture([ouverte]) == pytest.approx(6.0)
+
+    # Deux tracés : c'est le plus petit écart entre bouts libres qui compte.
+    nord = LineString([(0, 100), (100, 100)])
+    sud = LineString([(0, 0), (100, 0)])
+    assert _trou_de_cloture([nord, sud]) == pytest.approx(100.0)
+
+    # Rien à mesurer sur une liste vide.
+    assert _trou_de_cloture([]) is None
+
+
+def test_un_ouvrage_annonce_en_legende_mais_absent_de_la_carte_est_nomme():
+    """Le portail déclaré sans forme est celui qu'on soupçonne au trou."""
+    from dataclasses import dataclass
+
+    from dp_socle.plan_pdf import _ouvrages_annonces_sans_forme
+
+    @dataclass
+    class _Entree:
+        libelle: str
+        categorie: str | None
+
+    @dataclass
+    class _Repere:
+        libelle: str
+
+    @dataclass
+    class _Lecture:
+        legende: list
+
+    lecture = _Lecture(
+        legende=[
+            _Entree("Portail (7 m)", "portail"),
+            _Entree("Poste de transformation", "ptr"),
+            _Entree("Clôture", "cloture"),
+        ]
+    )
+    # Le poste est sur la carte, le portail non ; la clôture n'est pas un ouvrage.
+    reperes = {"ptr": [_Repere("Poste de transformation")], "portail": []}
+
+    assert _ouvrages_annonces_sans_forme(lecture, reperes) == ["Portail (7 m)"]

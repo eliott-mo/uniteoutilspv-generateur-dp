@@ -2806,6 +2806,19 @@ if import_be_courant is not None and commune.strip():
             "taille.",
             icon="⚠️",
         )
+    elif import_be_courant.plan.polygone_cloture is None:
+        # Sans contour fermé, aucune coupe ne peut être posée — ni proposée, ni
+        # tracée, ni déplacée : les trois réclament une emprise à traverser.
+        # Réclamer la coupe ici demandait au chef de projet un geste qu'aucun
+        # clic ne pouvait accomplir, et la vraie cause avait défilé depuis
+        # l'import. Relevé le 02/10/2026 sur La Chapelle-sous-Aubenas.
+        st.error(
+            "La clôture du plan ne se referme pas : ni la surface clôturée ni "
+            "la coupe A-A' ne peuvent être calculées, et le lot 4 a besoin des "
+            "deux. C'est le plan qui est à reprendre — le rapport ci-dessus dit "
+            "de combien, et quel ouvrage manque probablement.",
+            icon="🚫",
+        )
     elif coupe is None:
         st.info(
             "Placez la ligne de coupe avant de valider : le lot 4 en a besoin "

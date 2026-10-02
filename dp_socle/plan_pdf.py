@@ -2786,6 +2786,48 @@ def _direction_de_ligne(ligne: LineString, point: Point) -> float:
     )
 
 
+def _trou_de_cloture(restes: list[LineString]) -> float | None:
+    """Le plus petit écart entre deux bouts libres des tracés non refermés.
+
+    C'est la mesure qui manquait au rapport : « la clôture ne se referme pas »
+    laisse chercher partout, « il lui manque 6,0 m » désigne l'endroit. Mesuré
+    le 02/10/2026 sur La Chapelle-sous-Aubenas : un seul tracé de 659,9 m dont
+    les deux bouts sont à 6,02 m l'un de l'autre, soit 0,9 % du périmètre.
+    """
+    bouts = []
+    for ligne in restes:
+        sommets = list(ligne.coords)
+        bouts.append(((id(ligne), 0), sommets[0]))
+        bouts.append(((id(ligne), -1), sommets[-1]))
+    ecarts = [
+        math.dist(a[:2], b[:2])
+        for i, (cle_a, a) in enumerate(bouts)
+        for cle_b, b in bouts[i + 1 :]
+        if cle_a != cle_b
+    ]
+    return min(ecarts) if ecarts else None
+
+
+def _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie) -> list[str]:
+    """Les entrées de légende qui annoncent un ouvrage que la carte ne porte pas.
+
+    Un trou de clôture que rien n'explique et un portail déclaré sans forme ne
+    sont pas deux anomalies : c'est la même, vue deux fois. Les rapprocher dans
+    un seul message évite au chef de projet d'avoir à faire le lien lui-même —
+    il l'a fait trois fois cette semaine, et c'est trois fois de trop.
+    """
+    places = {
+        repere.libelle
+        for liste in reperes_par_categorie.values()
+        for repere in liste
+    }
+    return sorted(
+        entree.libelle
+        for entree in lecture.legende
+        if entree.categorie in CATEGORIES_OUVRAGES and entree.libelle not in places
+    )
+
+
 def _refermer(lignes: list[LineString], centres_ouvrages: list, libelles: list):
     """Referme une clôture interrompue au droit d'un ouvrage, en le disant.
 
@@ -3559,10 +3601,24 @@ def construire(
                 "dessine."
             )
         if restes:
+            trou = _trou_de_cloture(restes)
+            manquants = _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie)
             notes.append(
                 f"Clôture ouverte : {len(restes)} tracé(s) ne se referment sur "
-                "aucun ouvrage. La surface clôturée n'est pas calculée, et le "
-                "plan est à reprendre."
+                "aucun ouvrage"
+                + (f", et il lui manque {trou:.1f} m" if trou is not None else "")
+                + ". "
+                + (
+                    "La légende annonce pourtant "
+                    + " ; ".join(f"« {n} »" for n in manquants)
+                    + " dont la carte ne porte aucune forme : c'est probablement "
+                    "là que la clôture s'interrompt. Ajoutez l'ouvrage au plan "
+                    "et refaites l'import. "
+                    if manquants
+                    else ""
+                )
+                + "Sans contour fermé, ni la surface clôturée ni la coupe A-A' "
+                "ne se calculent, et le dossier ne peut pas être généré."
             )
             enceinte.anneau = None
             enceinte.lignes = restes + ([anneau] if anneau is not None else [])
