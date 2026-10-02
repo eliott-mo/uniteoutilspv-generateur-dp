@@ -1926,3 +1926,101 @@ def test_le_controle_de_l_emprise_ne_parle_pas_du_dxf_a_qui_depose_un_pdf():
         None,
     )
     assert "ne se referme pas" not in fermee.message
+
+
+# ---------------------------------------------------------------------------
+# Le contour que ses deux bouts manquent de peu (Bédarieux, 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_contour_ferme_a_quelques_millimetres_pres_est_ferme():
+    """Neuf millimètres sur 748 m ne font pas une clôture ouverte.
+
+    Mesuré sur le DXF de Bédarieux du 24/09/2026 : la clôture est une polyligne
+    de 747,6 m dont les deux bouts se manquent de 9 mm. Fermée pour qui la
+    regarde, ouverte pour `is_closed` — et l'exigence stricte posée la veille
+    la refusait, ce qui privait le chef de projet de sa surface clôturée **et**
+    faisait tomber la carte.
+
+    Un vrai trou de clôture se compte en mètres : un portail en fait sept.
+    """
+    from shapely.geometry import LineString, MultiLineString
+
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    def plan_avec(trace):
+        return PlanBE(
+            entites=[EntiteBE("cloture", "CLOTURE", trace, False)],
+            azimut_tables_deg=0.0,
+            correspondance={"CLOTURE": "cloture"},
+            unite="m",
+            facteur_unite=1.0,
+            calques_ignores=[],
+            calques_vides=[],
+            source="essai.dxf",
+        )
+
+    # 9 mm : le même point, à la précision du dessin près. Rien à dire.
+    presque = plan_avec(
+        LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0.009, 0)])
+    )
+    assert presque.surface_cloturee_m2 == pytest.approx(10_000.0, rel=1e-3)
+    assert not [a for a in presque.avertissements if "refermé" in a]
+
+    # 5 cm : refermé aussi, mais dit — le tracé mérite d'être repris.
+    large = plan_avec(LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0.05, 0)]))
+    assert large.surface_cloturee_m2 == pytest.approx(10_000.0, rel=1e-3)
+    assert any("refermé" in a for a in large.avertissements)
+
+    # 1 m : c'est un trou, et la surface ne se calcule pas.
+    trouee = plan_avec(LineString([(0, 0), (100, 0), (100, 100), (0, 100), (1.0, 0)]))
+    assert trouee.surface_cloturee_m2 is None
+    assert any("ne se referment pas" in a for a in trouee.avertissements)
+
+
+def test_la_carte_se_cadre_meme_sans_contour_de_cloture():
+    """Un plan sans clôture fermée garde une carte, cadrée sur le reste.
+
+    Relevé sur Bédarieux : `bornes_wgs84(None)` faisait tomber l'application
+    entière, et le chef de projet perdait jusqu'au rapport de contrôle qui lui
+    disait ce qui manquait — c'est précisément quand un plan est incomplet
+    qu'on a besoin de l'outil.
+    """
+    from shapely.geometry import LineString, Polygon
+
+    from dp_socle.apercu_be import cadre_de_la_carte
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    def plan_avec(*entites):
+        return PlanBE(
+            entites=list(entites),
+            azimut_tables_deg=0.0,
+            correspondance={},
+            unite="m",
+            facteur_unite=1.0,
+            calques_ignores=[],
+            calques_vides=[],
+            source="essai.dxf",
+        )
+
+    cloture = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    tables = Polygon([(10, 10), (40, 10), (40, 40), (10, 40)])
+
+    # Avec clôture : c'est elle qui cadre.
+    avec = plan_avec(
+        EntiteBE("cloture", "CLOTURE", cloture, False),
+        EntiteBE("tables_pv", "TABLES", tables, False),
+    )
+    assert cadre_de_la_carte(avec).bounds == cloture.bounds
+
+    # Sans : les tables et la piste suffisent à cadrer.
+    piste = LineString([(200, 0), (260, 0)])
+    sans = plan_avec(
+        EntiteBE("tables_pv", "TABLES", tables, False),
+        EntiteBE("piste_lourde_a_creer", "PISTE", piste, False),
+    )
+    assert cadre_de_la_carte(sans).bounds == (10.0, 0.0, 260.0, 40.0)
+
+    # Rien du tout : il n'y a pas de carte à cadrer, et c'est à l'appelant de
+    # le dire plutôt que de lever.
+    assert cadre_de_la_carte(plan_avec()) is None

@@ -586,28 +586,42 @@ def _perimetre(geometrie: BaseGeometry) -> float:
     return float(geometrie.length)
 
 
+#: Écart maximal entre les deux bouts d'un tracé pour qu'il soit tenu pour
+#: fermé, en mètres.
+#:
+#: 10 cm : mesuré le 02/10/2026 sur Bédarieux, dont la clôture est une
+#: polyligne de 747,6 m dont les bouts se manquent de **9 mm** — fermée pour qui
+#: la regarde, ouverte pour `is_closed`, et l'exigence stricte posée la veille
+#: la refusait. Un vrai trou de clôture se compte en mètres : un portail en fait
+#: sept, soixante-dix fois plus. Refermer 10 cm sur 748 m fausse la surface de
+#: 0,013 %.
+JEU_CONTOUR_FERME_M = 0.10
+
+#: En deçà de cet écart, deux sommets sont le même point et il n'y a rien à
+#: dire : c'est la tolérance que `_sans_doublons` applique déjà aux sommets
+#: répétés. Au-delà, la reprise se dit.
+JEU_SOMMET_CONFONDU_M = 0.01
+
+
 def _polygoniser(
     geometrie: BaseGeometry, avertissements: list[str] | None = None
 ) -> Polygon | None:
     """Polygone d'un contour, qu'il arrive en polygone ou en ligne fermée."""
     morceaux, sans_surface, recoupes, ouverts = [], 0, 0, 0
+    refermes: list[float] = []
     for partie in _parties(geometrie):
         if partie.geom_type == "Polygon":
             candidat = partie
-        elif (
-            partie.geom_type == "LineString"
-            and len(partie.coords) >= 4
-            and partie.is_closed
-        ):
-            candidat = Polygon([(x, y) for x, y, *_ in partie.coords])
+        elif partie.geom_type == "LineString" and len(partie.coords) >= 4:
+            sommets = [(x, y) for x, y, *_ in partie.coords]
+            jeu = hypot(sommets[-1][0] - sommets[0][0], sommets[-1][1] - sommets[0][1])
+            if jeu > JEU_CONTOUR_FERME_M:
+                ouverts += 1
+                continue
+            if jeu > JEU_SOMMET_CONFONDU_M:
+                refermes.append(jeu)
+            candidat = Polygon(sommets)
         else:
-            # Un tracé ouvert n'entoure rien. `Polygon()` le refermait d'un
-            # trait, et fabriquait une surface que personne n'avait dessinée :
-            # mesuré le 01/10/2026 sur Saint-Aubin-sur-Loire, dont la clôture
-            # ne se referme pas. L'outil annonçait « la surface clôturée n'est
-            # pas calculée » et la calculait quand même, sur trois tracés
-            # ouverts dont les faux anneaux se recoupaient.
-            ouverts += 1
             continue
         # Un contour sans surface n'entoure rien, et il fait tomber l'union :
         # GEOS y effondre un anneau et lève « point array must contain 0 or >1
@@ -640,6 +654,15 @@ def _polygoniser(
             continue
         morceaux.append(candidat)
 
+    if refermes and avertissements is not None:
+        message = (
+            f"{len(refermes)} contour(s) du plan refermé(s) : leurs deux bouts "
+            f"ne se rejoignaient pas, à {max(refermes) * 100:.0f} cm près au "
+            "plus. L'écart est négligeable devant le tracé et la surface est "
+            "calculée, mais une polyligne fermée serait plus sûre."
+        )
+        if message not in avertissements:
+            avertissements.append(message)
     if ouverts and avertissements is not None:
         message = (
             f"{ouverts} tracé(s) de contour ne se referment pas : ils n'entourent "
