@@ -483,6 +483,30 @@ def en_wgs84_point(x: float, y: float) -> tuple[float, float]:
     return lat, lon
 
 
+def cadre_de_la_carte(plan) -> BaseGeometry | None:
+    """Ce sur quoi la carte du plan se cadre : sa clôture, ou à défaut le reste.
+
+    La clôture délimite le projet, et c'est elle qui cadre quand elle existe.
+    Elle peut manquer — tracé ouvert, calque non apparié —, et le plan porte
+    alors toujours ses tables, ses pistes et ses ouvrages : c'est leur étendue
+    qui sert, faute de mieux.
+
+    Relevé le 02/10/2026 sur Bédarieux : la carte passait la clôture à
+    `bornes_wgs84` sans la regarder, et `None.bounds` faisait tomber
+    l'application entière. Le chef de projet perdait jusqu'au rapport de
+    contrôle qui lui disait ce qui manquait — c'est précisément quand un plan
+    est incomplet qu'on a besoin de l'outil.
+
+    Rend None quand le plan ne porte rien du tout : il n'y a alors pas de carte
+    à cadrer, et c'est à l'appelant de le dire.
+    """
+    polygone = plan.polygone_cloture
+    if polygone is not None:
+        return polygone
+    dessinees = [e.geometrie for e in plan.entites if not e.geometrie.is_empty]
+    return unary_union(dessinees) if dessinees else None
+
+
 def bornes_wgs84(geometrie: BaseGeometry) -> tuple[float, float, float, float]:
     """(sud, ouest, nord, est) en degrés, pour cadrer la carte."""
     vers_wgs84, _ = _transformateurs()

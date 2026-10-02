@@ -31,6 +31,7 @@ from dp_socle.apercu_be import (
     URL_TUILES_ORTHO,
     apercu_au_survol,
     bornes_wgs84,
+    cadre_de_la_carte,
     clic_l93,
     en_wgs84,
     legende_presente,
@@ -1386,6 +1387,12 @@ def _carte_du_plan(import_be_courant, avec_la_coupe: bool) -> None:
     """
     plan = import_be_courant.plan
     emprise_cloturee = plan.polygone_cloture
+    # Sans contour de clôture, la carte n'a plus de quoi se cadrer, et
+    # `bornes_wgs84(None)` faisait tomber l'application entière : le chef de
+    # projet perdait jusqu'au rapport qui lui disait ce qui manquait. Relevé le
+    # 02/10/2026 sur Bédarieux. Le plan porte bien d'autres géométries — tables,
+    # pistes, ouvrages : c'est leur étendue qui cadre, et on le dit.
+    cadre = cadre_de_la_carte(plan)
 
     if not avec_la_coupe and _geste_arme() == "translation_coupe":
         # Armé avant la validation, puis validé : le geste n'a plus de bouton
@@ -1496,7 +1503,7 @@ def _carte_du_plan(import_be_courant, avec_la_coupe: bool) -> None:
     # suivrait la souris en permanence serait du bruit. Tout se passe dans le
     # navigateur — aucun rechargement, contrairement à `return_on_hover` qui
     # relancerait le script à chaque mouvement de souris. Voir `apercu_au_survol`.
-    if _geste_arme() == "translation_coupe":
+    if _geste_arme() == "translation_coupe" and emprise_cloturee is not None:
         # `representative_point` plutôt que le centroïde : shapely le garantit
         # **dans** le polygone, quand le centroïde d'une emprise concave peut en
         # sortir — et une coupe qui n'y passe pas est refusée. Le cas ne se
@@ -1512,7 +1519,21 @@ def _carte_du_plan(import_be_courant, avec_la_coupe: bool) -> None:
             ).geometrie
         ).add_to(carte)
 
-    sud, ouest, nord, est = bornes_wgs84(emprise_cloturee)
+    if cadre is None:
+        st.error(
+            "Le plan ne porte aucune géométrie exploitable : la carte ne peut "
+            "pas être cadrée. Vérifiez la correspondance des calques.",
+            icon="🚫",
+        )
+        return
+    if emprise_cloturee is None:
+        st.warning(
+            "Pas de contour de clôture fermé dans le plan : la carte est cadrée "
+            "sur l'étendue de ce qu'il porte, et la surface clôturée n'est pas "
+            "calculée. Voir le rapport de contrôle ci-dessous.",
+            icon="⚠️",
+        )
+    sud, ouest, nord, est = bornes_wgs84(cadre)
     carte.fit_bounds([[sud, ouest], [nord, est]])
 
     if _geste_arme() is not None:
