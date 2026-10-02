@@ -3451,19 +3451,49 @@ def _enceinte_jusqu_au_poste(enceinte: Polygon, poste: Polygon) -> Polygon:
 
 
 def _correction_proposee(ouvrage: OuvragePlace, rang: int, anneau: LineString | None):
-    """La correction D8 d'un poste posé en retrait de la clôture, s'il y a lieu."""
+    """La correction D8 d'un poste posé en retrait de la clôture, s'il y a lieu.
+
+    Rend la correction, ou None, **et une note** quand le poste n'est pas sur la
+    clôture sans pouvoir y être posé d'office — comme le fait sa sœur, la mise
+    en limite de propriété (`_correction_en_limite`).
+
+    Elle se taisait jusqu'au 02/10/2026, et c'est ce silence qu'on corrige : le
+    chef de projet voyait la correction de clôture proposée, aucune pour son
+    poste, et n'avait aucun moyen de savoir si c'est qu'il n'y avait rien à
+    corriger ou que l'outil s'était abstenu. Les deux se ressemblent à l'écran,
+    et seule la première est une bonne nouvelle.
+    """
     if anneau is None or ouvrage.categorie not in POSTES_EN_LIMITE:
-        return None
+        return None, None
+    nom = f"« {ouvrage.libelle} »"
     if ouvrage.largeur_m is None:
-        return None
+        return None, (
+            f"{nom} : sa largeur n'est pas tranchée, et c'est elle qui dit où "
+            "s'arrête son long pan. Tranchez le gabarit plus haut, et la pose "
+            "sur la clôture sera proposée si elle a lieu d'être."
+        )
     centre = Point(ouvrage.centre)
     distance = anneau.distance(centre)
     retrait = distance - ouvrage.largeur_m / 2.0
-    if retrait <= SUR_LA_CLOTURE_M or retrait > RETRAIT_CORRIGEABLE_M:
-        return None
+    if retrait <= SUR_LA_CLOTURE_M:
+        # Déjà sur la clôture, à la tolérance près : rien à proposer, et rien à
+        # dire — le silence est alors une bonne nouvelle, et la seule.
+        return None, None
+    if retrait > RETRAIT_CORRIGEABLE_M:
+        return None, (
+            f"{nom} est à {retrait:.1f} m de la clôture, son long pan une fois "
+            "le poste à ses cotes : trop loin pour l'y poser d'office. Un poste "
+            "de livraison ferme d'ordinaire l'enceinte sur son long pan ; c'est "
+            "au plan de l'y mettre."
+        )
     direction_cloture = _direction_de_ligne(anneau, centre)
-    if abs(_dans_demi_tour(direction_cloture - ouvrage.direction_deg)) > PARALLELISME_DEG:
-        return None
+    ecart = abs(_dans_demi_tour(direction_cloture - ouvrage.direction_deg))
+    if ecart > PARALLELISME_DEG:
+        return None, (
+            f"{nom} est tourné de {ecart:.0f}° par rapport à la clôture qu'il "
+            f"borde, à {retrait:.1f} m d'elle : il ne la longe pas, et l'y poser "
+            "le ferait pivoter. C'est au plan de l'orienter."
+        )
     sur_la_ligne = nearest_points(anneau, centre)[0]
     # Le long pan affleure le tracé : le centre s'arrête à une demi-largeur de
     # la clôture, du côté où il était.
@@ -3488,7 +3518,7 @@ def _correction_proposee(ouvrage: OuvragePlace, rang: int, anneau: LineString | 
         ),
         centre_corrige=centre_corrige,
         direction_deg=direction_cloture,
-    )
+    ), None
 
 
 @dataclass
@@ -3701,7 +3731,9 @@ def construire(
 
     proposees, appliquees = [], []
     for rang, ouvrage in enumerate(ouvrages, start=1):
-        correction = _correction_proposee(ouvrage, rang, anneau)
+        correction, note = _correction_proposee(ouvrage, rang, anneau)
+        if note:
+            notes.append(note)
         if correction is None:
             continue
         proposees.append(correction)

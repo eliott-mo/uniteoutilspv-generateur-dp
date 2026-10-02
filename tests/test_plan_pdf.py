@@ -1591,3 +1591,59 @@ def test_un_repli_de_rattachement_repete_ne_fait_qu_une_ligne():
     for message in replis:
         # Le compte et les positions sont dans le message, pas dans sa répétition.
         assert " pt" in message
+
+
+def test_la_pose_d_un_poste_sur_la_cloture_dit_pourquoi_elle_s_abstient():
+    """Un silence et « rien à corriger » se ressemblent trop à l'écran.
+
+    Demandé par le chef de projet le 02/10/2026 : il voyait la correction de
+    clôture proposée, aucune pour son poste de livraison, et n'avait aucun
+    moyen de savoir si c'est qu'il n'y avait rien à corriger ou que l'outil
+    s'était abstenu. Sa sœur — la mise en limite de propriété — disait déjà
+    pourquoi ; celle-ci se taisait.
+
+    Le seul silence qui reste est celui de la bonne nouvelle : le poste est
+    déjà sur la clôture.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import OuvragePlace, _correction_proposee
+
+    anneau = LineString([(0, 0), (200, 0), (200, 200), (0, 200), (0, 0)])
+
+    def poste(centre, direction=0.0, largeur=4.0):
+        return OuvragePlace(
+            categorie="pdl_ptr",
+            libelle="Poste de livraison",
+            gabarit="PDL-PTR",
+            longueur_m=8.0,
+            largeur_m=largeur,
+            centre=centre,
+            direction_deg=direction,
+            orientation="grand côté",
+            dessine_m=(8.0, 4.0),
+        )
+
+    # Déjà sur la clôture : rien à proposer, et rien à dire.
+    correction, note = _correction_proposee(poste((100.0, 2.0)), 1, anneau)
+    assert correction is None and note is None
+
+    # En retrait et parallèle : c'est le cas qui se propose.
+    correction, note = _correction_proposee(poste((100.0, 8.0)), 1, anneau)
+    assert correction is not None and note is None
+
+    # Trop loin : refusé, et dit, avec la distance.
+    correction, note = _correction_proposee(poste((100.0, 40.0)), 1, anneau)
+    assert correction is None
+    assert "trop loin" in note and "38.0 m" in note
+
+    # Pas parallèle : refusé, et dit, avec l'angle.
+    correction, note = _correction_proposee(poste((100.0, 8.0), direction=30.0), 1, anneau)
+    assert correction is None
+    assert "tourné de 30°" in note
+
+    # Largeur pas tranchée : refusé, et dit — c'est au chef de projet de
+    # trancher le gabarit, et il peut le faire tout de suite.
+    correction, note = _correction_proposee(poste((100.0, 8.0), largeur=None), 1, anneau)
+    assert correction is None
+    assert "largeur n'est pas tranchée" in note
