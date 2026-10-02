@@ -381,6 +381,16 @@ FIDELITE_MIN = 0.75
 #: anisotrope, que le pas seul ne verrait pas.
 TOLERANCE_ECHELLE = 0.02
 
+#: Écart admis entre le rapport de deux rangées voisines et le nombre entier de
+#: pas qu'il devrait valoir.
+#:
+#: 15 % : à Sarnois, l'allée entre les deux blocs vaut 1,35 pas et les treize
+#: autres écarts tombent à moins de 0,4 % de 1,00 (mesuré le 02/10/2026). Le
+#: seuil sépare les deux sans hésitation, et laisse passer l'arrondi des bords
+#: de bande au pixel — 3 % au plus sur ce plan.
+ECART_RANG_TOLERE = 0.15
+
+
 #: Densité minimale d'une case du profil pour que l'emprise du plan s'y arrête,
 #: en part de la case médiane.
 #:
@@ -1774,6 +1784,9 @@ class RangeesDuPlan:
     masque: np.ndarray
     #: Pixels à la teinte des tables écartés comme étrangers au champ.
     isolats_ecartes: int = 0
+    #: Écarts entre rangées voisines qui ne sont pas un multiple du pas : les
+    #: allées entre blocs. Elles ne comptent pas dans la mesure du pas.
+    allees: int = 0
 
 
 #: Part des pixels de table sous laquelle un groupe isolé n'est pas le champ.
@@ -1912,6 +1925,85 @@ def _dans_la_bande(projection, origine, pas, bande):
     return (projection >= origine + debut * pas) & (projection < origine + (fin + 1) * pas)
 
 
+def _pas_des_rangees(centres: list, ecarts_rangees) -> tuple[float, 'np.ndarray', int]:
+    """Le pas des rangées, les allées exclues, et combien il y en avait.
+
+    Rendu à part de `mesurer_rangees` pour se mesurer sans image : les
+    centres suffisent, et c'est sur eux que tout se joue.
+    """
+    # Le pas est la pente des centres de rangée sur leur rang, et non la
+    # médiane de leurs écarts. Chaque centre porte l'arrondi des bords de sa
+    # bande au pixel de l'image — 0,48 pt à Gannay —, et la médiane de quinze
+    # écarts en gardait ±2,5 ‰ (mesuré le 23/09/2026), autant que la
+    # tolérance. La droite, elle, s'appuie sur toutes les rangées à la fois.
+    #
+    # Ce que la droite ne savait pas faire : une **allée**. Un champ en deux
+    # blocs laisse entre eux un écart qui n'est pas un multiple du pas — 1,35
+    # fois à Sarnois, mesuré le 02/10/2026 : 20,33 pt là où les treize autres
+    # font 15,10. Le rang arrondi le comptait pour un pas de plus, la droite
+    # étalait les 5,2 pt d'excédent sur quatorze rangs, et le pas sortait 3,2 %
+    # trop grand. L'échelle du plan avec, et le recoupement refusait un plan
+    # juste — pour la seconde fois sur ce projet.
+    #
+    # Un écart qui n'est pas un multiple entier du pas est donc une allée : elle
+    # coupe le champ en blocs, et la droite s'ajuste dans chacun.
+    median = float(np.median(ecarts_rangees))
+    rapports = np.asarray(ecarts_rangees) / median
+    multiples = np.round(rapports)
+    reguliers = (np.abs(rapports - multiples) <= ECART_RANG_TOLERE) & (multiples >= 1)
+    # Une allée coupe le champ en blocs. Dans chacun, les rangées tombent sur un
+    # pas régulier et la droite des centres sur leur rang s'appuie sur toutes :
+    # c'est la mesure d'origine, et sa précision. Entre les blocs, rien n'est
+    # ajusté — l'écart n'est pas un multiple du pas et n'apprend rien sur lui.
+    # Sommer les écarts à la place, comme je l'avais d'abord fait, revient à
+    # (dernière − première) / (n − 1) : les rangées du milieu se télescopent, et
+    # la mesure ne tient plus que sur deux d'entre elles.
+    coupures = np.nonzero(~reguliers)[0]
+    blocs = [b for b in np.split(np.arange(len(centres)), coupures + 1) if len(b) >= 2]
+    if not blocs:
+        raise ErreurPlanPDF(
+            "Les rangées du plan ne tombent sur aucun pas régulier : leurs écarts "
+            f"sont {np.round(ecarts_rangees, 2).tolist()} pt, et aucune paire "
+            "voisine n'en fait un multiple. Le pas ne se mesure pas (décision D3)."
+        )
+    tous = np.asarray(centres, dtype=float)
+    rangs_par_bloc = []
+    numerateur = denominateur = 0.0
+    for bloc in blocs:
+        places = tous[bloc]
+        rangs = np.round((places - places[0]) / median)
+        if len(set(rangs.tolist())) != len(rangs):
+            raise ErreurPlanPDF(
+                "Les rangées du plan ne sont pas régulièrement espacées : deux "
+                "d'entre elles tombent au même rang, et le pas ne se mesure pas "
+                f"(écarts relevés : {np.round(ecarts_rangees, 2).tolist()} pt)."
+            )
+        rangs_par_bloc.append(rangs)
+        numerateur += float(((rangs - rangs.mean()) * (places - places.mean())).sum())
+        denominateur += float(((rangs - rangs.mean()) ** 2).sum())
+    if denominateur <= 0.0:
+        raise ErreurPlanPDF(
+            "Les rangées du plan tombent toutes au même rang : le pas ne se "
+            "mesure pas (décision D3)."
+        )
+    pente = numerateur / denominateur
+    residus = np.concatenate(
+        [
+            tous[bloc]
+            - (pente * rangs + (tous[bloc].mean() - pente * rangs.mean()))
+            for bloc, rangs in zip(blocs, rangs_par_bloc)
+        ]
+    )
+    if np.abs(residus).max() > 0.25 * pente:
+        raise ErreurPlanPDF(
+            "Les rangées du plan ne tombent pas sur un pas régulier : l'une d'elles "
+            f"s'en écarte de {np.abs(residus).max():.2f} pt pour un pas de "
+            f"{pente:.2f} pt. Le pas ne se mesure pas (décision D3)."
+        )
+    allees = int(len(coupures))
+    return pente, residus, allees
+
+
 def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> RangeesDuPlan:
     """Direction, pas et position des rangées de tables sur la copie d'écran.
 
@@ -1994,29 +2086,7 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
             "finesse les rangées ne se séparent pas. Refaites-la en plein écran, "
             "zoomée sur le site, et remontez le plan par-dessus."
         )
-    # Le pas est la pente des centres de rangée sur leur rang, et non la
-    # médiane de leurs écarts. Chaque centre porte l'arrondi des bords de sa
-    # bande au pixel de l'image — 0,48 pt à Gannay —, et la médiane de quinze
-    # écarts en gardait ±2,5 ‰ (mesuré le 23/09/2026), autant que la
-    # tolérance. La droite, elle, s'appuie sur toutes les rangées à la fois.
-    # Le rang se lit sur l'écart médian : une rangée manquée laisse un rang
-    # vide, elle ne décale pas les suivantes.
-    median = float(np.median(ecarts_rangees))
-    rangs = np.round((np.array(centres) - centres[0]) / median)
-    if len(set(rangs.tolist())) != len(rangs):
-        raise ErreurPlanPDF(
-            "Les rangées du plan ne sont pas régulièrement espacées : deux d'entre "
-            "elles tombent au même rang, et le pas ne se mesure pas (écarts "
-            f"relevés : {np.round(ecarts_rangees, 2).tolist()} pt)."
-        )
-    pente, ordonnee = np.polyfit(rangs, centres, 1)
-    residus = np.array(centres) - (pente * rangs + ordonnee)
-    if np.abs(residus).max() > 0.25 * pente:
-        raise ErreurPlanPDF(
-            "Les rangées du plan ne tombent pas sur un pas régulier : l'une d'elles "
-            f"s'en écarte de {np.abs(residus).max():.2f} pt pour un pas de "
-            f"{pente:.2f} pt. Le pas ne se mesure pas (décision D3)."
-        )
+    pente, residus, allees = _pas_des_rangees(centres, ecarts_rangees)
     dans_une_bande, isolats = _sans_les_isolats(
         points, dans_une_bande, direction, pas
     )
@@ -2025,7 +2095,8 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
     return RangeesDuPlan(
         direction_deg=direction,
         pas_pt=float(pente),
-        dispersion_pt=float(np.std(residus)),
+        dispersion_pt=float(np.std(residus)) if residus.size else 0.0,
+        allees=allees,
         centres=centres,
         points=points[dans_une_bande],
         masque=masque_rangees,
@@ -2614,6 +2685,149 @@ def _bouts_raccordes_confondus(axes: list) -> list:
     return [
         AxePiste(axe.categorie, axe.libelle, LineString(c)) for axe, c in zip(axes, coords)
     ]
+
+
+#: Décalage latéral maximal qu'on propose pour écarter une piste des tables,
+#: en mètres.
+#:
+#: C'est `pistes.RACCORD_M` : au-delà, le bout de la piste quitte le tracé
+#: voisin auquel il se raccorde, et la correction ouvrirait la boucle qu'elle
+#: prétend arranger. Une piste qu'il faut déplacer de plus de trois mètres
+#: n'est pas « un peu à côté » : elle est dessinée au travers du champ, et
+#: c'est au plan de la reprendre.
+DECALAGE_PISTE_MAX_M = 3.0
+
+#: Surface de table sous une piste en deçà de laquelle on ne dit rien, en m².
+#: Le même seuil que le contrôle des pistes, qui ne compte pas les contacts de
+#: bord dus à l'arrondi des virages.
+MORSURE_NEGLIGEABLE_M2 = 0.5
+
+
+def _ecarte_des_tables(ligne: LineString, tables, interdits):
+    """Le plus petit décalage latéral qui dégage la bande des tables, ou None.
+
+    Le décalage est rigide, dans la normale moyenne du tracé : c'est le geste
+    qu'on ferait à la main sur un plan, et le seul qui ne déforme pas la piste.
+    Il s'arrête dès qu'il libère les tables **sans** mordre ailleurs — clôture
+    ou ouvrages —, parce qu'une correction qui échange un défaut contre un
+    autre n'en est pas une.
+
+    Rend (ligne décalée, décalage signé), ou None quand aucun décalage sous
+    `DECALAGE_PISTE_MAX_M` n'y parvient.
+    """
+    from shapely.affinity import translate
+
+    def mord(bande) -> bool:
+        return bande.intersection(tables).area > 0.05
+
+    bande = ligne.buffer(
+        LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round"
+    )
+    if not mord(bande):
+        return None
+
+    sommets = list(ligne.coords)
+    dx = sommets[-1][0] - sommets[0][0]
+    dy = sommets[-1][1] - sommets[0][1]
+    longueur = math.hypot(dx, dy)
+    if longueur < 1e-9:
+        return None
+    nx, ny = -dy / longueur, dx / longueur
+
+    pas = 0.1
+    for k in range(1, int(DECALAGE_PISTE_MAX_M / pas) + 1):
+        for sens in (1.0, -1.0):
+            ecart = k * pas * sens
+            essai = translate(ligne, nx * ecart, ny * ecart)
+            bande = essai.buffer(
+                LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round"
+            )
+            if mord(bande):
+                continue
+            if interdits is not None and bande.intersects(interdits):
+                continue
+            return essai, ecart
+    return None
+
+
+def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte) -> tuple:
+    """La correction qui écarte des tables les pistes qui mordent dessus.
+
+    Elle complète celle qui serre les pistes contre la clôture : celle-là ne
+    traite que les pistes qui la longent, et ne peut rien pour une piste
+    dessinée en plein champ au travers d'une rangée. Demande du chef de projet
+    du 02/10/2026 : « on a régulièrement des tables qui viennent se superposer
+    à la piste quand on dessine sur le plan HelioScope ».
+
+    Ce qu'elle ne fera pas : rétrécir la piste, ni découper sa bande autour des
+    tables. Les 5 m sont l'instruction, et une bande échancrée montrerait une
+    piste qui n'existe pas. Quand aucun décalage ne dégage, elle le dit et
+    laisse le tracé du plan.
+    """
+    if not axes or tables is None:
+        return None, axes, None
+    toutes = unary_union(list(tables))
+    if toutes.is_empty:
+        return None, axes, None
+    interdits = enceinte.exterior if enceinte is not None else None
+
+    ecartes, deplacements, rebelles = [], {}, []
+    for rang, (axe, piste) in enumerate(zip(axes, pistes)):
+        if piste.surface.intersection(toutes).area <= MORSURE_NEGLIGEABLE_M2:
+            ecartes.append(axe)
+            continue
+        trouve = _ecarte_des_tables(axe.ligne, toutes, interdits)
+        if trouve is None:
+            rebelles.append(axe.libelle)
+            ecartes.append(axe)
+            continue
+        ligne, ecart = trouve
+        deplacements[rang] = ecart
+        ecartes.append(AxePiste(axe.categorie, axe.libelle, ligne))
+
+    # Une piste qui mord sur les tables et qu'aucun décalage ne dégage : rien à
+    # proposer, mais il faut le dire. Se taire laisserait croire que l'outil n'a
+    # rien vu, là où il a cherché et renoncé.
+    note_rebelles = (
+        ", ".join(f"« {l} »" for l in sorted(set(rebelles)))
+        + f" mord(ent) sur les tables, et aucun décalage sous "
+        f"{nombre_fr(DECALAGE_PISTE_MAX_M)} m ne la/les dégage sans ouvrir ses "
+        "raccords : la piste est dessinée au travers d'une rangée, et c'est au "
+        "plan de la reprendre."
+        if rebelles
+        else None
+    )
+    if not deplacements:
+        return None, axes, note_rebelles
+
+    avant = float(
+        unary_union([pistes[i].surface for i in deplacements]).intersection(toutes).area
+    )
+    apres_pistes, _ = dessiner_pistes(ecartes)
+    apres = float(
+        unary_union([apres_pistes[i].surface for i in deplacements]).intersection(toutes).area
+    )
+    libelles = sorted({axes[i].libelle for i in deplacements})
+    recule = max(abs(e) for e in deplacements.values())
+    correction = CorrectionDesPistes(
+        identifiant="pistes_hors_tables",
+        categorie=", ".join(sorted({axes[i].categorie for i in deplacements})),
+        libelle="Pistes écartées des tables",
+        retrait_m=recule,
+        raison=(
+            "Menées sur le trait du plan, "
+            + ", ".join(f"« {l} »" for l in libelles)
+            + f" recouvre(nt) {nombre_fr(round(avant, 1))} m² de tables. Écartée(s) "
+            f"d'au plus {nombre_fr(round(recule, 1))} m, sans toucher la clôture "
+            "— correction du plan —, elle(s) "
+            + (
+                "n'en recouvre(nt) plus aucune."
+                if apres <= 0.05
+                else f"n'en recouvre(nt) plus que {nombre_fr(round(apres, 1))} m²."
+            )
+        ),
+    )
+    return correction, ecartes, note_rebelles
 
 
 def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tuple:
@@ -3753,11 +3967,27 @@ def construire(
     correction_pistes, axes_serres = _pistes_contre_la_cloture(
         axes_de_pistes, pistes, enceinte.polygone if enceinte is not None else None, tables
     )
+    axes_courants = axes_de_pistes
     if correction_pistes is not None:
         proposees.append(correction_pistes)
         if correction_pistes.identifiant in choix.corrections:
             appliquees.append(correction_pistes)
             pistes, notes_pistes = dessiner_pistes(axes_serres)
+            axes_courants = axes_serres
+    # Les pistes qui ne longent pas la clôture : la correction précédente ne
+    # peut rien pour elles, et une piste dessinée au travers d'une rangée a de
+    # la place pour s'en écarter. Calculée sur l'état courant, pour que les
+    # deux corrections se composent au lieu de se contredire.
+    correction_tables, axes_ecartes, note_tables = _pistes_hors_des_tables(
+        axes_courants, pistes, tables, enceinte.polygone if enceinte is not None else None
+    )
+    if note_tables:
+        notes.append(note_tables)
+    if correction_tables is not None:
+        proposees.append(correction_tables)
+        if correction_tables.identifiant in choix.corrections:
+            appliquees.append(correction_tables)
+            pistes, notes_pistes = dessiner_pistes(axes_ecartes)
     notes.extend(notes_pistes)
     # Les mises en limite de propriété se vérifient au calage, dans
     # `ImportPlanPDF` : la construction ne connaît pas l'emprise cadastrale.

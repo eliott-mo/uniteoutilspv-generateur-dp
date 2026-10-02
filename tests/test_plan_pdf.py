@@ -661,9 +661,20 @@ def test_la_correction_du_poste_est_proposee_et_pas_appliquee(import_gannay, con
 
     Son centre est à 7,8 m du tracé — les 7,7 m du brief —, son long pan à
     6,3 m une fois le poste à ses cotes. L'import le propose, et ne le fait pas.
+
+    Les trois corrections que Gannay appelle sont listées ici, et c'est
+    volontaire : une correction qui apparaîtrait sans qu'on l'ait voulue
+    modifierait un plan dans le dos du chef de projet. `pistes_hors_tables`
+    s'y est ajoutée le 02/10/2026 — elle écarte des tables une piste que
+    `pistes_contre_cloture` ne traite pas, celle-ci ne s'occupant que des
+    pistes qui longent la clôture.
     """
     proposees = {c.identifiant: c for c in import_gannay.corrections_proposees}
-    assert set(proposees) == {"poste_sur_cloture:pdl_ptr:1", "pistes_contre_cloture"}
+    assert set(proposees) == {
+        "poste_sur_cloture:pdl_ptr:1",
+        "pistes_contre_cloture",
+        "pistes_hors_tables",
+    }
     assert proposees["poste_sur_cloture:pdl_ptr:1"].retrait_m == pytest.approx(6.3, abs=0.2)
     assert contrat_gannay.donnees["corrections_plan"] == []
     poste = contrat_gannay.geometries("pdl_ptr")[0]
@@ -1647,3 +1658,68 @@ def test_la_pose_d_un_poste_sur_la_cloture_dit_pourquoi_elle_s_abstient():
     correction, note = _correction_proposee(poste((100.0, 8.0), largeur=None), 1, anneau)
     assert correction is None
     assert "largeur n'est pas tranchée" in note
+
+
+# ---------------------------------------------------------------------------
+# Le pas des rangées quand le champ a une allée (Sarnois, 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_allee_entre_deux_blocs_ne_fausse_plus_le_pas():
+    """Un écart qui n'est pas un multiple du pas n'apprend rien sur lui.
+
+    Mesuré sur Sarnois : le champ est en deux blocs, séparés par une allée de
+    14,11 m là où les rangées sont à 10,48 — soit 1,35 pas, et non deux. Le
+    rang arrondi la comptait pour un pas de plus, la droite étalait les 5,2 pt
+    d'excédent sur quatorze rangs, et le pas sortait **3,2 % trop grand**.
+    L'échelle du plan avec, et le recoupement refusait un plan juste : c'est la
+    seconde fois que ce projet butait dessus.
+
+    Les écarts sont ceux relevés sur son plan, au centième de point.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _pas_des_rangees
+
+    ecarts = [15.11, 15.12, 15.10, 15.08, 15.12, 15.10, 15.10,
+              20.33,  # l'allée : 1,35 pas
+              15.12, 15.09, 15.11, 15.11, 15.07, 15.13]
+    centres = [0.0] + list(np.cumsum(ecarts))
+
+    pente, residus, allees = _pas_des_rangees(centres, np.diff(centres))
+    assert allees == 1
+    assert pente == pytest.approx(15.10, abs=0.02)
+    # Ce que donnait la droite d'avant, sur les mêmes centres : 3,2 % de trop.
+    rangs = np.round((np.array(centres) - centres[0]) / float(np.median(np.diff(centres))))
+    naive = np.polyfit(rangs, centres, 1)[0]
+    assert naive == pytest.approx(15.63, abs=0.02)
+    assert naive / pente - 1 == pytest.approx(0.035, abs=0.005)
+
+
+def test_un_champ_regulier_garde_la_precision_de_la_droite():
+    """La régression par bloc ne doit rien coûter à un champ sans allée.
+
+    Sommer les écarts à la place reviendrait à (dernière − première) / (n − 1) :
+    les rangées du milieu se télescopent, et la mesure ne tiendrait plus que sur
+    deux d'entre elles. Mesuré le 02/10/2026, c'est ce qui a déplacé le calage
+    de Bray de dix centimètres et fait tomber ses tests — le dépôt mettait en
+    garde contre cette erreur, et je l'ai faite quand même.
+
+    Le bruit des centres est ici celui des bords de bande arrondis au pixel.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _pas_des_rangees
+
+    tirage = np.random.default_rng(7)
+    vrai_pas = 15.10
+    centres = [k * vrai_pas + tirage.normal(0.0, 0.08) for k in range(17)]
+
+    pente, _, allees = _pas_des_rangees(centres, np.diff(centres))
+    assert allees == 0
+    # La droite sur tous les rangs, à laquelle la mesure doit être identique.
+    rangs = np.arange(17.0)
+    assert pente == pytest.approx(float(np.polyfit(rangs, centres, 1)[0]), abs=1e-9)
+    # Et bien plus proche du vrai pas que les deux rangées des extrémités.
+    bouts = (centres[-1] - centres[0]) / 16.0
+    assert abs(pente - vrai_pas) < abs(bouts - vrai_pas)

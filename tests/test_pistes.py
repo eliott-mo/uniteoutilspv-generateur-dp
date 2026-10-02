@@ -306,3 +306,77 @@ def test_un_raccord_sur_une_piste_courbe_ne_part_pas_en_aiguille():
         -RAYON_INTERIEUR_M, join_style="round"
     )
     assert ajout.difference(fermeture.buffer(0.05)).area == pytest.approx(0.0, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Les pistes écartées des tables (demande du 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_piste_qui_mord_sur_une_rangee_s_en_ecarte_du_minimum():
+    """« Des tables viennent se superposer à la piste », et il y a la place.
+
+    La correction qui serre les pistes contre la clôture ne traite que celles
+    qui la longent : une piste dessinée en plein champ au travers d'une rangée
+    n'avait rien. Elle s'écarte maintenant du plus petit décalage qui dégage
+    les tables, et pas d'un centimètre de plus — c'est une correction du plan,
+    et une correction se tient au minimum.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.plan_pdf import _pistes_hors_des_tables
+
+    rangee = box(0.0, 0.0, 100.0, 2.0)
+    # Bande de 5 m centrée sur y = 4 : elle déborde de 0,5 m sur la rangée.
+    axe = AxePiste(
+        "piste_lourde_a_creer", "Piste", LineString([(0.0, 4.0), (100.0, 4.0)])
+    )
+    pistes, _ = dessiner_pistes([axe])
+    assert pistes[0].surface.intersection(rangee).area == pytest.approx(50.0, abs=1.0)
+
+    correction, ecartes, note = _pistes_hors_des_tables([axe], pistes, [rangee], None)
+    assert correction is not None and note is None
+    assert correction.retrait_m == pytest.approx(0.5, abs=0.05)
+
+    apres, _ = dessiner_pistes(ecartes)
+    assert apres[0].surface.intersection(rangee).area == pytest.approx(0.0, abs=0.05)
+
+
+def test_une_piste_dessinee_au_travers_d_une_rangee_le_dit_au_lieu_de_se_taire():
+    """Chercher et renoncer n'est pas la même chose que ne rien voir.
+
+    Une piste dont l'axe passe dans la rangée demanderait plus de trois mètres
+    de décalage — `DECALAGE_PISTE_MAX_M`, au-delà duquel le bout de la piste
+    quitte le tracé voisin auquel il se raccorde. Rien n'est proposé, et c'est
+    dit : sans cela le chef de projet croirait que l'outil n'a rien vu.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.plan_pdf import _pistes_hors_des_tables
+
+    rangee = box(0.0, 0.0, 100.0, 2.0)
+    axe = AxePiste(
+        "piste_lourde_a_creer", "Piste", LineString([(0.0, 1.0), (100.0, 1.0)])
+    )
+    pistes, _ = dessiner_pistes([axe])
+
+    correction, ecartes, note = _pistes_hors_des_tables([axe], pistes, [rangee], None)
+    assert correction is None
+    assert ecartes == [axe], "le tracé du plan reste tel quel"
+    assert "au travers d'une rangée" in note and "3 m" in note
+
+
+def test_une_piste_a_l_ecart_des_tables_ne_declenche_rien():
+    """Pas de correction sans objet, et pas de message sans objet non plus."""
+    from shapely.geometry import LineString, box
+
+    from dp_socle.plan_pdf import _pistes_hors_des_tables
+
+    rangee = box(0.0, 0.0, 100.0, 2.0)
+    axe = AxePiste(
+        "piste_lourde_a_creer", "Piste", LineString([(0.0, 20.0), (100.0, 20.0)])
+    )
+    pistes, _ = dessiner_pistes([axe])
+
+    correction, ecartes, note = _pistes_hors_des_tables([axe], pistes, [rangee], None)
+    assert correction is None and note is None and ecartes == [axe]
