@@ -22,6 +22,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 VARIABLE = "DP_CAIRO_DLL_DIR"
 
@@ -240,6 +241,20 @@ def etat_travail() -> EtatTravail:
 _RACINE = Path(__file__).resolve().parent.parent
 
 
+#: Le fuseau dans lequel la date de déploiement se lit.
+#:
+#: Le conteneur de Streamlit Community Cloud tourne en UTC, le chef de projet
+#: regarde sa montre : affichée à l'heure du conteneur, la version s'annonçait
+#: deux heures plus tôt qu'elle n'avait été mise en ligne. Relevé le 02/10/2026,
+#: « Version du 02/10/2026 à 11:19 » pour un déploiement de 13:19. Or cette
+#: ligne n'existe que pour qu'il confronte l'heure affichée à celle de son test :
+#: fausse de deux heures, elle lui fait conclure l'inverse de la vérité.
+#:
+#: `tzdata` est déclarée dans `requirements.txt` pour que `ZoneInfo` trouve la
+#: base des fuseaux même sur une image sans `/usr/share/zoneinfo`.
+_FUSEAU_DU_PROJET = ZoneInfo("Europe/Paris")
+
+
 @dataclass(frozen=True)
 class VersionDeployee:
     """Ce que l'outil en ligne porte, et depuis quand."""
@@ -305,8 +320,10 @@ def version_deployee() -> VersionDeployee:
             horodatages.append(chemin.stat().st_mtime)
         except OSError:
             continue
-    quand = datetime.fromtimestamp(max(horodatages)) if horodatages else None
+    if not horodatages:
+        return VersionDeployee(date="inconnue", commit=_commit_du_depot())
+    quand = datetime.fromtimestamp(max(horodatages), _FUSEAU_DU_PROJET)
     return VersionDeployee(
-        date=quand.strftime("%d/%m/%Y à %H:%M") if quand else "inconnue",
+        date=quand.strftime("%d/%m/%Y à %H:%M"),
         commit=_commit_du_depot(),
     )

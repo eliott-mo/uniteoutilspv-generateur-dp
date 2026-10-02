@@ -74,3 +74,11 @@ pypdfium2==5.12.1
 # des sondes sans figurer ici, le piège déjà rencontré avec pillow-heif : c'est
 # cette ligne qui en fait une dépendance du projet.
 python-pptx==1.0.2
+
+# La base des fuseaux horaires, pour `zoneinfo`. Le conteneur de Streamlit
+# Community Cloud tourne en UTC et la date de déploiement affichée doit être
+# celle de la montre du chef de projet : sans elle, `ZoneInfo("Europe/Paris")`
+# lève sur une image Linux dépourvue de `/usr/share/zoneinfo`, et la ligne de
+# version — qui n'existe que pour trancher « quelle version tenez-vous ? » —
+# emporterait l'écran au lieu de répondre.
+tzdata==2026.4

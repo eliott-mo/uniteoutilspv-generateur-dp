@@ -249,3 +249,31 @@ def test_la_version_deployee_porte_une_date_et_un_commit():
         # Le dépôt est là : le commit aussi, en sept caractères.
         assert version.commit is not None and len(version.commit) == 7
         assert version.message.endswith(f"({version.commit})")
+
+
+def test_la_version_se_date_a_l_heure_du_chef_de_projet():
+    """L'heure affichée est celle de sa montre, pas celle du conteneur.
+
+    Relevé le 02/10/2026 : l'outil annonçait « Version du 02/10/2026 à 11:19 »
+    pour un déploiement de 13:19. Le conteneur de Streamlit Community Cloud
+    tourne en UTC, et la ligne était datée à son heure à lui. Or elle n'existe
+    que pour que le chef de projet confronte l'heure affichée à celle de son
+    test : fausse de deux heures, elle lui fait conclure l'inverse de la vérité.
+
+    Ce test tombe aussi si `tzdata` disparaît de `requirements.txt` : sous
+    Linux, `ZoneInfo` ne trouverait plus la base des fuseaux, et l'intégration
+    continue le dirait avant la production.
+    """
+    from datetime import datetime, timezone
+
+    from dp_socle.environnement import _FUSEAU_DU_PROJET
+
+    # L'instant même du relevé : 11:19 UTC, soit 13:19 à Paris en heure d'été.
+    releve = datetime(2026, 10, 2, 11, 19, tzinfo=timezone.utc)
+    assert releve.astimezone(_FUSEAU_DU_PROJET).strftime(
+        "%d/%m/%Y à %H:%M"
+    ) == "02/10/2026 à 13:19"
+
+    # Et en heure d'hiver, où l'écart n'est plus que d'une heure.
+    hiver = datetime(2026, 12, 15, 11, 19, tzinfo=timezone.utc)
+    assert hiver.astimezone(_FUSEAU_DU_PROJET).strftime("%H:%M") == "12:19"
