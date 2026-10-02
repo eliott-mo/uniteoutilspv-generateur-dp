@@ -2024,3 +2024,59 @@ def test_la_carte_se_cadre_meme_sans_contour_de_cloture():
     # Rien du tout : il n'y a pas de carte à cadrer, et c'est à l'appelant de
     # le dire plutôt que de lever.
     assert cadre_de_la_carte(plan_avec()) is None
+
+
+# ---------------------------------------------------------------------------
+# Les remplissages dont le contour est fait d'arcs (Bédarieux, 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_contour_de_remplissage_en_arcs_se_lit_au_lieu_d_etre_perdu():
+    """PVcase dessine ses voiries avec des raccords courbes, et on les perdait.
+
+    Mesuré sur le DXF de Bédarieux : le calque « PVcase Road » porte sept
+    remplissages dont six ont des bords en arcs. Leur `vertices` est vide — un
+    chemin fait d'arêtes ne porte pas de sommets —, ils étaient déclarés
+    illisibles, et **3 595 m² de voirie sur 3 851** disparaissaient. Le chef de
+    projet ne voyait pas ses pistes et croyait le calque non apparié.
+
+    `ezdxf` sait aplatir ces bords à la flèche près, comme le module le fait
+    déjà pour les arcs des portails et les bulges des plateformes.
+    """
+    import math
+
+    from shapely.geometry import Polygon
+
+    from dp_socle.import_be import _sommets_du_contour
+
+    document = ezdxf.new()
+    hachure = document.modelspace().add_hatch()
+    chemin = hachure.paths.add_edge_path()
+    # Un carré de 10 m dont le côté droit est un demi-disque de 5 m de rayon.
+    chemin.add_line((0.0, 0.0), (10.0, 0.0))
+    chemin.add_arc(center=(10.0, 5.0), radius=5.0, start_angle=-90.0, end_angle=90.0)
+    chemin.add_line((10.0, 10.0), (0.0, 10.0))
+    chemin.add_line((0.0, 10.0), (0.0, 0.0))
+
+    # Le chemin ne porte aucun sommet : c'est ce qui le faisait déclarer perdu.
+    assert not list(getattr(chemin, "vertices", []))
+
+    sommets = _sommets_du_contour(chemin, 1.0)
+    assert len(sommets) > 20, "l'arc doit être discrétisé, pas sauté"
+    # 100 m² pour le carré, plus le demi-disque de 5 m : 139,3 m².
+    assert Polygon(sommets).area == pytest.approx(100.0 + math.pi * 25.0 / 2.0, rel=1e-3)
+
+
+def test_un_contour_que_ezdxf_ne_sait_pas_aplatir_reste_illisible_sans_lever():
+    """Ce qu'on ne sait pas lire se compte, et se dit — il ne remonte pas.
+
+    L'appelant tient le compte des remplissages illisibles et le porte au
+    rapport. Une exception à cet endroit emporterait l'import entier pour un
+    seul bord récalcitrant.
+    """
+    from dp_socle.import_be import _sommets_du_contour
+
+    class _CheminCasse:
+        vertices = []
+
+    assert _sommets_du_contour(_CheminCasse(), 1.0) == []

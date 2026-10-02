@@ -2461,6 +2461,41 @@ COUVERTURE_DOUBLON_HATCH = 0.90
 JEU_DOUBLON_HATCH_M = 0.2
 
 
+def _sommets_du_contour(chemin, facteur: float) -> list:
+    """Les sommets d'un contour de remplissage, arcs compris.
+
+    Un chemin de HATCH est soit une polyligne — ses sommets se lisent
+    directement —, soit une suite d'arêtes qui peut mêler segments et **arcs**.
+    Dans ce second cas `vertices` est vide, et l'élément était déclaré illisible.
+
+    Mesuré le 02/10/2026 sur Bédarieux : le calque « PVcase Road » porte sept
+    remplissages dont six ont des bords en arcs — PVcase dessine ses voiries
+    ainsi, avec des raccords courbes. 3 595 m² de voirie sur 3 851 étaient
+    perdus, et le chef de projet ne voyait pas ses pistes.
+
+    `ezdxf` sait aplatir ces bords, à la flèche près, comme le module le fait
+    déjà pour les arcs des portails et les bulges des plateformes.
+    """
+    sommets = [
+        (v[0] * facteur, v[1] * facteur) for v in getattr(chemin, "vertices", [])
+    ]
+    if len(sommets) >= 3:
+        return sommets
+    try:
+        trace = ezpath.from_hatch_boundary_path(chemin)
+        return [
+            (v.x * facteur, v.y * facteur)
+            for v in trace.flattening(
+                distance=FLECHE_DISCRETISATION_M / max(facteur, 1e-12)
+            )
+        ]
+    except Exception:
+        # Un bord que `ezdxf` ne sait pas aplatir — spline ouverte, chemin
+        # dégénéré. L'appelant le compte comme illisible et le dit au rapport ;
+        # c'est son rôle, pas celui d'une exception qui remonterait ici.
+        return []
+
+
 def _contours_des_remplissages(
     remplissages, deja: list, facteur: float, calque: str, avertissements: list
 ) -> list:
@@ -2505,10 +2540,7 @@ def _contours_des_remplissages(
     for remplissage in remplissages:
         contours = []
         for chemin in remplissage.paths:
-            sommets = [
-                (v[0] * facteur, v[1] * facteur)
-                for v in getattr(chemin, "vertices", [])
-            ]
+            sommets = _sommets_du_contour(chemin, facteur)
             if len(sommets) >= 3:
                 contours.append(Polygon(sommets))
         if not contours:
