@@ -507,6 +507,46 @@ def test_la_piste_a_creer_se_hachure_sur_le_plan_et_en_legende():
     assert STYLES["piste_lourde_a_creer"].style.remplissage == "#979797"
 
 
+def test_l_aire_de_stationnement_se_seme_de_points_sur_le_plan_et_en_legende():
+    """Une entrée de légende à part, et un motif qui ne se confond avec aucun.
+
+    Demande du chef de projet du 02/10/2026, sur un calque d'Auzainvilliers que
+    la charte ne portait pas : une aire de stationnement est du même revêtement
+    qu'une voie lourde — même grave, même gris — mais sa destination n'est pas
+    la même, et l'instruction la lit. Les hachures étant prises par la piste à
+    créer, c'est un semis de points qui la distingue.
+
+    Mesuré des deux côtés, comme pour la hachure : la forme du plan et la
+    pastille de la légende. Un motif qui ne serait qu'en légende mentirait.
+    """
+    from dp_socle.planche import REF_POINTS_STATIONNEMENT, Planche
+    from dp_socle.planches.legende import dessiner_legende
+
+    planche = Planche(
+        titre="T", numero="T", projet="T", date="02/10/2026", avec_cartouche=False
+    )
+    planche.ajouter_rectangle(
+        10.0, 40.0, 30.0, 20.0, STYLES["aire_stationnement"].style
+    )
+    dessiner_legende(
+        planche,
+        construire_legende(("piste_lourde", "aire_stationnement")),
+        position=(10.0, 10.0),
+    )
+    svg = planche.svg()
+
+    assert svg.count(REF_POINTS_STATIONNEMENT) == 2, "le plan et la pastille"
+    assert svg.count('<pattern id="points-stationnement"') == 1, "posé une fois"
+    # Le même gris que la voie lourde : c'est la même grave compactée, et c'est
+    # le semis qui porte la distinction, pas la teinte.
+    assert STYLES["aire_stationnement"].style.remplissage == "#979797"
+    assert STYLES["aire_stationnement"].matiere == "voie_lourde"
+    # Mais une entrée de légende à elle, là où l'aire de grutage partage celle
+    # de la voie lourde.
+    libelles = [e.libelle for e in construire_legende(("piste_lourde", "aire_stationnement"))]
+    assert "Aire de stationnement" in libelles and "Voie lourde" in libelles
+
+
 def test_un_remplissage_sans_motif_connu_est_refuse():
     """Une référence que `defs` ne porte pas ne lève pas d'elle-même.
 

@@ -37,7 +37,13 @@ from dataclasses import dataclass as _dataclass
 from shapely.ops import unary_union
 
 from ..erreurs import ErreurComposition
-from ..planche import REF_PISTE_A_CREER, STYLE_BATIMENT, STYLE_PARCELLE, Style
+from ..planche import (
+    REF_PISTE_A_CREER,
+    REF_POINTS_STATIONNEMENT,
+    STYLE_BATIMENT,
+    STYLE_PARCELLE,
+    Style,
+)
 from .primitives import union_valide
 
 #: Écart perceptuel minimal entre deux teintes susceptibles de se retrouver sur
@@ -166,24 +172,35 @@ STYLES = {
     "aire_grutage": StyleDP(
         "Voie lourde", 8, _remplie("#979797", "#6e6e6e"), matiere="voie_lourde"
     ),
+    # Même revêtement que la voie lourde — même gris, même matière —, et c'est
+    # le semis de points qui la distingue, les hachures étant prises par la
+    # piste à créer. Demande du chef de projet du 02/10/2026 : une entrée de
+    # légende à part, parce qu'une aire de stationnement n'est pas une voie et
+    # que l'instruction lit la destination d'une surface autant que sa nature.
+    "aire_stationnement": StyleDP(
+        "Aire de stationnement", 9,
+        Style(trait="#6e6e6e", epaisseur_mm=0.2, remplissage="#979797",
+              hachure=REF_POINTS_STATIONNEMENT),
+        matiere="voie_lourde",
+    ),
     # Dérivée : le gris 215 du contrat la confondait avec la plateforme, dont
     # elle est toujours voisine. Bleu clair, comme l'ouvrage SDIS qu'elle sert.
     "aire_aspiration": StyleDP(
-        "Aire d'aspiration", 9, _remplie("#c3dcef", "#3f7f9f")
+        "Aire d'aspiration", 10, _remplie("#c3dcef", "#3f7f9f")
     ),
-    "espace_vert": StyleDP("Espace vert", 10, _remplie("#c9dfa8", "#7d9b55")),
+    "espace_vert": StyleDP("Espace vert", 11, _remplie("#c9dfa8", "#7d9b55")),
     "arbre_existant": StyleDP(
-        "Arbres existants", 11, _remplie("#5a8f4a", "#37592c"),
+        "Arbres existants", 12, _remplie("#5a8f4a", "#37592c"),
         symbole="vegetation",
     ),
     # Installations de chantier : temporaires. Elles ne sont ni dessinées ni
     # portées en légende (décision D3), et gardent un style pour le seul cas où
     # une planche de contrôle voudrait les montrer.
     "base_vie": StyleDP(
-        "Base vie (chantier)", 12, _remplie("#e8d8be", "#967646"), dessinee=False
+        "Base vie (chantier)", 13, _remplie("#e8d8be", "#967646"), dessinee=False
     ),
     "stockage_chantier": StyleDP(
-        "Stockage logistique (chantier)", 13, _remplie("#e8d8be", "#967646"),
+        "Stockage logistique (chantier)", 14, _remplie("#e8d8be", "#967646"),
         dessinee=False,
     ),
     # Le symbole est une **bande**, et non le houppier bosselé des arbres : au
@@ -191,14 +208,14 @@ STYLES = {
     # ainsi que le dossier de référence la dessine. Un houppier en légende pour
     # une bande au plan faisait chercher des arbres qui n'y sont pas.
     "haie": StyleDP(
-        "Haie plantée", 14,
+        "Haie plantée", 15,
         Style(trait="#50780a", epaisseur_mm=0.4, remplissage="#6faa0b"),
         relevee=True, symbole="bande",
     ),
     # Dérivée : vert sombre, pour se lire contre la haie plantée sans lui
     # disputer sa teinte relevée.
     "haie_existante": StyleDP(
-        "Haie existante", 15,
+        "Haie existante", 16,
         Style(trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18"),
         symbole="vegetation", matiere="haie_en_place",
     ),
@@ -213,7 +230,7 @@ STYLES = {
     # se verrait pas. Le tiret dit la même chose sur un linéaire, et
     # `style_de` le reporte du remplissage au trait.
     "haie_a_renforcer": StyleDP(
-        "Haie à renforcer", 16, Style(
+        "Haie à renforcer", 17, Style(
             trait="#1e3a10", epaisseur_mm=0.4, remplissage="#2f5c18",
             tirets="2.4 1.2",
         ),
@@ -224,52 +241,52 @@ STYLES = {
     # même teinte, même intitulé — celui du dossier de référence, « Panneaux
     # photovoltaïques » — donc une seule entrée de légende.
     "tables_pv": StyleDP(
-        "Panneaux photovoltaïques", 17,
+        "Panneaux photovoltaïques", 18,
         Style(trait="#2c4a8a", epaisseur_mm=0.2, remplissage="#97caca"),
         relevee=True,
     ),
     "modules_pv": StyleDP(
-        "Panneaux photovoltaïques", 18,
+        "Panneaux photovoltaïques", 19,
         Style(trait="#2c4a8a", epaisseur_mm=0.08, remplissage="#97caca"),
     ),
     # -- postes -------------------------------------------------------------
     "pdl_ptr": StyleDP(
-        "Poste de livraison / transformation", 19, _remplie("#7fffbf", "#000000"),
+        "Poste de livraison / transformation", 20, _remplie("#7fffbf", "#000000"),
         relevee=True,
     ),
     # Dérivées : trois postes distincts au tableau bilan, trois entrées de
     # légende au dossier. Le vert du PDL/PTR est relevé ; les deux autres s'en
     # écartent en clarté, ce qui reste lisible sur un objet de 12 x 3 mm.
-    "ptr": StyleDP("Poste de transformation", 20, _remplie("#2f9e6a", "#000000")),
-    "pdl": StyleDP("Poste de livraison", 21, _remplie("#d5f7e6", "#000000")),
+    "ptr": StyleDP("Poste de transformation", 21, _remplie("#2f9e6a", "#000000")),
+    "pdl": StyleDP("Poste de livraison", 22, _remplie("#d5f7e6", "#000000")),
     # Dérivée : le contrat lui donnait le vert du PDL/PTR, qu'elle ne peut pas
     # porter — les deux se côtoient sur le même plan. Un local technique n'est
     # pas un poste électrique : teinte neutre chaude.
     "local_technique": StyleDP(
-        "Local technique", 22, _remplie("#cfc0a8", "#7a6a50")
+        "Local technique", 23, _remplie("#cfc0a8", "#7a6a50")
     ),
-    "bess": StyleDP("Conteneurs BESS", 23, _remplie("#ffcd78", "#8a5a10")),
+    "bess": StyleDP("Conteneurs BESS", 24, _remplie("#ffcd78", "#8a5a10")),
     # Dérivée : le bac de rétention retient de l'huile, pas de l'eau. Le
     # cyan du contrat le confondait avec la citerne incendie, teinte relevée.
     "bac_retention": StyleDP(
-        "Bac de rétention", 24, _remplie("#6e96b4", "#2f4d66")
+        "Bac de rétention", 25, _remplie("#6e96b4", "#2f4d66")
     ),
     # Dérivée : cyan sombre, distinct de la citerne incendie (relevée, cyan
     # moyen) comme de la teinte des tables.
     "citerne_refroidissement": StyleDP(
-        "Citerne de refroidissement", 25, _remplie("#1d7d99", "#0d3f4f")
+        "Citerne de refroidissement", 26, _remplie("#1d7d99", "#0d3f4f")
     ),
     # Dérivée : orangé pâle, de la même famille que le BESS qu'elle dessert.
-    "zone_remise": StyleDP("Zone de remise", 26, _remplie("#ffe6bb", "#8a5a10")),
+    "zone_remise": StyleDP("Zone de remise", 27, _remplie("#ffe6bb", "#8a5a10")),
     "bac_equarrissage": StyleDP(
-        "Bac d'équarrissage", 27, _remplie("#a8703c", "#5c3c1e")
+        "Bac d'équarrissage", 28, _remplie("#a8703c", "#5c3c1e")
     ),
     "bache_incendie": StyleDP(
-        "Citerne incendie", 28, _remplie("#3fbfbf", "#000000"), relevee=True
+        "Citerne incendie", 29, _remplie("#3fbfbf", "#000000"), relevee=True
     ),
     # -- linéaires ----------------------------------------------------------
     "limite_paddock": StyleDP(
-        "Limite de paddock", 29,
+        "Limite de paddock", 30,
         Style(trait="#966e14", epaisseur_mm=0.3, remplissage="none",
               tirets="2.0 1.2"),
         symbole="ligne",
@@ -277,17 +294,17 @@ STYLES = {
     # Dérivée : ocre franc. Le beige pâle du contrat se confondait avec la
     # zone de remise, dont elle ne partage ni la fonction ni la planche.
     "zone_contention": StyleDP(
-        "Zone de contention", 30, _remplie("#d8bc72", "#7a5a10")
+        "Zone de contention", 31, _remplie("#d8bc72", "#7a5a10")
     ),
     # Tracés d'étude, exclus du dossier (décision D3) : seule la clôture
     # délimite le projet à l'instruction.
     "recul_implantation": StyleDP(
-        "Recul d'implantation (étude)", 31,
+        "Recul d'implantation (étude)", 32,
         Style(trait="#c87828", epaisseur_mm=0.2, remplissage="none"),
         dessinee=False, symbole="tirete",
     ),
     "zone_implantation_pv": StyleDP(
-        "Zone d'implantation (étude)", 32,
+        "Zone d'implantation (étude)", 33,
         Style(trait="#ff2d2d", epaisseur_mm=0.3, remplissage="none"),
         dessinee=False, symbole="tirete",
     ),
@@ -295,7 +312,7 @@ STYLES = {
     # **est** un trait rouge continu, et lui donner en légende un grillage sur
     # poteaux promettait un figuré que la planche ne porte pas.
     "cloture": StyleDP(
-        "Clôture du projet solaire", 33,
+        "Clôture du projet solaire", 34,
         Style(trait="#ff0000", epaisseur_mm=0.5, remplissage="none"),
         relevee=True, symbole="ligne",
     ),
@@ -305,14 +322,14 @@ STYLES = {
     # moteur est un rectangle, et la clôture comme le portail sont rouges au
     # dossier de référence. Deux entrées, deux libellés, un même rouge.
     "portail": StyleDP(
-        "Portail", 34,
+        "Portail", 35,
         Style(trait="#ff0000", epaisseur_mm=0.9, remplissage="none"),
         relevee=True, symbole="portail",
     ),
     # Dérivée : rouge sombre et tireté, pour ne pas se lire comme le portail
     # d'accès, que seul le tableau bilan compte.
     "portail_exploitant": StyleDP(
-        "Portail d'exploitation", 35,
+        "Portail d'exploitation", 36,
         Style(trait="#8a0000", epaisseur_mm=0.45, remplissage="none",
               tirets="1.4 0.8"),
         symbole="portail",

@@ -239,6 +239,7 @@ SOLS_TRAVERSES = (
     "piste_legere",
     "piste_lourde",
     "aire_grutage",
+    "aire_stationnement",
 )
 
 #: Pas admis pour les graduations de l'axe altimétrique, en mètres, et écart

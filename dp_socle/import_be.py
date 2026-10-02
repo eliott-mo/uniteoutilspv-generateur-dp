@@ -97,6 +97,7 @@ CATEGORIES = (
     "piste_lourde",
     "piste_legere",
     "aire_grutage",
+    "aire_stationnement",
     "bache_incendie",
     "aire_aspiration",
     "local_technique",
@@ -192,6 +193,10 @@ CORRESPONDANCE_DEFAUT = {
     "UNI_VRD_Pistes lourdes": "piste_lourde",
     "UNI_VRD_Pistes légères": "piste_legere",
     "UNI_VRD_Aire de grutage": "aire_grutage",
+    # Relevé sur Auzainvilliers le 02/10/2026 : le calque n'a pas le
+    # préfixe « VRD » de ses voisins de voirie.
+    "UNI_Aire stationnement": "aire_stationnement",
+    "UNI_VRD_Aire de stationnement": "aire_stationnement",
     "PVcase Trees": "arbre_existant",
     # Ces trois-là ne se voient qu'une fois les blocs développés : elles sont
     # portées par le contenu des blocs, pas par leur insertion.

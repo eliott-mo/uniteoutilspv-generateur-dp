@@ -83,6 +83,12 @@ STYLES = {
     # distingue pas. Deux catégories dessinées à l'identique n'apparaissent
     # qu'une fois en légende.
     "aire_grutage": StyleCategorie("Voie lourde", (162, 162, 162), (110, 110, 110)),
+    # Même gris que la voie lourde, dont elle a le revêtement ; sur les
+    # planches c'est un semis de points qui l'en distingue, que cet aperçu
+    # d'écran ne rend pas.
+    "aire_stationnement": StyleCategorie(
+        "Aire de stationnement", (162, 162, 162), (110, 110, 110)
+    ),
     "plateforme": StyleCategorie("Plateforme", (215, 215, 215), (110, 110, 110)),
     "aire_aspiration": StyleCategorie(
         "Aire d'aspiration", (215, 215, 215), (63, 191, 191), epaisseur=2
@@ -156,6 +162,7 @@ ORDRE_DESSIN = (
     "piste_legere",
     "piste_lourde",
     "aire_grutage",
+    "aire_stationnement",
     "aire_aspiration",
     "espace_vert",
     "arbre_existant",

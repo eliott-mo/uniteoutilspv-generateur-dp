@@ -148,6 +148,29 @@ MOTIF_PISTE_A_CREER = (
     "</pattern>"
 )
 
+#: Motif de l'aire de stationnement : un semis de points.
+#:
+#: Les hachures sont prises par la piste lourde à créer, et l'aire de
+#: stationnement est du même revêtement qu'elle — même gris, même matière. Ce
+#: sont donc le semis et l'intitulé qui la distinguent, comme le filet et
+#: l'intitulé distinguent les trois voies lourdes entre elles. Demande du chef
+#: de projet du 02/10/2026.
+#:
+#: 1,5 mm de pas et 0,3 mm de rayon : le point fait 0,6 mm sur l'épreuve A3,
+#: lisible sans peser, et couvre 12,6 % de la surface là où la hachure en
+#: couvre un quart. Comme elle, le motif ne porte **que** ses marques : un
+#: `<rect>` de fond dans un `<pattern>` laisse des coutures blanches au pavage
+#: de cairo, et c'est le second passage sur l'aplat qui fait le remplissage.
+MOTIF_POINTS_STATIONNEMENT = (
+    '<pattern id="points-stationnement" width="1.5" height="1.5" '
+    'patternUnits="userSpaceOnUse">'
+    '<circle cx="0.75" cy="0.75" r="0.3" fill="#3a3a3a"/>'
+    "</pattern>"
+)
+
+#: Référence SVG du semis, telle qu'un remplissage la porte.
+REF_POINTS_STATIONNEMENT = "url(#points-stationnement)"
+
 #: Référence SVG du motif, telle qu'un remplissage la porte.
 REF_PISTE_A_CREER = "url(#hachures-piste-a-creer)"
 
@@ -160,6 +183,7 @@ REF_PISTE_A_CREER = "url(#hachures-piste-a-creer)"
 MOTIFS = {
     "hachures-bati": MOTIF_BATIMENT,
     "hachures-piste-a-creer": MOTIF_PISTE_A_CREER,
+    "points-stationnement": MOTIF_POINTS_STATIONNEMENT,
 }
 
 #: Styles employés par les planches du socle.
