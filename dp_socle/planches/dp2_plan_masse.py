@@ -37,7 +37,7 @@ from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
 from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
 from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
-from .primitives import TRAIT_AXE, repere_coupe
+from .primitives import TRAIT_AXE, repere_coupe, union_valide
 
 NUMERO = "DP 2"
 TITRE = piece("DP 2").titre
@@ -119,6 +119,32 @@ def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm) -> tuple:
     return coins[parts.index(min(parts))]
 
 
+def _ce_que_la_planche_cadre(contrat: Contrat, emprise: Emprise):
+    """Ce sur quoi le plan de masse se cadre : la zone clôturée, et à défaut l'emprise.
+
+    Décision du chef de projet du 02/10/2026 : **la zone clôturée**, et non
+    l'emprise cadastrale déposée. Celle-ci dit ce qui est maîtrisé — parfois
+    plusieurs fois le projet — et l'échelle s'y réglait : à Boisné-La Tude, le
+    plan de masse sortait au 1:5 000, le site perdu au milieu de deux
+    kilomètres de parcellaire, là où Saint-Cyr-en-Val — dont l'emprise épouse
+    la clôture à 1 % près — sortait au 1:2 000, bien lisible.
+
+    Sans clôture au contrat, l'emprise reprend son rôle : c'est la seule
+    étendue qui reste, et l'appelant le dit.
+
+    Rend (ce qui a cadré, dimensions en mètres, centre).
+    """
+    cloture = union_valide(contrat.geometries("cloture"))
+    if cloture is None or cloture.is_empty:
+        return "emprise", emprise.dimensions_m, emprise.centre
+    minx, miny, maxx, maxy = cloture.bounds
+    return (
+        "cloture",
+        (maxx - minx, maxy - miny),
+        ((minx + maxx) / 2.0, (miny + maxy) / 2.0),
+    )
+
+
 def generer(
     projet: Projet,
     contrat: Contrat,
@@ -129,15 +155,21 @@ def generer(
     planche = nouvelle_planche(projet, NUMERO, numero=numero)
     zone = planche.zone_dessin()
 
-    largeur_m, hauteur_m = emprise.dimensions_m
+    avertissements = []
+    cadre_sur, dimensions, centre = _ce_que_la_planche_cadre(contrat, emprise)
     denominateur = echelle_adaptative(
-        largeur_m, hauteur_m, zone, marge=MARGE, valeurs=ECHELLES_PLAN_MASSE
+        *dimensions, zone, marge=MARGE, valeurs=ECHELLES_PLAN_MASSE
     )
     planche.definir_echelle(denominateur)
-    planche.centrer_sur(emprise.centre)
+    planche.centrer_sur(centre)
 
     minx, miny, maxx, maxy = planche.emprise_terrain()
-    avertissements = []
+    if cadre_sur == "emprise":
+        avertissements.append(
+            "Pas de clôture au contrat : le plan de masse est cadré sur "
+            "l'emprise cadastrale, faute de mieux. Si elle déborde largement du "
+            "projet, la planche sera peu zoomée."
+        )
 
     # 1. Parcellaire du WFS IGN, en filet fin, avec les numéros de parcelle.
     #    Le cadastre embarqué par le bureau d'études est écarté d'office : le

@@ -791,3 +791,76 @@ def test_seuls_les_ouvrages_a_facade_ont_une_planche():
         "bache_incendie", "citerne_refroidissement",
         "local_technique", "bess",
     }
+
+
+# ---------------------------------------------------------------------------
+# Ce sur quoi le plan de masse se cadre (décision du 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_le_plan_de_masse_se_cadre_sur_la_zone_cloturee():
+    """L'emprise cadastrale dit ce qui est maîtrisé, pas ce qu'il faut montrer.
+
+    Relevé sur Boisné-La Tude : le plan de masse sortait au 1:5 000, le site
+    perdu au milieu de deux kilomètres de parcellaire, parce que l'emprise
+    déposée faisait plusieurs fois le projet. Saint-Cyr-en-Val, dont l'emprise
+    épouse la clôture à 1 % près, sortait au 1:2 000 — bien lisible.
+
+    Décision du chef de projet : le cadre suit la **zone clôturée**. Les deux
+    cas sont mesurés ici, et le troisième aussi : sans clôture au contrat,
+    l'emprise reprend son rôle, faute d'autre étendue.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.echelle import echelle_adaptative
+    from dp_socle.planche import Planche
+    from dp_socle.planches.dp2_plan_masse import (
+        ECHELLES_PLAN_MASSE,
+        MARGE,
+        _ce_que_la_planche_cadre,
+    )
+
+    class _Contrat:
+        def __init__(self, cloture):
+            self._cloture = cloture
+
+        def geometries(self, categorie):
+            return self._cloture if categorie == "cloture" else []
+
+    class _Emprise:
+        def __init__(self, geometrie):
+            minx, miny, maxx, maxy = geometrie.bounds
+            self.geometrie = geometrie
+            self.dimensions_m = (maxx - minx, maxy - miny)
+            self.centre = ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
+
+    zone = Planche(
+        titre="T", numero="DP 2", projet="T", date="02/10/2026"
+    ).zone_dessin()
+
+    def echelle(dimensions):
+        return echelle_adaptative(
+            *dimensions, zone, marge=MARGE, valeurs=ECHELLES_PLAN_MASSE
+        )
+
+    cloture = box(0.0, 0.0, 250.0, 350.0)
+    large = _Emprise(box(-400.0, -300.0, 650.0, 750.0))  # douze fois la clôture
+
+    quoi, dimensions, centre = _ce_que_la_planche_cadre(_Contrat([cloture]), large)
+    assert quoi == "cloture"
+    assert dimensions == pytest.approx((250.0, 350.0))
+    assert centre == pytest.approx((125.0, 175.0))
+    # Le site devient lisible : 1:2 000 au lieu du 1:5 000 de l'emprise.
+    assert echelle(dimensions) == 2000
+    assert echelle(large.dimensions_m) == 5000
+
+    # Quand l'emprise épouse la clôture, rien ne change : c'est le cas de
+    # Saint-Cyr-en-Val, et l'échelle y était déjà la bonne.
+    serree = _Emprise(box(0.0, 0.0, 250.0, 350.0))
+    _, dimensions_serrees, _ = _ce_que_la_planche_cadre(_Contrat([cloture]), serree)
+    assert echelle(dimensions_serrees) == echelle(serree.dimensions_m) == 2000
+
+    # Sans clôture au contrat, l'emprise reprend son rôle.
+    quoi, dimensions, centre = _ce_que_la_planche_cadre(_Contrat([]), large)
+    assert quoi == "emprise"
+    assert dimensions == pytest.approx(large.dimensions_m)
