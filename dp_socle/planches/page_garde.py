@@ -254,7 +254,14 @@ def _bloc_sommaire(planche: Planche, x: float, y: float, pages: dict) -> float:
     """
     hauteur_titre = 7.0
     hauteur_ligne = 5.0
-    pieces = [p for p in PIECES if p.code]  # la page de garde ne s'y liste pas
+    # La page de garde ne s'y liste pas. Une pièce facultative non plus, tant
+    # qu'elle n'est pas produite : annoncée sans page, elle se lit comme une
+    # pièce manquante alors qu'elle n'avait pas lieu d'être. Une pièce
+    # **attendue** et absente, elle, reste listée sans page — DP 3 sans coupe,
+    # DP 11 sans notice —, et c'est son absence qu'il faut voir avant le dépôt.
+    pieces = [
+        p for p in PIECES if p.code and (not p.facultative or pages.get(p.code))
+    ]
     hauteur_contenu = hauteur_ligne * len(pieces)
 
     _cellule_titre(planche, x, y, LARGEUR_COLONNE, hauteur_titre, "SOMMAIRE",

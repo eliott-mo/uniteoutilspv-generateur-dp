@@ -111,3 +111,56 @@ def test_codes_produits_refuse_une_piece_inconnue():
 def test_piece_inconnue():
     with pytest.raises(KeyError):
         piece("DP 99")
+
+
+# ---------------------------------------------------------------------------
+# Le sommaire et les pièces facultatives (relevé du 02/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_piece_facultative_ne_se_liste_au_sommaire_que_produite():
+    """« DP 1-3 bis — » annonçait une pièce manquante qui n'avait pas lieu d'être.
+
+    Relevé par le chef de projet : le tableau des parcelles n'est produit que
+    lorsqu'il ne tient pas sur DP 1-3 — au-delà de deux colonnes il masque
+    l'emprise qu'il décrit. Sur un dossier où il tient, le sommaire le listait
+    quand même, sans page, et se lisait comme un oubli.
+
+    Une pièce **attendue** et absente, elle, reste listée sans page : DP 3 sans
+    coupe, DP 11 sans notice. C'est précisément leur absence qu'il faut voir
+    avant le dépôt, et la distinction tient à ce seul champ.
+    """
+    from dp_socle.dossier import PIECES, PAR_CODE
+
+    facultatives = {p.code for p in PIECES if p.facultative}
+    assert facultatives == {"DP 1-3 bis", "DP 4-3"}
+    # Celles qu'on veut voir manquer ne le sont pas.
+    assert not PAR_CODE["DP 3"].facultative
+    assert not PAR_CODE["DP 11"].facultative
+    assert not PAR_CODE["DP 2"].facultative
+
+
+def test_le_sommaire_saute_la_facultative_absente_et_garde_l_attendue():
+    """Ce qui se mesure est la liste dessinée, pas l'intention.
+
+    Le sommaire se compose des pièces à code ; la facultative n'y entre que si
+    `pages` lui en donne une.
+    """
+    from dp_socle.dossier import PIECES
+
+    def listees(pages):
+        return [
+            p.code
+            for p in PIECES
+            if p.code and (not p.facultative or pages.get(p.code))
+        ]
+
+    sans_tableau = listees({"DP 1-1": 2, "DP 1-3": 4, "DP 2": 5, "DP 4-3": 9})
+    assert "DP 1-3 bis" not in sans_tableau
+    assert "DP 4-3" in sans_tableau, "produite, donc listée"
+    # L'attendue sans page reste au sommaire : c'est son absence qui doit se voir.
+    assert "DP 3" in sans_tableau and "DP 11" in sans_tableau
+
+    avec_tableau = listees({"DP 1-3 bis": 5, "DP 1-3": 4})
+    assert "DP 1-3 bis" in avec_tableau
+    assert "DP 4-3" not in avec_tableau, "non produite sur ce dossier-là"

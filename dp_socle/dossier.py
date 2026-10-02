@@ -21,6 +21,16 @@ class Piece:
     titre: str
     #: Produite par le générateur, ou fournie / à venir dans un lot ultérieur.
     produite: bool = False
+    #: Pièce qui n'existe que si le projet l'appelle. Elle ne se liste au
+    #: sommaire que lorsqu'elle est produite : annoncée sans page, elle fait
+    #: croire à une pièce manquante alors qu'elle n'avait pas lieu d'être.
+    #: Relevé par le chef de projet le 02/10/2026 sur le sommaire d'un dossier
+    #: dont le tableau des parcelles tenait sur DP 1-3.
+    #:
+    #: À distinguer d'une pièce attendue mais absente — DP 3 sans coupe, DP 11
+    #: sans notice : celles-là se listent **sans page**, et c'est précisément
+    #: leur absence qu'il faut voir avant le dépôt.
+    facultative: bool = False
 
     @property
     def intitule(self) -> str:
@@ -50,7 +60,12 @@ PIECES = (
     # Une pièce facultative ne décale rien tant qu'elle n'est pas produite :
     # `codes_produits` ne compte que ce qui existe, comme pour un projet sans
     # poste qui n'a pas de DP 4-1.
-    Piece("DP 1-3 bis", "Plan de cadastre — tableau des parcelles", produite=True),
+    Piece(
+        "DP 1-3 bis",
+        "Plan de cadastre — tableau des parcelles",
+        produite=True,
+        facultative=True,
+    ),
     Piece("DP 2", "Plan de masse", produite=True),
     Piece("DP 3", "Coupe des tables photovoltaïques et du terrain", produite=True),
     Piece("DP 4-1", "Poste de livraison/transformation", produite=True),
@@ -60,7 +75,7 @@ PIECES = (
     # citerne de refroidissement, aire d'aspiration. Elle n'existe que si ces
     # ouvrages existent — d'où la numérotation calculée sur les pièces
     # réellement produites et non sur cette liste.
-    Piece("DP 4-3", "Autres ouvrages techniques", produite=True),
+    Piece("DP 4-3", "Autres ouvrages techniques", produite=True, facultative=True),
     # Produites depuis le lot 6. DP 6 peut couvrir **plusieurs planches**, une
     # par point de vue : son rang se compte donc sur les planches réellement
     # produites, comme celui des DP 4, et jamais sur cette liste.
