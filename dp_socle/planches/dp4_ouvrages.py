@@ -94,6 +94,15 @@ CITERNES = ("bache_incendie", "citerne_refroidissement")
 #: élévations : conteneurs et citernes, comme les postes et la clôture.
 TEINTE_RAL = CONTENEURS + CITERNES
 
+#: Locaux techniques, au sens du PPRI : ceux qui se surélèvent au-dessus des
+#: plus hautes eaux (décision D2 du lot 9).
+#:
+#: Les citernes en sont exclues — ce sont des cuves ancrées, pas des locaux. Le
+#: chef de projet a dit « tous les locaux techniques » le 02/10/2026, ce qui les
+#: laisse dehors en bonne lecture ; la question est à reposer sur un projet réel
+#: qui porte une citerne en zone inondable.
+LOCAUX_TECHNIQUES = POSTES + CONTENEURS
+
 #: Ouvrages dont la façade n'apprend rien de plus dès qu'un autre du même genre
 #: est déjà décrit dans le dossier, et le second qui les couvre.
 #:
@@ -227,6 +236,50 @@ EPAISSEUR_TOITURE_M = 0.14
 #: fourchette, comme lui.
 HAUTEUR_SOCLE_M = 0.30
 HAUTEUR_SOCLE_MAX_M = 0.50
+
+#: Figuré d'un local technique surélevé au-dessus des plus hautes eaux, imposé
+#: par un PPRI (lot 9). Relevé sur la planche HOCH « PC 5-1 Poste de livraison :
+#: façade et coupe » de Périgny-la-Rose, du 26/05/2025.
+#:
+#: Toutes ces hauteurs sont comptées **depuis le terrain naturel**, que le
+#: dessin place à zéro. La planche ne porte aucune cote NGF : une cote absolue
+#: devrait s'accorder avec la topographie relevée — le profil de DP 3, le
+#: relevé du géomètre — et un désaccord de quelques décimètres entre deux
+#: pièces du même dossier est ce que le dossier ne peut pas se permettre
+#: (décisions D1 et D5 du lot 9).
+EPAISSEUR_PLATEFORME_M = 0.20
+#: Débord de la plateforme autour du local : la circulation que le garde-corps
+#: protège. Sans elle il n'y aurait rien à protéger, et l'accès au local se
+#: ferait depuis le vide.
+DEBORD_PLATEFORME_M = 0.60
+SECTION_PILOTIS_M = 0.25
+#: Un mètre : la hauteur réglementaire d'un garde-corps de plain-pied.
+HAUTEUR_GARDE_CORPS_M = 1.00
+#: Marche et giron de l'escalier d'accès. 17 / 28 cm est le couple courant d'un
+#: escalier de service, et il vérifie la règle du pas : 2 x 17 + 28 = 62 cm.
+HAUTEUR_MARCHE_M = 0.17
+GIRON_M = 0.28
+
+#: Côté où l'escalier est dessiné, **par convention** (décision D3 du lot 9).
+#:
+#: Le générateur ne sait pas de quel côté il sera construit : le DXF du bureau
+#: d'études ne donne qu'une emprise au sol, et aucune donnée du dossier ne le
+#: dit. Le chef de projet a tranché le 02/10/2026 — « si l'escalier change, ça
+#: pourra se faire facilement en demandant une modification de l'autorisation »
+#: — et la convention est donc écrite ici **et** au bloc de caractéristiques de
+#: la planche, pour que le bureau d'études sache ce qu'il regarde.
+#:
+#: Au-delà du pignon, et non devant une façade : la volée se montre alors de
+#: profil sur les deux élévations long pan, qui s'élargissent, et reste vue en
+#: bout sur les pignons, qui sont les vues les plus étroites de la planche et
+#: les premières à manquer de place.
+COTE_ESCALIER = "pignon droit"
+
+#: Teinte de la ligne des plus hautes eaux connues, et son figuré.
+#:
+#: Pointillé bleu, comme la planche de référence. C'est la seule ligne d'eau du
+#: dossier : elle ne risque pas d'être confondue avec un autre figuré.
+COULEUR_PHEC = "#1f6fb4"
 
 #: Maille du grillage, en **mètres** de terrain.
 #:
@@ -370,10 +423,19 @@ def generer(
         )
 
     avertissements = []
+    surelevation = surelevation_du_projet(projet)
+    if surelevation is None and any(c in LOCAUX_TECHNIQUES for c in categories):
+        # Constat, pas alerte : le rapport dit ce que l'outil a fait, et la
+        # quasi-totalité des projets ne sont pas en zone inondable (D4).
+        avertissements.append(
+            f"{code} : locaux techniques posés au sol, aucune surélévation "
+            "saisie. En zone inondable (PPRI), la hauteur du plancher se "
+            "renseigne à l'import."
+        )
     blocs = []
     for categorie in categories:
         try:
-            bloc = _bloc_ouvrage(contrat, categorie, avertissements)
+            bloc = _bloc_ouvrage(contrat, categorie, avertissements, surelevation)
         except ErreurCoteOuvrage as exc:
             avertissements.append(
                 f"{code} : « {categorie} » n'est pas dessiné — {exc}"
@@ -1030,7 +1092,8 @@ def _centre_zone(planche: Planche) -> tuple:
 # ---------------------------------------------------------------------------
 
 
-def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> BlocOuvrage:
+def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list,
+                  surelevation: Surelevation | None = None) -> BlocOuvrage:
     if categorie == "cloture":
         return _bloc_cloture()
     if categorie == "portail":
@@ -1050,9 +1113,16 @@ def _bloc_ouvrage(contrat: Contrat, categorie: str, avertissements: list) -> Blo
         # dessine en plan, et son cadre le dit.
         return _bloc_surface(cote, STYLES[categorie].libelle, categorie)
     if categorie in POSTES:
-        return _bloc_volume(cote, STYLES[categorie].libelle, categorie)
+        return _bloc_volume(
+            cote, STYLES[categorie].libelle, categorie, surelevation
+        )
     if categorie in CONTENEURS:
-        return _bloc_conteneur(cote, STYLES[categorie].libelle, categorie)
+        return _bloc_conteneur(
+            cote, STYLES[categorie].libelle, categorie, surelevation
+        )
+    # Les citernes ne sont pas des locaux techniques : ce sont des cuves
+    # ancrées, et la décision D2 du lot 9 les laisse au sol même en zone
+    # inondable. À reposer sur un projet réel qui en porte une.
     if categorie in CITERNES:
         return _bloc_citerne(cote, STYLES[categorie].libelle, categorie)
     # Tout le reste est un équipement posé, pas un bâtiment : deux vues et ses
@@ -1110,46 +1180,231 @@ def _toiture(dessin: Dessin, largeur_m: float, hauteur_m: float) -> None:
     )
 
 
-def _socle(dessin: Dessin, largeur_m: float) -> None:
-    """Socle de pose, entre le sol et le bas des parois."""
+def _socle(dessin: Dessin, largeur_m: float, assise_m: float = 0.0) -> None:
+    """Socle de pose, entre l'assise et le bas des parois.
+
+    `assise_m` est le niveau sur lequel l'ouvrage repose : le terrain naturel
+    pour un local posé au sol, le dessus de la plateforme pour un local
+    surélevé au-dessus des plus hautes eaux.
+    """
     dessin.rectangle(
-        -0.10, 0.0, largeur_m + 0.20, HAUTEUR_SOCLE_M,
+        -0.10, assise_m, largeur_m + 0.20, HAUTEUR_SOCLE_M,
         Style(trait="#8a8578", epaisseur_mm=0.2, remplissage=COULEUR_SOCLE),
     )
 
 
+# ---------------------------------------------------------------------------
+# Locaux techniques surélevés (PPRI)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Surelevation:
+    """Les deux hauteurs du PPRI, telles que le chef de projet les a saisies.
+
+    Toutes deux comptées **depuis le terrain naturel**, et jamais en NGF : voir
+    `EPAISSEUR_PLATEFORME_M` pour la raison, et `Projet.surelevation_locaux_m`
+    pour la saisie.
+    """
+
+    plancher_m: float
+    #: Niveau des plus hautes eaux connues. Facultatif : sans lui, la plateforme
+    #: et son escalier sont dessinés mais la planche ne trace aucune ligne
+    #: d'eau — elle se tait plutôt que d'en placer une au hasard.
+    phec_m: float | None = None
+
+    def __post_init__(self):
+        if self.plancher_m <= 0:
+            raise ErreurComposition(
+                f"Surélévation de {self.plancher_m} m : une surélévation est une "
+                "hauteur au-dessus du terrain naturel."
+            )
+        if self.phec_m is not None and self.phec_m >= self.plancher_m:
+            raise ErreurComposition(
+                f"Plus hautes eaux à {self.phec_m} m pour un plancher à "
+                f"{self.plancher_m} m : le dessin se contredirait."
+            )
+
+    @property
+    def marches(self) -> int:
+        """Nombre de marches de la volée d'accès."""
+        return max(int(round(self.plancher_m / HAUTEUR_MARCHE_M)), 1)
+
+    @property
+    def course_m(self) -> float:
+        """Emprise horizontale de la volée, en mètres.
+
+        C'est elle qui élargit les élévations long pan, et c'est par elle que la
+        planche peut descendre d'un cran d'échelle : à 2,25 m de surélévation la
+        volée compte treize marches et prend 3,64 m, soit plus d'un demi-poste.
+        """
+        return self.marches * GIRON_M
+
+
+def surelevation_du_projet(projet: Projet) -> Surelevation | None:
+    """La surélévation saisie pour ce projet, ou `None` s'il n'y en a pas.
+
+    Lue de `projet.json` et non du contrat : la surélévation décrit l'ouvrage,
+    pas sa géométrie au sol, et le contrat a un consommateur hors du dépôt que
+    cette donnée ne concerne pas (décision D5 du lot 9).
+    """
+    plancher = getattr(projet, "surelevation_locaux_m", None)
+    if plancher is None:
+        return None
+    return Surelevation(
+        plancher_m=float(plancher),
+        phec_m=(
+            float(projet.phec_locaux_m)
+            if getattr(projet, "phec_locaux_m", None) is not None
+            else None
+        ),
+    )
+
+
+def _plateforme(dessin: Dessin, largeur_m: float, surelevation: Surelevation,
+                escalier: str | None = None) -> None:
+    """Plateforme sur pilotis portant un local surélevé, et son accès.
+
+    `largeur_m` est la largeur de l'ouvrage dans cette vue ; la plateforme
+    déborde de `DEBORD_PLATEFORME_M` de chaque côté. `escalier` vaut « droite »
+    ou « gauche » pour montrer la volée de profil, `None` pour les vues où elle
+    est vue en bout.
+    """
+    assise = surelevation.plancher_m
+    dalle = assise - EPAISSEUR_PLATEFORME_M
+    gauche = -DEBORD_PLATEFORME_M
+    droite = largeur_m + DEBORD_PLATEFORME_M
+    beton = Style(trait="#8a8578", epaisseur_mm=0.22, remplissage=COULEUR_SOCLE)
+    metal = Style(trait="#5d6152", epaisseur_mm=0.22, remplissage="none")
+
+    for x in (gauche, droite - SECTION_PILOTIS_M):
+        dessin.rectangle(x, 0.0, SECTION_PILOTIS_M, dalle, beton)
+    dessin.rectangle(gauche, dalle, droite - gauche, EPAISSEUR_PLATEFORME_M, beton)
+
+    # Garde-corps : les deux montants d'extrémité et leurs lisses, posées sur
+    # les seuls débords de la plateforme.
+    #
+    # Pas de lisse devant la façade, alors que le garde-corps en fait bien le
+    # tour : tracée là, elle barre la porte et les grilles de ventilation, qui
+    # sont ce que l'élévation est faite pour montrer. Le garde-corps se lit à
+    # ses montants, et le dossier gagne une façade lisible.
+    haut = assise + HAUTEUR_GARDE_CORPS_M
+    for x in (gauche, droite):
+        dessin.ligne((x, assise), (x, haut), metal)
+    for depart, arrivee in ((gauche, 0.0), (largeur_m, droite)):
+        if arrivee - depart <= 0:
+            continue
+        for y in (haut, assise + HAUTEUR_GARDE_CORPS_M / 2.0):
+            dessin.ligne((depart, y), (arrivee, y), metal)
+
+    if escalier in ("droite", "gauche"):
+        _escalier(dessin, surelevation, droite if escalier == "droite" else gauche,
+                  sens=1.0 if escalier == "droite" else -1.0, beton=beton,
+                  metal=metal)
+
+    if surelevation.phec_m is not None:
+        _ligne_phec(dessin, surelevation, gauche, droite, escalier)
+
+
+def _escalier(dessin: Dessin, surelevation: Surelevation, depart_m: float,
+              sens: float, beton: Style, metal: Style) -> None:
+    """Volée droite d'accès à la plateforme, dessinée de profil.
+
+    Les marches sont réparties exactement sur la surélévation plutôt que posées
+    à 17 cm : un escalier dont la dernière marche ne tombe pas sur le plancher
+    est un escalier faux, et l'arrondi du nombre de marches le garantirait
+    presque toujours.
+    """
+    assise = surelevation.plancher_m
+    nombre = surelevation.marches
+    marche = assise / nombre
+    contour = [(depart_m, assise)]
+    for index in range(nombre):
+        x = depart_m + sens * (index + 1) * GIRON_M
+        contour.append((x, assise - index * marche))
+        contour.append((x, assise - (index + 1) * marche))
+    contour.append((depart_m, 0.0))
+    dessin.polyligne(contour, beton, fermer=True)
+
+    # Main courante, parallèle à la pente, et ses deux montants.
+    bout = depart_m + sens * surelevation.course_m
+    dessin.ligne((depart_m, assise + HAUTEUR_GARDE_CORPS_M),
+                 (bout, HAUTEUR_GARDE_CORPS_M), metal)
+    dessin.ligne((bout, 0.0), (bout, HAUTEUR_GARDE_CORPS_M), metal)
+
+
+def _ligne_phec(dessin: Dessin, surelevation: Surelevation, gauche: float,
+                droite: float, escalier: str | None) -> None:
+    """Ligne des plus hautes eaux, en pointillé, et sa cote.
+
+    La cote est relative, comme sur la planche de référence qui écrit
+    « PHEC (0,45 m) » pour une surélévation de 0,55 m.
+    """
+    phec = surelevation.phec_m
+    debut = gauche - (surelevation.course_m if escalier == "gauche" else 0.0)
+    fin = droite + (surelevation.course_m if escalier == "droite" else 0.0)
+    marge = dessin.metres(3.0)
+    dessin.ligne(
+        (debut - marge, phec), (fin + marge, phec),
+        Style(trait=COULEUR_PHEC, epaisseur_mm=0.3, tirets="2.4 1.4"),
+    )
+    dessin.texte(
+        fin + marge, phec, f"PHEC ({nombre_fr(phec)} m)",
+        taille=5.5 * PT, ancre="end", decalage_mm=(0.0, -1.4),
+        couleur=COULEUR_PHEC,
+    )
+
+
 def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
-                     coter_socle: bool = False):
+                     coter_socle: bool = False,
+                     surelevation: Surelevation | None = None,
+                     escalier: str | None = None):
     """Une face de poste : socle, parois, toiture débordante et ouvertures.
 
     `ouvertures` est une suite de (type, fraction de la largeur), le type
     valant « porte » ou « grille ».
+
+    `surelevation` renseignée, le poste est posé sur sa plateforme et non sur le
+    terrain : tout monte de la hauteur du plancher, et les lignes de cote
+    s'écartent d'autant que la plateforme déborde, sans quoi elles tombaient
+    dedans.
     """
+    assise = surelevation.plancher_m if surelevation is not None else 0.0
+    # La plateforme déborde du local : les cotes doivent passer au-delà.
+    retrait = DEBORD_PLATEFORME_M if surelevation is not None else 0.0
 
     def tracer(dessin: Dessin) -> None:
+        bord = max(0.9, retrait + dessin.metres(2.0))
         sol_hachure(
-            dessin, [(-0.9, 0.0), (largeur_m + 0.9, 0.0)], epaisseur_mm=1.8
+            dessin, [(-bord, 0.0), (largeur_m + bord, 0.0)], epaisseur_mm=1.8
         )
-        _socle(dessin, largeur_m)
+        if surelevation is not None:
+            _plateforme(dessin, largeur_m, surelevation, escalier=escalier)
+        _socle(dessin, largeur_m, assise)
         dessin.rectangle(
-            0.0, HAUTEUR_SOCLE_M, largeur_m, hauteur_m, _style_poste()
+            0.0, assise + HAUTEUR_SOCLE_M, largeur_m, hauteur_m, _style_poste()
         )
         for nature, fraction in ouvertures:
             abscisse = largeur_m * fraction
             if nature == "porte":
-                _porte(dessin, abscisse, hauteur_m)
+                _porte(dessin, abscisse, hauteur_m, assise)
             else:
-                _grille(dessin, abscisse, hauteur_m)
-        _toiture(dessin, largeur_m, hauteur_m + HAUTEUR_SOCLE_M)
+                _grille(dessin, abscisse, hauteur_m, assise)
+        _toiture(dessin, largeur_m, assise + hauteur_m + HAUTEUR_SOCLE_M)
 
         cote_horizontale(
             dessin, 0.0, largeur_m, -dessin.metres(6.5),
             f"{nombre_fr(largeur_m)} m",
         )
         cote_verticale(
-            dessin, HAUTEUR_SOCLE_M, HAUTEUR_SOCLE_M + hauteur_m,
-            -dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m",
+            dessin, assise + HAUTEUR_SOCLE_M, assise + HAUTEUR_SOCLE_M + hauteur_m,
+            -retrait - dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m",
         )
+        if surelevation is not None:
+            cote_verticale(
+                dessin, 0.0, assise, -retrait - dessin.metres(8.0),
+                f"{nombre_fr(assise)} m",
+            )
         # La fourchette du socle, écrite comme sur le dossier de référence.
         # Portée par une seule vue : répétée sur les quatre, elle débordait sur
         # la vue voisine et n'apprenait rien de plus.
@@ -1168,16 +1423,26 @@ def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
     return tracer
 
 
-def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
+def _bloc_volume(cote, libelle: str, categorie: str,
+                 surelevation: Surelevation | None = None) -> BlocOuvrage:
     """Un poste préfabriqué : plan de toiture, quatre élévations, coupe.
 
     C'est la présentation du dossier de référence pour le seul ouvrage bâti du
     site : la toiture vue de dessus, les quatre faces, et une coupe où une
     silhouette donne l'échelle.
+
+    `surelevation` renseignée, le poste est posé sur une plateforme au-dessus
+    des plus hautes eaux (lot 9). L'escalier ne se montre de profil que sur les
+    deux élévations long pan, et du côté opposé de l'une à l'autre : c'est le
+    même escalier vu de l'autre bord du poste.
     """
     longueur = cote.longueur_m
     largeur = cote.largeur_m
     hauteur = cote.hauteur_m
+    assise = surelevation.plancher_m if surelevation is not None else 0.0
+    # Ce que la plateforme et sa volée ajoutent à l'encombrement des vues.
+    jeu = 2 * DEBORD_PLATEFORME_M if surelevation is not None else 0.0
+    course = surelevation.course_m if surelevation is not None else 0.0
 
     def plan(dessin: Dessin) -> None:
         # La toiture vue de dessus déborde des murs : c'est elle qu'on voit.
@@ -1195,55 +1460,98 @@ def _bloc_volume(cote, libelle: str, categorie: str) -> BlocOuvrage:
         _coter_rectangle(dessin, longueur, largeur)
 
     def coupe(dessin: Dessin) -> None:
-        sol_hachure(dessin, [(-0.9, 0.0), (largeur + 3.2, 0.0)], epaisseur_mm=1.8)
-        _socle(dessin, largeur)
+        bord = max(0.9, DEBORD_PLATEFORME_M + 0.3) if surelevation else 0.9
+        sol_hachure(
+            dessin, [(-bord, 0.0), (largeur + 3.2, 0.0)], epaisseur_mm=1.8
+        )
+        if surelevation is not None:
+            # Pas d'escalier ici : la coupe est transversale et la volée, qui
+            # court au-delà du pignon, s'y verrait en bout.
+            _plateforme(dessin, largeur, surelevation)
+        _socle(dessin, largeur, assise)
         # Une coupe montre l'enveloppe et le vide intérieur, pas un aplat.
-        dessin.rectangle(0.0, HAUTEUR_SOCLE_M, largeur, hauteur, TRAIT_FORT)
+        dessin.rectangle(0.0, assise + HAUTEUR_SOCLE_M, largeur, hauteur, TRAIT_FORT)
         dessin.rectangle(
-            0.14, HAUTEUR_SOCLE_M + 0.14, largeur - 0.28, hauteur - 0.28,
+            0.14, assise + HAUTEUR_SOCLE_M + 0.14, largeur - 0.28, hauteur - 0.28,
             TRAIT_FIN,
         )
-        _toiture(dessin, largeur, hauteur + HAUTEUR_SOCLE_M)
+        _toiture(dessin, largeur, assise + hauteur + HAUTEUR_SOCLE_M)
+        # La silhouette reste au terrain naturel : c'est de là qu'on regarde
+        # l'ouvrage, et c'est ce qui fait voir la surélévation.
         silhouette(dessin, largeur + 1.7, 0.0, pleine=False)
         cote_verticale(
-            dessin, HAUTEUR_SOCLE_M, HAUTEUR_SOCLE_M + hauteur,
+            dessin, assise + HAUTEUR_SOCLE_M, assise + HAUTEUR_SOCLE_M + hauteur,
             -dessin.metres(3.0), f"{nombre_fr(hauteur)} m",
         )
 
-    hauteur_vue = hauteur + HAUTEUR_SOCLE_M + EPAISSEUR_TOITURE_M
+    hauteur_vue = assise + hauteur + HAUTEUR_SOCLE_M + EPAISSEUR_TOITURE_M
     return BlocOuvrage(
         titre=f"{libelle} — {cote.dimensions}",
         vues=[
             Vue("Plan de toiture", longueur, largeur, plan),
             Vue(
-                "Élévation long pan (façade)", longueur, hauteur_vue,
+                "Élévation long pan (façade)", longueur + jeu + course, hauteur_vue,
                 _elevation_poste(
-                    longueur, hauteur, [("porte", 0.5)], coter_socle=True
+                    longueur, hauteur, [("porte", 0.5)], coter_socle=True,
+                    surelevation=surelevation, escalier="droite",
                 ),
             ),
             Vue(
-                "Élévation long pan (arrière)", longueur, hauteur_vue,
+                "Élévation long pan (arrière)", longueur + jeu + course, hauteur_vue,
                 _elevation_poste(
-                    longueur, hauteur, [("grille", 0.25), ("grille", 0.75)]
+                    longueur, hauteur, [("grille", 0.25), ("grille", 0.75)],
+                    surelevation=surelevation, escalier="gauche",
                 ),
             ),
             Vue(
-                "Élévation pignon", largeur, hauteur_vue,
-                _elevation_poste(largeur, hauteur, [("grille", 0.5)]),
+                "Élévation pignon", largeur + jeu, hauteur_vue,
+                _elevation_poste(
+                    largeur, hauteur, [("grille", 0.5)], surelevation=surelevation
+                ),
             ),
             Vue(
-                "Élévation pignon opposé", largeur, hauteur_vue,
-                _elevation_poste(largeur, hauteur, []),
+                "Élévation pignon opposé", largeur + jeu, hauteur_vue,
+                _elevation_poste(largeur, hauteur, [], surelevation=surelevation),
             ),
-            Vue("Coupe transversale", largeur + 3.4, max(hauteur_vue, 2.1), coupe),
+            Vue(
+                "Coupe transversale", largeur + 3.4 + jeu,
+                max(hauteur_vue, 2.1), coupe,
+            ),
         ],
         caracteristiques=[
             f"Poste préfabriqué, teinte {REFERENCE_RAL}.",
             f"Dimensions hors tout : {cote.dimensions}.",
             f"Socle de {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
             f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m.",
+            *_caracteristiques_surelevation(surelevation),
         ],
     )
+
+
+def _caracteristiques_surelevation(surelevation: Surelevation | None) -> list:
+    """Ce que la planche écrit de la surélévation, en clair.
+
+    La convention de l'escalier en fait partie : le générateur le place d'un
+    côté qu'aucune donnée du dossier ne désigne (décision D3), et le bureau
+    d'études doit pouvoir lire sur la planche que c'est une convention et non un
+    relevé. Non écrite, elle serait un repli silencieux de plus.
+    """
+    if surelevation is None:
+        return []
+    lignes = [
+        f"Plancher surélevé de {nombre_fr(surelevation.plancher_m)} m au-dessus "
+        "du terrain naturel (PPRI).",
+    ]
+    if surelevation.phec_m is not None:
+        lignes.append(
+            f"PHEC à {nombre_fr(surelevation.phec_m)} m au-dessus du terrain "
+            "naturel. PHEC : plus hautes eaux connues."
+        )
+    lignes.append(
+        f"Accès par volée de {surelevation.marches} marches et plateforme à "
+        f"garde-corps ; escalier figuré au {COTE_ESCALIER} par convention."
+    )
+    return lignes
 
 
 def _bloc_surface(cote, libelle: str, categorie: str) -> BlocOuvrage:
@@ -1394,17 +1702,26 @@ def _rectangle_arrondi(dessin: Dessin, x, y, largeur, hauteur, rayon, style) -> 
     _contour_plein(dessin, points, style)
 
 
-def _bloc_conteneur(cote, libelle: str, categorie: str) -> BlocOuvrage:
+def _bloc_conteneur(cote, libelle: str, categorie: str,
+                    surelevation: Surelevation | None = None) -> BlocOuvrage:
     """Un conteneur maritime : tôle nervurée, cadre, portes, plots.
 
     C'est la présentation du dossier de référence pour le local de stockage et
     le conteneur batterie. La version précédente les dessinait en rectangles
     pleins : à cette échelle un conteneur et un bac de rétention en sortaient
     identiques, alors que rien ne se ressemble moins sur le terrain.
+
+    `surelevation` renseignée, le conteneur est posé sur une plateforme au-dessus
+    des plus hautes eaux (lot 9) — c'est aussi un local technique, et la
+    décision D2 ne les sépare pas des postes.
     """
     longueur = cote.longueur_m
     largeur = cote.largeur_m
     hauteur = cote.hauteur_m
+    assise = surelevation.plancher_m if surelevation is not None else 0.0
+    jeu = 2 * DEBORD_PLATEFORME_M if surelevation is not None else 0.0
+    course = surelevation.course_m if surelevation is not None else 0.0
+    retrait = DEBORD_PLATEFORME_M if surelevation is not None else 0.0
     style = _style_ouvrage(categorie)
     nervure = Style(trait="#2f3529", epaisseur_mm=0.08, remplissage="none")
     cadre = Style(trait="#2f3529", epaisseur_mm=0.22, remplissage=COULEUR_TOITURE)
@@ -1432,56 +1749,92 @@ def _bloc_conteneur(cote, libelle: str, categorie: str) -> BlocOuvrage:
                 dessin.rectangle(cx, cy, 0.22, 0.22, cadre)
         _coter_rectangle(dessin, longueur, largeur)
 
+    def _assiette(dessin: Dessin, portee: float, escalier: str | None) -> None:
+        """Ce qui porte le conteneur : ses plots, ou sa plateforme.
+
+        Les deux ne se cumulent pas. Des plots de 30 cm posés sur la plateforme
+        tomberaient dans l'épaisseur de sa dalle, et leur raison d'être — tenir
+        le conteneur hors du sol — est déjà remplie par la plateforme.
+        """
+        if surelevation is None:
+            _plots(dessin, portee)
+        else:
+            _plateforme(dessin, portee, surelevation, escalier=escalier)
+
     def long_pan(dessin: Dessin) -> None:
-        sol_hachure(dessin, [(-0.5, 0.0), (longueur + 0.5, 0.0)], epaisseur_mm=1.6)
-        _plots(dessin, longueur)
-        dessin.rectangle(0.0, 0.0, longueur, hauteur, style)
-        _nervures(dessin, longueur, LONGERON_M, hauteur - LONGERON_M)
+        bord = max(0.5, retrait + 0.3)
+        sol_hachure(
+            dessin, [(-bord, 0.0), (longueur + bord, 0.0)], epaisseur_mm=1.6
+        )
+        _assiette(dessin, longueur, "droite")
+        dessin.rectangle(0.0, assise, longueur, hauteur, style)
+        _nervures(dessin, longueur, assise + LONGERON_M,
+                  assise + hauteur - LONGERON_M)
         # Longerons haut et bas : le cadre du conteneur, lisse.
-        dessin.rectangle(0.0, 0.0, longueur, LONGERON_M, cadre)
-        dessin.rectangle(0.0, hauteur - LONGERON_M, longueur, LONGERON_M, cadre)
-        _coter_rectangle(dessin, longueur, hauteur)
+        dessin.rectangle(0.0, assise, longueur, LONGERON_M, cadre)
+        dessin.rectangle(
+            0.0, assise + hauteur - LONGERON_M, longueur, LONGERON_M, cadre
+        )
+        _coter_rectangle(dessin, longueur, hauteur, assise, retrait)
         dessin.texte(
-            longueur, hauteur, REFERENCE_RAL,
+            longueur, assise + hauteur, REFERENCE_RAL,
             taille=5.5 * PT, ancre="end", decalage_mm=(0.0, -2.0),
         )
 
     def pignon(dessin: Dessin) -> None:
-        sol_hachure(dessin, [(-0.5, 0.0), (largeur + 0.5, 0.0)], epaisseur_mm=1.6)
-        _plots(dessin, largeur)
-        dessin.rectangle(0.0, 0.0, largeur, hauteur, style)
-        dessin.rectangle(0.0, 0.0, largeur, LONGERON_M, cadre)
-        dessin.rectangle(0.0, hauteur - LONGERON_M, largeur, LONGERON_M, cadre)
+        bord = max(0.5, retrait + 0.3)
+        sol_hachure(
+            dessin, [(-bord, 0.0), (largeur + bord, 0.0)], epaisseur_mm=1.6
+        )
+        _assiette(dessin, largeur, None)
+        dessin.rectangle(0.0, assise, largeur, hauteur, style)
+        dessin.rectangle(0.0, assise, largeur, LONGERON_M, cadre)
+        dessin.rectangle(
+            0.0, assise + hauteur - LONGERON_M, largeur, LONGERON_M, cadre
+        )
         # Les deux vantaux et leurs barres de condamnation : c'est ce qui
         # désigne le pignon d'accès, et ce qui manquait le plus.
         battant = Style(trait="#2f3529", epaisseur_mm=0.18, remplissage="none")
         for vantail in range(2):
             x0 = 0.06 + vantail * (largeur - 0.12) / 2.0
             large = (largeur - 0.12) / 2.0
-            dessin.rectangle(x0, LONGERON_M, large, hauteur - 2 * LONGERON_M, battant)
+            dessin.rectangle(
+                x0, assise + LONGERON_M, large, hauteur - 2 * LONGERON_M, battant
+            )
             for index in (1, 2):
                 x = x0 + large * index / 3.0
-                dessin.ligne((x, LONGERON_M), (x, hauteur - LONGERON_M), nervure)
+                dessin.ligne(
+                    (x, assise + LONGERON_M),
+                    (x, assise + hauteur - LONGERON_M), nervure,
+                )
         # Poignées, au milieu de la hauteur.
         for x in (largeur * 0.44, largeur * 0.56):
-            dessin.ligne((x, hauteur * 0.45), (x, hauteur * 0.58), battant)
-        _coter_rectangle(dessin, largeur, hauteur)
+            dessin.ligne(
+                (x, assise + hauteur * 0.45), (x, assise + hauteur * 0.58), battant
+            )
+        _coter_rectangle(dessin, largeur, hauteur, assise, retrait)
 
+    hauteur_vue = assise + hauteur + HAUTEUR_SOCLE_M
     return BlocOuvrage(
         titre=f"{libelle} — {cote.dimensions}",
         vues=[
             Vue("Plan de toiture", longueur, largeur, plan),
-            Vue("Élévation long pan", longueur, hauteur + HAUTEUR_SOCLE_M, long_pan),
-            Vue("Élévation pignon (portes)", largeur, hauteur + HAUTEUR_SOCLE_M,
-                pignon),
+            Vue("Élévation long pan", longueur + jeu + course, hauteur_vue, long_pan),
+            Vue("Élévation pignon (portes)", largeur + jeu, hauteur_vue, pignon),
         ],
         caracteristiques=[
             f"Type : {cote.ouvrage}",
             f"Conteneur maritime, teinte {REFERENCE_RAL}.",
             f"Hors tout : {nombre_fr(longueur)} x {nombre_fr(largeur)} x "
             f"{nombre_fr(hauteur)} m.",
-            f"Posé sur plots de {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
-            f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m.",
+            *(
+                [
+                    f"Posé sur plots de {nombre_fr(HAUTEUR_SOCLE_M, 1)} à "
+                    f"{nombre_fr(HAUTEUR_SOCLE_MAX_M, 1)} m."
+                ]
+                if surelevation is None
+                else _caracteristiques_surelevation(surelevation)
+            ),
         ],
     )
 
@@ -1698,46 +2051,52 @@ def _bloc_portail(largeur_m: float) -> BlocOuvrage:
 # ---------------------------------------------------------------------------
 
 
-def _coter_rectangle(dessin: Dessin, largeur_m: float, hauteur_m: float) -> None:
-    """Les deux cotes d'une vue rectangulaire, hors du dessin."""
+def _coter_rectangle(dessin: Dessin, largeur_m: float, hauteur_m: float,
+                     assise_m: float = 0.0, retrait_m: float = 0.0) -> None:
+    """Les deux cotes d'une vue rectangulaire, hors du dessin.
+
+    `assise_m` relève la cote de hauteur avec l'ouvrage ; `retrait_m` écarte les
+    deux lignes de ce que la plateforme déborde, sans quoi la cote verticale
+    tomberait dedans.
+    """
     # La cote horizontale passe sous la bande de sol hachurée des élévations,
     # dans laquelle elle venait sinon s'écrire.
     cote_horizontale(
         dessin, 0.0, largeur_m, -dessin.metres(6.5), f"{nombre_fr(largeur_m)} m"
     )
     cote_verticale(
-        dessin, 0.0, hauteur_m, -dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m"
+        dessin, assise_m, assise_m + hauteur_m,
+        -retrait_m - dessin.metres(3.0), f"{nombre_fr(hauteur_m)} m",
     )
 
 
-def _porte(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
+def _porte(dessin: Dessin, x_centre: float, hauteur_m: float,
+           assise_m: float = 0.0) -> None:
     """Double porte d'un poste, en élévation, posée sur le socle."""
     largeur_porte = min(1.9, hauteur_m * 0.75)
     hauteur_porte = min(2.1, hauteur_m * 0.82)
     gauche = x_centre - largeur_porte / 2.0
-    dessin.rectangle(
-        gauche, HAUTEUR_SOCLE_M, largeur_porte, hauteur_porte, TRAIT_MOYEN
-    )
+    pied = assise_m + HAUTEUR_SOCLE_M
+    dessin.rectangle(gauche, pied, largeur_porte, hauteur_porte, TRAIT_MOYEN)
     dessin.ligne(
-        (x_centre, HAUTEUR_SOCLE_M),
-        (x_centre, HAUTEUR_SOCLE_M + hauteur_porte),
-        TRAIT_FIN,
+        (x_centre, pied), (x_centre, pied + hauteur_porte), TRAIT_FIN,
     )
     # Les deux poignées, au tiers de la hauteur.
     for cote in (-1, 1):
         abscisse = x_centre + cote * 0.09
         dessin.ligne(
-            (abscisse, HAUTEUR_SOCLE_M + hauteur_porte * 0.45),
-            (abscisse, HAUTEUR_SOCLE_M + hauteur_porte * 0.55),
+            (abscisse, pied + hauteur_porte * 0.45),
+            (abscisse, pied + hauteur_porte * 0.55),
             TRAIT_MOYEN,
         )
 
 
-def _grille(dessin: Dessin, x_centre: float, hauteur_m: float) -> None:
+def _grille(dessin: Dessin, x_centre: float, hauteur_m: float,
+            assise_m: float = 0.0) -> None:
     """Grille de ventilation, en élévation, posée sur le socle."""
     largeur = 0.7
     hauteur = 0.55
-    bas = HAUTEUR_SOCLE_M + hauteur_m * 0.45
+    bas = assise_m + HAUTEUR_SOCLE_M + hauteur_m * 0.45
     dessin.rectangle(x_centre - largeur / 2.0, bas, largeur, hauteur, TRAIT_FIN)
     hachurer(
         dessin,

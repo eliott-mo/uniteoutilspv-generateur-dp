@@ -110,3 +110,196 @@ def test_les_cotes_font_l_aller_retour_par_projet_json(tmp_path):
     nues = json.loads(chemin_nu.read_text(encoding="utf-8"))
     assert "surelevation_locaux_m" not in nues
     assert "phec_locaux_m" not in nues
+
+
+# ---------------------------------------------------------------------------
+# Ce que la planche montre, mesuré dans le PDF produit
+# ---------------------------------------------------------------------------
+
+import geopandas as gpd
+from pypdf import PdfReader
+from shapely.geometry import box
+
+from dp_socle.contrat import charger_contrat
+from dp_socle.planches import dp4_ouvrages
+
+from . import contrat_synthetique as synthese
+from .mesure_pdf import longueur, segments_obliques
+
+
+@pytest.fixture
+def site(tmp_path, monkeypatch):
+    """Contrat synthétique et projet, prêts à produire DP 4-1.
+
+    Le parcellaire du plan de repérage est neutralisé : sans cela le vert du
+    test dépend de la Géoplateforme, et `_parcelles_du_cadre` rattrape une
+    panne en produisant la planche sans fond — le défaut serait invisible.
+    """
+    monkeypatch.setattr(dp4_ouvrages, "telecharger_parcelles", lambda *a, **k: [])
+
+    def _preparer(**cotes):
+        dossier = tmp_path / "sortie" / "Essai"
+        synthese.ecrire(dossier)
+        x0, y0 = synthese.ORIGINE_L93
+        emprise = tmp_path / "emprise.geojson"
+        gpd.GeoDataFrame(
+            geometry=[
+                box(
+                    x0 - 60, y0 - 60,
+                    x0 + synthese.LARGEUR_SITE_M + 60,
+                    y0 + synthese.HAUTEUR_SITE_M + 60,
+                )
+            ],
+            crs="EPSG:2154",
+        ).to_file(emprise, driver="GeoJSON")
+        projet = Projet(
+            nom="Essai", commune="Saint-Cyr-en-Val", code_postal="45590",
+            date="2026-10-04", emprise=str(emprise), libelle="Essai lot 9",
+            **cotes,
+        )
+        return projet, charger_contrat(dossier)
+
+    return _preparer
+
+
+def _texte(chemin) -> str:
+    return PdfReader(str(chemin)).pages[0].extract_text()
+
+
+def test_la_planche_porte_la_surelevation_et_la_phec(site, tmp_path):
+    """Les deux hauteurs se lisent sur la planche produite, en relatif.
+
+    Et aucune cote NGF n'y figure : c'est la décision D1, et c'est ce qui
+    dispense la planche de s'accorder avec la topographie relevée.
+    """
+    projet, contrat = site(surelevation_locaux_m=2.25, phec_locaux_m=1.95)
+    sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
+    texte = _texte(sortie.chemin)
+
+    assert "PHEC (1,95 m)" in texte
+    assert "plus hautes eaux connues" in texte
+    assert "2,25 m au-dessus du terrain naturel" in texte
+    assert "13 marches" in texte
+    # La convention de l'escalier est écrite sur la planche, pas seulement dans
+    # le code : le bureau d'études doit savoir qu'il lit une convention.
+    assert dp4_ouvrages.COTE_ESCALIER in texte
+    # Aucune cote NGF : ni la cote PHEC de Saint-Cyr, ni celle du plancher.
+    for absolu in ("97,45", "97,75", "95,50", "NGF"):
+        assert absolu not in texte, absolu
+
+
+def test_la_phec_omise_ne_trace_aucune_ligne_d_eau(site, tmp_path):
+    """Sans elle, la plateforme est dessinée mais la planche se tait."""
+    projet, contrat = site(surelevation_locaux_m=2.25)
+    sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
+    texte = _texte(sortie.chemin)
+
+    assert "2,25 m au-dessus du terrain naturel" in texte
+    assert "PHEC" not in texte
+
+
+def test_l_escalier_est_bien_trace(site, tmp_path):
+    """Mesuré dans le PDF : la main courante est une longue oblique.
+
+    C'est la seule oblique de cette longueur sur la planche — les autres sont
+    les pattes des lignes de cote, qui font moins de 2 mm. Sans surélévation il
+    n'y en a aucune, et c'est ce qui prouve que la volée est dessinée plutôt
+    qu'annoncée.
+    """
+    projet, contrat = site(surelevation_locaux_m=2.25)
+    avec = dp4_ouvrages.generer(projet, contrat, tmp_path / "avec", "DP 4-1")
+    nu, contrat_nu = site()
+    sans = dp4_ouvrages.generer(nu, contrat_nu, tmp_path / "sans", "DP 4-1")
+
+    def plus_longue(chemin) -> float:
+        obliques = segments_obliques(chemin)
+        return max((longueur(s) for s in obliques), default=0.0)
+
+    # Deux élévations long pan portent la volée, donc deux mains courantes.
+    longues = [
+        s for s in segments_obliques(avec.chemin) if longueur(s) > 50.0
+    ]
+    assert len(longues) == 2, f"{len(longues)} oblique(s) longue(s)"
+    assert plus_longue(sans.chemin) < 50.0
+
+
+def test_un_projet_sans_surelevation_le_dit_au_rapport(site, tmp_path):
+    """Un constat, pas une alerte : le rapport dit ce que l'outil a fait.
+
+    C'est le prix de la saisie discrète (décision D4) : le volet replié se
+    rate — celui des intitulés de légende l'a prouvé le 26/09/2026 — et le
+    rapport est ce qui rattrape l'oubli avant le dépôt.
+    """
+    projet, contrat = site()
+    sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
+    constats = sortie.details["avertissements"]
+    assert any("posés au sol" in m and "PPRI" in m for m in constats), constats
+
+    releve, contrat_releve = site(surelevation_locaux_m=2.25)
+    avec = dp4_ouvrages.generer(releve, contrat_releve, tmp_path / "avec", "DP 4-1")
+    assert not any("posés au sol" in m for m in avec.details["avertissements"])
+
+
+def test_la_planche_tient_encore_a_une_echelle_autorisee(site, tmp_path):
+    """La question laissée ouverte par le brief, et sa réponse mesurée.
+
+    2,25 m de plus par vue et 3,64 m de volée élargissent les élévations long
+    pan de moitié. Il fallait vérifier que la planche ne se retrouve pas sous
+    les échelles permises : elle y tient, et le chiffre est noté ici pour que
+    sa dérive se voie.
+    """
+    nu, contrat_nu = site()
+    sans = dp4_ouvrages.generer(nu, contrat_nu, tmp_path / "sans", "DP 4-1")
+    projet, contrat = site(surelevation_locaux_m=2.25, phec_locaux_m=1.95)
+    avec = dp4_ouvrages.generer(projet, contrat, tmp_path / "avec", "DP 4-1")
+
+    for sortie in (sans, avec):
+        assert sortie.details["echelle_ouvrages"] in dp4_ouvrages.ECHELLES_OUVRAGES
+    # La surélévation ne peut qu'agrandir les vues, donc jamais remonter
+    # l'échelle : le dénominateur ne descend pas.
+    assert avec.details["echelle_ouvrages"] >= sans.details["echelle_ouvrages"]
+
+
+def test_une_surelevation_absurde_est_refusee_par_la_mise_en_page(site, tmp_path):
+    """La seconde question du brief, et sa réponse : aucun plafond à inventer.
+
+    Une faute de frappe — 22,5 au lieu de 2,25 — ne s'absorbe pas en écrasant
+    l'échelle : `_echelles_des_blocs` refuse, parce que la vue ne tient plus
+    dans le panneau même au 1:200. Le contrôle existait donc déjà, et lui a une
+    raison mesurable là où un seuil de vraisemblance serait arbitraire.
+
+    Ce test tient le comportement : si quelqu'un desserre un jour la mise en
+    page, il faudra décider sciemment quoi faire de 22,5 m.
+    """
+    from dp_socle.erreurs import ErreurComposition
+
+    projet, contrat = site(surelevation_locaux_m=22.5)
+    with pytest.raises(ErreurComposition, match="ne tient pas"):
+        dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
+
+
+def test_l_echelle_de_saint_cyr_descend_d_un_cran(site, tmp_path):
+    """Ce que la surélévation coûte à la planche, mesuré le 04/10/2026.
+
+    Le poste du contrat d'essai sort au 1:100 posé au sol, au 1:100 encore avec
+    la surélévation de Périgny (0,55 m), et au **1:200** avec celle de
+    Saint-Cyr (2,25 m) : cinq vues qui montent de 2,25 m font 112 mm de plus
+    sur la colonne, et le panneau n'en a pas la place.
+
+    Le 1:200 est une échelle permise et le cartouche l'annonce — la planche
+    reste juste. Le chiffre est pris ici pour que sa dérive se voie, et parce
+    que c'est lui qu'il faudra regarder si la lisibilité de la volée est un
+    jour contestée.
+    """
+    cas = {
+        "sol": {},
+        "perigny": {"surelevation_locaux_m": 0.55, "phec_locaux_m": 0.45},
+        "saint_cyr": {"surelevation_locaux_m": 2.25, "phec_locaux_m": 1.95},
+    }
+    mesures = {}
+    for nom, cotes in cas.items():
+        projet, contrat = site(**cotes)
+        sortie = dp4_ouvrages.generer(projet, contrat, tmp_path / nom, "DP 4-1")
+        mesures[nom] = sortie.details["echelle_ouvrages"]
+
+    assert mesures == {"sol": 100, "perigny": 100, "saint_cyr": 200}

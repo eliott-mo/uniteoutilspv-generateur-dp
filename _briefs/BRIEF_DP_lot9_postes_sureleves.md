@@ -159,14 +159,22 @@ Mesuré le 02/10/2026, sur la notice DP 11 des projets :
 - Périgny-la-Rose, pour comparaison : surélévation 0,55 m, PHEC 0,45 m
   (revanche 10 cm), poste 3,0 m, hauteur totale annoncée « max 5,0 m ».
 
-Reste à mesurer à la construction :
+Mesuré le 04/10/2026, à la construction, sur le contrat d'essai du dépôt
+(`tests/test_surelevation_lot9.py` tient les deux résultats) :
 
-- la planche DP 4-1 de Saint-Cyr tient-elle encore à son échelle avec 2,25 m de
-  plus par vue, et la volée d'escalier est-elle lisible à l'épreuve A3 ?
-- une faute de frappe du genre 22,5 au lieu de 2,25 : `_echelles_des_blocs`
-  refuse-t-il, ou absorbe-t-il la valeur en écrasant l'échelle ? S'il absorbe,
-  il faudra un plafond — et il sera alors fondé sur cette mesure, pas inventé
-  d'avance.
+- **l'échelle de DP 4-1 descend d'un cran sur Saint-Cyr.** Posé au sol, le
+  poste sort au 1:100 ; avec la surélévation de Périgny (0,55 m) il y reste ;
+  avec celle de Saint-Cyr (2,25 m) la planche passe au **1:200**. Cinq vues qui
+  montent de 2,25 m font 112 mm de plus sur la colonne, et le panneau n'en a
+  pas la place. Le 1:200 est une échelle permise et le cartouche l'annonce,
+  donc la planche reste juste — mais elle n'est plus au 1:100 de HOCH, et la
+  volée y a des marches d'environ 1,4 mm. À regarder sur l'épreuve A3 avant
+  dépôt, et c'est le seul point du lot qui reste à juger à l'œil.
+- **une valeur absurde est déjà refusée.** 22,5 m au lieu de 2,25 ne s'absorbe
+  pas en écrasant l'échelle : `_echelles_des_blocs` lève `ErreurComposition`,
+  la vue ne tenant plus dans le panneau même au 1:200. Aucun plafond de
+  vraisemblance n'est donc à inventer, et c'était la bonne décision de ne pas
+  en poser un d'avance.
 
 ---
 
