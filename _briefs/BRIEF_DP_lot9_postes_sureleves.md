@@ -1,4 +1,4 @@
-# BRIEF CLAUDE CODE — Générateur de dossier DP, lot 9 : postes surélevés en zone inondable
+# BRIEF DP, lot 9 : locaux techniques surélevés en zone inondable
 
 > Lots 1 à 8 livrés. Les planches DP 4 dessinent les ouvrages posés au sol, sur
 > leur socle. Ce lot leur ajoute le cas des **locaux techniques surélevés
@@ -23,6 +23,11 @@ Une planche fausse qui s'affiche correctement est pire qu'une erreur bloquante
 (règle du dépôt) : ici, la planche est fausse et personne ne le voit avant
 l'instruction.
 
+**Le lot a été réduit à l'examen du 04/10/2026**, et ce qu'il reste tient en une
+phrase : *deux cotes relatives saisies, un dessin de plus sur les blocs DP 4.*
+Ce qui en faisait un lot entier — le contrat, le photomontage, la coupe A-A' —
+en est sorti par la décision D5. Voir « Ce que le lot ne touche pas ».
+
 ---
 
 ## La référence
@@ -34,10 +39,16 @@ le modèle à suivre. Elle porte, sur les quatre élévations **et** sur la coup
 - une **plateforme sur pilotis**, le poste posé dessus ;
 - un **garde-corps** sur tout le pourtour de la plateforme ;
 - un **escalier d'accès** latéral, avec son palier ;
-- la **ligne PHEC** en pointillé bleu, légendée « PHEC (0.45 m) » et, en pied de
+- la **ligne PHEC** en pointillé bleu, légendée « PHEC (0,45 m) » et, en pied de
   cadre, « PHEC : Plus Hautes Eaux Connues » ;
 - les cotes : surélévation (0,55 m à Périgny), hauteur du poste (3,0 m), et la
   hauteur totale (« max 5,0 m »).
+
+**Mesure qui a tranché la saisie** : l'étiquette HOCH cote `PHEC (0,45 m)` pour
+une surélévation de 0,55 m. Les deux sont des **hauteurs au-dessus du terrain
+naturel**, pas des cotes NGF, et elles diffèrent de 10 cm — la revanche. À
+Saint-Cyr la revanche est de 30 cm. C'est ce qui interdit de déduire l'une de
+l'autre, et c'est aussi ce qui montre qu'aucun NGF n'est nécessaire.
 
 Sur Saint-Cyr la surélévation est de 2,25 m, soit quatre fois celle de Périgny :
 l'escalier y compte plus de marches, et la vérification à l'épreuve A3 est à
@@ -45,25 +56,38 @@ refaire — une volée qui tient à 0,55 m peut ne plus tenir à 2,25 m.
 
 ---
 
-## Décisions prises avec le chef de projet le 02/10/2026
+## Décisions
 
-**D1 — La hauteur vient du PPRI, donc du chef de projet.** Le PPRI est un
-document d'urbanisme : aucune API ne donne la cote des plus hautes eaux en un
-point. La surélévation est donc **saisie**, et rejoint `projet.json`, format
-pivot du dépôt. Une correction se fait en changeant la valeur et en
-régénérant.
+**D1 — Deux cotes saisies, toutes deux relatives au terrain naturel.** Le PPRI
+est un document d'urbanisme : aucune API ne donne la cote des plus hautes eaux
+en un point. Les valeurs sont donc **saisies**, et rejoignent `projet.json`,
+format pivot du dépôt.
 
-À trancher à la construction : saisit-on la **surélévation** (2,25 m) ou la
-**cote PHEC en NGF** (97,45 m) avec le terrain naturel (95,5 m), dont la
-différence donne la surélévation ? La planche HOCH affiche la cote PHEC ; si on
-ne saisit que la surélévation, l'étiquette « PHEC » ne peut pas porter de cote.
+| Champ | Saint-Cyr | Rôle au dessin |
+|---|---|---|
+| Surélévation du plancher au-dessus du terrain naturel | 2,25 m | pilotis, assise de la plateforme, garde-corps, marches, pied des parois |
+| Niveau des plus hautes eaux au-dessus du terrain naturel | 1,95 m | pointillé bleu et son étiquette |
 
-**D2 — Tous les locaux techniques, pas seulement les postes.** Postes de
-livraison et de transformation, conteneurs BESS, local technique. À trancher :
-les citernes (`bache_incendie`, `citerne_refroidissement`) sont des cuves
-ancrées, pas des locaux — le chef de projet a dit « tous les locaux
-techniques », ce qui les exclut en bonne lecture, mais la question mérite d'être
-reposée sur un projet réel.
+La seconde est **facultative** : renseignée, elle trace la ligne PHEC comme
+HOCH ; vide, il n'y a pas de pointillé et le reste est dessiné quand même. Le
+chef de projet calcule ces deux hauteurs depuis les éléments de son dossier —
+à Saint-Cyr, 97,75 − 95,50 et 97,45 − 95,50.
+
+**Aucune cote NGF, nulle part.** Ni saisie, ni dessinée, ni écrite aux
+caractéristiques. C'est une décision du chef de projet du 04/10/2026, et sa
+raison est la bonne : *« l'idée est surtout d'avoir une surélévation relative
+sur le dessin pour l'autorisation d'urbanisme, pas d'avoir des NGF »*. Une cote
+absolue sur la planche devrait s'accorder avec la topographie relevée — le
+profil RGE ALTI de DP 3, le relevé du géomètre — et un désaccord de 50 cm entre
+deux pièces du même dossier serait exactement la contradiction qu'on cherche à
+éviter. En relatif il n'y a rien à accorder : voir D5.
+
+**D2 — Tous les locaux techniques, pas seulement les postes.** `POSTES`
+(`pdl_ptr`, `ptr`, `pdl`) et `CONTENEURS` (`bess`, `local_technique`). Les
+citernes (`CITERNES`) sont des cuves ancrées, pas des locaux : le chef de projet
+a dit « tous les locaux techniques », ce qui les exclut en bonne lecture. La
+question mérite d'être reposée sur un projet réel qui en porte une en zone
+inondable.
 
 **D3 — Le dessin suit HOCH, escalier compris.** L'objection soulevée à l'examen
 — le générateur ne sait pas de quel côté va l'escalier, et en placer un au
@@ -73,49 +97,95 @@ l'autorisation ». L'escalier est donc dessiné d'un côté choisi par conventio
 et **la convention doit être écrite dans le code et dans le dossier** pour que
 le bureau d'études sache ce qu'il regarde.
 
+**D4 — Saisie discrète, constat au rapport.** Un volet replié dans la section 2,
+sur les **deux** parcours d'import, titré en clair (« Locaux techniques
+surélevés — PPRI »), champs vides par défaut. Un chef de projet non concerné lit
+le titre et passe.
+
+Le dépôt a déjà payé le pari du volet replié : celui des intitulés de légende
+l'était, présenté comme un recours, et le commentaire de `_retoucher_la_legende`
+dit ce qui s'est passé le 26/09/2026 — « le chef de projet passait dessus sans
+le voir ». Il a fallu l'ouvrir d'office. La discrétion est donc tenable **à
+l'entrée seulement**, et elle se paie par une ligne de constat au rapport de
+génération quand rien n'est saisi : « Locaux techniques posés au sol : aucune
+surélévation saisie. » Sans icône et sans alerte — le régime du rapport, qui
+dit ce que l'outil a fait. Ajouter une alerte à 95 % des dossiers irait contre
+l'allègement du 02/10/2026, qui a ramené les messages visibles de 23 à 14.
+
+**D5 — Rien ne sort des planches DP 4.** La surélévation n'entre **pas** au
+contrat, ne touche **pas** `dp3_coupes.py`, et n'est **jamais** recoupée avec
+l'altimétrie ni avec le tableau bilan. Ce n'est pas un choix de commodité, c'est
+ce qui rend D1 sûr : les blocs DP 4 tracent leur propre ligne de sol à `y = 0`
+(`sol_hachure` à zéro, socle à partir de zéro), donc **la planche ne prétend à
+aucune altitude** et il n'y a rien à contredire.
+
+Conséquence assumée : le dépôt voisin `photomontage` continuera de monter ses
+vues sur des locaux posés au sol. À rouvrir si un photomontage de projet en PPRI
+se révèle faux à l'œil — mais c'est une décision qui se prend avec lui, pas ici.
+
+**D6 — Un seul contrôle, interne aux deux nombres.** Si les deux sont
+renseignées, la PHEC doit être sous le plancher ; sinon le dessin se contredit
+lui-même. Rien d'autre : pas de plafond de vraisemblance inventé, pas de
+contrôle de topographie.
+
 ---
 
 ## Ce que le lot touche
 
-- `dp_socle/planches/dp4_ouvrages.py` : `_bloc_poste` (plan de toiture, quatre
-  élévations, coupe) et le bloc des conteneurs. Les hauteurs de vue, les cotes
-  et le calcul d'échelle des blocs (`_echelles_des_blocs`) changent avec la
+- `dp_socle/planches/dp4_ouvrages.py` : `_bloc_volume` (plan de toiture, quatre
+  élévations, coupe) et `_bloc_conteneur`. Les hauteurs de vue, les cotes et le
+  calcul d'échelle des blocs (`_echelles_des_blocs`) changent avec la
   surélévation — une vue plus haute de 2,25 m peut faire tomber la planche sous
   l'échelle qui la logeait.
 - `dp_socle/projet.py` et `app.py` : la saisie et le report dans `projet.json`.
-- `dp_socle/contrat.py` : à vérifier. La surélévation décrit l'ouvrage, pas sa
-  géométrie au sol ; elle n'a pas à entrer dans le contrat si le lot 4 la lit de
-  `projet.json`. Mais le dépôt voisin `photomontage` lit ce contrat, et un poste
-  surélevé de 2,25 m **change ce qu'on voit** sur un photomontage. À trancher
-  avec lui.
-- `dp_socle/planches/dp3_coupes.py` : la coupe A-A' traverse le site et peut
-  passer sur un poste. À vérifier.
+- Le rapport de génération : la ligne de constat de D4.
+
+## Ce que le lot ne touche pas
+
+Tranché par D5, et écrit ici pour que la question ne se repose pas :
+`dp_socle/contrat.py`, `dp_socle/planches/dp3_coupes.py`, `dp_socle/coupe.py`,
+et le dépôt voisin `photomontage`.
 
 ---
 
 ## Ce qui est mesuré, et reste à mesurer
 
-Mesuré le 02/10/2026 :
+Mesuré le 02/10/2026, sur la notice DP 11 des projets :
 
-- Saint-Cyr-en-Val, surélévation **2,25 m**, cote PHEC **97,45 m NGF**, terrain
-  naturel retenu **95,5 m**, plancher du poste **≥ 97,75 m NGF** (PHEC + 0,30),
-  hauteur du local de l'ordre de **2,5 m** — tous relevés dans la notice DP 11
-  du projet.
-- Périgny-la-Rose, pour comparaison : surélévation 0,55 m, poste 3,0 m,
-  hauteur totale annoncée « max 5,0 m ».
+- Saint-Cyr-en-Val : surélévation **2,25 m**, PHEC **1,95 m** au-dessus du
+  terrain naturel (revanche 30 cm), hauteur du local de l'ordre de **2,5 m**.
+  Les cotes NGF d'origine, qui ne servent plus à la saisie mais datent la
+  mesure : PHEC 97,45 m, plancher ≥ 97,75 m, terrain naturel retenu 95,5 m.
+- Périgny-la-Rose, pour comparaison : surélévation 0,55 m, PHEC 0,45 m
+  (revanche 10 cm), poste 3,0 m, hauteur totale annoncée « max 5,0 m ».
 
-Reste à mesurer à la construction : la planche DP 4-1 de Saint-Cyr tient-elle
-encore à son échelle avec 2,25 m de plus par vue, et la volée d'escalier est-elle
-lisible à l'épreuve A3 ?
+Reste à mesurer à la construction :
+
+- la planche DP 4-1 de Saint-Cyr tient-elle encore à son échelle avec 2,25 m de
+  plus par vue, et la volée d'escalier est-elle lisible à l'épreuve A3 ?
+- une faute de frappe du genre 22,5 au lieu de 2,25 : `_echelles_des_blocs`
+  refuse-t-il, ou absorbe-t-il la valeur en écrasant l'échelle ? S'il absorbe,
+  il faudra un plafond — et il sera alors fondé sur cette mesure, pas inventé
+  d'avance.
 
 ---
 
 ## Pièges connus
 
-- **Le PPTX n'est pas modifiable à la main.** Ses diapositives sont vides : chaque
-  planche est une image posée sur sa mise en page (mesuré le 02/10/2026 sur
-  `PV-St-Cyr-en-Val-IND07_DP_a_finaliser`). Retoucher le PPT serait perdu à la
-  prochaine génération. La correction vient du générateur, puis on régénère.
+- **Le PPTX n'est pas modifiable à la main.** Ses diapositives sont vides :
+  chaque planche est une image posée sur sa mise en page (mesuré le 02/10/2026
+  sur `PV-St-Cyr-en-Val-IND07_DP_a_finaliser`). Retoucher le PPT serait perdu à
+  la prochaine génération. La correction vient du générateur, puis on régénère.
+- **Pour Saint-Cyr, qui est à l'indice 07**, le chef de projet n'a pas à tout
+  refaire : une planche entre dans le `.pptx` en une seule image pleine page
+  (décision D0 du lot 8), et la surélévation n'ajoute ni ne retire aucune pièce,
+  donc la pagination ne bouge pas. Il génère à côté et remplace la seule diapo
+  DP 4-1 dans son dossier fini — son travail photographique est conservé.
 - **Le DXF ne porte pas la surélévation** et ne la portera pas : le bureau
   d'études livre une emprise au sol. Ce n'est pas un défaut d'import à corriger,
   c'est une donnée qui n'existe que dans le PPRI et la notice.
+- **Le tableau des gabarits n'existe que sur le parcours « plan projet PDF ».**
+  Le volet « Les ouvrages du plan, aux cotes de leur gabarit » est propre au lot
+  2ter ; le parcours DXF du bureau d'études — celui de Saint-Cyr — n'affiche que
+  « Paramètres extraits du tableau bilan ». D'où le volet à part de D4, sur les
+  deux parcours, plutôt qu'une colonne ajoutée à ce tableau.
