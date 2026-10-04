@@ -984,6 +984,97 @@ def _trancher_les_voiries(import_be) -> None:
 
 
 
+def _surelevation_saisie() -> tuple:
+    """Les deux hauteurs lues à l'écran, `(plancher, phec)`, chacune ou `None`.
+
+    Un zéro saisi vaut comme non renseigné : le champ a un minimum de zéro pour
+    que le pas de 5 cm reste commode, et une surélévation nulle n'existe pas en
+    PPRI.
+
+    Écrite **avant** celle qui l'appelle : `test_ordre_app` refuse qu'une
+    fonction lise un nom de module écrit plus bas qu'elle, même un autre nom de
+    fonction. Python ne s'en plaindrait pas, mais la règle est ce qui a éteint
+    la `NameError` du 09/09/2026, et elle vaut mieux qu'une exception du côté du
+    navigateur.
+    """
+    depot = _nom_depot(commune)
+    valeurs = []
+    for cle in (f"surelevation_{depot}", f"phec_{depot}"):
+        valeur = st.session_state.get(cle)
+        valeurs.append(float(valeur) if valeur else None)
+    return tuple(valeurs)
+
+
+def _saisir_la_surelevation() -> None:
+    """Les deux hauteurs du PPRI, quand les locaux techniques sont surélevés.
+
+    **Replié, et c'est délibéré.** La quasi-totalité des projets ne sont pas en
+    zone inondable : un bandeau sur chaque dossier entraînerait à ne plus lire
+    les bandeaux, ce que l'allègement des alertes du 02/10/2026 cherchait
+    justement à défaire. Le titre du volet suffit à qui est concerné.
+
+    Ce que la discrétion coûte est payé ailleurs : la planche DP 4 porte au
+    rapport, quand rien n'est saisi, le constat qu'elle a dessiné des locaux
+    posés au sol. Le volet replié se rate — celui des intitulés de légende l'a
+    montré le 26/09/2026 — et c'est le rapport qui rattrape l'oubli.
+
+    Les clés portent le nom du dépôt, comme celles de la légende : sans lui, une
+    surélévation saisie sur un projet suivait le chef de projet quand il en
+    ouvrait un autre.
+    """
+    depot = _nom_depot(commune)
+    with st.expander("Locaux techniques surélevés — PPRI (zone inondable)"):
+        st.caption(
+            "À ne remplir que si un plan de prévention du risque inondation "
+            "impose de surélever les locaux techniques. Les deux hauteurs se "
+            "comptent **au-dessus du terrain naturel**, en mètres — pas en cote "
+            "NGF : la planche n'en porte aucune, pour n'avoir pas à s'accorder "
+            "avec la topographie relevée."
+        )
+        st.number_input(
+            "Surélévation du plancher au-dessus du terrain naturel (m)",
+            min_value=0.0, max_value=25.0, step=0.05, value=None,
+            format="%.2f", key=f"surelevation_{depot}",
+            help=(
+                "La hauteur du plancher du local au-dessus du terrain naturel. "
+                "Elle se calcule depuis les éléments du dossier : à "
+                "Saint-Cyr-en-Val, plancher à 97,75 m NGF et terrain naturel à "
+                "95,50 donnent 2,25 m."
+            ),
+        )
+        st.number_input(
+            "Niveau des plus hautes eaux au-dessus du terrain naturel (m)",
+            min_value=0.0, max_value=25.0, step=0.05, value=None,
+            format="%.2f", key=f"phec_{depot}",
+            help=(
+                "Facultatif. Renseigné, il fait tracer la ligne PHEC en "
+                "pointillé, comme sur les planches de référence. Laissé vide, "
+                "la plateforme est dessinée sans ligne d'eau — l'outil ne la "
+                "place pas au hasard, son écart au plancher étant la revanche "
+                "du PPRI et non une valeur fixe."
+            ),
+        )
+        plancher, phec = _surelevation_saisie()
+        if phec is not None and plancher is None:
+            st.error(
+                "Renseignez aussi la surélévation du plancher : les plus hautes "
+                "eaux seules ne permettent pas de la déduire.",
+                icon="🚫",
+            )
+        elif plancher is not None and phec is not None and phec >= plancher:
+            st.error(
+                f"Les plus hautes eaux ({phec:.2f} m) atteignent le plancher "
+                f"({plancher:.2f} m) : le dessin se contredirait. Vérifiez les "
+                "deux hauteurs dans la notice.",
+                icon="🚫",
+            )
+        elif plancher is not None:
+            st.caption(
+                f"Les locaux techniques seront dessinés sur une plateforme à "
+                f"{plancher:.2f} m, avec garde-corps et escalier d'accès."
+            )
+
+
 def _tableau_controles(controles) -> None:
     """Rend les contrôles croisés, quel que soit leur producteur."""
     st.dataframe(
@@ -2160,6 +2251,12 @@ def _regler_et_trancher_le_plan_pdf(import_pdf) -> None:
             width="stretch",
             hide_index=True,
         )
+    # Pas de saisie de surélévation ici, bien que ce soit le seul tableau de
+    # l'outil qui parle de hauteurs d'ouvrage : la suite de la section 2 est
+    # commune aux deux parcours d'import, et un second appel y rendait deux
+    # fois les mêmes champs — `StreamlitDuplicateElementKey`, relevé le
+    # 04/10/2026 par `test_app_plan_pdf`. Le volet est posé une seule fois,
+    # après le typage des voiries.
 
 
 def _etat_de_l_import(import_courant):
@@ -2777,6 +2874,7 @@ if import_be_courant is not None and commune.strip():
                     st.caption(f"· {message}")
 
         _trancher_les_voiries(import_be_courant)
+        _saisir_la_surelevation()
         # Une fois l'import validé, ces remarques ont été lues : elles se
         # replient pour que la carte, qui vient après, ne soit plus à deux
         # écrans de défilement (retour d'usage du 17/09/2026). Elles restent
@@ -3016,6 +3114,11 @@ if nom:
 #: question arrive aussi tard » (retour d'usage du 17/09/2026).
 voirie = st.session_state.get("voirie_tranchee")
 
+#: Les deux hauteurs du PPRI, saisies en section 2 dans leur volet replié. Lues
+#: ici comme le tri des voiries, et pour la même raison : ce sont des décisions
+#: du chef de projet que les fichiers du bureau d'études ne portent pas.
+surelevation_locaux, phec_locaux = _surelevation_saisie()
+
 
 
 def _construire_projet() -> Projet | None:
@@ -3059,6 +3162,11 @@ def _construire_projet() -> Projet | None:
             if import_be_courant is not None
             else None
         ),
+        # Les hauteurs du PPRI, s'il y en a. `Projet.valider` refuse une PHEC
+        # sans plancher et une PHEC au-dessus de lui : l'écran le dit déjà, mais
+        # un `projet.json` repris à la main ne passe pas par l'écran.
+        surelevation_locaux_m=surelevation_locaux,
+        phec_locaux_m=phec_locaux,
     )
 
 
@@ -3093,6 +3201,10 @@ _entrees_generation = (
         (_legendes_retouchees(import_be_courant.plan) or {}).items()
     )) if import_be_courant is not None else (),
     str(voirie),
+    # Sans elles, le bouton restait grisé après la saisie d'une surélévation :
+    # la génération « déjà faite » l'était sur un dossier qui, lui, a changé.
+    surelevation_locaux,
+    phec_locaux,
     st.session_state.get("etat_ecrit"),
 )
 _generation_faite = _deja_fait("generation_faite", _entrees_generation)

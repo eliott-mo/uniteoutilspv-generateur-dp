@@ -303,3 +303,105 @@ def test_l_echelle_de_saint_cyr_descend_d_un_cran(site, tmp_path):
         mesures[nom] = sortie.details["echelle_ouvrages"]
 
     assert mesures == {"sol": 100, "perigny": 100, "saint_cyr": 200}
+
+
+# ---------------------------------------------------------------------------
+# La saisie, et les deux parcours d'import
+# ---------------------------------------------------------------------------
+
+
+def _appels_dans_app(nom_appel):
+    """Où `app.py` appelle une fonction : (portée, ligne), par lecture de l'arbre.
+
+    Contrôlé à la source plutôt qu'à l'exécution parce que l'oubli redouté est
+    silencieux : un parcours d'import sur les deux garderait son volet, l'autre
+    ne l'aurait jamais, et rien ne le dirait — le chef de projet verrait
+    simplement un champ absent, sans savoir qu'il devrait être là.
+    """
+    import ast
+    from pathlib import Path
+
+    arbre = ast.parse(
+        (Path(__file__).resolve().parent.parent / "app.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    trouves = []
+
+    def descendre(noeud, portee):
+        for enfant in ast.iter_child_nodes(noeud):
+            if isinstance(enfant, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                descendre(enfant, enfant.name)
+                continue
+            if (
+                isinstance(enfant, ast.Call)
+                and isinstance(enfant.func, ast.Name)
+                and enfant.func.id == nom_appel
+            ):
+                trouves.append((portee, enfant.lineno))
+            descendre(enfant, portee)
+
+    descendre(arbre, "<module>")
+    return trouves
+
+
+def test_la_saisie_est_posee_une_seule_fois_pour_les_deux_parcours():
+    """Un seul volet, dans la partie de la section 2 commune aux deux imports.
+
+    Il y en avait deux au premier jet — un par parcours —, le tableau des
+    gabarits étant propre au plan PDF et le typage des voiries au plan du bureau
+    d'études. Mais la suite de la section 2 est **commune** : sur le parcours
+    PDF les deux s'affichaient, et Streamlit levait
+    `StreamlitDuplicateElementKey` sur la clé du premier champ. Relevé le
+    04/10/2026 par `test_app_plan_pdf`, que rien d'autre n'aurait vu — les
+    tests de modules n'exécutent jamais `app.py`.
+
+    Un seul appel, donc, et posé là où le chef de projet tranche déjà le type
+    de ses voiries : c'est la place des décisions que les fichiers du bureau
+    d'études ne portent pas.
+    """
+    appels = _appels_dans_app("_saisir_la_surelevation")
+    assert len(appels) == 1, appels
+    (portee, ligne), = appels
+    assert portee == "<module>"
+    (_, ligne_voiries), = _appels_dans_app("_trancher_les_voiries")
+    assert abs(ligne - ligne_voiries) <= 3
+
+
+def test_les_cotes_rearment_le_bouton_de_generation():
+    """Saisir une surélévation doit redonner la main sur « Générer ».
+
+    Sans cela le bouton reste grisé — la génération est « déjà faite » — et le
+    chef de projet ne peut pas corriger un dossier qu'il vient de produire au
+    sol. C'est la même mécanique que pour le tri des voiries.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app.py").read_text(
+        encoding="utf-8"
+    )
+    # Par l'arbre, et non par découpe de texte : le tuple porte des appels
+    # parenthésés, et une coupe sur « ) » s'arrêtait au premier d'entre eux.
+    entrees = None
+    for noeud in ast.walk(ast.parse(source)):
+        if isinstance(noeud, ast.Assign) and any(
+            isinstance(c, ast.Name) and c.id == "_entrees_generation"
+            for c in noeud.targets
+        ):
+            entrees = ast.get_source_segment(source, noeud.value)
+    assert entrees is not None, "_entrees_generation introuvable"
+    assert "surelevation_locaux" in entrees
+    assert "phec_locaux" in entrees
+
+
+def test_les_cotes_partent_bien_dans_le_projet():
+    """Elles doivent arriver à `Projet`, sans quoi la planche ne les verra pas."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app.py").read_text(
+        encoding="utf-8"
+    )
+    construction = source.split("def _construire_projet", 1)[1]
+    assert "surelevation_locaux_m=surelevation_locaux" in construction
+    assert "phec_locaux_m=phec_locaux" in construction

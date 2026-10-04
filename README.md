@@ -134,6 +134,22 @@ chaque reconstruction du conteneur.
    n'ouvre pas le dépliant obtient les intitulés de référence. La correction se
    conserve dans `projet.json`, et une régénération ne la redemande pas.
 
+   **La surélévation des locaux techniques se saisit ici aussi**, dans un
+   dépliant intitulé « Locaux techniques surélevés — PPRI (zone inondable) ».
+   Celui-là reste **replié**, et c'est délibéré : la quasi-totalité des projets
+   ne sont pas en zone inondable, et un bandeau sur chaque dossier entraînerait
+   à ne plus lire les bandeaux. Deux hauteurs, toutes deux comptées **au-dessus
+   du terrain naturel** et jamais en cote NGF — la surélévation du plancher, et
+   facultativement le niveau des plus hautes eaux qui fait tracer la ligne PHEC.
+   Voir « Locaux techniques surélevés » plus bas pour ce que la planche en fait,
+   et pourquoi le relatif plutôt que l'absolu.
+
+   Ce que ce dépliant replié coûte est payé au rapport : quand un projet porte
+   des locaux techniques et qu'aucune surélévation n'est saisie, DP 4 écrit en
+   constat qu'elle les a dessinés posés au sol. Un volet replié se rate — celui
+   de la légende l'a prouvé — et le rapport est ce qui rattrape l'oubli avant le
+   dépôt.
+
    Un champ par **intitulé** et non par catégorie : « Voie lourde » couvre la
    piste lourde et l'aire de grutage, qui sont la même grave compactée, et la
    planche n'en fait qu'une ligne. En montrer deux champs laisserait croire
@@ -2998,6 +3014,54 @@ citerne ni poste — se cadrer sur les 327 m du site, au 1/5 000.
 | DP 4-1 | `pdl_ptr`, `ptr`, `pdl` — plan de toiture, quatre élévations, coupe |
 | DP 4-2 | `cloture`, `portail`, `bache_incendie` |
 | DP 4-3 | `bess`, `local_technique`, `citerne_refroidissement` |
+
+#### Locaux techniques surélevés
+
+Un plan de prévention du risque inondation peut imposer que les locaux
+techniques soient surélevés au-dessus de la cote des plus hautes eaux connues.
+Saisie faite, les postes et les conteneurs reçoivent la plateforme sur pilotis
+du dossier de référence : garde-corps aux extrémités, volée droite d'accès et
+ligne PHEC en pointillé. Les citernes n'en reçoivent pas — ce sont des cuves
+ancrées, pas des locaux.
+
+**Deux hauteurs relatives, aucune cote NGF.** Le PPRI et les notices écrivent
+en NGF, mais la planche n'en porte rien, et c'est voulu : les blocs DP 4 tracent
+leur propre ligne de sol à zéro, donc la planche ne prétend à aucune altitude et
+n'a rien à accorder avec la topographie relevée — ni le profil RGE ALTI de DP 3,
+ni le relevé du géomètre. Une cote absolue, elle, devrait s'y accorder, et un
+désaccord de quelques décimètres entre deux pièces du même dossier est ce qu'un
+dossier ne peut pas se permettre. Le chef de projet calcule les deux hauteurs
+depuis sa notice ; à Saint-Cyr-en-Val, 97,75 − 95,50 donne 2,25 m de plancher et
+97,45 − 95,50 donne 1,95 m de PHEC.
+
+Les deux ne se déduisent pas l'une de l'autre : leur écart est la **revanche**
+du PPRI, 10 cm à Périgny-la-Rose pour 30 cm à Saint-Cyr. Renseigner la PHEC
+seule est donc refusé, et l'omettre ne fait pas tracer la ligne au niveau du
+plancher — la planche se tait plutôt que de la placer à 30 cm de sa place.
+
+**Trois conventions, écrites sur la planche et pas seulement dans le code.**
+L'escalier est figuré au pignon droit, le dossier ne disant pas de quel côté il
+sera construit ; le bloc de caractéristiques l'annonce comme une convention,
+pour que le bureau d'études sache qu'il ne lit pas un relevé. Le garde-corps
+n'a pas de lisse devant la façade, alors qu'il en fait le tour : tracée là, elle
+barre la porte et les grilles de ventilation, qui sont ce que l'élévation est
+faite pour montrer. Et les marches sont réparties exactement sur la
+surélévation plutôt que posées à 17 cm, une dernière marche qui ne tombe pas sur
+le plancher étant fausse.
+
+**Ce que la surélévation coûte à la planche.** Cinq vues qui montent de 2,25 m
+font 112 mm de plus sur la colonne des blocs : mesuré le 04/10/2026, DP 4-1
+passe du 1:100 au **1:200** à la surélévation de Saint-Cyr, et y reste au 1:100
+à celle de Périgny. Le 1:200 est permis et le cartouche l'annonce, donc la
+planche reste juste — mais la volée y a des marches d'environ 1,4 mm, à juger
+sur l'épreuve A3. Une valeur aberrante, elle, est refusée par la mise en page :
+22,5 m au lieu de 2,25 ne tient dans aucune échelle permise, et aucun plafond
+n'a eu à être inventé.
+
+La surélévation **n'entre pas dans le contrat** : elle décrit l'ouvrage, pas sa
+géométrie au sol. Conséquence assumée — le dépôt voisin `photomontage` continue
+de monter ses vues sur des locaux posés au sol, et c'est une décision à rouvrir
+avec lui si un photomontage de projet en PPRI se révèle faux à l'œil.
 
 La liste est celle arrêtée à la relecture du 04/09/2026 : postes de livraison, de
 transformation et combiné, clôture et portail, citernes, local de stockage,
