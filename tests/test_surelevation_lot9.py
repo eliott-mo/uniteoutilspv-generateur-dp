@@ -405,3 +405,21 @@ def test_les_cotes_partent_bien_dans_le_projet():
     construction = source.split("def _construire_projet", 1)[1]
     assert "surelevation_locaux_m=surelevation_locaux" in construction
     assert "phec_locaux_m=phec_locaux" in construction
+
+
+def test_la_ligne_phec_ne_deborde_pas_sur_la_vue_voisine(site, tmp_path):
+    """Une seule étiquette PHEC sur la planche, et des lignes qui s'arrêtent.
+
+    Relevé à l'œil sur la planche de Saint-Cyr le 04/10/2026, après la première
+    version : l'étiquette était portée par les cinq vues et les quatre dernières
+    s'écrivaient par-dessus le dessin d'à côté, tandis que les lignes d'eau,
+    allongées de 3 mm pour se détacher — 60 cm de terrain au 1:200 —, se
+    rejoignaient en une seule traversant la planche.
+
+    C'est le même piège que la fourchette du socle avait rencontré le
+    05/09/2026 dans ce fichier, et il se résout de la même façon : une vue la
+    porte, les autres non.
+    """
+    projet, contrat = site(surelevation_locaux_m=2.25, phec_locaux_m=1.95)
+    sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
+    assert _texte(sortie.chemin).count("PHEC (1,95 m)") == 1

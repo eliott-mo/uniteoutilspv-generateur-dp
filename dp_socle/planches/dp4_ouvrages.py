@@ -1262,13 +1262,19 @@ def surelevation_du_projet(projet: Projet) -> Surelevation | None:
 
 
 def _plateforme(dessin: Dessin, largeur_m: float, surelevation: Surelevation,
-                escalier: str | None = None) -> None:
+                escalier: str | None = None,
+                etiqueter_phec: bool = False) -> None:
     """Plateforme sur pilotis portant un local surélevé, et son accès.
 
     `largeur_m` est la largeur de l'ouvrage dans cette vue ; la plateforme
     déborde de `DEBORD_PLATEFORME_M` de chaque côté. `escalier` vaut « droite »
     ou « gauche » pour montrer la volée de profil, `None` pour les vues où elle
     est vue en bout.
+
+    `etiqueter_phec` n'est vrai que sur **une** vue, comme la fourchette du
+    socle : portée par les cinq, l'étiquette débordait sur la vue voisine et
+    les quatre dernières s'écrivaient par-dessus le dessin d'à côté. La ligne
+    d'eau, elle, reste sur toutes — c'est elle qui montre la surélévation.
     """
     assise = surelevation.plancher_m
     dalle = assise - EPAISSEUR_PLATEFORME_M
@@ -1303,7 +1309,7 @@ def _plateforme(dessin: Dessin, largeur_m: float, surelevation: Surelevation,
                   metal=metal)
 
     if surelevation.phec_m is not None:
-        _ligne_phec(dessin, surelevation, gauche, droite, escalier)
+        _ligne_phec(dessin, surelevation, gauche, droite, escalier, etiqueter_phec)
 
 
 def _escalier(dessin: Dessin, surelevation: Surelevation, depart_m: float,
@@ -1334,25 +1340,31 @@ def _escalier(dessin: Dessin, surelevation: Surelevation, depart_m: float,
 
 
 def _ligne_phec(dessin: Dessin, surelevation: Surelevation, gauche: float,
-                droite: float, escalier: str | None) -> None:
+                droite: float, escalier: str | None,
+                etiqueter: bool = False) -> None:
     """Ligne des plus hautes eaux, en pointillé, et sa cote.
 
     La cote est relative, comme sur la planche de référence qui écrit
     « PHEC (0,45 m) » pour une surélévation de 0,55 m.
+
+    La ligne s'arrête **exactement** aux bords de ce qu'elle traverse. Elle
+    dépassait de trois millimètres de chaque côté, pour se détacher : au 1:200
+    cela fait 60 cm de terrain, et les lignes des vues voisines se rejoignaient
+    en une seule traversant toute la planche.
     """
     phec = surelevation.phec_m
     debut = gauche - (surelevation.course_m if escalier == "gauche" else 0.0)
     fin = droite + (surelevation.course_m if escalier == "droite" else 0.0)
-    marge = dessin.metres(3.0)
     dessin.ligne(
-        (debut - marge, phec), (fin + marge, phec),
+        (debut, phec), (fin, phec),
         Style(trait=COULEUR_PHEC, epaisseur_mm=0.3, tirets="2.4 1.4"),
     )
-    dessin.texte(
-        fin + marge, phec, f"PHEC ({nombre_fr(phec)} m)",
-        taille=5.5 * PT, ancre="end", decalage_mm=(0.0, -1.4),
-        couleur=COULEUR_PHEC,
-    )
+    if etiqueter:
+        dessin.texte(
+            fin, phec, f"PHEC ({nombre_fr(phec)} m)",
+            taille=5.5 * PT, ancre="end", decalage_mm=(0.0, -1.4),
+            couleur=COULEUR_PHEC,
+        )
 
 
 def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
@@ -1379,7 +1391,10 @@ def _elevation_poste(largeur_m: float, hauteur_m: float, ouvertures,
             dessin, [(-bord, 0.0), (largeur_m + bord, 0.0)], epaisseur_mm=1.8
         )
         if surelevation is not None:
-            _plateforme(dessin, largeur_m, surelevation, escalier=escalier)
+            # L'étiquette PHEC suit la fourchette du socle : une seule vue la
+            # porte, et c'est la façade.
+            _plateforme(dessin, largeur_m, surelevation, escalier=escalier,
+                        etiqueter_phec=coter_socle)
         _socle(dessin, largeur_m, assise)
         dessin.rectangle(
             0.0, assise + HAUTEUR_SOCLE_M, largeur_m, hauteur_m, _style_poste()
@@ -1759,7 +1774,10 @@ def _bloc_conteneur(cote, libelle: str, categorie: str,
         if surelevation is None:
             _plots(dessin, portee)
         else:
-            _plateforme(dessin, portee, surelevation, escalier=escalier)
+            # La vue qui porte la volée porte aussi l'étiquette PHEC, et elle
+            # seule : répétée, elle déborde sur la vue voisine.
+            _plateforme(dessin, portee, surelevation, escalier=escalier,
+                        etiqueter_phec=escalier is not None)
 
     def long_pan(dessin: Dessin) -> None:
         bord = max(0.5, retrait + 0.3)
