@@ -146,6 +146,27 @@ class Projet:
     #: bâtiments du WFS IGN — se renomment sous `palette.CLE_PARCELLE` et
     #: `palette.CLE_BATIMENT`.
     legendes: dict | None = None
+    #: Surélévation du plancher des locaux techniques au-dessus du terrain
+    #: naturel, en mètres, quand un PPRI l'impose (lot 9).
+    #:
+    #: **Une hauteur relative, jamais une cote NGF.** Les blocs DP 4 tracent
+    #: leur propre ligne de sol à zéro : la planche ne prétend à aucune
+    #: altitude, et il n'y a donc rien à accorder avec la topographie relevée —
+    #: ni le profil RGE ALTI de DP 3, ni le relevé du géomètre. Une cote
+    #: absolue, elle, devrait s'y accorder, et un désaccord de quelques
+    #: décimètres entre deux pièces du même dossier est précisément ce que le
+    #: dossier ne peut pas se permettre (décision du 04/10/2026).
+    #:
+    #: Vide, les locaux sont dessinés posés au sol et le rapport le dit.
+    surelevation_locaux_m: float | None = None
+    #: Niveau des plus hautes eaux connues au-dessus du terrain naturel, en
+    #: mètres. **Facultatif** : renseigné, il trace le pointillé bleu et son
+    #: étiquette, comme la planche HOCH de Périgny ; vide, le reste est dessiné
+    #: quand même.
+    #:
+    #: Il ne se déduit pas de la surélévation : l'écart des deux est la
+    #: revanche, et elle vaut 10 cm à Périgny pour 30 à Saint-Cyr.
+    phec_locaux_m: float | None = None
 
     @property
     def libelle_affiche(self) -> str:
@@ -221,6 +242,7 @@ class Projet:
                     f"longitude_calage = {self.longitude_calage} hors de la France "
                     "métropolitaine (-5,5° à 10,0°). Refaites le calage."
                 )
+        self.valider_surelevation()
         if self.voirie is not None:
             # Le même ensemble que celui du contrat, et non une seconde liste :
             # « sans objet » n'était arrivé que dans `decrire_voiries`, et un
@@ -323,6 +345,51 @@ class Projet:
                             f"{code}, prise {rang} : image introuvable "
                             f"({image}). Redéposez-la, ou retirez la prise."
                         )
+
+    def valider_surelevation(self) -> None:
+        """Contrôle la cohérence interne des deux cotes de surélévation.
+
+        Un seul contrôle, et il ne porte que sur les deux nombres saisis : la
+        PHEC doit être sous le plancher, sinon le dessin se contredit lui-même
+        — un pointillé d'eau au-dessus d'un plancher qu'il est censé épargner.
+
+        Rien d'autre n'est contrôlé. Pas de recoupement avec l'altimétrie :
+        ces hauteurs sont relatives au terrain naturel et la planche ne
+        prétend à aucune altitude (décision D5). Pas de plafond de
+        vraisemblance non plus : il serait inventé, et `_echelles_des_blocs`
+        refuse déjà ce qui ne tient pas sur la planche.
+        """
+        for champ in ("surelevation_locaux_m", "phec_locaux_m"):
+            valeur = getattr(self, champ)
+            if valeur is None:
+                continue
+            if not isinstance(valeur, (int, float)) or isinstance(valeur, bool):
+                raise ErreurDP(
+                    f"projet.json : « {champ} » doit être une hauteur en mètres, "
+                    f"pas {valeur!r}."
+                )
+            if valeur <= 0:
+                raise ErreurDP(
+                    f"projet.json : « {champ} » vaut {valeur}. C'est une hauteur "
+                    "au-dessus du terrain naturel : laissez le champ vide si "
+                    "l'ouvrage est posé au sol."
+                )
+        if self.phec_locaux_m is None:
+            return
+        if self.surelevation_locaux_m is None:
+            raise ErreurDP(
+                "projet.json : le niveau des plus hautes eaux est renseigné "
+                f"({self.phec_locaux_m} m) sans surélévation du plancher. "
+                "L'un ne se déduit pas de l'autre — leur écart est la revanche "
+                "du PPRI, 10 cm sur un projet et 30 sur un autre."
+            )
+        if self.phec_locaux_m >= self.surelevation_locaux_m:
+            raise ErreurDP(
+                f"projet.json : les plus hautes eaux ({self.phec_locaux_m} m) "
+                f"atteignent ou dépassent le plancher des locaux "
+                f"({self.surelevation_locaux_m} m). Le dessin se contredirait "
+                "lui-même ; vérifiez les deux hauteurs dans la notice."
+            )
 
     def ecrire(self, chemin: str | Path) -> Path:
         chemin = Path(chemin)
