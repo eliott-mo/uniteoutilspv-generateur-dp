@@ -423,3 +423,57 @@ def test_la_ligne_phec_ne_deborde_pas_sur_la_vue_voisine(site, tmp_path):
     projet, contrat = site(surelevation_locaux_m=2.25, phec_locaux_m=1.95)
     sortie = dp4_ouvrages.generer(projet, contrat, tmp_path, "DP 4-1")
     assert _texte(sortie.chemin).count("PHEC (1,95 m)") == 1
+
+
+def test_la_fondation_sur_longrines_fait_l_aller_retour(tmp_path):
+    """Le choix se conserve dans `projet.json`, comme les cotes du PPRI.
+
+    Il s'écrit **dans les deux cas**, contrairement aux cotes du PPRI qui
+    disparaissent quand elles sont vides : `ecrire` ne retire que les champs à
+    `None`, et `False` n'en est pas un. C'est le régime de `cadrage_garde`, qui
+    s'écrit à 0,0. Et c'est tant mieux ici : un dossier relu doit dire sur quoi
+    il est fondé, et l'absence du champ ne se distinguerait pas d'un fichier
+    écrit par une version antérieure.
+    """
+    projet = _projet(tmp_path, fondation_longrines=True)
+    projet.valider()
+    chemin = projet.ecrire(tmp_path / "projet.json")
+    assert json.loads(chemin.read_text(encoding="utf-8"))["fondation_longrines"]
+
+    nu = _projet(tmp_path)
+    assert nu.fondation_longrines is False
+    chemin_nu = nu.ecrire(tmp_path / "nu" / "projet.json")
+    assert (
+        json.loads(chemin_nu.read_text(encoding="utf-8"))["fondation_longrines"]
+        is False
+    )
+
+
+def test_la_case_des_longrines_est_offerte_et_part_dans_le_projet():
+    """Posée en section 2 avec les autres décisions, et reportée au projet.
+
+    Contrôlé à la source pour la même raison que la surélévation : l'oubli
+    serait silencieux — la case existerait sans que rien ne la lise, et le
+    chef de projet cocherait dans le vide.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app.py").read_text(
+        encoding="utf-8"
+    )
+    appels = _appels_dans_app("_saisir_les_fondations")
+    assert len(appels) == 1, appels
+    assert appels[0][0] == "<module>"
+
+    construction = source.split("def _construire_projet", 1)[1]
+    assert "fondation_longrines=fondation_longrines" in construction
+
+    entrees = None
+    for noeud in ast.walk(ast.parse(source)):
+        if isinstance(noeud, ast.Assign) and any(
+            isinstance(c, ast.Name) and c.id == "_entrees_generation"
+            for c in noeud.targets
+        ):
+            entrees = ast.get_source_segment(source, noeud.value)
+    assert entrees and "fondation_longrines" in entrees

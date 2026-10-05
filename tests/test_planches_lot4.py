@@ -904,3 +904,88 @@ def test_une_coupe_de_site_long_trouve_une_echelle():
     # de 3 MWc, et il doit tenir sans que la pièce disparaisse.
     assert echelle_du_dessin(700.0, 10.0, zone, ECHELLES_TERRAIN,
                              libelle="coupe du terrain") == 2000
+
+
+# ---------------------------------------------------------------------------
+# Fondation hors-sol : la centrale sur longrines (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.reseau
+def test_la_coupe_des_tables_pose_les_longrines_au_lieu_des_pieux(
+    site, tmp_path, parcellaire_double
+):
+    """Demande du chef de projet du 05/10/2026, sur le modèle de Pontivy.
+
+    Une centrale peut être fondée **hors-sol** : des poutres béton posées sur le
+    terrain, sur lesquelles les tables se tiennent, au lieu de pieux battus.
+    Rien dans les fichiers du bureau d'études ne le dit — ni le DXF ni le
+    tableau bilan ne décrivent la fondation —, d'où la saisie.
+
+    Ce que la planche doit montrer, et qui est tout ce qui distingue les deux :
+    le sol reste entier sous la table, là où un pieu le perce. Mesuré ici sur le
+    PDF produit, par le libellé que la longrine porte et par le nombre de traits
+    qui descendent sous le terrain.
+    """
+    from pypdf import PdfReader
+
+    from dp_socle.planches import dp3_coupes
+
+    projet, dossier = site()
+    contrat = charger_contrat(dossier)
+
+    sur_pieux = dp3_coupes.generer(projet, contrat, tmp_path / "pieux", numero="6")
+    projet.fondation_longrines = True
+    sur_longrines = dp3_coupes.generer(
+        projet, contrat, tmp_path / "longrines", numero="6"
+    )
+
+    texte_pieux = PdfReader(str(sur_pieux.chemin)).pages[0].extract_text()
+    texte_longrines = PdfReader(str(sur_longrines.chemin)).pages[0].extract_text()
+    assert "Longrines" not in texte_pieux
+    assert "Longrines" in texte_longrines
+
+    # Les fiches : deux traits verticaux par pieu, sous le terrain naturel.
+    # Ils disparaissent avec les longrines, et c'est le cœur du dessin.
+    def fiches(chemin) -> int:
+        bas = [
+            s for s in segments(chemin)
+            if abs(s[0][0] - s[1][0]) < 0.2 and longueur(s) > 5.0
+        ]
+        return len(bas)
+
+    assert fiches(sur_pieux.chemin) > fiches(sur_longrines.chemin)
+
+    # Et l'échelle ne bouge pas : la longrine tient sous la table, elle
+    # n'élargit ni ne surélève le dessin.
+    assert (
+        sur_longrines.details["echelle_tables"]
+        == sur_pieux.details["echelle_tables"]
+    )
+
+
+def test_la_longrine_tient_sous_la_table_sans_la_deborder():
+    """Son emprise déborde de 50 cm chaque appui, et pas davantage.
+
+    Relevé sur la planche HOCH de Pontivy-Guernal du 26/11/2024 : le bloc porte
+    les deux poteaux et dépasse d'une cinquantaine de centimètres de part et
+    d'autre. Plus large, il se lirait comme une dalle ; plus étroit, les
+    poteaux sembleraient en porte-à-faux.
+    """
+    from dp_socle.planches.dp3_coupes import (
+        APPUIS_RAMPANT,
+        DEBORD_LONGRINE_M,
+        _emprise_longrine,
+        geometrie_table,
+    )
+
+    class _Table:
+        projection_m = 6.0
+
+    gauche, droite = _emprise_longrine(_Table(), 10.0)
+    premier = 10.0 + 6.0 * min(APPUIS_RAMPANT)
+    dernier = 10.0 + 6.0 * max(APPUIS_RAMPANT)
+    assert gauche == pytest.approx(premier - DEBORD_LONGRINE_M)
+    assert droite == pytest.approx(dernier + DEBORD_LONGRINE_M)
+    # Elle reste sous la table : le rampant projeté fait 6 m, elle moins.
+    assert droite - gauche < 6.0

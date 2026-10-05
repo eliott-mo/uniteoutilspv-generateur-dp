@@ -1044,6 +1044,36 @@ def _surelevation_saisie() -> tuple:
     return tuple(valeurs)
 
 
+def _fondation_longrines_saisie() -> bool:
+    """Vrai si le chef de projet a coché la fondation hors-sol.
+
+    Clé portant le nom du dépôt, comme les autres décisions de la section : sans
+    lui, le choix suivrait le chef de projet d'un projet à l'autre.
+    """
+    return bool(st.session_state.get(f"longrines_{_nom_depot(commune)}"))
+
+
+def _saisir_les_fondations() -> None:
+    """Pieux battus ou longrines : une case, et rien d'autre.
+
+    Une case plutôt qu'un volet replié comme celui du PPRI : c'est un seul
+    choix, pas trois cotes, et il se lit d'un coup d'œil. Rien de ce que le
+    bureau d'études livre ne le dit — ni le DXF ni le tableau bilan ne décrivent
+    la fondation des tables —, d'où la saisie.
+    """
+    st.checkbox(
+        "Centrale fondée sur **longrines** (fondation hors-sol)",
+        key=f"longrines_{_nom_depot(commune)}",
+        help=(
+            "Des poutres béton posées sur le terrain, sur lesquelles les tables "
+            "se tiennent, au lieu de pieux battus. Ne change que la coupe de "
+            "principe des tables de DP 3 : les emprises au sol, les hauteurs "
+            "déclarées et les planches d'ouvrages sont les mêmes. Modèle : le "
+            "dossier HOCH de Pontivy-Guernal du 26/11/2024."
+        ),
+    )
+
+
 def _saisir_la_surelevation() -> None:
     """Les deux hauteurs du PPRI, quand les locaux techniques sont surélevés.
 
@@ -2913,6 +2943,7 @@ if import_be_courant is not None and commune.strip():
                     st.caption(f"· {message}")
 
         _trancher_les_voiries(import_be_courant)
+        _saisir_les_fondations()
         _saisir_la_surelevation()
         # Une fois l'import validé, ces remarques ont été lues : elles se
         # replient pour que la carte, qui vient après, ne soit plus à deux
@@ -3171,6 +3202,9 @@ voirie = st.session_state.get("voirie_tranchee")
 #: du chef de projet que les fichiers du bureau d'études ne portent pas.
 surelevation_locaux, phec_locaux = _surelevation_saisie()
 
+#: Fondation des tables, cochée en section 2. Lue ici comme le reste.
+fondation_longrines = _fondation_longrines_saisie()
+
 
 
 def _construire_projet() -> Projet | None:
@@ -3219,6 +3253,7 @@ def _construire_projet() -> Projet | None:
         # un `projet.json` repris à la main ne passe pas par l'écran.
         surelevation_locaux_m=surelevation_locaux,
         phec_locaux_m=phec_locaux,
+        fondation_longrines=fondation_longrines,
     )
 
 
@@ -3257,6 +3292,7 @@ _entrees_generation = (
     # la génération « déjà faite » l'était sur un dossier qui, lui, a changé.
     surelevation_locaux,
     phec_locaux,
+    fondation_longrines,
     st.session_state.get("etat_ecrit"),
 )
 _generation_faite = _deja_fait("generation_faite", _entrees_generation)

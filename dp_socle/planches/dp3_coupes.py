@@ -188,6 +188,23 @@ LARGEUR_PIEU_M = 0.09
 #: Fiche du pieu sous le terrain naturel, en mètres. Elle est dessinée : c'est
 #: elle qui fait comprendre qu'il s'agit d'un pieu battu et non d'un plot posé.
 FICHE_PIEU_M = 1.10
+
+#: Longrines : la fondation hors-sol, quand la centrale n'est pas sur pieux.
+#:
+#: Des poutres béton **posées sur le terrain**, sur lesquelles les poteaux se
+#: tiennent debout. Rien n'est enfoncé, et c'est ce que le dessin doit faire
+#: comprendre : le sol reste entier sous la table, là où un pieu le perce.
+#:
+#: Relevé sur le dossier HOCH de Pontivy-Guernal du 26/11/2024, planche DP 4-3
+#: au 1:50 : le bloc affleure le terrain, porte les deux poteaux, déborde d'une
+#: cinquantaine de centimètres de part et d'autre, et son libellé — « Longrines »
+#: — est écrit dedans. Sa hauteur y mesure environ le quart des 1,10 m qui
+#: séparent le sol du point bas de la table, soit 30 cm.
+HAUTEUR_LONGRINE_M = 0.30
+#: Ce dont la longrine déborde de chaque poteau, en mètres.
+DEBORD_LONGRINE_M = 0.50
+#: Teinte du béton, relevée sur la planche de Pontivy.
+COULEUR_LONGRINE = "#c9c9c9"
 #: Hauteur de la platine de tête et du collier de contreventement, en mètres.
 PLATINE_M = 0.16
 COLLIER_M = 0.14
@@ -604,7 +621,9 @@ def generer(
     )
 
     bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables)
-    echelle_tables, nb_rangees, _ = _coupe_des_tables(planche, table, bloc_tables)
+    echelle_tables, nb_rangees, _ = _coupe_des_tables(
+        planche, table, bloc_tables, longrines=projet.fondation_longrines
+    )
     planche.definir_echelle(echelle_tables)
 
     haut_terrain = utile_y + hauteur_tables + BLANC_TOURNANT_MM
@@ -643,7 +662,7 @@ def generer(
 
 
 def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
-                      tracer: bool = True) -> tuple:
+                      tracer: bool = True, longrines: bool = False) -> tuple:
     """Dessin de type : trois rangées en profil, sur un sol hachuré.
 
     Aucune géométrie n'est lue du GeoPackage. C'est une coupe de principe, et
@@ -734,12 +753,16 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
     pieds = []
     for index in range(nb_rangees):
         x_bas = index * table.pas_m
-        _tracer_table(dessin, table, x_bas, trait_table)
-        pieds.append((x_bas - 0.3, x_bas + table.projection_m + 0.3))
+        _tracer_table(dessin, table, x_bas, trait_table, longrines)
+        if longrines:
+            pieds.append(_emprise_longrine(table, x_bas))
 
     # L'herbe court sous les tables : c'est une prairie qui reste pâturée, et
-    # une coupe sans elle se lit comme un terrassement.
-    herbe(dessin, sol_gauche, sol_droite, eviter=[])
+    # une coupe sans elle se lit comme un terrassement. Elle s'écarte des
+    # longrines, qui sont posées dessus : des touffes au travers du béton se
+    # lisaient comme une longrine enterrée, c'est-à-dire le contraire de ce que
+    # cette fondation-là est.
+    herbe(dessin, sol_gauche, sol_droite, eviter=pieds)
 
     _coter_table(dessin, table, nb_rangees)
 
@@ -789,7 +812,34 @@ def _bande(dessin: Dessin, depart, arrivee, epaisseur_m: float, style) -> None:
     )
 
 
-def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) -> None:
+def _emprise_longrine(table: GeometrieTable, x_bas: float) -> tuple:
+    """Ce que la longrine d'une table occupe au sol, en mètres du dessin."""
+    appuis = [x_bas + table.projection_m * f for f in APPUIS_RAMPANT]
+    return (min(appuis) - DEBORD_LONGRINE_M, max(appuis) + DEBORD_LONGRINE_M)
+
+
+def _tracer_longrine(dessin: Dessin, gauche: float, droite: float) -> None:
+    """La poutre béton posée au sol, sous les deux poteaux d'une table.
+
+    Posée **sur** le terrain et non dedans : c'est tout ce qui distingue une
+    fondation hors-sol d'un pieu battu, et c'est ce que l'instruction regarde.
+    Son libellé est écrit dedans, comme sur la planche de Pontivy.
+    """
+    largeur = droite - gauche
+    dessin.rectangle(
+        gauche, 0.0, largeur, HAUTEUR_LONGRINE_M,
+        type(TRAIT_MOYEN)(
+            trait="#8a8a8a", epaisseur_mm=0.2, remplissage=COULEUR_LONGRINE
+        ),
+    )
+    dessin.texte(
+        gauche + largeur / 2.0, HAUTEUR_LONGRINE_M / 2.0, "Longrines",
+        taille=TAILLE_COTE, ancre="middle", decalage_mm=(0.0, 1.0),
+    )
+
+
+def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style,
+                  longrines: bool = False) -> None:
     """Une table en profil : le plan des modules et sa structure porteuse.
 
     Reprise de la coupe de principe du dossier de Massay du 17/04/2025, où la
@@ -800,6 +850,11 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) ->
 
     Un pieu dessiné d'un trait unique ne se lit pas comme une structure : il se
     lit comme une ligne de rappel.
+
+    `longrines` vraie, la centrale est fondée hors-sol : les poteaux ne sont
+    plus fichés mais posés sur une poutre béton qui affleure le terrain, et le
+    sol reste entier sous la table. Modèle : le dossier HOCH de Pontivy-Guernal
+    du 26/11/2024.
     """
     acier = type(TRAIT_MOYEN)(trait="#3a3a3a", epaisseur_mm=0.2, remplissage="none")
     fiche = type(TRAIT_FIN)(trait="#7a7a7a", epaisseur_mm=0.15, remplissage="none")
@@ -836,29 +891,39 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style) ->
     ]
     dessin.polyligne([bas, haut, dessus[1], dessus[0]], style, fermer=True)
 
-    # Les deux pieux, à double trait, fichés sous le terrain.
+    # Les deux poteaux, à double trait. Fichés sous le terrain sur pieux ;
+    # posés sur la longrine quand la centrale est fondée hors-sol.
+    pied = HAUTEUR_LONGRINE_M if longrines else 0.0
+    tetes = [
+        sous_rampant(_point_sur_rampant(table, x_bas, f), HAUTEUR_PANNE_M)
+        for f in APPUIS_RAMPANT
+    ]
+    if longrines:
+        # Dessinée **avant** les poteaux, pour qu'ils se lisent posés dessus et
+        # non traversés par elle. Son emprise vient de `_emprise_longrine`, la
+        # même que l'herbe évite : calculée deux fois, elle aurait différé de
+        # six centimètres — le déport des têtes sous la panne.
+        _tracer_longrine(dessin, *_emprise_longrine(table, x_bas))
     colliers = []
-    for fraction in APPUIS_RAMPANT:
-        tete = sous_rampant(
-            _point_sur_rampant(table, x_bas, fraction), HAUTEUR_PANNE_M
-        )
+    for tete in tetes:
         x = tete[0]
         dessin.polyligne(
             [
-                (x - LARGEUR_PIEU_M / 2.0, 0.0),
+                (x - LARGEUR_PIEU_M / 2.0, pied),
                 (x - LARGEUR_PIEU_M / 2.0, tete[1]),
                 (x + LARGEUR_PIEU_M / 2.0, tete[1]),
-                (x + LARGEUR_PIEU_M / 2.0, 0.0),
+                (x + LARGEUR_PIEU_M / 2.0, pied),
             ],
             acier,
         )
-        # La fiche, sous le terrain naturel.
-        for cote in (-1, 1):
-            dessin.ligne(
-                (x + cote * LARGEUR_PIEU_M / 2.0, 0.0),
-                (x + cote * LARGEUR_PIEU_M / 2.0, -FICHE_PIEU_M),
-                fiche,
-            )
+        if not longrines:
+            # La fiche, sous le terrain naturel.
+            for cote in (-1, 1):
+                dessin.ligne(
+                    (x + cote * LARGEUR_PIEU_M / 2.0, 0.0),
+                    (x + cote * LARGEUR_PIEU_M / 2.0, -FICHE_PIEU_M),
+                    fiche,
+                )
         # Platine de tête, entre le pieu et la panne.
         dessin.rectangle(
             x - PLATINE_M / 2.0, tete[1] - PLATINE_M / 4.0,

@@ -167,6 +167,18 @@ class Projet:
     #: Il ne se déduit pas de la surélévation : l'écart des deux est la
     #: revanche, et elle vaut 10 cm à Périgny pour 30 à Saint-Cyr.
     phec_locaux_m: float | None = None
+    #: Centrale fondée sur **longrines** — des poutres béton posées au sol —
+    #: plutôt que sur pieux battus.
+    #:
+    #: Le choix ne se lit nulle part dans les fichiers : ni le DXF ni le tableau
+    #: bilan ne disent comment les tables sont fondées. Il se saisit donc, comme
+    #: la surélévation du PPRI, et rejoint `projet.json`.
+    #:
+    #: Il ne change **que** la coupe de principe des tables de DP 3 : les
+    #: emprises au sol, les hauteurs déclarées et les planches d'ouvrages sont
+    #: les mêmes. Le dossier HOCH de Pontivy-Guernal du 26/11/2024 en est le
+    #: modèle.
+    fondation_longrines: bool = False
 
     @property
     def libelle_affiche(self) -> str:

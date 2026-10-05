@@ -2931,7 +2931,24 @@ Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
 échelle : il porte celle de la coupe des tables, et la coupe du terrain porte la
 sienne en clair.
 
-**La coupe s'arrête à ce qu'elle traverse**, plus dix mètres de part et d'autre.
+**La centrale peut être fondée sur longrines**, c'est-à-dire hors-sol : des
+poutres béton posées sur le terrain, sur lesquelles les tables se tiennent, au
+lieu de pieux battus. Rien dans les fichiers du bureau d'études ne le dit — ni
+le DXF ni le tableau bilan ne décrivent la fondation —, d'où une case à cocher
+en section 2, qui rejoint `projet.json`. Elle ne change **que** la coupe de
+principe des tables : les emprises au sol, les hauteurs déclarées et les
+planches d'ouvrages sont les mêmes.
+
+Ce que le dessin montre alors, et qui est tout ce qui distingue les deux : le
+sol reste **entier** sous la table, là où un pieu le perce. Le bloc affleure le
+terrain, porte les deux poteaux, déborde de 50 cm de part et d'autre, et son
+libellé est écrit dedans ; l'herbe s'arrête à ses bords, des touffes au travers
+du béton se lisant comme une longrine enterrée — le contraire de ce qu'elle est.
+Modèle : le dossier HOCH de Pontivy-Guernal du 26/11/2024, planche DP 4-3 au
+1:50, dont la longrine mesure le quart des 1,10 m qui séparent le sol du point
+bas de la table, soit 30 cm.
+
+**La coupe s'arrête à ce qu'elle traverse**, plus vingt mètres de part et d'autre.
 Elle allait d'un bord à l'autre de la projection de *tous* les sommets de la
 clôture sur la direction de coupe — c'est-à-dire la largeur totale de l'enceinte
 dans cette direction. Les deux ne coïncident que si l'enceinte est un rectangle
