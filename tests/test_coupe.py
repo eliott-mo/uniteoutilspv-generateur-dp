@@ -15,6 +15,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 
 from dp_socle.coupe import (
     ECART_SUSPECT_DEG,
+    MARGE_COUPE_M,
     ProfilTerrain,
     controler_coherence,
     corriger_ligne_coupe,
@@ -228,16 +229,35 @@ def test_point_milieu_du_trace_conserve(plan, emprise):
     assert coupe.geometrie.distance(milieu) == pytest.approx(0.0, abs=1e-6)
 
 
-def test_coupe_traverse_toute_l_emprise_avec_dix_metres_de_marge(plan, emprise):
+def test_la_coupe_s_arrete_a_sa_marge_de_ce_qu_elle_traverse(plan, emprise):
+    """Elle borde ce qu'elle coupe, et non la largeur totale de l'enceinte.
+
+    Elle allait d'un bord à l'autre de la projection de **tous** les sommets de
+    la clôture sur la direction de coupe — sa largeur dans cette direction. Les
+    deux ne coïncident que si l'enceinte est un rectangle aligné sur la coupe.
+    Sur Saint-Aubin-sur-Loire, dont la clôture court en biais, la ligne ne
+    traversait l'enceinte que sur 227 m et la coupe se dessinait sur 493 : la
+    moitié hors du projet, et deux crans d'échelle perdus — 1:1500 au lieu de
+    1:750 (relevé par le chef de projet le 05/10/2026, « toute la partie droite
+    ne sert pas à grand-chose »).
+    """
     centre = emprise.centroid
     trace = LineString([(centre.x - 5, centre.y - 5), (centre.x + 5, centre.y + 5)])
     coupe = corriger_ligne_coupe(trace, plan.azimut_tables_deg, emprise)
 
-    _, ymin, _, ymax = emprise.bounds
-    ys = sorted(c[1] for c in coupe.geometrie.coords)
-    assert ymin - ys[0] == pytest.approx(10.0, abs=0.01)
-    assert ys[-1] - ymax == pytest.approx(10.0, abs=0.01)
-    assert coupe.geometrie.intersects(emprise)
+    traversee = coupe.geometrie.intersection(emprise)
+    assert not traversee.is_empty
+    # La marge de part et d'autre de ce qu'elle traverse, pas un mètre de plus.
+    assert coupe.geometrie.length == pytest.approx(
+        traversee.length + 2 * MARGE_COUPE_M, abs=0.05
+    )
+    # Mesurés **le long de la coupe** et non perpendiculairement à la clôture :
+    # un bord oblique est plus près que la marge en ligne droite, et c'est
+    # normal.
+    for bout in (coupe.geometrie.coords[0], coupe.geometrie.coords[-1]):
+        assert Point(bout[:2]).distance(traversee) == pytest.approx(
+            MARGE_COUPE_M, abs=0.05
+        )
 
 
 def test_trace_a_plus_de_45_degres_avertit_mais_corrige(plan, emprise):
@@ -272,7 +292,7 @@ def test_emprise_allongee_en_biais_ne_donne_pas_une_coupe_deux_fois_trop_longue(
     trace = LineString([(-10, -10), (10, 10)])
     coupe = corriger_ligne_coupe(trace, 45.0, emprise_biaise)
     # Largeur réelle de la bande, perpendiculairement à son grand axe : 60 m.
-    assert coupe.longueur_m == pytest.approx(60.0 + 20.0, abs=1.0)
+    assert coupe.longueur_m == pytest.approx(60.0 + 2 * MARGE_COUPE_M, abs=1.0)
 
 
 def test_trace_reduit_a_un_point_refuse(emprise):
@@ -355,17 +375,18 @@ def test_deplacer_la_coupe_la_deplace_vraiment(plan, emprise):
     assert deplacee.geometrie.distance(point) == pytest.approx(0.0, abs=1e-6)
 
 
-def test_la_coupe_deplacee_traverse_toute_l_emprise_avec_la_marge(plan, emprise):
+def test_la_coupe_deplacee_borde_aussi_ce_qu_elle_traverse(plan, emprise):
+    """La même règle où qu'on la pose : la marge au-delà de la traversée."""
     centre = emprise.centroid
     coupe = translater_ligne_coupe(
         Point(centre.x + 45.0, centre.y), plan.azimut_tables_deg, emprise
     )
 
-    _, ymin, _, ymax = emprise.bounds
-    ys = sorted(c[1] for c in coupe.geometrie.coords)
-    assert ymin - ys[0] == pytest.approx(10.0, abs=0.01)
-    assert ys[-1] - ymax == pytest.approx(10.0, abs=0.01)
-    assert coupe.geometrie.intersects(emprise)
+    traversee = coupe.geometrie.intersection(emprise)
+    assert not traversee.is_empty
+    assert coupe.geometrie.length == pytest.approx(
+        traversee.length + 2 * MARGE_COUPE_M, abs=0.05
+    )
 
 
 def test_clic_trop_loin_du_site_refuse_en_disant_de_combien(plan, emprise):
@@ -837,33 +858,56 @@ def test_carte_sans_trace_ne_renvoie_rien():
     )
 
 
-def test_deplacer_la_coupe_la_translate_en_bloc(plan, emprise):
-    """Le segment glisse sans tourner ni changer de longueur.
+def test_deplacer_la_coupe_garde_sa_direction_et_suit_ce_qu_elle_traverse(
+    plan, emprise
+):
+    """Le segment glisse sans tourner, et sa longueur suit ce qu'il coupe.
 
-    C'est la propriété sur laquelle repose le trait d'aperçu qui suit la souris :
-    il peut être le segment de référence translaté, plutôt qu'une coupe
-    recalculée à chaque mouvement. `_etendre` projette les sommets de l'emprise
-    sur la direction de coupe *relativement au point de passage* ; déplacer ce
-    point perpendiculairement à la coupe ne change aucune de ces projections.
+    Elle ne changeait pas : `_etendre` projetait les sommets de l'emprise sur la
+    direction de coupe, et déplacer le point de passage perpendiculairement n'y
+    changeait rien. Depuis le 05/10/2026 la coupe s'arrête à ce qu'elle traverse
+    — voir `test_la_coupe_s_arrete_a_sa_marge_de_ce_qu_elle_traverse` —, donc
+    sa longueur dépend de l'endroit : sur une enceinte irrégulière, deux
+    positions ne coupent pas la même largeur.
+
+    Ce qui reste vrai, et qui est ce qui compte pour le chef de projet : la
+    direction ne bouge pas, et la coupe passe par où il a cliqué. Le trait
+    d'aperçu, lui, reste un segment de référence translaté — il dit l'endroit et
+    la direction, pas les bouts exacts (décision du chef de projet du
+    05/10/2026 : l'interface garde son affichage, la DP 3 prend la bonne
+    partie).
     """
     base = translater_ligne_coupe(
         emprise.centroid, plan.azimut_tables_deg, emprise
     ).geometrie
-    depart, arrivee = base.coords[0], base.coords[-1]
+    direction = _azimut(base)
 
     for decalage in (-90.0, -30.0, 45.0, 95.0):
-        # Le décalage porte sur l'axe des rangées (est-ouest à Saint-Cyr), plus
-        # un déplacement le long de la coupe, qui ne doit rien changer du tout.
+        point = Point(emprise.centroid.x + decalage, emprise.centroid.y + 40.0)
         glissee = translater_ligne_coupe(
-            Point(emprise.centroid.x + decalage, emprise.centroid.y + 40.0),
-            plan.azimut_tables_deg,
-            emprise,
+            point, plan.azimut_tables_deg, emprise
         ).geometrie
-        a2, b2 = glissee.coords[0], glissee.coords[-1]
-        # Les deux extrémités subissent la même translation, au bit près.
-        assert a2[0] - depart[0] == pytest.approx(b2[0] - arrivee[0], abs=1e-9)
-        assert a2[1] - depart[1] == pytest.approx(b2[1] - arrivee[1], abs=1e-9)
-        assert glissee.length == pytest.approx(base.length, abs=1e-9)
+        assert _azimut(glissee) == pytest.approx(direction, abs=1e-9)
+        assert glissee.distance(point) == pytest.approx(0.0, abs=1e-6)
+        traversee = glissee.intersection(emprise)
+        assert glissee.length == pytest.approx(
+            traversee.length + 2 * MARGE_COUPE_M, abs=0.05
+        )
+
+
+def _azimut(ligne) -> float:
+    """Direction d'un segment, en degrés, pour comparer deux coupes."""
+    import math
+
+    (x0, y0), (x1, y1) = ligne.coords[0][:2], ligne.coords[-1][:2]
+    return math.degrees(math.atan2(y1 - y0, x1 - x0)) % 180.0
+
+
+def _droite_portant(ligne, allonge: float = 2_000.0):
+    """La droite qui porte un segment, prolongée de part et d'autre."""
+    from shapely.affinity import scale
+
+    return scale(ligne, xfact=allonge, yfact=allonge, origin="center")
 
 
 def test_le_trait_d_apercu_ne_ment_pas_sur_l_endroit_de_la_coupe(plan, emprise):
@@ -904,7 +948,14 @@ def test_le_trait_d_apercu_ne_ment_pas_sur_l_endroit_de_la_coupe(plan, emprise):
                 Point(*vers_l93.transform(a[0] + wx, a[1] + wy)),
                 Point(*vers_l93.transform(b[0] + wx, b[1] + wy)),
             ]
-            pire = max(pire, max(vraie.distance(bout) for bout in apercu))
+            # L'écart se mesure à l'**axe** de la vraie coupe, et non à son
+            # segment : depuis que la coupe s'arrête à ce qu'elle traverse, ses
+            # bouts dépendent de l'endroit, là où l'aperçu garde la longueur du
+            # segment de référence. Ce que l'aperçu doit dire sans mentir est
+            # l'endroit et la direction du trait — ce sur quoi le chef de projet
+            # clique —, et c'est ce que ce test mesure.
+            axe = _droite_portant(vraie)
+            pire = max(pire, max(axe.distance(bout) for bout in apercu))
 
     # Mesuré à 1,3 cm sur Saint-Cyr le 15/09/2026. Le seuil est à 10 cm : bien
     # au-dessus de la mesure, et bien en dessous du pixel de carte au zoom 18,
@@ -1760,7 +1811,7 @@ def test_la_coupe_par_defaut_est_perpendiculaire_et_bien_placee():
     assert coupe.corrigee
     # Elle traverse le site sur toute sa hauteur, marge comprise.
     assert coupe.geometrie.intersects(emprise)
-    assert coupe.longueur_m == pytest.approx(220.0 + 2 * 10.0, abs=0.5)
+    assert coupe.longueur_m == pytest.approx(220.0 + 2 * MARGE_COUPE_M, abs=0.5)
     # Et elle dit où elle s'est posée : rien de muet.
     assert coupe.avertissements
     assert "Coupe par défaut" in coupe.avertissements[0]

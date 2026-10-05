@@ -2931,14 +2931,32 @@ Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
 échelle : il porte celle de la coupe des tables, et la coupe du terrain porte la
 sienne en clair.
 
-**La coupe du terrain descend jusqu'au 1:2000**, et c'est un site réel qui l'a
-imposé : à Saint-Aubin-sur-Loire la coupe A-A' traverse 493 m, soit 493 mm au
-1:1000 — l'ancienne borne — pour une zone de dessin de 362 mm. La planche levait
+**La coupe s'arrête à ce qu'elle traverse**, plus dix mètres de part et d'autre.
+Elle allait d'un bord à l'autre de la projection de *tous* les sommets de la
+clôture sur la direction de coupe — c'est-à-dire la largeur totale de l'enceinte
+dans cette direction. Les deux ne coïncident que si l'enceinte est un rectangle
+aligné sur la coupe. La clôture de Saint-Aubin-sur-Loire court en biais : la
+ligne n'y traverse l'enceinte que sur **227 m** et la coupe s'y dessinait sur
+**493** — la moitié hors du projet, par-delà la clôture. Relevé par le chef de
+projet sur la planche le 05/10/2026 : « toute la partie droite ne sert pas à
+grand-chose ». Bornée, la coupe passe à 247 m et la planche remonte du 1:1500 au
+**1:750**.
+
+Ce que cela coûte, et qui est assumé : la coupe n'a plus une longueur
+indépendante de l'endroit où on la pose, puisqu'elle suit ce qu'elle croise. Le
+trait d'aperçu qui suit la souris reste, lui, un segment de référence translaté
+— il dit l'endroit et la direction, pas les bouts exacts, et la vraie coupe
+s'affiche dès le clic. Décision du chef de projet du 05/10/2026 : l'interface
+garde son affichage, et c'est la pièce qui prend la bonne partie.
+
+**La coupe du terrain descend jusqu'au 1:2000**, et c'est le même site qui l'a
+imposé : avant d'être bornée, la coupe de Saint-Aubin faisait 493 mm au 1:1000 —
+l'ancienne borne — pour une zone de dessin de 362 mm. La planche levait
 `ErreurEchelle`, la génération rattrapait la pièce une à une, et le dossier
-sortait **sans sa coupe** (05/10/2026). Une coupe au 1:1500 est grossière, mais
-elle est vraie et son échelle est écrite sur son cadre ; l'absence de la pièce,
-elle, ne se voit qu'à l'instruction. Saint-Aubin sort désormais ses tables au
-1:80 et son terrain au 1:1500.
+sortait **sans sa coupe**. Les deux corrections sont gardées : un site long et
+droit atteindra les 493 m sans qu'aucune borne ne le sauve, et une coupe au
+1:1500 est grossière mais vraie, son échelle écrite sur son cadre — là où
+l'absence de la pièce ne se voit qu'à l'instruction.
 
 C'est aussi ce qui a fait remonter une pièce absente au rang de ce qu'elle est :
 « DP 3 n'est pas produite » arrivait au milieu des points à savoir, parmi les

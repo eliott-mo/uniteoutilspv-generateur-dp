@@ -30,9 +30,17 @@ from shapely.geometry.base import BaseGeometry
 from .erreurs import ErreurCoupe
 from .ign import telecharger_altitudes
 
-#: Marge ajoutée de chaque côté de l'emprise clôturée, en mètres, pour que la
-#: coupe la traverse entièrement et montre le terrain de part et d'autre.
-MARGE_COUPE_M = 10.0
+#: Marge ajoutée de chaque côté de ce que la coupe traverse, en mètres, pour
+#: qu'elle montre le terrain au-delà du projet.
+#:
+#: Vingt mètres depuis le 05/10/2026, contre dix auparavant. La coupe borne
+#: désormais ce qu'elle traverse (`_etendre`) au lieu de couvrir la largeur
+#: totale de l'enceinte, et elle ne montrait plus guère les abords : le chef de
+#: projet tenait à voir la topographie alentour. Mesuré sur
+#: Saint-Aubin-sur-Loire le même jour, le surcoût est nul — la coupe y passe de
+#: 247 à 267 m et la planche reste au 1:750, en occupant 356 mm des 362 du
+#: cadre. Au-delà, 30 m la feraient tomber au 1:1000.
+MARGE_COUPE_M = 20.0
 
 #: Part de l'emprise écartée à chaque bout pour le placement de la coupe.
 #:
@@ -455,11 +463,19 @@ def _verifier_traverse(
 def _etendre(
     milieu: Point, direction_deg: float, emprise: BaseGeometry, marge_m: float
 ) -> LineString:
-    """Segment centré sur `milieu`, de direction donnée, traversant l'emprise.
+    """Segment centré sur `milieu`, de direction donnée, bornée à ce qu'il traverse.
 
-    L'étendue se calcule en projetant les sommets de l'emprise sur la direction
-    de coupe, plutôt qu'en prenant la diagonale de sa boîte englobante : une
-    emprise allongée en biais donnerait sinon une coupe deux fois trop longue.
+    La coupe va d'un bord à l'autre de **ce que la ligne traverse vraiment**,
+    plus une marge de chaque côté. Et non de la projection de tous les sommets
+    de l'emprise sur la direction de coupe, qui est sa largeur totale dans cette
+    direction : les deux ne coïncident que si l'emprise est un rectangle aligné
+    sur la coupe.
+
+    Mesuré le 05/10/2026 sur Saint-Aubin-sur-Loire, dont la clôture court en
+    biais : la ligne n'y traverse l'emprise clôturée que sur 227 m, et la coupe
+    s'y dessinait sur 493 — la moitié hors du projet, par-delà la clôture. Le
+    chef de projet l'a vu sur la planche : « toute la partie droite ne sert pas
+    à grand-chose ». Elle coûtait deux crans d'échelle, du 1:750 au 1:1500.
     """
     ux, uy = cos(radians(direction_deg)), sin(radians(direction_deg))
     projections = [
@@ -470,13 +486,31 @@ def _etendre(
             "L'emprise clôturée ne porte aucun sommet exploitable : la ligne de "
             "coupe ne peut pas être dimensionnée."
         )
-    debut, fin = min(projections) - marge_m, max(projections) + marge_m
-    return LineString(
-        [
-            (milieu.x + debut * ux, milieu.y + debut * uy),
-            (milieu.x + fin * ux, milieu.y + fin * uy),
-        ]
-    )
+
+    def segment(debut: float, fin: float) -> LineString:
+        return LineString(
+            [
+                (milieu.x + debut * ux, milieu.y + debut * uy),
+                (milieu.x + fin * ux, milieu.y + fin * uy),
+            ]
+        )
+
+    # La ligne de part en part, qui sert à trouver où elle entre et sort.
+    traversee = segment(min(projections), max(projections)).intersection(emprise)
+    # `point[:2]` et non `x, y` : le GeoPackage garde le Z des tables, et
+    # l'intersection rend alors des sommets à trois valeurs.
+    portees = [
+        (point[0] - milieu.x) * ux + (point[1] - milieu.y) * uy
+        for partie in getattr(traversee, "geoms", [traversee])
+        if not partie.is_empty
+        for point in getattr(partie, "coords", ())
+    ]
+    if not portees:
+        # La ligne passe au large de l'emprise : on garde l'étendue projetée,
+        # qui la couvre à coup sûr, plutôt que de rendre une coupe vide.
+        portees = projections
+    debut, fin = min(portees) - marge_m, max(portees) + marge_m
+    return segment(debut, fin)
 
 
 def _sommets(geometrie: BaseGeometry):
