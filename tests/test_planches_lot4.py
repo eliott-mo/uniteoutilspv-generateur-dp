@@ -864,3 +864,43 @@ def test_le_plan_de_masse_se_cadre_sur_la_zone_cloturee():
     quoi, dimensions, centre = _ce_que_la_planche_cadre(_Contrat([]), large)
     assert quoi == "emprise"
     assert dimensions == pytest.approx(large.dimensions_m)
+
+
+# ---------------------------------------------------------------------------
+# Un site long garde sa coupe du terrain (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_coupe_de_site_long_trouve_une_echelle():
+    """Saint-Aubin-sur-Loire : le dossier sortait sans DP 3, et presque sans le dire.
+
+    Sa coupe A-A' traverse 493 m de terrain. Les échelles de la coupe du
+    terrain s'arrêtaient au 1:1000, soit 493 mm pour une zone de dessin de
+    362 mm : `echelle_du_dessin` levait, la génération rattrapait la pièce une à
+    une — « DP 3 n'est pas produite : … » — et le `.pptx` partait sans sa coupe,
+    le message perdu au milieu des points à savoir.
+
+    Mesuré à la correction : la planche sort désormais, terrain au 1:1500.
+    """
+    from dp_socle.erreurs import ErreurEchelle
+    from dp_socle.planches.dp3_coupes import ECHELLES_TERRAIN
+    from dp_socle.planches.primitives import echelle_du_dessin
+
+    # La zone de dessin de la coupe du terrain, telle que mesurée sur la
+    # planche de Saint-Aubin le 05/10/2026.
+    zone = (0.0, 0.0, 362.0, 74.4)
+
+    denominateur = echelle_du_dessin(493.0, 6.0, zone, ECHELLES_TERRAIN,
+                                     libelle="coupe du terrain")
+    assert denominateur == 1500
+
+    # L'ancienne liste ne pouvait pas : c'est elle qui faisait disparaître la
+    # pièce, et le test le tient pour que personne ne la restreigne sans voir.
+    with pytest.raises(ErreurEchelle, match="coupe du terrain"):
+        echelle_du_dessin(493.0, 6.0, zone, (200, 250, 300, 500, 750, 1000),
+                          libelle="coupe du terrain")
+
+    # Et de la marge au-delà : 700 m est l'ordre de grandeur du plus long site
+    # de 3 MWc, et il doit tenir sans que la pièce disparaisse.
+    assert echelle_du_dessin(700.0, 10.0, zone, ECHELLES_TERRAIN,
+                             libelle="coupe du terrain") == 2000

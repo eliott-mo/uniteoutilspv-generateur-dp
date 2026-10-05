@@ -80,7 +80,19 @@ TITRE = piece("DP 3").titre
 #: de Saint-Cyr est de 9,5 m contre 3 m aux Islettes, et deux tables au 1/50 y
 #: occuperaient toute la largeur utile sans place pour les cotes.
 ECHELLES_TABLES = (50, 80, 100, 200)
-ECHELLES_TERRAIN = (200, 250, 300, 500, 750, 1000)
+#: Elles s'arrêtaient au 1:1000, et un site long perdait sa coupe en silence.
+#:
+#: Saint-Aubin-sur-Loire, mesuré le 05/10/2026 : la coupe A-A' y traverse
+#: 493 m de terrain, soit 493 mm au 1:1000 pour une zone de dessin de 362 mm.
+#: `echelle_du_dessin` levait `ErreurEchelle`, la génération rattrapait la
+#: pièce une à une — « DP 3 n'est pas produite : … » — et le dossier sortait
+#: sans sa coupe, le message perdu au milieu des points à savoir.
+#:
+#: Trois crans de plus, jusqu'au 1:2000 : 700 m, l'ordre de grandeur du plus
+#: long site de 3 MWc, y tiennent en 350 mm. Une coupe au 1:1500 est grossière,
+#: mais elle est vraie et son échelle est écrite sur son cadre — là où l'absence
+#: de la pièce, elle, ne se voit qu'à l'instruction.
+ECHELLES_TERRAIN = (200, 250, 300, 500, 750, 1000, 1250, 1500, 2000)
 
 #: Rangées dessinées sur la coupe de type, et minimum garanti par l'échelle.
 #:
