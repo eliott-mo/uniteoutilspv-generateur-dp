@@ -2604,6 +2604,34 @@ chemin ; l'arc de l'angle ne pouvait le franchir, et il se prenait pour un
 décrochement à effacer. Le chemin s'arrondit désormais sur sa seule géométrie,
 sans sommets alignés, et se recoupe ensuite à ses raccords.
 
+**Caler contre la piste les ouvrages qu'elle mord** est la troisième de ces
+corrections, demandée le 05/10/2026 : « les citernes et autres locaux
+techniques en bord de piste viennent mordre sur celle-ci ; il faudrait qu'ils
+viennent se caler contre la piste mais sans la mordre ». Ici c'est **l'ouvrage
+qui recule**, et non la piste : il est posé à l'estime, son repère sur un
+dessin PowerPoint valant à un mètre près, là où les 5 m de la bande sont une
+instruction. Reculer d'un mètre un local dessiné à la main n'invente rien ;
+rétrécir la piste, si.
+
+Le recul est perpendiculaire à la piste, du côté où l'ouvrage penche déjà — il
+ne pivote pas, son orientation venant du plan —, et s'arrête au premier
+dixième de mètre qui libère la bande : l'ouvrage l'affleure, il ne s'en éloigne
+pas. Il est refusé s'il fait buter l'ouvrage sur la clôture, sur une table ou
+sur un autre ouvrage, parce qu'une correction qui échange un défaut contre un
+autre n'en est pas une. Calculée **en dernier**, sur les bandes telles qu'elles
+seront dessinées : les deux corrections précédentes déplacent les pistes, et un
+recul calculé avant elles viserait une piste qui n'est plus là. À Gannay, le
+BESS empiète de 0,9 m² sur la bande et recule de 0,7 m.
+
+**La règle du centre** dit où elle s'arrête : un ouvrage dont le centre tombe
+**dans** la bande n'est pas au bord de la piste, il est dessiné dessus. Le
+reculer serait le replacer, et une note le dit sans rien corriger. C'est aussi
+ce qui règle, sans avoir à la connaître, la contradiction entre la correction
+du poste (D8) et celle des pistes : le poste combiné de Gannay posé sur la
+clôture a son centre sous la bande et demanderait 5,5 m de recul, ce qui
+défairait D8 — qui a raison, un poste de livraison fermant l'enceinte sur son
+long pan. Il reste donc où D8 l'a mis, et le contrôle le signale.
+
 ### Ce que le lot 2ter ne peut pas fournir
 
 Le plan PDF et l'export HelioScope sont deux sources, mais aucune n'est un

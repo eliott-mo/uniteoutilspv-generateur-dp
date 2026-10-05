@@ -662,18 +662,22 @@ def test_la_correction_du_poste_est_proposee_et_pas_appliquee(import_gannay, con
     Son centre est à 7,8 m du tracé — les 7,7 m du brief —, son long pan à
     6,3 m une fois le poste à ses cotes. L'import le propose, et ne le fait pas.
 
-    Les trois corrections que Gannay appelle sont listées ici, et c'est
-    volontaire : une correction qui apparaîtrait sans qu'on l'ait voulue
-    modifierait un plan dans le dos du chef de projet. `pistes_hors_tables`
-    s'y est ajoutée le 02/10/2026 — elle écarte des tables une piste que
-    `pistes_contre_cloture` ne traite pas, celle-ci ne s'occupant que des
-    pistes qui longent la clôture.
+    Les corrections que Gannay appelle sont listées ici, et c'est volontaire :
+    une correction qui apparaîtrait sans qu'on l'ait voulue modifierait un plan
+    dans le dos du chef de projet. `pistes_hors_tables` s'y est ajoutée le
+    02/10/2026 — elle écarte des tables une piste que `pistes_contre_cloture`
+    ne traite pas, celle-ci ne s'occupant que des pistes qui longent la
+    clôture. `ouvrages_contre_pistes` l'a rejointe le 05/10/2026 : sur le tracé
+    du plan, le BESS empiète de 0,9 m² sur la bande, et c'est l'ouvrage qui
+    recule — il est posé à l'estime sur un dessin PowerPoint, là où les 5 m de
+    la piste sont une instruction.
     """
     proposees = {c.identifiant: c for c in import_gannay.corrections_proposees}
     assert set(proposees) == {
         "poste_sur_cloture:pdl_ptr:1",
         "pistes_contre_cloture",
         "pistes_hors_tables",
+        "ouvrages_contre_pistes",
     }
     assert proposees["poste_sur_cloture:pdl_ptr:1"].retrait_m == pytest.approx(6.3, abs=0.2)
     assert contrat_gannay.donnees["corrections_plan"] == []
@@ -1740,3 +1744,90 @@ def test_le_libelle_de_cloture_de_boisne_est_connu_de_la_charte():
     connus = {normaliser(k): v for k, v in CORRESPONDANCE_LEGENDE.items()}
     for libelle in ("Clôture", "Clôture extérieure"):
         assert connus[normaliser(libelle)] == "cloture", libelle
+
+
+# ---------------------------------------------------------------------------
+# Les ouvrages que la piste mord, calés contre elle (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _gannay(export, corrections=()):
+    """L'import de Gannay avec les corrections demandées, les choix du plan faits."""
+    return importer_plan_pdf(
+        PLAN_GANNAY,
+        export,
+        longitude_origine=LONGITUDE_GANNAY,
+        correction_nord_sud_m=NORD_SUD_GANNAY_M,
+        choix=ChoixDuPlan(
+            volume_citerne_m3=120,
+            largeur_portail_m=7.0,
+            corrections=tuple(corrections),
+        ),
+    )
+
+
+def _bandes(construction):
+    from shapely.ops import unary_union
+
+    return unary_union([p.surface for p in construction.pistes])
+
+
+@besoin_gannay
+def test_un_ouvrage_mordu_par_la_piste_est_cale_contre_elle(export_gannay):
+    """Demande du chef de projet du 05/10/2026, sur le BESS de Gannay.
+
+    « Les citernes et autres locaux techniques en bord de piste viennent mordre
+    sur celle-ci ; il faudrait qu'ils viennent se caler contre la piste mais
+    sans la mordre. »
+
+    C'est l'ouvrage qui recule, et non la piste : il est posé à l'estime sur un
+    dessin PowerPoint, là où les 5 m de la bande sont une instruction du
+    23/09/2026. Reculer d'un mètre un local dessiné à la main n'invente rien ;
+    rétrécir la piste, si.
+    """
+    brut = _gannay(export_gannay).construction
+    bandes = _bandes(brut)
+    mordus = {
+        o.libelle: o.geometrie().intersection(bandes).area
+        for o in brut.ouvrages
+        if o.geometrie() is not None
+        and o.geometrie().intersection(bandes).area > 0.5
+    }
+    assert "BESS" in mordus, mordus
+    assert mordus["BESS"] == pytest.approx(0.9, abs=0.3)
+
+    cale = _gannay(export_gannay, ("ouvrages_contre_pistes",)).construction
+    bandes = _bandes(cale)
+    bess = next(o for o in cale.ouvrages if o.libelle == "BESS")
+    forme = bess.geometrie()
+    # Dégagé de la bande…
+    assert forme.intersection(bandes).area <= 0.05
+    # … mais calé contre elle, et non posé n'importe où plus loin : le recul
+    # s'arrête au premier dixième de mètre qui libère la piste.
+    assert forme.distance(bandes) <= 0.15
+    assert "ouvrages_contre_pistes" in (bess.correction or "")
+
+
+@besoin_gannay
+def test_un_ouvrage_dessine_sur_la_piste_n_est_pas_recule(export_gannay):
+    """Le centre sous la bande : on s'abstient, et on dit pourquoi.
+
+    Mesuré le 05/10/2026 : le poste combiné de Gannay, une fois posé sur la
+    clôture par la correction D8, a son centre dans la bande et demanderait
+    5,5 m de recul. L'y reculer défairait D8, qui a raison — un poste de
+    livraison ferme l'enceinte sur son long pan. La règle du centre l'écarte
+    d'elle-même, sans rien savoir de D8.
+    """
+    construction = _gannay(
+        export_gannay, ("poste_sur_cloture:pdl_ptr:1",)
+    ).construction
+    assert any(
+        "centre sous la piste" in note and "Poste combiné" in note
+        for note in construction.notes
+    ), construction.notes
+    cale = [
+        c
+        for c in construction.corrections_proposees
+        if c.identifiant == "ouvrages_contre_pistes"
+    ]
+    assert not any("Poste combiné" in c.raison for c in cale)

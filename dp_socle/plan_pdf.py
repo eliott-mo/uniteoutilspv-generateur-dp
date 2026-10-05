@@ -2756,7 +2756,8 @@ def _ecarte_des_tables(ligne: LineString, tables, interdits):
     return None
 
 
-def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte) -> tuple:
+def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte,
+                            ouvrages: list | None = None) -> tuple:
     """La correction qui écarte des tables les pistes qui mordent dessus.
 
     Elle complète celle qui serre les pistes contre la clôture : celle-là ne
@@ -2775,7 +2776,19 @@ def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte) -> tuple
     toutes = unary_union(list(tables))
     if toutes.is_empty:
         return None, axes, None
-    interdits = enceinte.exterior if enceinte is not None else None
+    # Ce que le décalage n'a pas le droit de mordre. Les ouvrages manquaient —
+    # la docstring les annonçait, le code ne passait que la clôture — et une
+    # piste écartée d'une rangée pouvait venir sur un poste (relevé le
+    # 05/10/2026). Le défaut était muet : la correction se disait bonne.
+    a_eviter = [enceinte.exterior] if enceinte is not None else []
+    formes = [
+        f
+        for f in (o.geometrie() for o in (ouvrages or []))
+        if f is not None and not f.is_empty
+    ]
+    if formes:
+        a_eviter.append(unary_union(formes))
+    interdits = unary_union(a_eviter) if a_eviter else None
 
     ecartes, deplacements, rebelles = [], {}, []
     for rang, (axe, piste) in enumerate(zip(axes, pistes)):
@@ -2834,6 +2847,174 @@ def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte) -> tuple
         ),
     )
     return correction, ecartes, note_rebelles
+
+
+#: Recul maximal proposé pour caler un ouvrage contre la piste, en mètres.
+#:
+#: La demi-largeur de la piste, et ce n'est pas un chiffre rond pris au hasard :
+#: un ouvrage dont le **centre** tombe hors de la bande n'a jamais à reculer de
+#: plus de sa propre demi-profondeur pour en sortir, et le gabarit la borne. Un
+#: ouvrage qui demande davantage a son centre dans la bande — il n'est pas « au
+#: bord de la piste », il est dessiné dessus, et c'est au plan de le reprendre.
+#:
+#: Mesuré le 05/10/2026 sur Gannay : le poste combiné, une fois posé sur la
+#: clôture par la correction D8, a son centre dans la bande et demanderait
+#: 5,5 m. L'y reculer défairait D8, qui a raison — un poste de livraison ferme
+#: l'enceinte sur son long pan. La règle du centre l'écarte d'elle-même.
+RECUL_OUVRAGE_MAX_M = LARGEUR_PISTE_M / 2.0
+
+
+@dataclass(frozen=True)
+class CorrectionDesOuvrages:
+    """Les ouvrages que la bande de piste mord, reculés jusqu'à l'affleurer.
+
+    Demande du chef de projet du 05/10/2026 : « les citernes et autres locaux
+    techniques en bord de piste viennent mordre sur celle-ci ; il faudrait
+    qu'ils viennent se caler contre la piste mais sans la mordre ».
+
+    C'est l'**ouvrage** qui bouge, et non la piste, parce que c'est lui qui est
+    posé à l'estime : le plan projet est un dessin PowerPoint, son repère
+    d'ouvrage vaut à un mètre près, et la bande de 5 m, elle, est une
+    instruction. Reculer d'un mètre un local dessiné à la main n'invente rien ;
+    rétrécir la piste, si.
+    """
+
+    identifiant: str
+    categorie: str
+    libelle: str
+    #: Le plus grand recul appliqué, en mètres.
+    retrait_m: float
+    raison: str
+    #: Nouveau centre par rang d'ouvrage, `{rang: (x, y)}`.
+    centres: dict
+
+    @property
+    def intitule(self) -> str:
+        return (
+            f"Caler contre la piste les ouvrages qu'elle mord, "
+            f"d'au plus {nombre_fr(round(self.retrait_m, 1))} m"
+        )
+
+
+def _cale_contre_la_piste(forme, bandes, interdits):
+    """Le plus petit recul qui sort `forme` de la bande, ou None.
+
+    Le recul est perpendiculaire à la piste, du côté où l'ouvrage penche déjà :
+    c'est le geste qu'on ferait à la main, et il ne fait pas pivoter l'ouvrage —
+    son orientation vient du plan et n'a pas à changer pour un chevauchement.
+
+    Il s'arrête dès que la bande est libérée **sans** mordre ailleurs : clôture,
+    tables ou autre ouvrage. Une correction qui échange un défaut contre un
+    autre n'en est pas une.
+
+    Rend (forme reculée, recul en mètres), ou None.
+    """
+    from shapely.affinity import translate
+
+    proche = nearest_points(bandes.boundary, forme.centroid)[0]
+    vx = forme.centroid.x - proche.x
+    vy = forme.centroid.y - proche.y
+    norme = math.hypot(vx, vy)
+    if norme < 1e-9:
+        return None
+    vx, vy = vx / norme, vy / norme
+
+    pas = 0.1
+    for k in range(1, int(RECUL_OUVRAGE_MAX_M / pas) + 1):
+        recul = k * pas
+        essai = translate(forme, vx * recul, vy * recul)
+        if essai.intersection(bandes).area > 0.05:
+            continue
+        if any(essai.intersects(interdit) for interdit in interdits):
+            continue
+        return essai, recul
+    return None
+
+
+def _ouvrages_contre_les_pistes(ouvrages: list, pistes: list, enceinte, tables) -> tuple:
+    """La correction qui recule jusqu'à l'affleurer les ouvrages mordus par la piste.
+
+    Calculée **après** les deux corrections de piste, sur les bandes telles
+    qu'elles seront dessinées : une piste serrée contre la clôture ne mord pas
+    les mêmes ouvrages que le tracé du plan, et proposer un recul contre une
+    piste qui va bouger ne voudrait rien dire.
+
+    Rend (correction, note) — la note dit ce qu'on a vu et renoncé à corriger.
+    """
+    if not ouvrages or not pistes:
+        return None, None
+    bandes = unary_union([p.surface for p in pistes])
+    if bandes.is_empty:
+        return None, None
+
+    formes = {rang: o.geometrie() for rang, o in enumerate(ouvrages, start=1)}
+    formes = {rang: f for rang, f in formes.items() if f is not None and not f.is_empty}
+    tous_les_voisins = {
+        rang: unary_union([f for autre, f in formes.items() if autre != rang])
+        for rang in formes
+    }
+    les_tables = unary_union(list(tables)) if tables else None
+
+    centres, reculs, dessus, rebelles = {}, {}, [], []
+    for rang, forme in formes.items():
+        ouvrage = ouvrages[rang - 1]
+        if forme.intersection(bandes).area <= MORSURE_NEGLIGEABLE_M2:
+            continue
+        # Le centre dans la bande : l'ouvrage est dessiné **sur** la piste et
+        # non à son bord. Le reculer serait le replacer, pas le caler.
+        if bandes.contains(Point(ouvrage.centre)):
+            dessus.append(ouvrage.libelle)
+            continue
+        interdits = [g for g in (tous_les_voisins[rang], les_tables) if g is not None]
+        if enceinte is not None:
+            interdits.append(enceinte.exterior)
+        trouve = _cale_contre_la_piste(forme, bandes, interdits)
+        if trouve is None:
+            rebelles.append(ouvrage.libelle)
+            continue
+        essai, recul = trouve
+        centres[rang] = (essai.centroid.x, essai.centroid.y)
+        reculs[rang] = recul
+
+    notes = []
+    if dessus:
+        notes.append(
+            ", ".join(f"« {l} »" for l in sorted(set(dessus)))
+            + " a/ont son/leur centre sous la piste : l'ouvrage n'est pas au bord "
+            "de la bande, il est dessiné dessus. Le reculer serait le replacer, "
+            "et c'est au plan de le faire."
+        )
+    if rebelles:
+        notes.append(
+            ", ".join(f"« {l} »" for l in sorted(set(rebelles)))
+            + f" mord(ent) sur la piste, et aucun recul sous "
+            f"{nombre_fr(RECUL_OUVRAGE_MAX_M)} m ne la/les dégage sans buter sur "
+            "la clôture, les tables ou un autre ouvrage."
+        )
+    note = " ".join(notes) or None
+    if not centres:
+        return None, note
+
+    libelles = sorted({ouvrages[rang - 1].libelle for rang in centres})
+    mordu = float(
+        unary_union([formes[rang] for rang in centres]).intersection(bandes).area
+    )
+    recule = max(reculs.values())
+    correction = CorrectionDesOuvrages(
+        identifiant="ouvrages_contre_pistes",
+        categorie=", ".join(sorted({ouvrages[r - 1].categorie for r in centres})),
+        libelle="Ouvrages calés contre la piste",
+        retrait_m=recule,
+        raison=(
+            "Posé(s) là où le plan les dessine, "
+            + ", ".join(f"« {l} »" for l in libelles)
+            + f" empiète(nt) de {nombre_fr(round(mordu, 1))} m² sur la piste. "
+            f"Reculé(s) d'au plus {nombre_fr(round(recule, 1))} m perpendiculairement "
+            "à elle — correction du plan —, il(s) l'affleure(nt) sans la mordre."
+        ),
+        centres=centres,
+    )
+    return correction, note
 
 
 def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tuple:
@@ -3985,7 +4166,9 @@ def construire(
     # la place pour s'en écarter. Calculée sur l'état courant, pour que les
     # deux corrections se composent au lieu de se contredire.
     correction_tables, axes_ecartes, note_tables = _pistes_hors_des_tables(
-        axes_courants, pistes, tables, enceinte.polygone if enceinte is not None else None
+        axes_courants, pistes, tables,
+        enceinte.polygone if enceinte is not None else None,
+        ouvrages,
     )
     if note_tables:
         notes.append(note_tables)
@@ -3994,6 +4177,30 @@ def construire(
         if correction_tables.identifiant in choix.corrections:
             appliquees.append(correction_tables)
             pistes, notes_pistes = dessiner_pistes(axes_ecartes)
+    # Les ouvrages que la bande mord, calés contre elle. En dernier, sur les
+    # bandes telles qu'elles seront dessinées : les deux corrections
+    # précédentes déplacent les pistes, et un recul calculé avant elles
+    # viserait une piste qui n'est plus là.
+    correction_ouvrages, note_ouvrages = _ouvrages_contre_les_pistes(
+        ouvrages, pistes, enceinte.polygone if enceinte is not None else None, tables
+    )
+    if note_ouvrages:
+        notes.append(note_ouvrages)
+    if correction_ouvrages is not None:
+        proposees.append(correction_ouvrages)
+        if correction_ouvrages.identifiant in choix.corrections:
+            appliquees.append(correction_ouvrages)
+            for rang, centre in correction_ouvrages.centres.items():
+                ouvrage = ouvrages[rang - 1]
+                ouvrage.centre = centre
+                # Sans écraser une correction déjà portée : un ouvrage peut
+                # avoir été posé sur la clôture puis calé contre la piste, et
+                # `projet.json` doit dire les deux.
+                ouvrage.correction = (
+                    f"{ouvrage.correction}+{correction_ouvrages.identifiant}"
+                    if ouvrage.correction
+                    else correction_ouvrages.identifiant
+                )
     notes.extend(notes_pistes)
     # Les mises en limite de propriété se vérifient au calage, dans
     # `ImportPlanPDF` : la construction ne connaît pas l'emprise cadastrale.
