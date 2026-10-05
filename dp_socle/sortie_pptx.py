@@ -332,6 +332,27 @@ class Groupe:
     pages: int = 1
 
 
+#: Les formules par lesquelles une pièce manquante s'annonce au rapport.
+#:
+#: Uniformes ici et dans `assemblage` — « DP 3 n'est pas produite », « DP 7 et
+#: DP 8 ne sont pas produites » —, ce qui permet de les reconnaître sans les
+#: énumérer pièce par pièce : une pièce ajoutée demain le sera aussi.
+MARQUEURS_PIECE_ABSENTE = ("n'est pas produite", "ne sont pas produites")
+
+
+def annonce_une_piece_absente(message: str) -> bool:
+    """Vrai quand un message de génération dit qu'une pièce manque au dossier.
+
+    Une pièce absente n'est pas une remarque sur le dossier : c'est un trou
+    dedans, et l'écran la montre à part. Relevé le 05/10/2026 sur
+    Saint-Aubin-sur-Loire — son contrat n'avait pas de profil de terrain, DP 3
+    n'a pas été produite, et le message le disant arrivait au milieu des points
+    à savoir, parmi les avertissements de principe que tout dossier porte. Le
+    `.pptx` est parti sans sa coupe.
+    """
+    return any(marqueur in message for marqueur in MARQUEURS_PIECE_ABSENTE)
+
+
 def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dpi,
                            fond_ign=True):
     """Toutes les planches du dossier, dans l'ordre, avec leur numéro de page.

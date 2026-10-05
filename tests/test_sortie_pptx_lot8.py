@@ -602,3 +602,55 @@ def test_le_rapport_dit_la_voie_et_le_poids_de_chaque_diapo(rapport):
         assert diapo.voie in ("vectorielle", "matricielle")
         assert diapo.octets > 0
     assert rapport.taille_mo > 0
+
+
+# ---------------------------------------------------------------------------
+# Une pièce absente se dit à part des remarques (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_piece_absente_se_reconnait_a_sa_formule():
+    """Saint-Aubin-sur-Loire : le `.pptx` est parti sans sa coupe.
+
+    Son contrat n'avait pas de profil de terrain — la coupe A-A' n'avait pas été
+    relevée —, DP 3 n'a donc pas été produite, et le message qui le disait
+    arrivait au milieu des « points à savoir », parmi les avertissements de
+    principe que tout dossier porte. Une pièce qui manque n'est pas une remarque
+    sur le dossier : c'est un trou dedans, et l'écran la montre à part.
+
+    Ce test tient la formule, qui est ce qui permet de les reconnaître sans
+    énumérer les pièces une à une.
+    """
+    from dp_socle.sortie_pptx import annonce_une_piece_absente
+
+    assert annonce_une_piece_absente(
+        "Aucun profil de terrain au contrat : DP 3 n'est pas produite. "
+        "Tracez la ligne de coupe A-A' et relevez le profil à l'import."
+    )
+    assert annonce_une_piece_absente(
+        "Aucune prise de vue enregistrée : DP 6, DP 7 et DP 8 ne sont pas produites."
+    )
+    assert annonce_une_piece_absente("DP 4-3 n'est pas produite : aucun ouvrage.")
+    # Et ce qui n'est pas une pièce manquante ne doit pas s'y glisser : les
+    # avertissements de principe accompagnent **tous** les dossiers, et les
+    # faire remonter en bloquants rendrait le signal muet.
+    from dp_socle.sortie_pptx import AVERTISSEMENTS_DE_PRINCIPE
+
+    for message in AVERTISSEMENTS_DE_PRINCIPE:
+        assert not annonce_une_piece_absente(message), message
+
+
+def test_les_deux_producteurs_emploient_la_meme_formule():
+    """`sortie_pptx` et `assemblage` annoncent une pièce absente des mêmes mots.
+
+    Sans quoi la sortie PowerPoint signalerait le trou et le PDF non, ou
+    l'inverse — et le défaut ne se verrait que sur un dossier réel.
+    """
+    from pathlib import Path
+
+    from dp_socle.sortie_pptx import MARQUEURS_PIECE_ABSENTE
+
+    racine = Path(__file__).resolve().parent.parent
+    for module in ("sortie_pptx.py", "assemblage.py"):
+        texte = (racine / "dp_socle" / module).read_text(encoding="utf-8")
+        assert any(m in texte for m in MARQUEURS_PIECE_ABSENTE), module

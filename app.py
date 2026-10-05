@@ -224,6 +224,42 @@ def _lister_les_avertissements(titre: str, messages) -> None:
     st.markdown(_en_puces(messages))
 
 
+def _contrat_porte_un_profil(dossier) -> bool:
+    """Vrai quand le contrat écrit porte un profil de terrain exploitable.
+
+    C'est la condition de DP 3, et elle se lit sur le contrat plutôt que sur
+    l'état de l'écran : le contrat est ce que la génération consommera, et un
+    import validé hier ne laisse rien en session.
+
+    Importé dans la fonction, comme toute nouveauté du socle qu'`app.py`
+    appelle : sur Community Cloud le script neuf tourne contre le socle du
+    démarrage, et un import en tête de fichier rendrait l'outil inutilisable à
+    la mise en ligne.
+    """
+    try:
+        from dp_socle.contrat import charger_contrat
+
+        profil = charger_contrat(dossier).profil
+    except Exception:
+        # Un contrat illisible se signale ailleurs, et bruyamment. Ici, ne pas
+        # prétendre savoir : on se tait plutôt que d'annoncer un faux manque.
+        return True
+    return bool((profil or {}).get("points"))
+
+
+def _annonce_une_piece_absente(message: str) -> bool:
+    """Vrai quand un message de génération dit qu'une pièce manque au dossier.
+
+    La reconnaissance vit dans le socle, avec les messages qu'elle reconnaît :
+    importée **dans la fonction** parce qu'`app.py` tourne contre le socle du
+    démarrage sur Community Cloud, et qu'un import en tête de fichier rendrait
+    l'outil inutilisable à la mise en ligne suivante.
+    """
+    from dp_socle.sortie_pptx import annonce_une_piece_absente
+
+    return annonce_une_piece_absente(message)
+
+
 def _signaler_l_imprevu(erreur: Exception, pendant: str) -> None:
     """Rend lisible une erreur que l'outil n'avait pas prévue.
 
@@ -3089,6 +3125,19 @@ if fichier_notice is None and contrat_present:
         icon="⚠️",
     )
 
+if contrat_present and not _contrat_porte_un_profil(_dossier_contrat):
+    # Dit **avant** de générer, comme la notice absente. Il l'était seulement
+    # après, au milieu des points à savoir : sur Saint-Aubin-sur-Loire le
+    # dossier est parti sans sa coupe, et une génération complète — fonds IGN
+    # compris — avait été dépensée pour s'en apercevoir (05/10/2026).
+    st.warning(
+        "**Aucun profil de terrain au contrat : DP 3 ne sortira pas.** La "
+        "coupe A-A' se place d'elle-même à l'import et son profil se relève "
+        "sur le RGE ALTI ; si le relevé a échoué, réimportez le plan, ou "
+        "relancez-le avec « Corriger et relever le profil ».",
+        icon="⚠️",
+    )
+
 
 st.divider()
 st.subheader("3. Génération")
@@ -3323,10 +3372,26 @@ if _genere_pptx is not None and _genere_pptx["nom"] == nom:
             width="stretch",
         )
 
+    # Une pièce absente se dit à part, et avant tout le reste. Elle était
+    # noyée : sur Saint-Aubin-sur-Loire, « DP 3 n'est pas produite » arrivait au
+    # milieu des points à savoir, parmi les avertissements de principe que tout
+    # dossier porte, et le `.pptx` est parti sans sa coupe (05/10/2026). Ce
+    # n'est pas une remarque sur le dossier : c'est une pièce qui manque.
+    _absentes = [
+        m for m in rapport_pptx.avertissements if _annonce_une_piece_absente(m)
+    ]
+    _autres = [m for m in rapport_pptx.avertissements if m not in _absentes]
+    if _absentes:
+        st.error(
+            f"**{len(_absentes)} pièce(s) du dossier ne sont pas produites.** "
+            "Le `.pptx` est complet de tout le reste, mais il lui manque "
+            "ceci — à régler avant le dépôt.",
+            icon="🚫",
+        )
+        st.markdown(_en_puces(_absentes))
     _lister_les_avertissements(
-        f"{len(rapport_pptx.avertissements)} point(s) à savoir avant de "
-        "finaliser le dossier",
-        rapport_pptx.avertissements,
+        f"{len(_autres)} point(s) à savoir avant de finaliser le dossier",
+        _autres,
     )
 
     st.dataframe(
