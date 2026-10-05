@@ -237,14 +237,17 @@ def _contrat_porte_un_profil(dossier) -> bool:
     la mise en ligne.
     """
     try:
-        from dp_socle.contrat import charger_contrat
+        from dp_socle.import_be import lire_parametres
 
-        profil = charger_contrat(dossier).profil
+        parametres = lire_parametres(dossier) or {}
     except Exception:
         # Un contrat illisible se signale ailleurs, et bruyamment. Ici, ne pas
         # prétendre savoir : on se tait plutôt que d'annoncer un faux manque.
         return True
-    return bool((profil or {}).get("points"))
+    # `projet.json` et non le contrat entier : Streamlit rejoue le script à
+    # chaque interaction, et `charger_contrat` y ouvrirait le GeoPackage à
+    # chaque fois. Le profil est dans le JSON, d'où `Contrat.profil` le lit.
+    return bool((parametres.get("profil_terrain") or {}).get("points"))
 
 
 def _annonce_une_piece_absente(message: str) -> bool:
