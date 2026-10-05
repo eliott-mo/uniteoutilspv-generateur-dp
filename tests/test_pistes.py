@@ -380,3 +380,68 @@ def test_une_piste_a_l_ecart_des_tables_ne_declenche_rien():
 
     correction, ecartes, note = _pistes_hors_des_tables([axe], pistes, [rangee], None)
     assert correction is None and note is None and ecartes == [axe]
+
+
+# ---------------------------------------------------------------------------
+# La largeur annoncée en légende prend le pas sur les 5 m (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_piste_porte_la_largeur_de_sa_legende():
+    """« Piste à créer (4 m de large) » se dessine à 4 m, pas à 5.
+
+    Décision du chef de projet du 05/10/2026 : le plan sait ce qu'il dessine,
+    et l'élargir le contredit. À La Chapelle-sous-Aubenas ce mètre de trop
+    faisait passer le poste de livraison, à 2,30 m de l'axe, au-dedans de la
+    bande — donc hors de portée de la correction qui cale les ouvrages, dont
+    la règle du centre protège ce qui est dessiné sur la piste.
+    """
+    from dp_socle.pistes import AxePiste, dessiner_pistes
+
+    trace = LineString([(0.0, 0.0), (120.0, 0.0)])
+    etroite, _ = dessiner_pistes([AxePiste("piste_lourde_a_creer", "p", trace, 4.0)])
+    large, _ = dessiner_pistes([AxePiste("piste_lourde_a_creer", "p", trace)])
+
+    assert etroite[0].largeur_m == 4.0
+    assert large[0].largeur_m == 5.0
+    # Mesuré sur la bande produite, et non sur la valeur déclarée.
+    assert etroite[0].surface.area / trace.length == pytest.approx(4.0, rel=1e-3)
+    assert large[0].surface.area / trace.length == pytest.approx(5.0, rel=1e-3)
+
+
+def test_le_rayon_de_l_axe_suit_la_largeur():
+    """Le rayon imposé est celui du bord intérieur : sur l'axe, il suit la largeur.
+
+    11 m au bord intérieur font 13 m sur l'axe d'une piste de 4 m, 13,5 m sur
+    celui d'une piste de 5 m. Arrondir une piste de 4 m à 13,5 m lui donnerait
+    un bord intérieur de 11,5 m — pas faux, mais ce n'est plus la règle ; et
+    l'inverse, 13 m sur une piste de 5 m, descendrait son bord à 10,5 m, en
+    deçà de la « voie engins ».
+    """
+    from dp_socle.pistes import RAYON_INTERIEUR_M, rayon_axe
+
+    assert rayon_axe(4.0) == pytest.approx(13.0)
+    assert rayon_axe(5.0) == pytest.approx(13.5)
+    assert rayon_axe(4.0) - 4.0 / 2.0 == pytest.approx(RAYON_INTERIEUR_M)
+
+
+def test_la_piste_serree_contre_la_cloture_garde_sa_largeur():
+    """Serrer une piste de 4 m ne doit pas la reporter comme une piste de 5 m.
+
+    L'axe est reporté sur la clôture décalée de la demi-largeur et du jeu : à
+    5 m supposés, une piste de 4 m se serait retrouvée à 1 m de la clôture au
+    lieu de 0,5, et sa bande aurait laissé un mètre de perdu le long d'elle.
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.pistes import JEU_CLOTURE_M, serrer_contre
+
+    enceinte = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    trace = LineString([(2.0, 2.0), (2.0, 98.0)])
+    for largeur in (4.0, 5.0):
+        axe = serrer_contre(trace, enceinte, largeur_m=largeur)
+        assert axe is not None, largeur
+        bande = axe.buffer(largeur / 2.0, cap_style="flat", join_style="round")
+        assert bande.distance(enceinte.exterior) == pytest.approx(
+            JEU_CLOTURE_M, abs=0.05
+        ), largeur

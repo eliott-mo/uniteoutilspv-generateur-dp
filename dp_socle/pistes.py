@@ -58,6 +58,16 @@ RAYON_INTERIEUR_M = 11.0
 #: Le même rayon, rapporté à l'axe : c'est l'axe que l'on arrondit.
 RAYON_AXE_M = RAYON_INTERIEUR_M + LARGEUR_PISTE_M / 2.0
 
+
+def rayon_axe(largeur_m: float) -> float:
+    """Rayon à appliquer à l'axe pour qu'une piste de `largeur_m` tienne le rayon intérieur.
+
+    Le rayon imposé est celui du **bord intérieur** du virage — la « voie
+    engins » des pompiers. Rapporté à l'axe, il grandit donc avec la largeur :
+    une piste de 4 m s'arrondit à 13 m sur son axe, une de 5 m à 13,5 m.
+    """
+    return RAYON_INTERIEUR_M + largeur_m / 2.0
+
 #: Deux extrémités de tracé à moins de ceci l'une de l'autre sont deux traits
 #: mis bout à bout, en mètres. Mesuré le 23/09/2026 : 1,9 et 2,2 m aux deux
 #: raccords de la boucle de Gannay ; 3,6 m entre les deux pistes de Bray, qui
@@ -102,6 +112,20 @@ class AxePiste:
     categorie: str
     libelle: str
     ligne: LineString
+    #: Largeur portée par la légende du plan, en mètres, ou None.
+    #:
+    #: Les 5 m de `LARGEUR_PISTE_M` sont l'instruction par défaut ; quand le
+    #: plan annonce lui-même la largeur de sa piste — « Piste à créer (4 m de
+    #: large) » sur La Chapelle-sous-Aubenas —, c'est elle qui vaut. Le plan
+    #: sait ce qu'il dessine, et l'élargir d'un mètre le contredit : à La
+    #: Chapelle, ce mètre faisait passer le poste de livraison de 2,30 m de
+    #: l'axe au-dedans de la bande (mesuré le 05/10/2026).
+    largeur_m: float | None = None
+
+    @property
+    def largeur(self) -> float:
+        """La largeur à dessiner : celle du plan, ou l'instruction par défaut."""
+        return self.largeur_m if self.largeur_m else LARGEUR_PISTE_M
 
 
 @dataclass
@@ -111,8 +135,11 @@ class PisteDessinee:
     categorie: str
     libelle: str
     axe: LineString
-    #: La bande de 5 m, raccords en T compris : un polygone, ou plusieurs.
+    #: La bande, raccords en T compris : un polygone, ou plusieurs.
     surface: BaseGeometry
+    #: Largeur de la bande, en mètres : celle que la légende annonce, ou les
+    #: 5 m de l'instruction du 23/09/2026 à défaut.
+    largeur_m: float = LARGEUR_PISTE_M
     #: Rayon appliqué sur l'axe à chacun de ses virages, en mètres.
     rayons_axe_m: list = field(default_factory=list)
     #: Rayon intérieur appliqué à chaque angle rentrant de ses raccords en T.
@@ -555,7 +582,7 @@ def _raccorder(
             distance = math.dist(coords[e1.axe][e1.bout], coords[e2.axe][e2.bout])
             if distance < JONCTION_M:
                 candidates.append((distance, e1, e2))
-            elif distance < 2.0 * LARGEUR_PISTE_M:
+            elif distance < axes[e1.axe].largeur + axes[e2.axe].largeur:
                 # Assez près pour que les bandes se touchent, trop loin pour
                 # être deux traits mis bout à bout : le plan ne dit pas si la
                 # piste se continue, et on ne le décide pas à sa place.
@@ -753,6 +780,8 @@ def _evasements(
     cible: LineString,
     disponible: float,
     paire,
+    largeur_axe_m: float = LARGEUR_PISTE_M,
+    largeur_cible_m: float = LARGEUR_PISTE_M,
 ) -> tuple[list[Polygon], list[float]]:
     """Les deux angles rentrants d'un raccord en T, arrondis au rayon intérieur.
 
@@ -767,15 +796,23 @@ def _evasements(
     voisin = coords[1] if raccord.bout == 0 else coords[-2]
     arrivee = _direction(voisin, extremite)
     principale = _direction_locale(cible, raccord.point)
-    demi = LARGEUR_PISTE_M / 2.0
+    # Deux demi-largeurs, et non une : celle de la piste qui arrive porte ses
+    # bords, celle de la piste rejointe porte le sien. Elles étaient
+    # confondues tant que toutes les pistes faisaient 5 m.
+    demi = largeur_axe_m / 2.0
+    demi_cible = largeur_cible_m / 2.0
     # Côté de la piste rejointe où se trouve celle qui arrive.
     cote_cible = 1.0 if (principale[0] * -arrivee[1] - principale[1] * -arrivee[0]) > 0 else -1.0
     bord_cible = (
-        raccord.point[0] - principale[1] * demi * cote_cible,
-        raccord.point[1] + principale[0] * demi * cote_cible,
+        raccord.point[0] - principale[1] * demi_cible * cote_cible,
+        raccord.point[1] + principale[0] * demi_cible * cote_cible,
     )
     projete = cible.project(Point(raccord.point))
-    reste_cible = math.inf if cible.is_ring else min(projete, cible.length - projete) - demi
+    reste_cible = (
+        math.inf
+        if cible.is_ring
+        else min(projete, cible.length - projete) - demi_cible
+    )
 
     evasements, rayons = [], []
     for cote in (1.0, -1.0):
@@ -818,7 +855,8 @@ def longe(axe: LineString, enceinte: Polygon) -> bool:
 
 
 def serrer_contre(
-    axe: LineString, enceinte: Polygon, jeu: float = JEU_CLOTURE_M
+    axe: LineString, enceinte: Polygon, jeu: float = JEU_CLOTURE_M,
+    largeur_m: float = LARGEUR_PISTE_M,
 ) -> LineString | None:
     """L'axe d'une piste qui longe la clôture, reporté pour que sa bande passe à `jeu` d'elle.
 
@@ -832,7 +870,7 @@ def serrer_contre(
 
     if not longe(axe, enceinte):
         return None
-    decale = enceinte.buffer(-(LARGEUR_PISTE_M / 2.0 + jeu), join_style="mitre")
+    decale = enceinte.buffer(-(largeur_m / 2.0 + jeu), join_style="mitre")
     if decale.is_empty:
         return None
     if decale.geom_type == "MultiPolygon":
@@ -898,7 +936,12 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
     axes_arrondis: dict = {}
     rayons_axe: dict = {}
     for chemin in chemins:
-        morceaux, rayons, notes_chemin = _arrondir(chemin, RAYON_AXE_M)
+        # Un chemin peut enchaîner des tracés de largeurs différentes. Le rayon
+        # imposé étant celui du **bord intérieur**, c'est la plus large qui
+        # commande : l'arrondir sur une piste plus étroite serrerait le bord de
+        # sa voisine en deçà des 11 m.
+        largeur_chemin = max(axes[t].largeur for t in set(chemin.troncons))
+        morceaux, rayons, notes_chemin = _arrondir(chemin, rayon_axe(largeur_chemin))
         libelles = sorted({axes[t].libelle for t in set(chemin.troncons)})
         for note in notes_chemin:
             notes.append(f"Piste « {' / '.join(libelles)} » : {note}.")
@@ -908,7 +951,7 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
 
     lignes = {i: LineString(points) for i, points in axes_arrondis.items()}
     surfaces = {
-        i: ligne.buffer(LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round")
+        i: ligne.buffer(axes[i].largeur / 2.0, cap_style="flat", join_style="round")
         for i, ligne in lignes.items()
     }
 
@@ -927,10 +970,11 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
         # deux bouts se raccordent, la moitié de ce qui reste à découvert entre
         # les deux pistes qu'elle relie : 3,2 m pour la bretelle de 11,4 m du
         # portail de Gannay.
-        demi = LARGEUR_PISTE_M / 2.0
+        demi = axes[raccord.axe].largeur / 2.0
+        demi_sur = axes[raccord.sur].largeur / 2.0
         nombre = nb_raccords[raccord.axe]
         disponible = min(
-            _longueur_droite_en_bout(coords_axe, bout) - demi,
+            _longueur_droite_en_bout(coords_axe, bout) - demi_sur,
             (axe.length - demi * nombre) / nombre,
         )
         evasements, rayons = _evasements(
@@ -939,6 +983,8 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
             lignes[raccord.sur],
             max(0.0, disponible),
             unary_union([surfaces[raccord.axe], surfaces[raccord.sur]]),
+            largeur_axe_m=axes[raccord.axe].largeur,
+            largeur_cible_m=axes[raccord.sur].largeur,
         )
         if evasements:
             # Un évasement ne touche la bande que le long de son bord, au
@@ -958,12 +1004,13 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
             )
 
     for i, liste in rayons_axe.items():
-        serres = [r for r in liste if r < RAYON_AXE_M - 0.05]
+        voulu = rayon_axe(axes[i].largeur)
+        serres = [r for r in liste if r < voulu - 0.05]
         if serres:
             notes.append(
                 f"Piste « {axes[i].libelle} » : {len(serres)} virage(s) de "
                 f"{min(serres):.1f} m de rayon sur l'axe, en deçà des "
-                f"{RAYON_AXE_M:.1f} m voulus — le tracé du plan ne laisse pas la place."
+                f"{voulu:.1f} m voulus — le tracé du plan ne laisse pas la place."
             )
 
     pistes = [
@@ -972,6 +1019,7 @@ def dessiner_pistes(axes: list[AxePiste]) -> tuple[list[PisteDessinee], list[str
             libelle=axes[i].libelle,
             axe=lignes[i],
             surface=surfaces[i],
+            largeur_m=axes[i].largeur,
             rayons_axe_m=[round(r, 2) for r in rayons_axe.get(i, [])],
             rayons_raccords_m=[round(r, 2) for r in rayons_raccords.get(i, [])],
         )

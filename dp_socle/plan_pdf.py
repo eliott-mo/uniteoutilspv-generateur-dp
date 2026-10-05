@@ -62,6 +62,7 @@ from .pistes import (
     RAYON_INTERIEUR_M,
     AxePiste,
     dessiner_pistes,
+    rayon_axe,
     serrer_contre,
 )
 
@@ -302,6 +303,12 @@ def cote_lue(libelle: str, categorie: str | None) -> dict:
         return {"volume_citerne_m3": int(valeur) if valeur.is_integer() else valeur}
     if categorie == "portail" and unite == "m":
         return {"largeur_portail_m": valeur}
+    # La largeur d'une piste, quand la légende l'annonce : « Piste à créer
+    # (4 m de large) » sur La Chapelle-sous-Aubenas. Elle prend le pas sur les
+    # 5 m de l'instruction du 23/09/2026 — le plan sait ce qu'il dessine, et
+    # l'élargir le contredit (décision du chef de projet du 05/10/2026).
+    if categorie in CATEGORIES_PISTES and unite == "m":
+        return {"largeur_piste_m": valeur}
     return {}
 
 
@@ -2721,7 +2728,8 @@ def _bouts_raccordes_confondus(axes: list) -> list:
                         milieu = ((p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0)
                         coords[i][bout_i] = coords[j][bout_j] = milieu
     return [
-        AxePiste(axe.categorie, axe.libelle, LineString(c)) for axe, c in zip(axes, coords)
+        AxePiste(axe.categorie, axe.libelle, LineString(c), axe.largeur_m)
+        for axe, c in zip(axes, coords)
     ]
 
 
@@ -2741,7 +2749,22 @@ DECALAGE_PISTE_MAX_M = 3.0
 MORSURE_NEGLIGEABLE_M2 = 0.5
 
 
-def _ecarte_des_tables(ligne: LineString, tables, interdits):
+def _largeurs_dites(pistes) -> str:
+    """« de 5 m », « de 4 m », ou « de 4 et 5 m » — ce que les bandes mesurent.
+
+    Les messages annonçaient « les pistes de 5 m » en dur. Depuis qu'une
+    largeur portée en légende prend le pas sur l'instruction, ce 5 pouvait
+    contredire la bande dessinée juste à côté de lui.
+    """
+    largeurs = sorted({p.largeur_m for p in pistes})
+    if not largeurs:
+        return f"de {nombre_fr(LARGEUR_PISTE_M)} m"
+    dites = [nombre_fr(round(l, 2)) for l in largeurs]
+    return "de " + (" et ".join(dites) if len(dites) < 3 else ", ".join(dites)) + " m"
+
+
+def _ecarte_des_tables(ligne: LineString, tables, interdits,
+                       largeur_m: float = LARGEUR_PISTE_M):
     """Le plus petit décalage latéral qui dégage la bande des tables, ou None.
 
     Le décalage est rigide, dans la normale moyenne du tracé : c'est le geste
@@ -2758,9 +2781,7 @@ def _ecarte_des_tables(ligne: LineString, tables, interdits):
     def mord(bande) -> bool:
         return bande.intersection(tables).area > 0.05
 
-    bande = ligne.buffer(
-        LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round"
-    )
+    bande = ligne.buffer(largeur_m / 2.0, cap_style="flat", join_style="round")
     if not mord(bande):
         return None
 
@@ -2778,7 +2799,7 @@ def _ecarte_des_tables(ligne: LineString, tables, interdits):
             ecart = k * pas * sens
             essai = translate(ligne, nx * ecart, ny * ecart)
             bande = essai.buffer(
-                LARGEUR_PISTE_M / 2.0, cap_style="flat", join_style="round"
+                largeur_m / 2.0, cap_style="flat", join_style="round"
             )
             if mord(bande):
                 continue
@@ -2827,14 +2848,14 @@ def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte,
         if piste.surface.intersection(toutes).area <= MORSURE_NEGLIGEABLE_M2:
             ecartes.append(axe)
             continue
-        trouve = _ecarte_des_tables(axe.ligne, toutes, interdits)
+        trouve = _ecarte_des_tables(axe.ligne, toutes, interdits, axe.largeur)
         if trouve is None:
             rebelles.append(axe.libelle)
             ecartes.append(axe)
             continue
         ligne, ecart = trouve
         deplacements[rang] = ecart
-        ecartes.append(AxePiste(axe.categorie, axe.libelle, ligne))
+        ecartes.append(AxePiste(axe.categorie, axe.libelle, ligne, axe.largeur_m))
 
     # Une piste qui mord sur les tables et qu'aucun décalage ne dégage : rien à
     # proposer, mais il faut le dire. Se taire laisserait croire que l'outil n'a
@@ -3071,8 +3092,12 @@ def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tup
         return None, axes
     serres = []
     for axe, net in zip(axes, _bouts_raccordes_confondus(axes)):
-        ligne = serrer_contre(net.ligne, enceinte)
-        serres.append(axe if ligne is None else AxePiste(axe.categorie, axe.libelle, ligne))
+        ligne = serrer_contre(net.ligne, enceinte, largeur_m=axe.largeur)
+        serres.append(
+            axe
+            if ligne is None
+            else AxePiste(axe.categorie, axe.libelle, ligne, axe.largeur_m)
+        )
     deplaces = [i for i, (axe, serre) in enumerate(zip(axes, serres)) if serre is not axe]
     if not deplaces:
         return None, axes
@@ -3085,6 +3110,7 @@ def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tup
         touchees = sum(1 for t in tables if t.intersection(surface).area > 0.01)
         return sur_tables, touchees, float(anneau.intersection(surface).length)
 
+    large = max((axes[i].largeur for i in deplaces), default=LARGEUR_PISTE_M)
     tables_avant, _, cloture_avant = bilan(pistes)
     if tables_avant <= 0.5 and cloture_avant <= 0.5:
         return None, axes
@@ -3105,8 +3131,8 @@ def _pistes_contre_la_cloture(axes: list, pistes: list, enceinte, tables) -> tup
         ensuite.append(
             f"ne recouvrent plus que {nombre_fr(round(tables_apres, 1))} m² de tables, "
             f"les bouts de {touchees_apres} rangée(s) venus à moins de "
-            f"{nombre_fr(LARGEUR_PISTE_M + JEU_CLOTURE_M)} m de la clôture : une piste "
-            f"de {nombre_fr(LARGEUR_PISTE_M)} m ne peut y passer sans les toucher"
+            f"{nombre_fr(round(large + JEU_CLOTURE_M, 2))} m de la clôture : une "
+            f"piste de {nombre_fr(round(large, 2))} m ne peut y passer sans les toucher"
         )
     else:
         ensuite.append("ne recouvrent plus aucune table")
@@ -4060,7 +4086,15 @@ def construire(
             if categorie == "cloture":
                 cloture.append(ligne)
             elif categorie in CATEGORIES_PISTES:
-                axes_de_pistes.append(AxePiste(trace.categorie, trace.libelle, ligne))
+                # La largeur que la légende annonce, s'il y en a une : elle
+                # prend le pas sur les 5 m par défaut. Lue sur le libellé de
+                # l'entrée, et non sur `cotes`, qui n'est bâti que plus bas.
+                largeur = cote_lue(trace.libelle, trace.categorie).get(
+                    "largeur_piste_m"
+                )
+                axes_de_pistes.append(
+                    AxePiste(trace.categorie, trace.libelle, ligne, largeur)
+                )
             else:
                 traces_dxf.append((trace.categorie, trace.libelle, ligne))
     for categorie, libelle, forme in surfaces_de_piste.values():
@@ -4967,29 +5001,33 @@ class ImportPlanPDF:
             c.identifiant == "pistes_contre_cloture"
             for c in self.construction.corrections_appliquees
         )
+        largeurs = _largeurs_dites(self.construction.pistes)
+        large = max(
+            (p.largeur_m for p in self.construction.pistes), default=LARGEUR_PISTE_M
+        )
         if not constats:
             message = (
-                f"Les pistes de {LARGEUR_PISTE_M:.0f} m ne recouvrent ni table, ni "
+                f"Les pistes {largeurs} ne recouvrent ni table, ni "
                 "ouvrage, ni la clôture hors des portails."
             )
         elif serrees:
             # Le trait n'est plus celui du plan : le dire, et dire ce qu'aucun
             # placement de la piste ne peut régler.
             message = (
-                f"Serrées contre la clôture, les pistes de {LARGEUR_PISTE_M:.0f} m "
+                f"Serrées contre la clôture, les pistes {largeurs} "
                 f"recouvrent encore {', '.join(constats)} : ce qui s'avance à moins "
-                f"de {nombre_fr(LARGEUR_PISTE_M + JEU_CLOTURE_M)} m de la clôture ne "
+                f"de {nombre_fr(round(large + JEU_CLOTURE_M, 2))} m de la clôture ne "
                 "leur laisse pas la place. C'est au plan de la leur faire."
             )
         else:
             message = (
-                f"Menées sur le tracé du plan, les pistes de {LARGEUR_PISTE_M:.0f} m "
+                f"Menées sur le tracé du plan, les pistes {largeurs} "
                 f"recouvrent {', '.join(constats)} : le trait du plan passe trop près. "
                 "Elles sont dessinées là où le plan les place ; c'est au plan de "
                 "leur faire la place."
             )
         return Controle(
-            "Pistes de 5 m sur le tracé du plan",
+            f"Pistes {largeurs} sur le tracé du plan",
             round(sur_tables, 1),
             None,
             "m²",
@@ -5129,18 +5167,27 @@ class ImportPlanPDF:
         # Ce que le plan donne d'une piste — son tracé, son type — et ce qui
         # vient d'ailleurs : sa largeur et ses rayons, d'une instruction.
         donnees["pistes_plan"] = {
-            "largeur_m": LARGEUR_PISTE_M,
+            "largeur_defaut_m": LARGEUR_PISTE_M,
             "rayon_interieur_m": RAYON_INTERIEUR_M,
-            "rayon_axe_m": RAYON_AXE_M,
             "source": (
                 "Instruction du chef de projet du 23/09/2026 : le plan donne le "
                 "tracé et le type ; la piste a 5 m de large et des virages de "
-                "11 m au bord intérieur (« voie engins »)."
+                "11 m au bord intérieur (« voie engins »). Depuis le "
+                "05/10/2026, une largeur annoncée en légende — « Piste à créer "
+                "(4 m de large) » — prend le pas sur ces 5 m : chaque piste "
+                "porte donc la sienne, et `largeur_source` dit d'où elle vient."
             ),
             "pistes": [
                 {
                     "categorie": p.categorie,
                     "libelle": p.libelle,
+                    "largeur_m": p.largeur_m,
+                    "largeur_source": (
+                        "légende du plan"
+                        if p.largeur_m != LARGEUR_PISTE_M
+                        else "instruction du 23/09/2026"
+                    ),
+                    "rayon_axe_m": round(rayon_axe(p.largeur_m), 2),
                     "longueur_axe_m": round(p.axe.length, 1),
                     "surface_m2": round(p.surface.area, 1),
                     "rayon_axe_min_m": p.rayon_axe_min_m,

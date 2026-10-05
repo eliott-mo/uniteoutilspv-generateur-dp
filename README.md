@@ -2575,8 +2575,21 @@ ne tient toujours pas se resserre au plus grand rayon possible. Et la
 bretelle du portail de Gannay, 11,4 m entre la boucle et l'anneau, n'offre
 que 3,2 m à chacun de ses quatre arrondis.
 
-Le trait du plan passe au ras de ce qu'il longe ; la piste de 5 m menée
-dessus peut le recouvrir. On ne la déplace pas d'office, parce que ce serait
+**La largeur vient de la légende quand elle l'annonce.** Les 5 m sont
+l'instruction par défaut ; « Piste à créer (4 m de large) », sur
+La Chapelle-sous-Aubenas, dit 4 m et c'est 4 m qui se dessinent — le plan sait
+ce qu'il dessine, et l'élargir le contredit (décision du 05/10/2026). Chaque
+piste porte donc la sienne, et `pistes_plan` l'écrit au contrat avec sa source.
+Le rayon de l'axe suit : le rayon imposé étant celui du **bord intérieur**,
+11 m y font 13 m sur l'axe d'une piste de 4 m contre 13,5 m sur celui d'une
+piste de 5 m. Ce mètre n'est pas une finesse : à La Chapelle il faisait passer
+le poste de livraison, à 2,30 m de l'axe, au-dedans de la bande — et donc hors
+de portée de la correction qui cale les ouvrages, dont la règle du centre
+protège ce qui est dessiné sur la piste. Les ouvrages mordus y passent de
+77,9 m² à 50,3 m² par la seule largeur, puis à 0,1 m² une fois calés.
+
+Le trait du plan passe au ras de ce qu'il longe ; la piste menée dessus peut le
+recouvrir. On ne la déplace pas d'office, parce que ce serait
 corriger le plan : un contrôle dit ce qu'elle recouvre. À Gannay, la piste à
 créer couvre 21 m² de tables et 2 m² d'ouvrages, et la clôture sur 113 m, son
 axe passant à 2,1 m de celle-ci. À Bray, rien. `projet.json` garde la

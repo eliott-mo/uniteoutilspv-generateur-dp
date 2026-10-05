@@ -814,6 +814,11 @@ def test_les_pistes_sortent_en_bandes_de_5_m_aux_virages_arrondis(contrat_gannay
     Instruction du chef de projet du 23/09/2026 : 5 m de large, 11 m au bord
     intérieur des virages, soit 13,5 m sur l'axe. À Gannay, la piste existante
     et la piste à créer ferment une boucle autour des tables.
+
+    Les 5 m restent ceux de Gannay, dont la légende n'annonce aucune largeur.
+    Depuis le 05/10/2026 une largeur portée en légende prend le pas sur eux, et
+    chaque piste porte donc la sienne au contrat — d'où `largeur_defaut_m` pour
+    l'instruction, et `largeur_m` par piste.
     """
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
@@ -822,9 +827,12 @@ def test_les_pistes_sortent_en_bandes_de_5_m_aux_virages_arrondis(contrat_gannay
     surfaces = [g for c in categories for g in contrat_gannay.geometries(c)]
     assert surfaces and all(g.geom_type == "Polygon" for g in surfaces)
     pistes = contrat_gannay.donnees["pistes_plan"]
-    assert pistes["largeur_m"] == 5.0
+    assert pistes["largeur_defaut_m"] == 5.0
     assert pistes["rayon_interieur_m"] == 11.0
     for piste in pistes["pistes"]:
+        assert piste["largeur_m"] == 5.0
+        assert piste["largeur_source"] == "instruction du 23/09/2026"
+        assert piste["rayon_axe_m"] == 13.5
         largeur = piste["surface_m2"] / piste["longueur_axe_m"]
         if piste["rayons_raccords_m"]:
             assert largeur > 5.0
