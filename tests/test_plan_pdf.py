@@ -1831,3 +1831,49 @@ def test_un_ouvrage_dessine_sur_la_piste_n_est_pas_recule(export_gannay):
         if c.identifiant == "ouvrages_contre_pistes"
     ]
     assert not any("Poste combiné" in c.raison for c in cale)
+
+
+# ---------------------------------------------------------------------------
+# Les libellés de légende que la cote entre parenthèses cachait (05/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_une_cote_entre_parentheses_s_enleve_avec_ses_mots():
+    """« Piste à créer (4 m de large) » : la parenthèse part entière.
+
+    Relevé sur La Chapelle-sous-Aubenas le 05/10/2026. La cote seule était
+    retirée et il restait « Piste à créer de large) », qui ne se rattache à
+    rien : la piste n'était pas importée **du tout**, et son libellé n'était
+    même pas signalé à apparier — l'écran de correspondance le posait sur
+    « (ignorer) » par défaut. « Portail (7 m) » marchait par chance, rien ne
+    suivant la cote dans sa parenthèse.
+    """
+    from dp_socle.plan_pdf import _sans_cote, categorie_proposee, motif_a_trancher
+
+    assert _sans_cote("Piste à créer (4 m de large)") == (4.0, "m", "Piste à créer")
+    assert _sans_cote("Piste existante (5 m de large)") == (
+        5.0, "m", "Piste existante",
+    )
+    assert motif_a_trancher("Piste à créer (4 m de large)") is not None
+    # Ce qui marchait doit continuer de marcher.
+    assert _sans_cote("Portail (7 m)") == (7.0, "m", "Portail")
+    assert categorie_proposee("Portail (7 m)") == "portail"
+    assert _sans_cote("Réserve incendie 120 m³") == (120.0, "m3", "Réserve incendie")
+    assert categorie_proposee("Citerne incendie (120 m3)") == "bache_incendie"
+    assert _sans_cote("Clôture") == (None, None, "Clôture")
+
+
+def test_le_local_de_stockage_bess_se_tranche_au_lieu_de_disparaitre():
+    """Son ambiguïté était notée dans le code, mais nulle part dans les données.
+
+    `CORRESPONDANCE_LEGENDE` le disait « à trancher » en commentaire — le
+    libellé peut désigner le conteneur de batteries ou l'abri qui le couvre —
+    sans l'inscrire dans `LIBELLES_A_TRANCHER`. L'écran de correspondance le
+    posait donc sur « (ignorer) », et le local disparaissait du dossier sans un
+    mot. Il réclame maintenant un choix.
+    """
+    from dp_socle.plan_pdf import categorie_proposee, motif_a_trancher
+
+    assert categorie_proposee("Local de stockage BESS") is None
+    motif = motif_a_trancher("Local de stockage BESS")
+    assert motif and "conteneur" in motif

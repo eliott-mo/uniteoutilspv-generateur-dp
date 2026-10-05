@@ -144,6 +144,15 @@ CORRESPONDANCE_LEGENDE = {
 LIBELLES_A_TRANCHER = {
     "Piste existante": "le libellé ne dit pas si la piste est lourde ou légère",
     "Piste à créer": "le libellé ne dit pas si la piste est lourde ou légère",
+    # Déjà tenu pour ambigu par `CORRESPONDANCE_LEGENDE` — il peut désigner le
+    # conteneur de batteries comme l'abri qui le couvre —, mais il n'était
+    # inscrit nulle part : l'écran de correspondance le posait sur
+    # « (ignorer) » par défaut, et le local disparaissait du dossier sans que
+    # rien ne le dise. Relevé le 05/10/2026 sur La Chapelle-sous-Aubenas.
+    "Local de stockage BESS": (
+        "le libellé peut désigner le conteneur de batteries ou l'abri qui le "
+        "couvre, et leurs gabarits diffèrent"
+    ),
 }
 
 _CORRESPONDANCE_NORMALISEE = {
@@ -232,8 +241,31 @@ _COTE_EN_LEGENDE = re.compile(
 )
 
 
+#: Une parenthèse de légende, prise entière. Voir `_sans_cote`.
+_PARENTHESE_EN_LEGENDE = re.compile(r"\s*\(([^()]*)\)")
+
+
 def _sans_cote(libelle: str) -> tuple[float | None, str | None, str]:
-    """La cote qu'un libellé porte, son unité (« m3 » ou « m »), et le libellé sans elle."""
+    """La cote qu'un libellé porte, son unité (« m3 » ou « m »), et le libellé sans elle.
+
+    Une parenthèse qui porte la cote s'enlève **entière**, avec les mots qui
+    l'accompagnent. Relevé le 05/10/2026 sur La Chapelle-sous-Aubenas : de
+    « Piste à créer (4 m de large) » il ne restait que « Piste à créer de
+    large) », qui ne se rattache à rien — la piste n'était pas importée du
+    tout, et son libellé n'était même pas signalé à apparier. « Portail (7 m) »
+    marchait par chance : rien ne suivait la cote dans la parenthèse.
+    """
+    for parenthese in _PARENTHESE_EN_LEGENDE.finditer(libelle):
+        dedans = _COTE_EN_LEGENDE.search(parenthese.group(1))
+        if dedans is None:
+            continue
+        valeur = float(dedans.group(1).replace(",", "."))
+        unite = "m" if dedans.group(2).lower() == "m" else "m3"
+        reste = (
+            libelle[: parenthese.start()] + " " + libelle[parenthese.end() :]
+        ).strip(" -–—:,")
+        return valeur, unite, " ".join(reste.split())
+
     trouve = _COTE_EN_LEGENDE.search(libelle)
     if trouve is None:
         return None, None, libelle
