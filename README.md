@@ -2621,7 +2621,19 @@ sur un autre ouvrage, parce qu'une correction qui échange un défaut contre un
 autre n'en est pas une. Calculée **en dernier**, sur les bandes telles qu'elles
 seront dessinées : les deux corrections précédentes déplacent les pistes, et un
 recul calculé avant elles viserait une piste qui n'est plus là. À Gannay, le
-BESS empiète de 0,9 m² sur la bande et recule de 0,7 m.
+BESS empiète de 0,9 m² sur la bande et recule de 0,7 m ; à
+La Chapelle-sous-Aubenas, trois ouvrages empiètent de 57 m² et reculent d'au
+plus 3,6 m.
+
+Le garde-fou valait d'abord une demi-largeur de piste, sur ce raisonnement : un
+ouvrage dont le centre est hors de la bande n'aurait jamais à reculer de plus
+de sa propre demi-profondeur. **Le raisonnement est faux**, mesuré le
+05/10/2026 à La Chapelle — la citerne incendie a son centre à 2,66 m hors de la
+bande et demande 3,6 m. Le recul suit la direction du point le plus proche et
+non la normale locale, qui en diffère près d'un virage ; et un rectangle garde
+un coin dans la bande longtemps après que son centre en est sorti. Le garde-fou
+vaut donc une largeur de piste, et il n'est qu'un garde-fou : le critère est la
+règle du centre.
 
 **La règle du centre** dit où elle s'arrête : un ouvrage dont le centre tombe
 **dans** la bande n'est pas au bord de la piste, il est dessiné dessus. Le

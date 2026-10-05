@@ -2851,17 +2851,21 @@ def _pistes_hors_des_tables(axes: list, pistes: list, tables, enceinte,
 
 #: Recul maximal proposé pour caler un ouvrage contre la piste, en mètres.
 #:
-#: La demi-largeur de la piste, et ce n'est pas un chiffre rond pris au hasard :
-#: un ouvrage dont le **centre** tombe hors de la bande n'a jamais à reculer de
-#: plus de sa propre demi-profondeur pour en sortir, et le gabarit la borne. Un
-#: ouvrage qui demande davantage a son centre dans la bande — il n'est pas « au
-#: bord de la piste », il est dessiné dessus, et c'est au plan de le reprendre.
+#: Une largeur de piste. C'est un garde-fou, et non le critère : celui-ci est la
+#: **règle du centre** (voir `_ouvrages_contre_les_pistes`), qui dit qu'un
+#: ouvrage dont le centre tombe dans la bande est dessiné dessus et non à son
+#: bord.
 #:
-#: Mesuré le 05/10/2026 sur Gannay : le poste combiné, une fois posé sur la
-#: clôture par la correction D8, a son centre dans la bande et demanderait
-#: 5,5 m. L'y reculer défairait D8, qui a raison — un poste de livraison ferme
-#: l'enceinte sur son long pan. La règle du centre l'écarte d'elle-même.
-RECUL_OUVRAGE_MAX_M = LARGEUR_PISTE_M / 2.0
+#: La borne valait d'abord une demi-largeur, sur ce raisonnement : un ouvrage
+#: dont le centre est hors de la bande n'aurait jamais à reculer de plus de sa
+#: propre demi-profondeur. **Le raisonnement est faux**, et La Chapelle-sous-
+#: Aubenas l'a montré le 05/10/2026 : la citerne incendie a son centre à 2,66 m
+#: hors de la bande et demande pourtant 3,6 m. Deux raisons, que la mesure a
+#: rendues visibles — le recul suit la direction du point le plus proche et non
+#: la normale locale, qui en diffère près d'un virage ; et un rectangle garde un
+#: coin dans la bande bien après que son centre en est sorti. La borne à
+#: 2,5 m refusait donc des ouvrages que rien n'empêchait de caler.
+RECUL_OUVRAGE_MAX_M = LARGEUR_PISTE_M
 
 
 @dataclass(frozen=True)
@@ -2962,6 +2966,12 @@ def _ouvrages_contre_les_pistes(ouvrages: list, pistes: list, enceinte, tables) 
             continue
         # Le centre dans la bande : l'ouvrage est dessiné **sur** la piste et
         # non à son bord. Le reculer serait le replacer, pas le caler.
+        #
+        # C'est le vrai critère du refus, celui qui règle sans la connaître la
+        # contradiction entre la correction D8 et celle des pistes : le poste
+        # combiné de Gannay posé sur la clôture a son centre sous la bande et
+        # demanderait 5,5 m, ce qui défairait D8 — qui a raison, un poste de
+        # livraison fermant l'enceinte sur son long pan.
         if bandes.contains(Point(ouvrage.centre)):
             dessus.append(ouvrage.libelle)
             continue
