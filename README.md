@@ -2931,6 +2931,22 @@ Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
 échelle : il porte celle de la coupe des tables, et la coupe du terrain porte la
 sienne en clair.
 
+**La coupe du terrain descend jusqu'au 1:2000**, et c'est un site réel qui l'a
+imposé : à Saint-Aubin-sur-Loire la coupe A-A' traverse 493 m, soit 493 mm au
+1:1000 — l'ancienne borne — pour une zone de dessin de 362 mm. La planche levait
+`ErreurEchelle`, la génération rattrapait la pièce une à une, et le dossier
+sortait **sans sa coupe** (05/10/2026). Une coupe au 1:1500 est grossière, mais
+elle est vraie et son échelle est écrite sur son cadre ; l'absence de la pièce,
+elle, ne se voit qu'à l'instruction. Saint-Aubin sort désormais ses tables au
+1:80 et son terrain au 1:1500.
+
+C'est aussi ce qui a fait remonter une pièce absente au rang de ce qu'elle est :
+« DP 3 n'est pas produite » arrivait au milieu des points à savoir, parmi les
+avertissements de principe que tout dossier porte. Les pièces manquantes se
+disent maintenant à part, en rouge, au-dessus du reste —
+`sortie_pptx.annonce_une_piece_absente` les reconnaît à leur formule, commune à
+`sortie_pptx` et `assemblage`.
+
 Les deux ne lisent pas les mêmes hauteurs, et c'est délibéré :
 
 - la **coupe des tables** est un dessin de type. Elle prend `point_bas_m` et
