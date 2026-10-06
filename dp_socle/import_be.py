@@ -1941,7 +1941,237 @@ def controler(
     controles.append(_emprise(plan, emprise_cadastrale))
     controles.append(_puissance(modules["puissance_mwc"], seuil_puissance_mwc))
     controles.append(_cotes_des_ouvrages(plan, tableau))
+    controles.append(_ouvrages_dans_l_enceinte(plan))
+    controles.append(_plateformes_raccordees(plan))
     return controles
+
+
+#: Débord admis d'un ouvrage hors de l'enceinte, en m².
+#:
+#: Le même seuil que pour la clôture dans l'emprise cadastrale, et pour la même
+#: raison : en deçà, c'est de l'imprécision de tracé entre deux calques, pas un
+#: ouvrage posé de travers. Les cas réels se comptent en dizaines de pour cent —
+#: 42 % du poste de livraison à Auzainvilliers, 100 % de celui de Sarnois.
+DEBORD_OUVRAGE_M2 = 1.0
+
+#: Ouvrages dont la place est hors de l'enceinte, et qui n'y font pas défaut.
+#:
+#: L'aire d'aspiration est le point d'eau des pompiers : elle se pose là où leur
+#: engin se gare, c'est-à-dire **dehors**. Le dossier de référence de l'agence,
+#: Saint-Cyr, la dessine entièrement hors clôture, et personne ne l'a jamais
+#: relevé — la signaler aurait été un faux positif sur le plan qui sert
+#: justement de mètre étalon. Auzainvilliers la met dedans : les deux se font,
+#: et aucune des deux n'est une anomalie.
+OUVRAGES_HORS_ENCEINTE_ADMIS = ("aire_aspiration",)
+
+#: Catégories de sol qui desservent un ouvrage, pour le contrôle des raccords.
+#:
+#: La voirie non typée en fait partie : le calque du bureau d'études ne dit pas
+#: toujours si une voie est lourde ou légère, et le raccord d'une plateforme ne
+#: dépend pas de la réponse.
+VOIRIES_DESSERVANTES = (
+    "piste_lourde_a_creer",
+    "piste_lourde_existante",
+    "piste_lourde",
+    "piste_legere",
+    "aire_grutage",
+    "aire_stationnement",
+    "chemin_existant",
+    "voirie",
+)
+
+
+def _nomme(plan: PlanBE, categorie: str) -> str:
+    """Le calque du bureau d'études derrière une catégorie, à défaut son nom.
+
+    C'est au bureau d'études que ces constats sont adressés, et il connaît ses
+    calques, pas notre vocabulaire : « UNI_PDL-PTR » lui dit où regarder,
+    « pdl_ptr » lui demande de traduire.
+    """
+    calques = plan.calques_de(categorie)
+    return " et ".join(f"« {c} »" for c in calques) if calques else f"« {categorie} »"
+
+
+def _ouvrages_dans_l_enceinte(plan: PlanBE) -> Controle:
+    """Les ouvrages techniques tiennent-ils entiers dans la clôture ?
+
+    Un ouvrage technique se pose à l'intérieur de l'enceinte. Le poste de
+    livraison lui-même, qui se pose en limite de propriété, est dedans et tient
+    lieu de clôture sur sa longueur (instruction du chef de projet du
+    24/09/2026) — il n'est pas à cheval.
+
+    Ce n'est pas une subtilité de dessin : les planches dessinent ce que le plan
+    porte, et un poste à cheval sort à cheval sur DP 2 comme sur les plans de
+    repérage. Relevé par le chef de projet le 06/10/2026 sur Auzainvilliers, où
+    le groupe du poste de livraison — le poste, sa plateforme et les bandes de
+    terre autour — déborde de 30 à 42 % hors clôture. Sarnois porte le cas
+    extrême : un poste **entièrement** dehors. Saint-Cyr, la référence, n'a
+    aucun débord.
+
+    Le constat se fait, la géométrie ne bouge pas. Le parcours du plan PDF
+    propose, lui, de caler le poste en limite ; cette correction-là demande un
+    mécanisme de propositions que ce parcours n'a pas, et déplacer d'office
+    serait décider à la place du bureau d'études.
+    """
+    from .contrat import LIBELLES_COTES
+
+    enceinte = plan.polygone_cloture
+    if enceinte is None:
+        return Controle(
+            libelle="Ouvrages dans l'enceinte",
+            valeur_dxf=None,
+            valeur_tableau=None,
+            unite="ouvrage(s) à cheval",
+            statut=AVERTISSEMENT,
+            message=(
+                "Aucun contour de clôture fermé dans le DXF : un ouvrage posé à "
+                "cheval sur l'enceinte n'aurait pas été vu."
+            ),
+            tolerance=f"{DEBORD_OUVRAGE_M2:g} m²",
+        )
+    debords, examines = {}, 0
+    for categorie in LIBELLES_COTES:
+        if categorie in OUVRAGES_HORS_ENCEINTE_ADMIS:
+            continue
+        for geometrie in plan.geometries(categorie):
+            if geometrie.area <= 0:
+                continue
+            examines += 1
+            dehors = geometrie.difference(enceinte).area
+            if dehors > DEBORD_OUVRAGE_M2:
+                # Groupé par catégorie : un calque porte souvent l'ouvrage, sa
+                # plateforme et les bandes de terre autour — six objets à
+                # Auzainvilliers, six lignes à lire pour un seul poste mal posé.
+                # Le bureau d'études corrige un calque, pas un objet.
+                compte, aire, hors = debords.get(categorie, (0, 0.0, 0.0))
+                debords[categorie] = (
+                    compte + 1,
+                    aire + geometrie.area,
+                    hors + dehors,
+                )
+    if not debords:
+        return Controle(
+            libelle="Ouvrages dans l'enceinte",
+            valeur_dxf=0,
+            valeur_tableau=0,
+            unite="ouvrage(s) à cheval",
+            statut=OK,
+            message=(
+                f"Les {examines} ouvrage(s) techniques du plan tiennent dans "
+                "l'enceinte."
+                if examines
+                else "Aucun ouvrage technique à situer sur ce plan."
+            ),
+            tolerance=f"{DEBORD_OUVRAGE_M2:g} m²",
+        )
+    detail = " ; ".join(
+        f"{_nomme(plan, categorie)} — {compte} objet(s), {aire:.0f} m² dont "
+        f"{dehors:.0f} m² ({dehors / aire:.0%}) hors clôture"
+        for categorie, (compte, aire, dehors) in debords.items()
+    )
+    calques = sorted({c for categorie in debords for c in plan.calques_de(categorie)})
+    objets = sum(compte for compte, _a, _d in debords.values())
+    return Controle(
+        libelle="Ouvrages dans l'enceinte",
+        valeur_dxf=objets,
+        valeur_tableau=0,
+        unite="ouvrage(s) à cheval",
+        statut=AVERTISSEMENT,
+        message=(
+            f"{objets} objet(s) de {len(debords)} calque(s) débordent de "
+            f"l'enceinte : {detail}. Un "
+            "ouvrage technique se pose à l'intérieur de la clôture, le poste de "
+            "livraison compris — il se cale en limite de propriété et tient lieu "
+            "de clôture sur sa longueur, il n'est pas à cheval. Les planches "
+            "dessineront ce que le plan porte — à demander au bureau d'études : "
+            "ramener dans l'enceinte les ouvrages des calques "
+            + ", ".join(f"« {c} »" for c in calques)
+            + ", ou faire passer la clôture derrière eux."
+        ),
+        tolerance=f"{DEBORD_OUVRAGE_M2:g} m²",
+    )
+
+
+def _plateformes_raccordees(plan: PlanBE) -> Controle:
+    """Chaque plateforme touche-t-elle la voirie qui la dessert ?
+
+    Une plateforme d'ouvrage se raccorde à la voie qui y mène. Dessinée à
+    l'écart, elle laisse sur les planches une bande de terrain entre la piste et
+    l'ouvrage — ce que le chef de projet a vu le 06/10/2026 sur Auzainvilliers,
+    où la plateforme du poste de transformation s'arrête à **1,05 m** de la
+    piste lourde.
+
+    Le seuil est le contact, et non une distance : sur les trois plans mesurés
+    ce jour-là — Saint-Cyr, Sarnois, Auzainvilliers — toutes les autres
+    plateformes touchent la voirie, au centimètre. Un écart quel qu'il soit est
+    donc l'anomalie, et l'écart mesuré est annoncé pour que le chef de projet
+    juge : un mètre est un raccord manqué, trente mètres un accès absent.
+    """
+    voiries = [
+        geometrie
+        for categorie in VOIRIES_DESSERVANTES
+        for geometrie in plan.geometries(categorie)
+        if geometrie.area > 0
+    ]
+    plateformes = [g for g in plan.geometries("plateforme") if g.area > 0]
+    if not plateformes:
+        return Controle(
+            libelle="Raccordement des plateformes",
+            valeur_dxf=0,
+            valeur_tableau=0,
+            unite="plateforme(s) détachée(s)",
+            statut=OK,
+            message="Aucune plateforme dessinée au plan.",
+            tolerance="contact",
+        )
+    if not voiries:
+        return Controle(
+            libelle="Raccordement des plateformes",
+            valeur_dxf=None,
+            valeur_tableau=None,
+            unite="plateforme(s) détachée(s)",
+            statut=AVERTISSEMENT,
+            message=(
+                f"{len(plateformes)} plateforme(s) au plan et aucune voirie "
+                "dessinée : leur raccordement n'a pas pu être contrôlé."
+            ),
+            tolerance="contact",
+        )
+    voirie = unary_union(voiries)
+    detachees = [
+        (g.area, g.distance(voirie)) for g in plateformes if not g.intersects(voirie)
+    ]
+    if not detachees:
+        return Controle(
+            libelle="Raccordement des plateformes",
+            valeur_dxf=0,
+            valeur_tableau=0,
+            unite="plateforme(s) détachée(s)",
+            statut=OK,
+            message=f"Les {len(plateformes)} plateforme(s) du plan touchent la voirie.",
+            tolerance="contact",
+        )
+    detail = " ; ".join(
+        f"{aire:.0f} m² à {ecart:.2f} m de la voirie la plus proche"
+        for aire, ecart in detachees
+    )
+    return Controle(
+        libelle="Raccordement des plateformes",
+        valeur_dxf=len(detachees),
+        valeur_tableau=0,
+        unite="plateforme(s) détachée(s)",
+        statut=AVERTISSEMENT,
+        message=(
+            f"{len(detachees)} plateforme(s) ne touchent pas la voirie : "
+            f"{detail}. Une plateforme d'ouvrage se raccorde à la voie qui la "
+            "dessert ; à l'écart, elle laisse sur les planches une bande de "
+            "terrain entre la piste et l'ouvrage — à demander au bureau "
+            "d'études : raccorder à la voirie les plateformes du calque "
+            + _nomme(plan, "plateforme")
+            + "."
+        ),
+        tolerance="contact",
+    )
 
 
 def _famille_de_cote(libelles: tuple) -> str:

@@ -2158,3 +2158,168 @@ def test_le_controle_des_cotes_est_rendu_a_chaque_import(plan, tableau):
 
     libelles = [c.libelle for c in controler(plan, tableau)]
     assert "Cotes normalisées des ouvrages" in libelles
+
+
+# ---------------------------------------------------------------------------
+# Ce que le plan pose de travers : ouvrages à cheval, plateformes détachées
+# ---------------------------------------------------------------------------
+
+
+def _plan_synthetique(objets):
+    """Un `PlanBE` minimal porté par une liste de (catégorie, calque, géométrie)."""
+    from dp_socle.import_be import EntiteBE, PlanBE
+
+    return PlanBE(
+        entites=[
+            EntiteBE(categorie=c, calque=calque, geometrie=g, z_reel=False)
+            for c, calque, g in objets
+        ],
+        azimut_tables_deg=0.0,
+        correspondance={calque: c for c, calque, _g in objets},
+        unite="m",
+        facteur_unite=1.0,
+        calques_ignores=[],
+        calques_vides=[],
+        source="synthétique",
+    )
+
+
+def _enceinte(x0, y0, x1, y1):
+    """La clôture en polyligne fermée, comme le DXF la livre.
+
+    Une `LinearRing` ne conviendrait pas : `_polygoniser` ne traite que les
+    polylignes et les polygones, et l'anneau rendait une enceinte vide — le
+    contrôle annonçait alors qu'il n'avait rien pu vérifier, ce qui est le bon
+    comportement pour une mauvaise raison.
+    """
+    from shapely.geometry import LineString, box
+
+    contour = LineString(list(box(x0, y0, x1, y1).exterior.coords))
+    return ("cloture", "UNI_Clôture", contour)
+
+
+def test_le_plan_de_reference_ne_declenche_aucun_des_deux_constats(plan):
+    """Saint-Cyr est le mètre étalon : un faux positif s'y verrait tout de suite.
+
+    Son aire d'aspiration est **entièrement hors clôture**, et c'est sa place —
+    c'est le point d'eau des pompiers, posé là où leur engin se gare. La
+    signaler aurait condamné le contrôle dès le premier dossier.
+    """
+    from dp_socle.import_be import _ouvrages_dans_l_enceinte, _plateformes_raccordees
+
+    assert _ouvrages_dans_l_enceinte(plan).statut == "ok"
+    assert _plateformes_raccordees(plan).statut == "ok"
+    aspiration = plan.geometries("aire_aspiration")
+    assert aspiration, "le plan de référence porte bien une aire d'aspiration"
+    assert aspiration[0].difference(plan.polygone_cloture).area > 1.0
+
+
+def test_un_ouvrage_a_cheval_sur_la_cloture_est_dit_et_groupe_par_calque():
+    """Mesuré le 06/10/2026 sur Auzainvilliers, dont le PDL déborde de 38 %.
+
+    Le calque du poste y porte six objets — le poste, sa plateforme et les
+    bandes de terre autour —, tous à cheval. Six lignes pour un seul poste mal
+    posé se lisent mal, et le bureau d'études corrige un calque, pas un objet :
+    le constat groupe.
+    """
+    from shapely.geometry import box
+    from dp_socle.import_be import _ouvrages_dans_l_enceinte
+
+    plan = _plan_synthetique(
+        [
+            _enceinte(0, 0, 100, 100),
+            # Le poste à cheval : 12 x 3 m, dont la moitié dehors.
+            ("pdl_ptr", "UNI_PDL-PTR", box(94.0, 40.0, 106.0, 43.0)),
+            # Sa plateforme, sur le même calque et à cheval elle aussi.
+            ("pdl_ptr", "UNI_PDL-PTR", box(94.0, 44.0, 106.0, 48.0)),
+            # Un poste bien posé, dedans : il ne doit pas être compté.
+            ("ptr", "UNI_PDT", box(10.0, 10.0, 20.0, 13.0)),
+        ]
+    )
+    controle = _ouvrages_dans_l_enceinte(plan)
+    assert controle.statut == "avertissement"
+    assert controle.valeur_dxf == 2, "les deux objets du calque sont comptés"
+    assert controle.message.count("UNI_PDL-PTR") == 2, "une seule ligne de constat"
+    assert "UNI_PDT" not in controle.message
+    assert "à demander au bureau d'études" in controle.message
+
+
+def test_un_ouvrage_qui_affleure_la_cloture_ne_declenche_rien():
+    """Un pouillème de débord est de l'imprécision de tracé entre deux calques.
+
+    Le seuil est celui de la clôture dans l'emprise cadastrale, pour la même
+    raison : les cas réels se comptent en dizaines de pour cent.
+    """
+    from shapely.geometry import box
+    from dp_socle.import_be import DEBORD_OUVRAGE_M2, _ouvrages_dans_l_enceinte
+
+    plan = _plan_synthetique(
+        [
+            _enceinte(0, 0, 100, 100),
+            # 3 m de long, débordant de 10 cm : 0,3 m², sous le seuil de 1 m².
+            ("ptr", "UNI_PDT", box(99.9, 40.0, 110.0, 43.0).intersection(
+                box(0, 0, 100.1, 100)
+            )),
+        ]
+    )
+    assert DEBORD_OUVRAGE_M2 == 1.0
+    assert _ouvrages_dans_l_enceinte(plan).statut == "ok"
+
+
+def test_une_plateforme_detachee_de_la_voirie_est_dite_avec_son_ecart():
+    """Mesuré le 06/10/2026 : 1,05 m entre la plateforme du PTR et la piste.
+
+    L'écart va au message : un mètre est un raccord manqué, trente mètres un
+    accès absent, et c'est au chef de projet d'en juger.
+    """
+    from shapely.geometry import box
+    from dp_socle.import_be import _plateformes_raccordees
+
+    plan = _plan_synthetique(
+        [
+            ("piste_lourde_a_creer", "UNI_VRD_Piste", box(0.0, 0.0, 100.0, 4.0)),
+            # Raccordée : elle touche la piste.
+            ("plateforme", "UNI_VRD_Plateforme", box(10.0, 4.0, 20.0, 14.0)),
+            # Détachée de 1,05 m, comme à Auzainvilliers.
+            ("plateforme", "UNI_VRD_Plateforme", box(40.0, 5.05, 50.0, 15.0)),
+        ]
+    )
+    controle = _plateformes_raccordees(plan)
+    assert controle.statut == "avertissement"
+    assert controle.valeur_dxf == 1
+    assert "1.05 m" in controle.message
+    assert "UNI_VRD_Plateforme" in controle.message
+    assert "à demander au bureau d'études" in controle.message
+
+
+def test_sans_voirie_dessinee_le_raccord_est_dit_non_controle():
+    """Pas de repli muet : ce qui n'a pas pu être vérifié se dit."""
+    from shapely.geometry import box
+    from dp_socle.import_be import _plateformes_raccordees
+
+    plan = _plan_synthetique(
+        [("plateforme", "UNI_VRD_Plateforme", box(10.0, 4.0, 20.0, 14.0))]
+    )
+    controle = _plateformes_raccordees(plan)
+    assert controle.statut == "avertissement"
+    assert "n'a pas pu être contrôlé" in controle.message
+
+
+def test_sans_cloture_fermee_le_debord_est_dit_non_controle():
+    """Même règle : une clôture ouverte ne vaut pas un plan sans débord."""
+    from shapely.geometry import box
+    from dp_socle.import_be import _ouvrages_dans_l_enceinte
+
+    plan = _plan_synthetique([("ptr", "UNI_PDT", box(10.0, 10.0, 20.0, 13.0))])
+    controle = _ouvrages_dans_l_enceinte(plan)
+    assert controle.statut == "avertissement"
+    assert "n'aurait pas été vu" in controle.message
+
+
+def test_les_deux_constats_sont_rendus_a_chaque_import(plan, tableau):
+    """Ils sont dans la liste que l'interface affiche, pas seulement appelables."""
+    from dp_socle.import_be import controler
+
+    libelles = [c.libelle for c in controler(plan, tableau)]
+    assert "Ouvrages dans l'enceinte" in libelles
+    assert "Raccordement des plateformes" in libelles

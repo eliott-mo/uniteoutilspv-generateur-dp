@@ -1520,6 +1520,8 @@ ne remarque avant l'instruction du dossier.
 | Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement, parcelles nommées si le DXF porte un cadastre |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
 | Cotes normalisées des ouvrages dessinés | toutes présentes | avertissement, en demande au bureau d'études |
+| Ouvrages techniques contenus dans l'enceinte | 1 m² de débord | avertissement, en demande au bureau d'études |
+| Plateformes raccordées à la voirie | contact | avertissement, en demande au bureau d'études |
 
 **Les cotes normalisées** méritent un mot, le contrôle étant né d'un dossier
 perdu. Le plan donne l'emprise au sol d'un ouvrage, **jamais sa hauteur** :
@@ -1544,6 +1546,44 @@ vient en tête désignerait la mauvaise sur un plan qui porte une 120 — quand 
 constat, lui, énumère les quatre libellés cherchés, qui sont ce avec quoi on
 retrouve la ligne dans le tableau. Il avertit sans bloquer : un tableau
 incomplet donne un dossier incomplet, pas un dossier faux.
+
+**Ce que le plan pose de travers** fait l'objet de deux constats, nés du même
+dossier. Les planches dessinent ce que le plan porte : un ouvrage mal posé sort
+mal posé sur DP 2 comme sur les plans de repérage, et rien ne le disait.
+
+- **Ouvrages dans l'enceinte.** Un ouvrage technique se pose à l'intérieur de
+  la clôture — le poste de livraison compris, qui se cale en limite de propriété
+  et tient lieu de clôture sur sa longueur, et n'est donc pas à cheval. Relevé
+  le 06/10/2026 sur Auzainvilliers, où le calque du poste de livraison porte six
+  objets — le poste, sa plateforme et les bandes de terre autour —, 391 m² dont
+  148 m² (38 %) hors clôture. Sarnois porte le cas extrême : un poste
+  **entièrement** dehors. Le constat groupe par calque, parce que le bureau
+  d'études corrige un calque et non un objet, et six lignes pour un seul poste
+  mal posé se lisent mal.
+
+  **L'aire d'aspiration en est exclue**, et c'est tout l'intérêt de l'avoir
+  mesuré : c'est le point d'eau des pompiers, posé là où leur engin se gare,
+  donc dehors. Saint-Cyr, le dossier de référence, la dessine entièrement hors
+  clôture et personne ne l'a jamais relevé ; la signaler aurait condamné le
+  contrôle sur le plan qui sert de mètre étalon.
+
+- **Raccordement des plateformes.** Une plateforme d'ouvrage se raccorde à la
+  voie qui la dessert ; à l'écart, elle laisse sur les planches une bande de
+  terrain entre la piste et l'ouvrage. Le seuil est le **contact**, et non une
+  distance : sur les trois plans mesurés le 06/10/2026 — Saint-Cyr, Sarnois,
+  Auzainvilliers — toutes les plateformes touchent la voirie au centimètre, sauf
+  celle du poste de transformation d'Auzainvilliers, à **1,05 m** de la piste
+  lourde. Un écart quel qu'il soit est donc l'anomalie, et l'écart mesuré est
+  annoncé pour que le chef de projet juge : un mètre est un raccord manqué,
+  trente mètres un accès absent.
+
+Les deux **constatent sans corriger**. Le parcours du plan PDF propose, lui, de
+caler le poste en limite de propriété et les ouvrages contre la piste ; ces
+corrections demandent le mécanisme de propositions à cocher que ce parcours n'a
+pas, et déplacer d'office la géométrie du bureau d'études serait décider à sa
+place. Les deux constats portent donc le marqueur de demande, avec le nom du
+**calque** et non celui de notre catégorie : le bureau d'études connaît
+« UNI_PDL-PTR », pas « pdl_ptr ».
 
 Le seuil de 1 m² sur le débordement n'est pas arbitraire : sur le jeu de
 référence, la clôture dépasse de **0,53 m²** de l'emprise cadastrale réelle.
