@@ -2215,10 +2215,16 @@ def _cotes_des_ouvrages(plan: PlanBE, tableau) -> Controle:
     avant que le rapport n'annonce les ouvrages non dessinés, et c'est la
     citerne manquante au plan de coupe qui a mis sur la voie.
 
-    Le constat se fait donc ici, où il coûte un message au bureau d'études
-    plutôt qu'un dossier. Il avertit sans bloquer : un tableau incomplet donne
-    un dossier incomplet, pas un dossier faux, et c'est au chef de projet de
-    juger s'il attend la correction ou s'il produit pour avancer.
+    **Ce qui restait manquant est désormais comblé en amont** : depuis le même
+    jour, `lire_tableau` complète les sections absentes depuis le classeur des
+    gabarits UNITe livré avec l'outil, et l'annonce. Un tableau simplement bâti
+    sur un modèle périmé ne déclenche donc plus ce contrôle — Auzainvilliers y
+    passe au vert. Il reste le filet pour ce que même le classeur ne porte pas :
+    une catégorie dessinée dont aucune cote n'existe nulle part.
+
+    Il avertit sans bloquer : un catalogue incomplet donne un dossier incomplet,
+    pas un dossier faux, et c'est au chef de projet de juger s'il attend la
+    correction ou s'il produit pour avancer.
 
     `LIBELLES_COTES` est lu dans `contrat` plutôt que recopié ici : c'est la
     table que les planches consultent, et deux copies qui dérivent donneraient
@@ -3050,6 +3056,10 @@ def parametres_json(
                 ("postes", tableau.postes),
             )
         },
+        # Ce que l'outil a apporté, et que le tableau ne portait pas. Vide dans
+        # le cas courant. Le lot 4 ne s'en sert pas : c'est une trace, pour que
+        # l'origine d'une hauteur se retrouve sur un dossier déjà déposé.
+        "cotes_completees": list(getattr(tableau, "cotes_completees", ()) or ()),
         "cotes_normalisees": [
             {
                 "ouvrage": cote.ouvrage,

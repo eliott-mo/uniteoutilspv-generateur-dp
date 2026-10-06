@@ -1547,6 +1547,36 @@ constat, lui, énumère les quatre libellés cherchés, qui sont ce avec quoi on
 retrouve la ligne dans le tableau. Il avertit sans bloquer : un tableau
 incomplet donne un dossier incomplet, pas un dossier faux.
 
+**L'onglet des dimensions n'est pas une donnée de projet.** C'est le catalogue
+des gabarits UNITe, le même dans tous les tableaux, et l'outil en livre une
+copie — `dp_socle/ressources/gabarits_unite.xlsx`, celle que le parcours du plan
+PDF lit déjà faute de tableau bilan. Un tableau bâti sur un modèle ancien en
+porte une version tronquée, et les ouvrages des sections absentes ne sont alors
+dessinés ni sur leur planche DP 4 ni sur la coupe DP 3.
+
+Depuis le 06/10/2026, les sections absentes du tableau **se complètent depuis ce
+classeur**. Mesuré sur Auzainvilliers, dont l'onglet s'arrête après « Local de
+stockage matériel » : 7 cotes lues, 10 complétées, et les six ouvrages qui
+manquaient au dossier — conteneurs BESS, bac de rétention, citerne de
+refroidissement, zone de remise, aire d'aspiration et citerne incendie —
+reviennent sur DP 3 comme sur DP 4.
+
+Trois garde-fous, parce qu'un complément est une substitution :
+
+- **le tableau garde la main partout où il parle.** Seuls les libellés qu'il ne
+  porte pas sont ajoutés : un projet dont le tableau déclare un ouvrage hors
+  standard garde le sien ;
+- **le complément s'annonce**, en nommant chaque cote apportée et d'où elle
+  vient, et la liste redescend dans `projet.json` sous `cotes_completees` — sur
+  un dossier déjà déposé, on doit pouvoir dire d'où vient une hauteur ;
+- **la variante reste choisie sur l'emprise mesurée au plan.** Il n'y a aucun
+  volume à saisir : la citerne d'Auzainvilliers fait 103,9 m² au DXF et tombe
+  sur la « Citerne incendie — 120 » (11,7 × 9,3 m, soit 108,8 m², à 4,5 % près).
+  Demander le volume au chef de projet lui ferait ressaisir ce que le plan donne
+  déjà au centimètre.
+
+Le contrôle ci-dessus reste le filet pour ce que même le classeur ne porte pas.
+
 **Ce que le plan pose de travers** fait l'objet de deux constats, nés du même
 dossier. Les planches dessinent ce que le plan porte : un ouvrage mal posé sort
 mal posé sur DP 2 comme sur les plans de repérage, et rien ne le disait.

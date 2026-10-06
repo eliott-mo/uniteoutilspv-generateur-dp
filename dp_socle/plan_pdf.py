@@ -2510,7 +2510,11 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
 #: Le classeur des gabarits UNITe, ressource de l'outil. C'est une copie de
 #: `exemples/Standards UNITe .xlsx`, la référence des cotes d'ouvrages, que
 #: `tests/test_plan_pdf.py` garde identique à l'octet.
-CHEMIN_GABARITS = Path(__file__).resolve().parent / "ressources" / "gabarits_unite.xlsx"
+#:
+#: Repris de `tableau_bilan`, qui le lit aussi depuis le 06/10/2026 pour
+#: compléter un tableau bilan bâti sur un modèle tronqué. Deux définitions du
+#: même chemin finiraient par désigner deux fichiers.
+from .tableau_bilan import CHEMIN_GABARITS  # noqa: E402
 
 #: Variante du local de stockage : un dossier de déclaration préalable porte sur
 #: moins de 3 MWc, c'est donc toujours celle-ci — P ≤ 5 MWc, un conteneur de

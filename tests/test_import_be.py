@@ -539,9 +539,13 @@ def test_les_cotes_se_trouvent_sous_les_deux_noms_d_onglet(tmp_path, onglet):
     )
     tableau = lire_tableau(chemin, "IND03")
 
-    assert [c.ouvrage for c in tableau.cotes] == ["Poste de transformation - PTR"]
-    assert tableau.cotes[0].dimensions == "10 x 3 x 3m"
-    assert tableau.cotes[0].surface_m2 == pytest.approx(30.0)
+    # Les cotes **lues** sont celles du tableau ; le reste du catalogue est
+    # complété depuis le classeur des gabarits depuis le 06/10/2026, et se
+    # distingue par `cotes_completees`.
+    lues = [c for c in tableau.cotes if c.ouvrage not in tableau.cotes_completees]
+    assert [c.ouvrage for c in lues] == ["Poste de transformation - PTR"]
+    assert lues[0].dimensions == "10 x 3 x 3m"
+    assert lues[0].surface_m2 == pytest.approx(30.0)
 
 
 def test_paramètre_absent_leve_plutot_que_de_rendre_une_valeur_par_defaut(tmp_path):
@@ -2323,3 +2327,123 @@ def test_les_deux_constats_sont_rendus_a_chaque_import(plan, tableau):
     libelles = [c.libelle for c in controler(plan, tableau)]
     assert "Ouvrages dans l'enceinte" in libelles
     assert "Raccordement des plateformes" in libelles
+
+
+# ---------------------------------------------------------------------------
+# Les cotes complétées depuis le classeur des gabarits UNITe
+# ---------------------------------------------------------------------------
+
+
+def test_un_tableau_complet_n_emprunte_rien_au_classeur(tableau):
+    """Saint-Cyr porte ses 17 cotes : rien à compléter, rien à annoncer."""
+    assert tableau.cotes_completees == ()
+    assert not [m for m in tableau.avertissements if "gabarits UNITe" in m]
+
+
+def test_un_onglet_tronque_se_complete_et_le_dit(tmp_path):
+    """Un tableau bâti sur un modèle ancien ne porte pas tout le catalogue.
+
+    Mesuré le 06/10/2026 sur Auzainvilliers, dont l'onglet des dimensions
+    s'arrête après « Local de stockage matériel » : il manquait les sections
+    « Aire de charge (BESS) » et « Citerne incendie » et la ligne de l'aire
+    d'aspiration, soit six ouvrages dessinés au plan et absents du dossier —
+    dont la citerne incendie, que le chef de projet cherchait sur la coupe.
+
+    L'onglet n'est pas une donnée de projet : c'est le catalogue des gabarits
+    UNITe, le même dans tous les tableaux, et l'outil en livre une copie. Les
+    sections absentes s'y prennent donc, et le complément s'annonce.
+    """
+    from dp_socle.tableau_bilan import lire_tableau
+
+    chemin = _tableau_fabrique(
+        tmp_path / "tronque.xlsx", decoupees=True, onglet_cotes="Dimensions postes"
+    )
+    tableau = lire_tableau(chemin, "IND03")
+
+    ouvrages = {c.ouvrage for c in tableau.cotes}
+    assert "Citerne incendie — 120" in ouvrages
+    assert "Aire de charge (BESS) — Citerne de refroidissement" in ouvrages
+    assert "Citerne incendie — 120" in tableau.cotes_completees
+    annonces = [m for m in tableau.avertissements if "gabarits UNITe" in m]
+    assert len(annonces) == 1, annonces
+    assert "Citerne incendie — 120" in annonces[0]
+
+
+def test_le_tableau_garde_la_main_sur_ce_qu_il_porte(tmp_path):
+    """Seuls les libellés absents sont ajoutés : le projet prime sur le standard.
+
+    Un tableau qui déclare un poste hors cotes de catalogue garde le sien — le
+    complément n'est pas un alignement sur le standard, c'est un bouche-trou.
+    """
+    from dp_socle.tableau_bilan import lire_tableau
+
+    tableau = lire_tableau(_tableau_fabrique(
+            tmp_path / "propre.xlsx", decoupees=True,
+            onglet_cotes="Dimensions postes",
+        ), "IND03")
+
+    ptr = [c for c in tableau.cotes if c.ouvrage == "Poste de transformation - PTR"]
+    assert len(ptr) == 1, "pas de doublon entre le tableau et le classeur"
+    assert ptr[0].dimensions == "10 x 3 x 3m"
+    assert "Poste de transformation - PTR" not in tableau.cotes_completees
+
+
+def test_la_variante_de_citerne_reste_choisie_sur_l_emprise_mesuree(tmp_path):
+    """Rien à saisir : c'est le plan qui dit laquelle des quatre.
+
+    La citerne d'Auzainvilliers mesure 103,9 m² au DXF, et tombe sur la 120
+    (11,7 x 9,3 m, soit 108,8 m², à 4,5 % près). Demander le volume au chef de
+    projet lui ferait ressaisir ce que le plan donne déjà au centimètre.
+    """
+    from dp_socle.contrat import Contrat
+    from dp_socle.tableau_bilan import lire_tableau
+
+    tableau = lire_tableau(_tableau_fabrique(
+            tmp_path / "variante.xlsx", decoupees=True,
+            onglet_cotes="Dimensions postes",
+        ), "IND03")
+    contrat = Contrat(
+        dossier=tmp_path,
+        donnees={
+            "cotes_normalisees": [
+                {
+                    "ouvrage": c.ouvrage,
+                    "dimensions": c.dimensions,
+                    "ordre_cotes": c.ordre_cotes,
+                    "surface_m2": c.surface_m2,
+                    "surface_plateforme_m2": c.surface_plateforme_m2,
+                }
+                for c in tableau.cotes
+            ]
+        },
+        couches={},
+    )
+    assert contrat.cote_de_categorie("bache_incendie", surface_m2=103.9).ouvrage == (
+        "Citerne incendie — 120"
+    )
+    assert contrat.cote_de_categorie("bache_incendie", surface_m2=35.0).ouvrage == (
+        "Citerne incendie — 30"
+    )
+
+
+def test_la_provenance_des_cotes_redescend_dans_le_contrat(plan, tmp_path):
+    """Sur un dossier déjà déposé, on doit pouvoir dire d'où vient une hauteur."""
+    from dp_socle.import_be import parametres_json
+    from dp_socle.tableau_bilan import lire_tableau
+
+    tableau = lire_tableau(_tableau_fabrique(
+            tmp_path / "trace.xlsx", decoupees=True,
+            onglet_cotes="Dimensions postes",
+        ), "IND03")
+    donnees = parametres_json(plan, tableau, [])
+    assert "Citerne incendie — 120" in donnees["cotes_completees"]
+    assert len(donnees["cotes_normalisees"]) == len(tableau.cotes)
+
+
+def test_un_seul_chemin_pour_le_classeur_des_gabarits():
+    """Deux définitions du même chemin finiraient par désigner deux fichiers."""
+    from dp_socle.plan_pdf import CHEMIN_GABARITS as cote_plan_pdf
+    from dp_socle.tableau_bilan import CHEMIN_GABARITS as cote_tableau
+
+    assert cote_plan_pdf is cote_tableau
+    assert cote_tableau.exists()

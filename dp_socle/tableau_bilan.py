@@ -43,6 +43,13 @@ ONGLET_STANDARDS = "Standards UNITe"
 #: page, mêmes sections, mêmes en-têtes « Dimensions (…) ».
 ONGLET_GABARITS = "Dimensions postes"
 
+#: Le classeur des gabarits UNITe, livré avec l'outil.
+#:
+#: Défini ici, auprès de `lire_gabarits` qui le lit, et non dans le module du
+#: plan PDF qui n'en est qu'un usager : les cotes manquantes d'un tableau bilan
+#: s'y complètent aussi désormais, et deux copies du chemin dériveraient.
+CHEMIN_GABARITS = Path(__file__).resolve().parent / "ressources" / "gabarits_unite.xlsx"
+
 #: Noms sous lesquels l'onglet des cotes se cherche dans un tableau bilan.
 #:
 #: Certains tableaux recopient la table des gabarits **sous son nom d'origine** :
@@ -368,6 +375,11 @@ class TableauBilan:
     cotes: list[CoteNormalisee]
     standards: dict
     source: str
+    #: Ouvrages dont la cote ne vient pas du tableau mais du classeur UNITe.
+    #:
+    #: Vide dans le cas courant. Renseigné, il dit exactement ce que l'outil a
+    #: apporté : c'est ce qui distingue un complément d'un repli muet.
+    cotes_completees: tuple[str, ...] = ()
     avertissements: list[str] = field(default_factory=list)
 
     def tous_parametres(self) -> dict:
@@ -517,6 +529,7 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
 
     cotes, avertissements_cotes = _lire_cotes(classeur, chemin)
     avertissements.extend(avertissements_cotes)
+    cotes, completees = _completer_depuis_les_gabarits(cotes, avertissements)
 
     type_projet = valeurs["generalites"].get("type_projet", "")
     standards, avertissements_standards = _lire_standards(classeur, chemin, type_projet)
@@ -532,6 +545,7 @@ def lire_tableau(chemin: str | Path, indice: str) -> TableauBilan:
         postes=valeurs["postes"],
         pistes=valeurs["pistes"],
         cotes=cotes,
+        cotes_completees=completees,
         standards=standards,
         source=chemin.name,
         avertissements=avertissements,
@@ -782,6 +796,63 @@ def _lire_cotes(
     else:
         cotes.append(aire)
     return cotes, avertissements
+
+
+def _completer_depuis_les_gabarits(
+    cotes: list[CoteNormalisee], avertissements: list[str]
+) -> tuple[list[CoteNormalisee], tuple[str, ...]]:
+    """Ajoute les cotes que le tableau ne porte pas, prises au classeur UNITe.
+
+    L'onglet des dimensions n'est pas une donnée de projet : c'est le catalogue
+    des gabarits UNITe, le même dans tous les tableaux, et l'outil en livre une
+    copie — celle que le parcours du plan PDF lit déjà faute de tableau bilan.
+    Un tableau bâti sur un modèle ancien en porte une version tronquée, et les
+    ouvrages des sections absentes ne sont alors dessinés ni sur leur planche
+    DP 4 ni sur la coupe DP 3.
+
+    Mesuré le 06/10/2026 sur Auzainvilliers, dont le tableau (V3) s'arrête après
+    « Local de stockage matériel » : il manquait les sections « Aire de charge
+    (BESS) » et « Citerne incendie » et la ligne de l'aire d'aspiration, soit
+    six ouvrages dessinés au plan et absents du dossier.
+
+    **Le tableau garde la main partout où il parle.** Seuls les libellés qu'il
+    ne porte pas sont ajoutés : un projet dont le tableau déclare une citerne
+    hors standard garde la sienne. Et la variante d'une famille reste choisie
+    sur l'emprise mesurée au plan — il n'y a rien à saisir.
+
+    Le complément est annoncé, et la liste de ce qui a été apporté redescend
+    dans le contrat : une substitution muette donnerait un dossier d'apparence
+    correcte dont personne ne saurait d'où viennent les hauteurs.
+    """
+    presentes = {cote.ouvrage for cote in cotes}
+    try:
+        catalogue, _ecartees = lire_gabarits(CHEMIN_GABARITS)
+    except (ErreurTableauBilan, OSError) as exc:
+        if presentes:
+            # Rien à compléter que l'on sache : le tableau a été lu, et un
+            # classeur illisible ne doit pas emporter un import qui tient.
+            return cotes, ()
+        avertissements.append(
+            f"Classeur des gabarits UNITe illisible ({CHEMIN_GABARITS.name}) : "
+            f"{exc} Les cotes absentes du tableau bilan ne peuvent pas être "
+            "complétées, et les ouvrages concernés ne seront pas dessinés."
+        )
+        return cotes, ()
+
+    ajoutees = [cote for cote in catalogue if cote.ouvrage not in presentes]
+    if not ajoutees:
+        return cotes, ()
+    avertissements.append(
+        f"{len(ajoutees)} cote(s) absente(s) de l'onglet des dimensions du "
+        f"tableau bilan, complétée(s) depuis le classeur des gabarits UNITe "
+        f"({CHEMIN_GABARITS.name}) : "
+        + ", ".join(f"« {cote.ouvrage} »" for cote in ajoutees)
+        + ". Ce catalogue est le même dans tous les tableaux ; celui-ci est "
+        "bâti sur un modèle qui ne le porte pas en entier. Les ouvrages seront "
+        "dessinés à ces dimensions — à vérifier si le projet s'écarte du "
+        "standard."
+    )
+    return cotes + ajoutees, tuple(cote.ouvrage for cote in ajoutees)
 
 
 def lire_gabarits(chemin: str | Path) -> tuple[list[CoteNormalisee], list[str]]:
