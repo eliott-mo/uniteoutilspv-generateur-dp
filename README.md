@@ -146,9 +146,15 @@ chaque reconstruction du conteneur.
    DXF, ni le tableau bilan, ni le plan PDF ne décrivent la fondation des tables
    ni ne connaissent le PPRI :
 
-   - une case, **« Centrale fondée sur longrines (fondation hors-sol) »**, qui
-     ne change que la coupe de principe des tables de DP 3 — voir « DP 3 — Deux
-     coupes, deux échelles, deux sources de hauteur » plus bas ;
+   - **la fondation des tables**, trois états exclusifs : pieux battus à deux
+     pieux par portique (le standard, et ce que la planche dessinait avant que
+     l'option existe), pieux battus à un seul pieu, ou longrines hors-sol. Seule
+     la coupe de principe des tables de DP 3 en dépend — voir « DP 3 — Deux
+     coupes, deux échelles, deux sources de hauteur » plus bas. Trois boutons et
+     non deux cases : une longrine est une poutre qui porte **deux** poteaux, et
+     deux cases auraient laissé cocher « longrines » et « mono-pieu » ensemble,
+     une fondation qui n'existe pas. `Projet.valider_fondation` la refuse de
+     toute façon ;
    - un dépliant, **« Locaux techniques surélevés — PPRI (zone inondable) »**,
      où deux hauteurs se comptent **au-dessus du terrain naturel** et jamais en
      cote NGF : la surélévation du plancher, et facultativement le niveau des
@@ -3042,6 +3048,43 @@ sur deux paraissait deux fois plus dense que sa voisine.
 Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
 échelle : il porte celle de la coupe des tables, et la coupe du terrain porte la
 sienne en clair.
+
+**Un pieu par portique ou deux.** La coupe dessinait deux poteaux sans que rien
+ne permette d'en choisir un seul. Le tableau bilan ne tranche pas : son « type
+de fondation » ne dit que « Pieux battus », et son nombre de pieux court sur
+toute la longueur de la table — 950 pieux pour 96 tables à Saint-Cyr, 920 pour
+79 à Auzainvilliers, soit 9,9 et 11,7 par table, dont on ne peut pas déduire le
+nombre de portiques, les tables n'ayant pas toutes la même longueur. D'où la
+saisie, en section 2 avec les autres choix du projet.
+
+Le mono-pieu est relevé **dans le vecteur** des deux planches HOCH qui en
+portent, et non dessiné de mémoire :
+
+| | Saint-Pierre-les-Étieux (12/09/2025) | Saint-Lubin-en-Vergonnois (16/12/2025) |
+|---|---|---|
+| Poteau, en fraction du rampant depuis le point bas | 0,66 | 0,52 |
+| Jambe de force côté point bas, sur la panne | 0,30 | 0,24 |
+| Jambe de force côté point haut | aucune | 0,81 |
+
+On retient **0,60** pour le poteau — entre les deux mesures, plutôt qu'un
+mi-rampant commode qu'aucune des deux planches ne dessine — et **une seule**
+jambe de force, vers le point bas, à 0,30 : la plus sobre des deux planches.
+Une coupe de principe dit la structure, elle ne la détaille pas. Le triangle de
+contreventement et son gousset disparaissent, n'ayant plus deux appuis à
+trianguler.
+
+Les deux références sont **agrivoltaïques** — moutons à Saint-Lubin, bovins à
+Saint-Pierre-les-Étieux —, donc des structures hautes : 3,5 et 4,5 m au point
+haut pour 25° d'inclinaison, là où un dossier DP au sol tourne plutôt entre 1,1
+et 3,0 m. La structure est la même, les hauteurs non : celles du dessin restent
+celles du tableau bilan du projet.
+
+**Ce que le rapport en dit.** DP 3 porte en constat le nombre de pieux déclaré,
+ce qu'il fait par table, et le nombre de portiques que la fondation choisie
+implique — en disant que c'est un ordre de grandeur et non une vérification.
+Une seule contradiction est certaine et se signale comme telle : le bi-pieu pose
+deux pieux par portique, donc un nombre **pair**, quelles que soient les
+longueurs de table. Un total impair est faux d'un côté ou de l'autre.
 
 **La centrale peut être fondée sur longrines**, c'est-à-dire hors-sol : des
 poutres béton posées sur le terrain, sur lesquelles les tables se tiennent, au

@@ -1044,32 +1044,53 @@ def _surelevation_saisie() -> tuple:
     return tuple(valeurs)
 
 
-def _fondation_longrines_saisie() -> bool:
-    """Vrai si le chef de projet a coché la fondation hors-sol.
+#: Les fondations de table offertes, et ce qu'elles disent à l'écran.
+#:
+#: Trois états exclusifs plutôt que deux cases : une centrale sur longrines
+#: porte deux poteaux par portique — sous un poteau unique, ce n'est plus une
+#: longrine mais une semelle —, et deux cases auraient laissé cocher les deux.
+#: `Projet.valider_fondation` refuse la combinaison ; le choix unique fait
+#: qu'elle ne se présente pas.
+FONDATIONS = {
+    "bi_pieu": "Pieux battus — **deux** pieux par portique (standard)",
+    "mono_pieu": "Pieux battus — **un seul** pieu par portique",
+    "longrines": "**Longrines** — fondation hors-sol",
+}
+
+
+def _fondation_saisie() -> str:
+    """La fondation retenue à l'écran, « bi_pieu » à défaut.
 
     Clé portant le nom du dépôt, comme les autres décisions de la section : sans
     lui, le choix suivrait le chef de projet d'un projet à l'autre.
     """
-    return bool(st.session_state.get(f"longrines_{_nom_depot(commune)}"))
+    choix = st.session_state.get(f"fondation_{_nom_depot(commune)}")
+    return choix if choix in FONDATIONS else "bi_pieu"
 
 
 def _saisir_les_fondations() -> None:
-    """Pieux battus ou longrines : une case, et rien d'autre.
+    """Comment les tables sont fondées : trois choix, en clair.
 
-    Une case plutôt qu'un volet replié comme celui du PPRI : c'est un seul
+    Des boutons plutôt qu'un volet replié comme celui du PPRI : c'est un seul
     choix, pas trois cotes, et il se lit d'un coup d'œil. Rien de ce que le
-    bureau d'études livre ne le dit — ni le DXF ni le tableau bilan ne décrivent
-    la fondation des tables —, d'où la saisie.
+    bureau d'études livre ne le dit — le tableau bilan donne un nombre de pieux
+    et un « type de fondation » qui ne dit que « Pieux battus », jamais combien
+    par portique —, d'où la saisie.
+
+    Le premier choix est celui que la planche dessinait avant que l'option
+    existe : un dossier déjà produit se régénère à l'identique.
     """
-    st.checkbox(
-        "Centrale fondée sur **longrines** (fondation hors-sol)",
-        key=f"longrines_{_nom_depot(commune)}",
+    st.radio(
+        "Fondation des tables",
+        options=list(FONDATIONS),
+        format_func=lambda cle: FONDATIONS[cle],
+        key=f"fondation_{_nom_depot(commune)}",
         help=(
-            "Des poutres béton posées sur le terrain, sur lesquelles les tables "
-            "se tiennent, au lieu de pieux battus. Ne change que la coupe de "
-            "principe des tables de DP 3 : les emprises au sol, les hauteurs "
-            "déclarées et les planches d'ouvrages sont les mêmes. Modèle : le "
-            "dossier HOCH de Pontivy-Guernal du 26/11/2024."
+            "Ne change que la coupe de principe des tables de DP 3 : les "
+            "emprises au sol, les hauteurs déclarées et les planches d'ouvrages "
+            "sont les mêmes. Modèles relevés dans les dossiers HOCH — "
+            "Pontivy-Guernal du 26/11/2024 pour les longrines, "
+            "Saint-Pierre-les-Étieux du 12/09/2025 pour le mono-pieu."
         ),
     )
 
@@ -3242,7 +3263,9 @@ voirie = st.session_state.get("voirie_tranchee")
 surelevation_locaux, phec_locaux = _surelevation_saisie()
 
 #: Fondation des tables, cochée en section 2. Lue ici comme le reste.
-fondation_longrines = _fondation_longrines_saisie()
+fondation = _fondation_saisie()
+fondation_longrines = fondation == "longrines"
+fondation_mono_pieu = fondation == "mono_pieu"
 
 
 
@@ -3293,6 +3316,7 @@ def _construire_projet() -> Projet | None:
         surelevation_locaux_m=surelevation_locaux,
         phec_locaux_m=phec_locaux,
         fondation_longrines=fondation_longrines,
+        fondation_mono_pieu=fondation_mono_pieu,
     )
 
 
@@ -3332,6 +3356,7 @@ _entrees_generation = (
     surelevation_locaux,
     phec_locaux,
     fondation_longrines,
+    fondation_mono_pieu,
     st.session_state.get("etat_ecrit"),
 )
 _generation_faite = _deja_fait("generation_faite", _entrees_generation)

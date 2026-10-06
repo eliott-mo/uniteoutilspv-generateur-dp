@@ -179,6 +179,19 @@ class Projet:
     #: les mêmes. Le dossier HOCH de Pontivy-Guernal du 26/11/2024 en est le
     #: modèle.
     fondation_longrines: bool = False
+    #: Tables portées par **un seul** pieu par portique, et non deux.
+    #:
+    #: Comme les longrines, le choix ne se lit nulle part : le tableau bilan
+    #: donne un nombre de pieux et un « type de fondation » qui ne dit que
+    #: « Pieux battus », jamais combien par portique. Relevé le 06/10/2026 :
+    #: 950 pieux pour 96 tables à Saint-Cyr, 920 pour 79 à Auzainvilliers, soit
+    #: 9,9 et 11,7 par table — des tables de longueurs différentes, dont on ne
+    #: peut pas déduire le nombre de portiques.
+    #:
+    #: Il ne change **que** la coupe de principe des tables de DP 3. Modèles
+    #: relevés dans les dossiers HOCH : Saint-Pierre-les-Étieux du 12/09/2025 et
+    #: Saint-Lubin-en-Vergonnois du 16/12/2025.
+    fondation_mono_pieu: bool = False
 
     @property
     def libelle_affiche(self) -> str:
@@ -255,6 +268,7 @@ class Projet:
                     "métropolitaine (-5,5° à 10,0°). Refaites le calage."
                 )
         self.valider_surelevation()
+        self.valider_fondation()
         if self.voirie is not None:
             # Le même ensemble que celui du contrat, et non une seconde liste :
             # « sans objet » n'était arrivé que dans `decrire_voiries`, et un
@@ -357,6 +371,21 @@ class Projet:
                             f"{code}, prise {rang} : image introuvable "
                             f"({image}). Redéposez-la, ou retirez la prise."
                         )
+
+    def valider_fondation(self) -> None:
+        """Refuse une fondation qui se contredit.
+
+        Une longrine est une poutre qui **porte deux poteaux** : sous un poteau
+        unique, ce n'est plus une longrine mais une semelle. Les deux options
+        cochées ensemble décriraient un ouvrage qui n'existe pas, et la coupe de
+        principe en dessinerait un au lieu de refuser.
+        """
+        if self.fondation_longrines and self.fondation_mono_pieu:
+            raise ErreurDP(
+                "Fondation contradictoire : une centrale sur longrines porte "
+                "deux poteaux par portique, le mono-pieu un seul. Choisissez "
+                "l'un ou l'autre."
+            )
 
     def valider_surelevation(self) -> None:
         """Contrôle la cohérence interne des deux cotes de surélévation.

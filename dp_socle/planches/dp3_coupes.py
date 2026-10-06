@@ -182,6 +182,26 @@ EPAISSEUR_MODULE_M = 0.06
 
 #: Position des deux pieux sur le rampant, en fraction depuis le point bas.
 APPUIS_RAMPANT = (0.22, 0.76)
+
+#: Position du pieu unique sur le rampant, en fraction depuis le point bas.
+#:
+#: Relevé le 06/10/2026 dans le vecteur des deux dossiers HOCH qui portent du
+#: mono-pieu : 0,66 à Saint-Pierre-les-Étieux (12/09/2025) et 0,52 à
+#: Saint-Lubin-en-Vergonnois (16/12/2025). On retient la valeur intermédiaire
+#: plutôt qu'un mi-rampant commode : aucune des deux planches ne le dessine là.
+APPUI_MONO_PIEU = 0.60
+
+#: Où la jambe de force rejoint la panne, en fraction du rampant depuis le bas.
+#:
+#: **Côté point bas**, dans les deux dossiers : 0,30 à Saint-Pierre-les-Étieux,
+#: 0,24 à Saint-Lubin. Saint-Lubin en porte une seconde vers le point haut
+#: (0,81) ; on s'en tient à la plus sobre des deux planches, celle qui n'en a
+#: qu'une — une coupe de principe dit la structure, elle ne la détaille pas.
+JAMBE_FORCE_RAMPANT = 0.30
+
+#: Hauteur du gousset de la jambe de force sur le poteau, en fraction de sa
+#: hauteur hors sol. Mesurée à 0,55 à Saint-Pierre-les-Étieux.
+HAUTEUR_JAMBE_FORCE = 0.55
 #: Largeur d'un pieu battu, en mètres. Un profilé courant fait 8 à 12 cm
 #: d'aile ; dessiné en trait unique, il ne se lit pas comme une structure.
 LARGEUR_PIEU_M = 0.09
@@ -591,6 +611,10 @@ def generer(
         )
 
     table, avertissements = geometrie_table(contrat)
+    avertissements.extend(
+        _constat_des_pieux(contrat, projet.fondation_longrines,
+                           projet.fondation_mono_pieu)
+    )
 
     # L'échelle du cartouche est celle de la coupe des tables ; celle de la
     # coupe du terrain est portée en clair à côté d'elle.
@@ -622,7 +646,9 @@ def generer(
 
     bloc_tables = (utile_x, utile_y, utile_l, hauteur_tables)
     echelle_tables, nb_rangees, _ = _coupe_des_tables(
-        planche, table, bloc_tables, longrines=projet.fondation_longrines
+        planche, table, bloc_tables,
+        longrines=projet.fondation_longrines,
+        mono_pieu=projet.fondation_mono_pieu,
     )
     planche.definir_echelle(echelle_tables)
 
@@ -661,8 +687,53 @@ def generer(
 # ---------------------------------------------------------------------------
 
 
+def _constat_des_pieux(contrat: Contrat, longrines: bool, mono_pieu: bool) -> list:
+    """Ce que le nombre de pieux déclaré implique, une fois la fondation choisie.
+
+    Le tableau bilan donne un nombre de pieux et un nombre de tables, jamais le
+    nombre de portiques : mesuré le 06/10/2026, 950 pieux pour 96 tables à
+    Saint-Cyr et 920 pour 79 à Auzainvilliers, soit 9,9 et 11,7 par table — des
+    tables de longueurs différentes, dont on ne peut rien déduire de ferme.
+
+    Le constat dit donc ce que le choix implique, et ne conclut pas à la place
+    du chef de projet. Une seule contradiction est certaine et se dit comme
+    telle : le bi-pieu pose deux pieux par portique, donc un nombre **pair** ;
+    un total impair contredit le choix, quelles que soient les longueurs de
+    table.
+
+    Sur longrines il n'y a pas de pieu du tout, et le constat se tait.
+    """
+    if longrines:
+        return []
+    structures = contrat.parametres.get("structures", {})
+    nb_pieux = structures.get("nb_pieux")
+    nb_tables = structures.get("nb_tables")
+    if not nb_pieux or not nb_tables:
+        return []
+    nb_pieux, nb_tables = int(nb_pieux), int(nb_tables)
+    par_table = nb_pieux / nb_tables
+    portiques = par_table if mono_pieu else par_table / 2.0
+    fondation = "mono-pieu" if mono_pieu else "bi-pieu"
+    messages = [
+        f"DP 3 : coupe des tables dessinée en {fondation}. Le tableau bilan "
+        f"déclare {nb_pieux} pieux pour {nb_tables} tables, soit "
+        f"{nombre_fr(round(par_table, 1))} par table — {nombre_fr(round(portiques, 1))} "
+        "portique(s) par table avec cette fondation. Les tables n'ayant pas "
+        "toutes la même longueur, ce compte est un ordre de grandeur et non une "
+        "vérification."
+    ]
+    if not mono_pieu and nb_pieux % 2:
+        messages.append(
+            f"DP 3 : {nb_pieux} pieux déclarés, un nombre impair, alors que le "
+            "bi-pieu en pose deux par portique. L'un des deux est faux — le "
+            "nombre du tableau bilan, ou la fondation choisie à l'import."
+        )
+    return messages
+
+
 def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
-                      tracer: bool = True, longrines: bool = False) -> tuple:
+                      tracer: bool = True, longrines: bool = False,
+                      mono_pieu: bool = False) -> tuple:
     """Dessin de type : trois rangées en profil, sur un sol hachuré.
 
     Aucune géométrie n'est lue du GeoPackage. C'est une coupe de principe, et
@@ -753,7 +824,7 @@ def _coupe_des_tables(planche: Planche, table: GeometrieTable, bloc,
     pieds = []
     for index in range(nb_rangees):
         x_bas = index * table.pas_m
-        _tracer_table(dessin, table, x_bas, trait_table, longrines)
+        _tracer_table(dessin, table, x_bas, trait_table, longrines, mono_pieu)
         if longrines:
             pieds.append(_emprise_longrine(table, x_bas))
 
@@ -813,7 +884,11 @@ def _bande(dessin: Dessin, depart, arrivee, epaisseur_m: float, style) -> None:
 
 
 def _emprise_longrine(table: GeometrieTable, x_bas: float) -> tuple:
-    """Ce que la longrine d'une table occupe au sol, en mètres du dessin."""
+    """Ce que la longrine d'une table occupe au sol, en mètres du dessin.
+
+    Toujours sur les deux appuis : une longrine est une poutre qui porte deux
+    poteaux, et `Projet.valider_fondation` refuse de la combiner au mono-pieu.
+    """
     appuis = [x_bas + table.projection_m * f for f in APPUIS_RAMPANT]
     return (min(appuis) - DEBORD_LONGRINE_M, max(appuis) + DEBORD_LONGRINE_M)
 
@@ -839,7 +914,7 @@ def _tracer_longrine(dessin: Dessin, gauche: float, droite: float) -> None:
 
 
 def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style,
-                  longrines: bool = False) -> None:
+                  longrines: bool = False, mono_pieu: bool = False) -> None:
     """Une table en profil : le plan des modules et sa structure porteuse.
 
     Reprise de la coupe de principe du dossier de Massay du 17/04/2025, où la
@@ -855,6 +930,12 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style,
     plus fichés mais posés sur une poutre béton qui affleure le terrain, et le
     sol reste entier sous la table. Modèle : le dossier HOCH de Pontivy-Guernal
     du 26/11/2024.
+
+    `mono_pieu` vraie, le portique n'a qu'un appui : un poteau à 0,60 du
+    rampant, et une jambe de force unique vers le point bas au lieu du triangle
+    de contreventement, qui n'a plus rien à trianguler. Modèles relevés le
+    06/10/2026 dans le vecteur des planches HOCH de Saint-Pierre-les-Étieux et
+    de Saint-Lubin-en-Vergonnois.
     """
     acier = type(TRAIT_MOYEN)(trait="#3a3a3a", epaisseur_mm=0.2, remplissage="none")
     fiche = type(TRAIT_FIN)(trait="#7a7a7a", epaisseur_mm=0.15, remplissage="none")
@@ -891,12 +972,13 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style,
     ]
     dessin.polyligne([bas, haut, dessus[1], dessus[0]], style, fermer=True)
 
-    # Les deux poteaux, à double trait. Fichés sous le terrain sur pieux ;
-    # posés sur la longrine quand la centrale est fondée hors-sol.
+    # Les poteaux, à double trait. Fichés sous le terrain sur pieux ; posés sur
+    # la longrine quand la centrale est fondée hors-sol. Un seul en mono-pieu.
     pied = HAUTEUR_LONGRINE_M if longrines else 0.0
+    appuis = (APPUI_MONO_PIEU,) if mono_pieu else APPUIS_RAMPANT
     tetes = [
         sous_rampant(_point_sur_rampant(table, x_bas, f), HAUTEUR_PANNE_M)
-        for f in APPUIS_RAMPANT
+        for f in appuis
     ]
     if longrines:
         # Dessinée **avant** les poteaux, pour qu'ils se lisent posés dessus et
@@ -929,13 +1011,33 @@ def _tracer_table(dessin: Dessin, table: GeometrieTable, x_bas: float, style,
             x - PLATINE_M / 2.0, tete[1] - PLATINE_M / 4.0,
             PLATINE_M, PLATINE_M * 0.75, acier,
         )
-        # Collier de contreventement.
-        y_collier = tete[1] * HAUTEUR_COLLIER
+        # Collier : il porte le contreventement en bi-pieu, la jambe de force
+        # en mono-pieu. Sa hauteur diffère : le gousset de la jambe se tient
+        # plus haut sur le poteau que le collier du triangle (0,55 contre 0,42
+        # de la hauteur hors sol), mesuré sur Saint-Pierre-les-Étieux.
+        fraction = HAUTEUR_JAMBE_FORCE if mono_pieu else HAUTEUR_COLLIER
+        y_collier = pied + (tete[1] - pied) * fraction
         dessin.rectangle(
             x - COLLIER_M / 2.0, y_collier - COLLIER_M / 2.0,
             COLLIER_M, COLLIER_M, acier,
         )
         colliers.append((x, y_collier))
+
+    if mono_pieu:
+        # Une jambe de force unique, du collier vers la panne côté point bas.
+        # Pas de gousset : il n'y a qu'une diagonale à recevoir, et la planche
+        # de référence n'en dessine pas.
+        _bande(
+            dessin,
+            sous_rampant(
+                _point_sur_rampant(table, x_bas, JAMBE_FORCE_RAMPANT),
+                HAUTEUR_PANNE_M,
+            ),
+            colliers[0],
+            0.05,
+            acier,
+        )
+        return
 
     # Le contreventement : un gousset sur la panne, deux diagonales vers les
     # colliers. C'est ce triangle qui tient la table au vent.

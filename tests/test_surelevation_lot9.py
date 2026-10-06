@@ -525,3 +525,39 @@ def test_la_case_des_longrines_est_offerte_et_part_dans_le_projet():
         ):
             entrees = ast.get_source_segment(source, noeud.value)
     assert entrees and "fondation_longrines" in entrees
+
+
+def test_la_fondation_se_choisit_entre_trois_et_part_dans_le_projet():
+    """Trois états exclusifs, et le premier est celui d'avant l'option.
+
+    Deux cases auraient laissé cocher longrines **et** mono-pieu, une fondation
+    qui n'existe pas — une longrine porte deux poteaux. Le choix unique fait que
+    la combinaison ne se présente pas ; `Projet.valider_fondation` la refuse de
+    toute façon.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app.py").read_text(
+        encoding="utf-8"
+    )
+    fondations = None
+    for noeud in ast.walk(ast.parse(source)):
+        if isinstance(noeud, ast.Assign) and any(
+            isinstance(c, ast.Name) and c.id == "FONDATIONS" for c in noeud.targets
+        ):
+            fondations = ast.literal_eval(noeud.value)
+    assert fondations is not None, "FONDATIONS introuvable"
+    assert list(fondations) == ["bi_pieu", "mono_pieu", "longrines"]
+
+    construction = source.split("def _construire_projet", 1)[1]
+    assert "fondation_mono_pieu=fondation_mono_pieu" in construction
+
+    entrees = None
+    for noeud in ast.walk(ast.parse(source)):
+        if isinstance(noeud, ast.Assign) and any(
+            isinstance(c, ast.Name) and c.id == "_entrees_generation"
+            for c in noeud.targets
+        ):
+            entrees = ast.get_source_segment(source, noeud.value)
+    assert entrees and "fondation_mono_pieu" in entrees

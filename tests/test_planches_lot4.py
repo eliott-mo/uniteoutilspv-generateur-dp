@@ -989,3 +989,118 @@ def test_la_longrine_tient_sous_la_table_sans_la_deborder():
     assert droite == pytest.approx(dernier + DEBORD_LONGRINE_M)
     # Elle reste sous la table : le rampant projeté fait 6 m, elle moins.
     assert droite - gauche < 6.0
+
+
+# ---------------------------------------------------------------------------
+# Un pieu par portique au lieu de deux (06/10/2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.reseau
+def test_la_coupe_des_tables_ne_pose_qu_un_pieu_en_mono_pieu(
+    site, tmp_path, parcellaire_double
+):
+    """Demande du chef de projet du 06/10/2026.
+
+    La coupe dessinait deux pieux par portique sans que rien ne permette d'en
+    choisir un seul : `APPUIS_RAMPANT` était figé. Le tableau bilan ne tranche
+    pas — il donne un nombre de pieux et un « type de fondation » qui ne dit que
+    « Pieux battus » —, d'où la saisie.
+
+    Modèles relevés le même jour dans le vecteur des planches HOCH :
+    Saint-Pierre-les-Étieux du 12/09/2025, poteau à 0,66 du rampant et une
+    jambe de force unique vers le point bas ; Saint-Lubin-en-Vergonnois du
+    16/12/2025, poteau à 0,52 et deux jambes. On retient la plus sobre.
+
+    Mesuré sur le PDF produit : moitié moins de fiches sous le terrain, et le
+    gousset du contreventement disparaît avec le triangle qu'il portait.
+    """
+    from dp_socle.planches import dp3_coupes
+
+    projet, dossier = site()
+    contrat = charger_contrat(dossier)
+
+    bi = dp3_coupes.generer(projet, contrat, tmp_path / "bi", numero="6")
+    projet.fondation_mono_pieu = True
+    mono = dp3_coupes.generer(projet, contrat, tmp_path / "mono", numero="6")
+
+    def fiches(chemin) -> int:
+        """Les traits verticaux qui descendent sous le terrain : deux par pieu."""
+        return len([
+            s for s in segments(chemin)
+            if abs(s[0][0] - s[1][0]) < 0.2 and longueur(s) > 5.0
+        ])
+
+    sur_deux, sur_un = fiches(bi.chemin), fiches(mono.chemin)
+    assert sur_un < sur_deux, (sur_un, sur_deux)
+    # Quatre verticales par pieu retiré : les deux côtés du poteau, à double
+    # trait, et les deux traits de sa fiche. Le nombre de rangées n'est pas figé
+    # — l'échelle en décide —, donc on vérifie le multiple et non le total ;
+    # d'autres verticales du dessin passent le filtre et interdisent un ratio.
+    assert (sur_deux - sur_un) % 4 == 0 and sur_deux - sur_un >= 4
+
+
+def test_un_mono_pieu_sur_longrines_est_refuse(tmp_path):
+    """Une longrine porte deux poteaux : sous un seul, c'est une semelle.
+
+    Les deux options cochées ensemble décriraient un ouvrage qui n'existe pas,
+    et la coupe de principe en dessinerait un au lieu de refuser.
+    """
+    from dp_socle.erreurs import ErreurDP
+
+    emprise = tmp_path / "emprise.geojson"
+    emprise.write_text('{"type": "FeatureCollection", "features": []}', encoding="utf-8")
+    projet = Projet(
+        nom="Essai", commune="Sarnois", code_postal="60210", date="2026-10-06",
+        emprise=str(emprise), fondation_longrines=True, fondation_mono_pieu=True,
+    )
+    with pytest.raises(ErreurDP, match="Fondation contradictoire"):
+        projet.valider()
+
+
+def test_le_constat_des_pieux_dit_ce_que_la_fondation_implique(site):
+    """Le rapport dit le compte, et se garde de conclure.
+
+    Relevé le 06/10/2026 : 950 pieux pour 96 tables à Saint-Cyr, soit 9,9 par
+    table. Les tables n'ont pas toutes la même longueur, et on ne peut pas en
+    déduire le nombre de portiques — le constat le dit plutôt que de prétendre
+    vérifier.
+    """
+    from dp_socle.planches.dp3_coupes import _constat_des_pieux
+
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    # Les chiffres relevés sur Saint-Cyr le 06/10/2026 : le site d'essai est
+    # synthétique et ne déclare pas de pieux.
+    contrat.parametres["structures"]["nb_pieux"] = 950
+    contrat.parametres["structures"]["nb_tables"] = 96
+
+    messages = _constat_des_pieux(contrat, longrines=False, mono_pieu=False)
+    assert messages
+    assert "bi-pieu" in messages[0]
+    assert "ordre de grandeur" in messages[0]
+    # Sur longrines il n'y a pas de pieu du tout : le constat se tait.
+    assert _constat_des_pieux(contrat, longrines=True, mono_pieu=False) == []
+
+
+def test_un_nombre_de_pieux_impair_contredit_le_bi_pieu(site):
+    """La seule contradiction certaine, et elle se dit.
+
+    Le bi-pieu pose deux pieux par portique, donc un nombre pair, quelles que
+    soient les longueurs de table. Un total impair est faux d'un côté ou de
+    l'autre.
+    """
+    from dp_socle.planches.dp3_coupes import _constat_des_pieux
+
+    _, dossier = site()
+    contrat = charger_contrat(dossier)
+    contrat.parametres["structures"]["nb_pieux"] = 951
+    contrat.parametres["structures"]["nb_tables"] = 96
+
+    messages = _constat_des_pieux(contrat, longrines=False, mono_pieu=False)
+    assert any("nombre impair" in m for m in messages)
+    # En mono-pieu, un nombre impair n'a rien d'anormal.
+    assert not any(
+        "nombre impair" in m
+        for m in _constat_des_pieux(contrat, longrines=False, mono_pieu=True)
+    )
