@@ -356,16 +356,64 @@ def test_la_saisie_est_posee_une_seule_fois_pour_les_deux_parcours():
     04/10/2026 par `test_app_plan_pdf`, que rien d'autre n'aurait vu — les
     tests de modules n'exécutent jamais `app.py`.
 
-    Un seul appel, donc, et posé là où le chef de projet tranche déjà le type
-    de ses voiries : c'est la place des décisions que les fichiers du bureau
-    d'études ne portent pas.
+    Un seul appel, donc, et il est aujourd'hui dans `_saisir_les_choix_du_projet`,
+    lui-même appelé une fois depuis la fin commune de la section 2.
     """
     appels = _appels_dans_app("_saisir_la_surelevation")
-    assert len(appels) == 1, appels
-    (portee, ligne), = appels
-    assert portee == "<module>"
+    assert appels == [("_saisir_les_choix_du_projet", appels[0][1])], appels
+    groupe = _appels_dans_app("_saisir_les_choix_du_projet")
+    assert len(groupe) == 1, groupe
+    assert groupe[0][0] == "<module>"
+
+
+def test_les_choix_du_projet_sont_rendus_avec_les_autres_options():
+    """Le volet remonte à côté des options, et non sous les remarques d'import.
+
+    Il était rendu en fin de section, derrière les remarques de l'import, où il
+    se lisait comme un message de plus ; sur le parcours PDF, la carte occupant
+    toute la colonne de droite, il atterrissait un écran et demi sous les
+    corrections auxquelles il ressemble (retour d'usage du 06/10/2026).
+
+    Le conteneur est donc **réservé** en haut de chaque parcours — un par
+    parcours, les deux étant exclusifs — et rempli une seule fois. Deux
+    réservations et un seul remplissage : s'il n'en restait qu'une, le parcours
+    privé de la sienne lèverait une `NameError` et l'outil serait inutilisable
+    pour tout le monde, comme le 01/10/2026.
+    """
+    import ast
+    from pathlib import Path
+
+    arbre = ast.parse(
+        (Path(__file__).resolve().parent.parent / "app.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    reserves = [
+        noeud
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Assign)
+        and any(
+            isinstance(c, ast.Name) and c.id == "emplacement_choix"
+            for c in noeud.targets
+        )
+    ]
+    assert len(reserves) == 2, [n.lineno for n in reserves]
+    remplissages = [
+        noeud
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.With)
+        and any(
+            isinstance(item.context_expr, ast.Name)
+            and item.context_expr.id == "emplacement_choix"
+            for item in noeud.items
+        )
+    ]
+    assert len(remplissages) == 1, [n.lineno for n in remplissages]
+    # Avant le typage des voiries et les remarques de l'import : c'est ce que
+    # la remontée veut dire, et une réservation posée plus bas ne le donnerait
+    # pas même avec un seul remplissage.
     (_, ligne_voiries), = _appels_dans_app("_trancher_les_voiries")
-    assert abs(ligne - ligne_voiries) <= 3
+    assert max(n.lineno for n in reserves) < ligne_voiries
 
 
 def test_les_cotes_rearment_le_bouton_de_generation():
@@ -464,7 +512,7 @@ def test_la_case_des_longrines_est_offerte_et_part_dans_le_projet():
     )
     appels = _appels_dans_app("_saisir_les_fondations")
     assert len(appels) == 1, appels
-    assert appels[0][0] == "<module>"
+    assert appels[0][0] == "_saisir_les_choix_du_projet"
 
     construction = source.split("def _construire_projet", 1)[1]
     assert "fondation_longrines=fondation_longrines" in construction

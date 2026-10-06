@@ -134,27 +134,44 @@ chaque reconstruction du conteneur.
    n'ouvre pas le dépliant obtient les intitulés de référence. La correction se
    conserve dans `projet.json`, et une régénération ne la redemande pas.
 
-   **La surélévation des locaux techniques se saisit ici aussi**, dans un
-   dépliant intitulé « Locaux techniques surélevés — PPRI (zone inondable) ».
-   Celui-là reste **replié**, et c'est délibéré : la quasi-totalité des projets
-   ne sont pas en zone inondable, et un bandeau sur chaque dossier entraînerait
-   à ne plus lire les bandeaux. Deux hauteurs, toutes deux comptées **au-dessus
-   du terrain naturel** et jamais en cote NGF — la surélévation du plancher, et
-   facultativement le niveau des plus hautes eaux qui fait tracer la ligne PHEC.
-   Voir « Locaux techniques surélevés » plus bas pour ce que la planche en fait,
-   et pourquoi le relatif plutôt que l'absolu.
-
-   Ce que ce dépliant replié coûte est payé au rapport : quand un projet porte
-   des locaux techniques et qu'aucune surélévation n'est saisie, DP 4 écrit en
-   constat qu'elle les a dessinés posés au sol. Un volet replié se rate — celui
-   de la légende l'a prouvé — et le rapport est ce qui rattrape l'oubli avant le
-   dépôt.
-
    Un champ par **intitulé** et non par catégorie : « Voie lourde » couvre la
    piste lourde et l'aire de grutage, qui sont la même grave compactée, et la
    planche n'en fait qu'une ligne. En montrer deux champs laisserait croire
    qu'on peut les nommer séparément — ce qui est possible, mais scinde la ligne,
    et doit donc se demander plutôt que s'obtenir par surprise.
+
+   **Les choix du projet** se saisissent sous les options de l'import, dans la
+   colonne de gauche pour un plan PDF et en tête des contrôles pour un plan du
+   bureau d'études. Deux décisions qu'aucun fichier d'entrée ne porte — ni le
+   DXF, ni le tableau bilan, ni le plan PDF ne décrivent la fondation des tables
+   ni ne connaissent le PPRI :
+
+   - une case, **« Centrale fondée sur longrines (fondation hors-sol) »**, qui
+     ne change que la coupe de principe des tables de DP 3 — voir « DP 3 — Deux
+     coupes, deux échelles, deux sources de hauteur » plus bas ;
+   - un dépliant, **« Locaux techniques surélevés — PPRI (zone inondable) »**,
+     où deux hauteurs se comptent **au-dessus du terrain naturel** et jamais en
+     cote NGF : la surélévation du plancher, et facultativement le niveau des
+     plus hautes eaux qui fait tracer la ligne PHEC. Voir « Locaux techniques
+     surélevés » plus bas pour ce que la planche en fait, et pourquoi le relatif
+     plutôt que l'absolu.
+
+   Les deux étaient rendus en fin de section, derrière les remarques de
+   l'import, où ils se lisaient comme des messages de plus ; sur le parcours
+   PDF, la carte occupant toute la colonne de droite, ils atterrissaient un
+   écran et demi sous les corrections auxquelles ils ressemblent. Remontés le
+   06/10/2026 à côté des options. Le conteneur qui les reçoit est **réservé** en
+   haut de chaque parcours et rempli une seule fois, la fin de la section 2
+   étant commune aux deux imports : deux appels y rendraient deux fois les mêmes
+   champs, `StreamlitDuplicateElementKey` relevé le 04/10/2026.
+
+   Le dépliant du PPRI reste **replié**, et c'est délibéré : la quasi-totalité
+   des projets ne sont pas en zone inondable, et un bandeau sur chaque dossier
+   entraînerait à ne plus lire les bandeaux. Ce que ce repli coûte est payé au
+   rapport : quand un projet porte des locaux techniques et qu'aucune
+   surélévation n'est saisie, DP 4 écrit en constat qu'elle les a dessinés posés
+   au sol. Un volet replié se rate — celui de la légende l'a prouvé — et le
+   rapport est ce qui rattrape l'oubli avant le dépôt.
 3. **Génération** — le type des voiries si le plan en laisse d'indécises, puis
    le bouton. Il est en dernier parce que tout ce qu'il consomme est au-dessus
    de lui, et c'est là que le nom du projet est complet : l'indice ne se connaît

@@ -1144,6 +1144,37 @@ def _saisir_la_surelevation() -> None:
             )
 
 
+def _saisir_les_choix_du_projet() -> None:
+    """Les décisions qu'aucun fichier d'entrée ne porte, groupées et remontées.
+
+    Ni le DXF, ni le tableau bilan, ni le plan PDF ne disent comment les tables
+    sont fondées ni si un PPRI impose de surélever les locaux : c'est ce que ces
+    deux saisies demandent, et le sous-titre le dit. Un titre neutre plutôt
+    qu'un écho à « Ce que le plan ne dit pas de ses ouvrages », qui le précède
+    de deux lignes sur le parcours PDF : deux titres voisins au mot près se
+    lisent comme un doublon, pas comme deux groupes.
+
+    **Avec les autres options, et non en fin de section.** Elles étaient posées
+    sous les remarques de l'import, où elles se lisaient comme des messages de
+    plus ; sur le parcours PDF, la carte occupant toute la colonne de droite,
+    elles atterrissaient un écran et demi sous les corrections auxquelles elles
+    ressemblent (retour d'usage du 06/10/2026).
+
+    Le conteneur qui les reçoit est réservé en haut de chaque parcours et rempli
+    ici **une seule fois** : la fin de la section 2 est commune aux deux
+    imports, et deux appels y rendraient deux fois les mêmes champs —
+    `StreamlitDuplicateElementKey`, relevé le 04/10/2026.
+    """
+    st.markdown("**Les choix du projet**")
+    st.caption(
+        "Deux décisions qu'aucun fichier d'entrée ne porte : ni le DXF ni le "
+        "tableau bilan ne décrivent la fondation des tables, et aucun des trois "
+        "imports ne connaît le PPRI."
+    )
+    _saisir_les_fondations()
+    _saisir_la_surelevation()
+
+
 def _tableau_controles(controles) -> None:
     """Rend les contrôles croisés, quel que soit leur producteur."""
     st.dataframe(
@@ -2821,6 +2852,10 @@ if import_be_courant is not None and commune.strip():
         colonne_reglages, colonne_carte = st.columns([1.0, 1.25], gap="medium")
         with colonne_reglages:
             _regler_et_trancher_le_plan_pdf(import_be_courant)
+            # Les choix du projet dans la même colonne que les corrections du
+            # plan, juste dessous : réservé ici, rempli plus bas par
+            # `_saisir_les_choix_du_projet`, qui dit pourquoi.
+            emplacement_choix = st.container()
         with colonne_carte:
             carte_de_la_coupe = _montrer_la_coupe(import_be_courant)
     plan = import_be_courant.plan
@@ -2837,6 +2872,9 @@ if import_be_courant is not None and commune.strip():
         colonnes[3].metric(
             "Puissance", f"{tableau.modules['puissance_mwc']:.5f} MWc".replace(".", ",")
         )
+        # Le plan du bureau d'études n'a ni calage ni correction à régler : ses
+        # choix viennent en tête, sous ce que le tableau bilan engage.
+        emplacement_choix = st.container()
 
     # Les bloquants d'abord, seuls, et rien d'autre au premier plan : ce sont
     # les seuls contrôles sur lesquels le chef de projet ait quelque chose à
@@ -2943,8 +2981,6 @@ if import_be_courant is not None and commune.strip():
                     st.caption(f"· {message}")
 
         _trancher_les_voiries(import_be_courant)
-        _saisir_les_fondations()
-        _saisir_la_surelevation()
         # Une fois l'import validé, ces remarques ont été lues : elles se
         # replient pour que la carte, qui vient après, ne soit plus à deux
         # écrans de défilement (retour d'usage du 17/09/2026). Elles restent
@@ -2976,6 +3012,9 @@ if import_be_courant is not None and commune.strip():
                 )
                 for message in routine:
                     st.caption(f"· {message}")
+
+    with emplacement_choix:
+        _saisir_les_choix_du_projet()
 
     coupe = st.session_state.coupe_be
     if tableau is not None:
