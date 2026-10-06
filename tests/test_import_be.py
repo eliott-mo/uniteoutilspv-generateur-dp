@@ -2080,3 +2080,81 @@ def test_un_contour_que_ezdxf_ne_sait_pas_aplatir_reste_illisible_sans_lever():
         vertices = []
 
     assert _sommets_du_contour(_CheminCasse(), 1.0) == []
+
+
+# ---------------------------------------------------------------------------
+# Les cotes normalisées des ouvrages dessinés
+# ---------------------------------------------------------------------------
+
+
+def test_le_tableau_de_reference_cote_tous_les_ouvrages_du_plan(plan, tableau):
+    """Sur les fichiers de référence, rien ne manque — le contrôle se tait."""
+    from dp_socle.import_be import _cotes_des_ouvrages
+
+    controle = _cotes_des_ouvrages(plan, tableau)
+    assert controle.statut == "ok", controle.message
+    assert controle.valeur_dxf == controle.valeur_tableau
+
+
+def test_un_ouvrage_dessine_sans_cote_part_en_demande_au_bureau_d_etudes(plan):
+    """Le plan porte une citerne, le tableau ne la cote pas : il faut le dire.
+
+    Mesuré le 06/10/2026 sur Auzainvilliers, dont le tableau bilan ne portait
+    que 7 cotes — les quatre postes et les trois locaux — là où ceux de Sarnois
+    et de Bray-Saint-Aignan en portent 17. Six catégories dessinées au DXF
+    n'avaient aucune cote, dont la citerne incendie. Rien ne l'a dit à
+    l'import : le chef de projet a produit le dossier entier avant que le
+    rapport n'annonce les ouvrages non dessinés, et c'est la citerne absente du
+    plan de coupe qui a mis sur la voie.
+
+    Le message doit porter le marqueur de demande au bureau d'études : c'est lui
+    qui le sort de la liste des remarques pour le poser dans le bandeau rouge
+    que le chef de projet recopie dans son message.
+    """
+    from dp_socle.import_be import _cotes_des_ouvrages
+
+    class TableauSansCiterne:
+        """Le tableau de référence privé de ses lignes « Citerne incendie »."""
+
+        cotes = [
+            cote
+            for cote in lire_tableau(TABLEAU, "IND06").cotes
+            if not cote.ouvrage.startswith("Citerne incendie")
+        ]
+
+    controle = _cotes_des_ouvrages(plan, TableauSansCiterne())
+    assert controle.statut == "avertissement"
+    assert controle.valeur_tableau == controle.valeur_dxf - 1
+    assert "bache_incendie" in controle.message
+    assert "à demander au bureau d'études" in controle.message
+    # Le constat énumère les quatre libellés cherchés — c'est ce qui permet de
+    # retrouver la ligne dans le tableau. La **demande**, elle, nomme la
+    # famille : réclamer « Citerne incendie — 30 » parce qu'elle vient en tête
+    # désignerait la mauvaise sur un plan qui porte une 120.
+    assert "Citerne incendie — 30" in controle.message
+    _, _, demande = controle.message.partition("à demander au bureau d'études")
+    assert "Citerne incendie (la variante du projet)" in demande
+    assert "Citerne incendie — 30" not in demande
+
+
+def test_la_demande_nomme_la_famille_et_non_sa_premiere_variante():
+    """Une famille à variantes se demande par son nom commun, sans reliquat.
+
+    « Local de stockage matériel — P » est le plus long préfixe commun aux trois
+    tailles, le « P » de « P<=5MWc » compris : couper au tiret cadratin est ce
+    qui rend une demande lisible.
+    """
+    from dp_socle.import_be import _famille_de_cote
+
+    assert _famille_de_cote(("Aire d'aspiration",)) == "Aire d'aspiration"
+    assert _famille_de_cote(
+        ("Local de stockage matériel — P<=5MWc", "Local de stockage matériel — P>5MWc")
+    ) == "Local de stockage matériel (la variante du projet)"
+
+
+def test_le_controle_des_cotes_est_rendu_a_chaque_import(plan, tableau):
+    """Il est dans la liste que l'interface affiche, pas seulement appelable."""
+    from dp_socle.import_be import controler
+
+    libelles = [c.libelle for c in controler(plan, tableau)]
+    assert "Cotes normalisées des ouvrages" in libelles

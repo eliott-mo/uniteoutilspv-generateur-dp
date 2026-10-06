@@ -1940,7 +1940,107 @@ def controler(
     )
     controles.append(_emprise(plan, emprise_cadastrale))
     controles.append(_puissance(modules["puissance_mwc"], seuil_puissance_mwc))
+    controles.append(_cotes_des_ouvrages(plan, tableau))
     return controles
+
+
+def _famille_de_cote(libelles: tuple) -> str:
+    """Le nom à demander au bureau d'études pour une famille de cotes.
+
+    Un seul libellé se demande tel quel. Une famille à variantes — quatre
+    volumes de citerne incendie, trois tailles de local de stockage — se demande
+    par son nom commun : réclamer « Citerne incendie — 30 » parce que c'est la
+    première de la liste désignerait la mauvaise, le plan d'Auzainvilliers
+    portant une citerne de 120.
+    """
+    if len(libelles) == 1:
+        return libelles[0]
+    commun = libelles[0]
+    for libelle in libelles[1:]:
+        while not libelle.startswith(commun):
+            commun = commun[:-1]
+    # Coupé au dernier tiret cadratin, et non simplement rogné : les trois
+    # locaux de stockage ont « Local de stockage matériel — P » en commun, le
+    # « P » de « P<=5MWc » compris, et la demande en gardait un bout de
+    # variante.
+    separateur = commun.rfind(" — ")
+    commun = (commun[:separateur] if separateur > 0 else commun).rstrip(" —-")
+    return f"{commun} (la variante du projet)" if commun else ", ".join(libelles)
+
+
+def _cotes_des_ouvrages(plan: PlanBE, tableau) -> Controle:
+    """Chaque ouvrage dessiné au plan a-t-il sa cote au tableau bilan ?
+
+    Le GeoPackage donne l'emprise au sol d'un ouvrage, **jamais sa hauteur** :
+    celle-ci vient des cotes normalisées du tableau, et d'elles seules. Sans la
+    ligne, l'ouvrage n'est dessiné ni sur sa planche DP 4 ni sur la coupe DP 3,
+    et le dossier part sans lui.
+
+    Mesuré le 06/10/2026 sur Auzainvilliers : son tableau bilan ne portait que
+    7 cotes — les quatre postes et les trois locaux de stockage — là où ceux de
+    Sarnois et de Bray-Saint-Aignan en portent 17. Cinq catégories dessinées au
+    DXF n'avaient donc aucune cote : citerne incendie, citerne de
+    refroidissement, bac de rétention, conteneurs BESS et aire d'aspiration.
+    Rien ne l'a dit à l'import — le chef de projet a produit le dossier entier
+    avant que le rapport n'annonce les ouvrages non dessinés, et c'est la
+    citerne manquante au plan de coupe qui a mis sur la voie.
+
+    Le constat se fait donc ici, où il coûte un message au bureau d'études
+    plutôt qu'un dossier. Il avertit sans bloquer : un tableau incomplet donne
+    un dossier incomplet, pas un dossier faux, et c'est au chef de projet de
+    juger s'il attend la correction ou s'il produit pour avancer.
+
+    `LIBELLES_COTES` est lu dans `contrat` plutôt que recopié ici : c'est la
+    table que les planches consultent, et deux copies qui dérivent donneraient
+    un contrôle qui rassure sur ce qu'il ne contrôle plus. Importé dans la
+    fonction, `contrat` important déjà ce module.
+    """
+    from .contrat import LIBELLES_COTES
+
+    catalogue = {cote.ouvrage for cote in tableau.cotes}
+    dessinees = [c for c in LIBELLES_COTES if plan.geometries(c)]
+    manquantes = [
+        (categorie, LIBELLES_COTES[categorie])
+        for categorie in dessinees
+        if not any(libelle in catalogue for libelle in LIBELLES_COTES[categorie])
+    ]
+    if not manquantes:
+        return Controle(
+            libelle="Cotes normalisées des ouvrages",
+            valeur_dxf=len(dessinees),
+            valeur_tableau=len(dessinees),
+            unite="ouvrage(s)",
+            statut=OK,
+            message=(
+                f"Les {len(dessinees)} catégorie(s) d'ouvrage dessinée(s) au "
+                "plan ont toutes leur cote au tableau bilan."
+                if dessinees
+                else "Aucun ouvrage à coter sur ce plan."
+            ),
+            tolerance="toutes présentes",
+        )
+    detail = " ; ".join(
+        f"« {categorie} » (cherché : {', '.join(libelles)})"
+        for categorie, libelles in manquantes
+    )
+    return Controle(
+        libelle="Cotes normalisées des ouvrages",
+        valeur_dxf=len(dessinees),
+        valeur_tableau=len(dessinees) - len(manquantes),
+        unite="ouvrage(s)",
+        statut=AVERTISSEMENT,
+        message=(
+            f"{len(manquantes)} ouvrage(s) dessiné(s) au plan n'ont aucune cote "
+            f"au tableau bilan : {detail}. Le plan donne leur emprise au sol, "
+            "jamais leur hauteur : ils ne seront dessinés ni sur les planches "
+            "d'ouvrages DP 4 ni sur la coupe du terrain DP 3, et le dossier "
+            "partira sans eux — à demander au bureau d'études : compléter les "
+            "cotes normalisées du tableau bilan pour "
+            + ", ".join(_famille_de_cote(libelles) for _c, libelles in manquantes)
+            + "."
+        ),
+        tolerance="toutes présentes",
+    )
 
 
 def _surface_dessinee(plan: PlanBE, categories) -> float:

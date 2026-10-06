@@ -1519,6 +1519,31 @@ ne remarque avant l'instruction du dossier.
 | Inclinaison des rangées, mesurée vs déclarée | 2°, en valeur absolue | avertissement |
 | Clôture contenue dans l'emprise cadastrale | 1 m² | avertissement, parcelles nommées si le DXF porte un cadastre |
 | Puissance vs seuil de recevabilité en DP | saisie | avertissement |
+| Cotes normalisées des ouvrages dessinés | toutes présentes | avertissement, en demande au bureau d'études |
+
+**Les cotes normalisées** méritent un mot, le contrôle étant né d'un dossier
+perdu. Le plan donne l'emprise au sol d'un ouvrage, **jamais sa hauteur** :
+celle-ci vient des cotes normalisées du tableau bilan, et d'elles seules. Sans
+la ligne, l'ouvrage n'est dessiné ni sur sa planche DP 4 ni sur la coupe du
+terrain DP 3 — et rien ne le disait avant la génération.
+
+Mesuré le 06/10/2026 sur Auzainvilliers : son tableau ne portait que **7 cotes**
+— les quatre postes et les trois locaux de stockage — là où ceux de Sarnois et
+de Bray-Saint-Aignan en portent 17. Six catégories dessinées au DXF n'avaient
+donc aucune cote : conteneurs BESS, bac de rétention, citerne de
+refroidissement, zone de remise, aire d'aspiration et citerne incendie. Le chef
+de projet a produit le dossier entier avant que le rapport n'annonce les
+ouvrages non dessinés, et c'est la citerne absente du plan de coupe qui a mis
+sur la voie.
+
+Le constat se fait maintenant à l'import, et porte le marqueur de demande au
+bureau d'études : il sort de la liste des remarques pour le bandeau rouge que
+le chef de projet recopie dans son message. La demande nomme la **famille** et
+non sa première variante — réclamer « Citerne incendie — 30 » parce qu'elle
+vient en tête désignerait la mauvaise sur un plan qui porte une 120 — quand le
+constat, lui, énumère les quatre libellés cherchés, qui sont ce avec quoi on
+retrouve la ligne dans le tableau. Il avertit sans bloquer : un tableau
+incomplet donne un dossier incomplet, pas un dossier faux.
 
 Le seuil de 1 m² sur le débordement n'est pas arbitraire : sur le jeu de
 référence, la clôture dépasse de **0,53 m²** de l'emprise cadastrale réelle.
