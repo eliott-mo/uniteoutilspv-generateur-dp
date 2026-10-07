@@ -15,7 +15,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 3 | Saisie des pistes, postes, clôtures | remplacé par le lot 2bis |
 | 4 | DP 2, DP 3, DP 4 | livré |
 | 5 | Notice DP 11, fournie en PDF par le chef de projet | livré |
-| 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré ; saisie retirée de l'interface au lot 8 |
+| 6 | DP 6, DP 7, DP 8 et leurs plans de repérage | livré ; saisie retirée de l'interface au lot 8, nombre et portée des DP 6 rendus au chef de projet le 07/10/2026 |
 | 7 | Ajout de la notice à un dossier déjà finalisé | livré |
 | 8 | Sortie PowerPoint à finaliser, pour le volet photographique | livré |
 | 9 | Locaux techniques surélevés au-dessus des plus hautes eaux (PPRI) | livré |

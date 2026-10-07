@@ -65,7 +65,60 @@ from .primitives import echelle_du_dessin
 #: n'auraient donc jamais servi qu'à sortir en silence une planche où le site
 #: n'occupe plus que seize millimètres, au lieu de signaler une position
 #: douteuse.
-ECHELLES_REPERAGE_VUES = (1000, 1500, 2000, 2500, 5000, 7500, 10000)
+ECHELLES_REPERAGE_VUES = (
+    1000, 1500, 2000, 2500, 5000, 7500, 10000,
+    # Allongée le 07/10/2026 : les photomontages les plus éloignés du chef de
+    # projet sont à 500–750 m du site, et aucun cran n'y suffisait. Mesuré sur
+    # une clôture de 232 x 335 m dans un panneau de 162 x 247 mm : une marge de
+    # 750 m demande au moins le 1/11 000, et le 1/12 500 la couvre partout —
+    # 896 m au-delà du site. Le 1/15 000 est la réserve des sites les plus
+    # larges (600 x 600 m), au-delà desquels on n'est plus en déclaration
+    # préalable.
+    12500, 15000,
+)
+
+#: Les trois niveaux de zoom d'un plan de repérage DP 6, et la marge qu'ils
+#: laissent autour du site, en mètres.
+#:
+#: Le libellé est un mot, la marge est ce qui décide vraiment de l'échelle, et
+#: l'échelle dépend de la taille du site : « proche » ne veut pas dire la même
+#: chose sur 2 ha et sur 6 ha. L'interface affiche donc l'échelle obtenue à côté
+#: de chaque mot, calculée sur le site du projet — le chef de projet choisit sur
+#: un fait, pas sur un adjectif.
+#:
+#: Mesuré le 07/10/2026 sur une clôture de 232 x 335 m :
+#:
+#: | Niveau | Marge | Échelle | Couvre au-delà du site |
+#: |---|---|---|---|
+#: | proche | 50 m | 1/2 500 | 86 m |
+#: | éloigné | 300 m | 1/7 500 | 492 m |
+#: | très éloigné | 750 m | 1/12 500 | 896 m |
+#:
+#: « proche » est la marge que DP 6 avait avant l'option : un dossier déjà
+#: produit se régénère à l'identique.
+ZOOMS_REPERAGE = {
+    "proche": 50.0,
+    "eloigne": 300.0,
+    "tres_eloigne": 750.0,
+}
+
+#: Ce que le chef de projet lit pour chaque niveau.
+LIBELLES_ZOOM = {
+    "proche": "Proche",
+    "eloigne": "Éloigné",
+    "tres_eloigne": "Très éloigné",
+}
+
+
+def marge_du_zoom(zoom: str | None) -> float:
+    """La marge d'un niveau de zoom, celle de « proche » à défaut.
+
+    Un niveau inconnu n'est pas une erreur de l'utilisateur mais un
+    `projet.json` repris à la main : il retombe sur le niveau d'origine, et
+    `Projet.valider_photomontages` le refuse en amont plutôt qu'ici.
+    """
+    return ZOOMS_REPERAGE.get(zoom or "proche", ZOOMS_REPERAGE["proche"])
+
 
 #: Marge autour du contenu utile, en part de sa plus grande dimension. Le cadre
 #: **tracé** est ce qu'on mesure, marge comprise : c'est la leçon du lot 4, où

@@ -28,6 +28,7 @@ là où la vraie génération demande deux à trois minutes de téléchargements
 from __future__ import annotations
 
 import zipfile
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -253,10 +254,13 @@ def test_les_pieces_se_suivent_dans_l_ordre_du_dossier(rapport):
     """L'ordre du sommaire, celui que les services instructeurs lisent."""
     codes = [diapo.code for diapo in rapport.diapos]
 
+    # Une seule DP 6 : le projet d'essai ne demande qu'un photomontage, et le
+    # nombre de cadres n'est plus une alternative à trier depuis le 07/10/2026 —
+    # il se déduit des mesures paysagères, déclarées au projet.
     attendus = [
         "", "DP 1-1", "DP 1-2", "DP 1-3", "DP 2", "DP 3",
         "DP 4-1", "DP 4-2",
-        "DP 6", "DP 6", "DP 7", "DP 8", "DP 8", "DP 8",
+        "DP 6", "DP 7", "DP 8", "DP 8", "DP 8",
         "DP 11", "DP 11",
     ]
     assert codes == attendus
@@ -471,8 +475,14 @@ def test_l_etiquette_du_repere_reste_horizontale(rapport):
 
 
 def test_les_alternatives_partagent_le_numero_de_leur_piece(rapport):
-    """Supprimer les surnuméraires laisse la pagination juste (décision D3)."""
-    for code, attendu in (("DP 6", 2), ("DP 8", 3)):
+    """Supprimer les surnuméraires laisse la pagination juste (décision D3).
+
+    DP 6 n'en a plus depuis le 07/10/2026 : son nombre de cadres se déduit des
+    mesures paysagères déclarées au projet, et son cadrage du niveau de zoom
+    choisi pour chaque photomontage. Il ne reste que DP 8, dont le point de vue
+    peut être loin sans qu'on sache encore où.
+    """
+    for code, attendu in (("DP 8", 3),):
         numeros = {d.numero for d in rapport.diapos if d.code == code}
         rangs = [d.alternative for d in rapport.diapos if d.code == code]
         assert len(numeros) == 1
@@ -654,3 +664,109 @@ def test_les_deux_producteurs_emploient_la_meme_formule():
     for module in ("sortie_pptx.py", "assemblage.py"):
         texte = (racine / "dp_socle" / module).read_text(encoding="utf-8")
         assert any(m in texte for m in MARQUEURS_PIECE_ABSENTE), module
+
+
+# ---------------------------------------------------------------------------
+# Plusieurs photomontages, chacun son zoom (07/10/2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rapport_trois_photomontages(dossier_projet, sans_geoplateforme):
+    """Le même dossier, mais à trois photomontages et trois niveaux de zoom.
+
+    Le contrat est **recopié** dans un dossier à part plutôt que régénéré au
+    même endroit : `generer_pptx` lit le contrat sous `dossier_sortie`, et deux
+    générations dans la même minute s'écraseraient l'une l'autre — le nom du
+    fichier porte un horodatage à la minute.
+    """
+    import dataclasses
+    import shutil
+    import tempfile
+
+    projet, sortie = dossier_projet
+    ailleurs = Path(tempfile.mkdtemp()) / "sortie"
+    shutil.copytree(sortie, ailleurs)
+    demande = dataclasses.replace(
+        projet,
+        nb_photomontages=3,
+        zooms_photomontages=("proche", "eloigne", "tres_eloigne"),
+        mesures_paysageres=True,
+    )
+    return sortie_pptx.generer_pptx(demande, dossier_sortie=ailleurs)
+
+
+def test_trois_photomontages_donnent_trois_planches_reperees_a_b_c(
+    rapport_trois_photomontages
+):
+    """Demande du chef de projet du 07/10/2026 : jusqu'à trois DP 6.
+
+    Le socle savait déjà rendre une planche par prise de vue — le dossier de
+    référence de Massay en porte deux, « Vue A » et « Vue B ». Ce qui manquait
+    était le moyen de dire combien : la sortie PowerPoint se produit avant que
+    les photomontages existent, et la saisie des photographies a été retirée de
+    l'interface au lot 8.
+
+    Ce ne sont pas des alternatives : les trois planches se gardent, et chacune
+    porte son repère.
+    """
+    diapos = [d for d in rapport_trois_photomontages.diapos if d.code == "DP 6"]
+
+    assert len(diapos) == 3
+    # Un seul numéro de pièce : trois planches de la même DP 6, pas trois pièces.
+    assert len({d.numero for d in diapos}) == 1
+    # Et aucun bandeau « n'en gardez qu'une » : elles se gardent toutes.
+    assert [d.alternative for d in diapos] == [(1, 1)] * 3
+
+
+def test_chaque_photomontage_porte_le_cadrage_de_son_zoom(
+    rapport_trois_photomontages
+):
+    """Le zoom décide de la marge, donc de l'échelle du plan de repérage.
+
+    Mesuré le 07/10/2026 sur une clôture de 232 x 335 m : 50 m de marge donnent
+    le 1/2 500, 300 m le 1/7 500, 750 m le 1/12 500 — qui couvre 896 m au-delà
+    du site, là où le 1/2 500 d'avant l'option s'arrêtait à 86 m. C'est ce qui
+    manquait aux photomontages pris à 500–750 m.
+    """
+    echelles = [
+        d.echelle for d in rapport_trois_photomontages.diapos if d.code == "DP 6"
+    ]
+
+    assert len(echelles) == 3
+    # Trois échelles **distinctes et croissantes** : un zoom qui ne changerait
+    # rien au cadrage serait un choix pour rien.
+    assert echelles == sorted(echelles)
+    assert len(set(echelles)) == 3
+
+
+def test_les_mesures_paysageres_decident_du_nombre_de_cadres(
+    rapport, rapport_trois_photomontages
+):
+    """Posée une fois pour le projet, la question remplace deux diapos à trier.
+
+    DP 6 sortait en deux versions — deux ou trois cadres —, le troisième volet
+    n'existant que si le projet porte des mesures paysagères. Le chef de projet
+    supprimait la mauvaise. Trois photomontages en auraient fait six diapos.
+    """
+    sans = [d for d in rapport.diapos if d.code == "DP 6"]
+    avec = [d for d in rapport_trois_photomontages.diapos if d.code == "DP 6"]
+
+    assert len(sans) == 1, "une seule version, et non plus deux au choix"
+    assert sans[0].cadres == 2
+    assert all(d.cadres == 3 for d in avec)
+
+
+def test_un_zoom_non_renseigne_retombe_sur_le_cadrage_d_origine(dossier_projet):
+    """Un dossier produit avant l'option se régénère à l'identique.
+
+    `zooms_photomontages` vide, chaque planche prend « proche » — la marge de
+    50 m que DP 6 avait toujours eue.
+    """
+    from dp_socle.sortie_pptx import _reglages_dp6
+
+    projet, _ = dossier_projet
+    cadres, marge = _reglages_dp6(projet, rang=1)
+
+    assert marge == 50.0
+    assert cadres == (2,)

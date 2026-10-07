@@ -146,6 +146,9 @@ chaque reconstruction du conteneur.
    DXF, ni le tableau bilan, ni le plan PDF ne décrivent la fondation des tables
    ni ne connaissent le PPRI :
 
+   - **les photomontages** : combien de planches DP 6 (1 à 3), la portée du
+     plan de repérage de chacune, et si le projet porte des mesures
+     paysagères — voir « Plusieurs DP 6, chacune à sa portée » plus bas ;
    - **la fondation des tables**, trois états exclusifs : pieux battus à deux
      pieux par portique (le standard, et ce que la planche dessinait avant que
      l'option existe), pieux battus à un seul pieu, ou longrines hors-sol. Seule
@@ -1540,6 +1543,57 @@ Elles sont **affichées en regard**, jamais opposées au projet : sur le fichier
 de référence, quatre d'entre elles s'écartent du projet (format de table,
 inter-table, hauteurs) sans que ce soit une anomalie. Un standard n'est pas une
 contrainte.
+
+#### Plusieurs DP 6, chacune à sa portée
+
+Demande des chefs de projet du 07/10/2026, en deux parties.
+
+**Le nombre.** Le socle rend une planche par prise de vue depuis le lot 6 — le
+dossier de référence de Massay en porte deux, « Vue A » et « Vue B ». Ce qui
+manquait était le moyen de dire combien : la sortie PowerPoint se produit
+**avant** que les photomontages existent (lot 8), et la saisie des
+photographies a été retirée de l'interface. Le projet porte donc le nombre, de
+1 à 3 ; au-delà, la pièce cesse d'être une insertion paysagère pour devenir un
+carnet de photomontages.
+
+Ce ne sont **pas des alternatives** : les trois planches se gardent, partagent
+le numéro de la pièce et portent chacune son repère. Aucun bandeau rouge.
+
+**La portée.** Le plan de repérage de DP 6 serrait à 50 m autour du site. Un
+photomontage pris à 600 m tombait hors du cadre, sans recours — et les plus
+éloignés sont à 500–750 m. Chaque planche porte donc son niveau :
+
+| Niveau | Marge | Échelle¹ | Couvre au-delà du site¹ |
+|---|---|---|---|
+| proche | 50 m | 1/2 500 | 86 m |
+| éloigné | 300 m | 1/7 500 | 492 m |
+| très éloigné | 750 m | 1/12 500 | 896 m |
+
+¹ mesuré le 07/10/2026 sur une clôture de 232 × 335 m dans un panneau de
+162 × 247 mm. L'échelle dépend de la taille du site ; la marge, non.
+
+C'est pourquoi l'écran annonce le niveau **en mètres autour du site** et non
+par son échelle : la question du chef de projet est « mon point de vue est à
+600 m, lequel prendre ? », et la marge y répond directement. L'échelle s'en
+déduit, et elle est écrite au cartouche de la planche produite.
+
+« Proche » est la marge que DP 6 avait avant l'option : un dossier déjà produit
+se régénère à l'identique.
+
+**Deux crans d'échelle en plus.** `ECHELLES_REPERAGE_VUES` s'arrêtait au
+1/10 000, et une marge de 750 m demande au moins le 1/11 000 sur un site de
+cette taille. Le 1/12 500 la couvre partout, le 1/15 000 est la réserve des
+sites les plus larges (600 × 600 m), au-delà desquels on n'est plus en
+déclaration préalable. Les deux crans profitent aussi à DP 7 et DP 8, et
+reculent d'autant le refus « à cette distance, ce n'est plus une photographie
+de ce site ».
+
+**Les mesures paysagères, une fois pour le projet.** Le troisième volet,
+« projet avec mesures paysagères », n'existe que si le projet en porte. La
+sortie rendait les **deux** versions — deux ou trois cadres — et le chef de
+projet supprimait la mauvaise ; trois photomontages en auraient fait six
+diapos. La question se pose maintenant une fois, et chaque planche sort dans sa
+seule bonne version : trois photomontages donnent trois diapos.
 
 ### Contrôles croisés
 

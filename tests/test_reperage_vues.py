@@ -102,13 +102,19 @@ def test_un_paysage_lointain_a_un_gros_kilometre_tient_avec_tout_le_site():
 def test_une_emprise_etendue_cede_avant_l_echelle():
     """Décision du 14/09/2026 : DP 2 montre le site, cette planche le repérage.
 
-    Le cas demande une emprise d'un kilomètre, au-delà des 3 MWc de nos
-    dossiers, mais c'est lui qui vérifie l'ordre des renoncements : le cadre
-    lâche le site avant de lâcher les prises de vue ou de sortir de la liste.
+    Le cas demande une emprise d'un kilomètre et demi, très au-delà des 3 MWc
+    de nos dossiers, mais c'est lui qui vérifie l'ordre des renoncements : le
+    cadre lâche le site avant de lâcher les prises de vue ou de sortir de la
+    liste.
+
+    Le site d'essai est passé de 1 000 à 1 500 m le 07/10/2026 : la liste a
+    gagné deux crans — 1/12 500 et 1/15 000, pour les photomontages à 500–750 m
+    du site — et le kilomètre d'avant y tenait de nouveau en entier, ce qui ne
+    vérifiait plus rien.
     """
-    large = box(X0, Y0, X0 + 1_000.0, Y0 + 300.0)
-    centre_large = (X0 + 500.0, Y0 + 150.0)
-    vues = [place_a_la_main("loin", X0 - 800.0, Y0 + 150.0)]
+    large = box(X0, Y0, X0 + 1_500.0, Y0 + 300.0)
+    centre_large = (X0 + 750.0, Y0 + 150.0)
+    vues = [place_a_la_main("loin", X0 - 1_200.0, Y0 + 150.0)]
     reperage = plan_de_reperage(vues, large, COLONNE_MM)
     assert not reperage.site_entier
     assert reperage.denominateur in ECHELLES_REPERAGE_VUES

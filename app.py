@@ -73,7 +73,12 @@ from dp_socle.sortie_pptx import (
 from dp_socle.ajout_notice import ajouter_la_notice, lire_le_dossier
 from dp_socle.import_be import SEUIL_DP_MWC
 from dp_socle.planches import dp11_notice
-from dp_socle.projet import Projet, identifiant_de_dossier, nom_de_projet
+from dp_socle.projet import (
+    MAX_PHOTOMONTAGES,
+    Projet,
+    identifiant_de_dossier,
+    nom_de_projet,
+)
 from dp_socle.tableau_bilan import indice_depuis_nom, indices_disponibles
 
 #: Où l'outil écrit ses fichiers de travail. Relatifs au dossier courant par
@@ -185,6 +190,9 @@ CHAMPS_PROJET_ATTENDUS = (
     "phec_locaux_m",
     "fondation_longrines",
     "fondation_mono_pieu",
+    "nb_photomontages",
+    "zooms_photomontages",
+    "mesures_paysageres",
 )
 
 
@@ -1230,6 +1238,85 @@ def _saisir_la_surelevation() -> None:
             )
 
 
+def _photomontages_saisis() -> tuple:
+    """Le nombre de DP 6 et leur niveau de zoom, `(nombre, zooms)`.
+
+    Écrite **avant** celle qui l'appelle : `test_ordre_app` refuse qu'une
+    fonction lise un nom de module écrit plus bas qu'elle.
+    """
+    depot = _nom_depot(commune)
+    nombre = int(st.session_state.get(f"nb_phom_{depot}") or 1)
+    zooms = tuple(
+        st.session_state.get(f"zoom_phom_{depot}_{rang}") or "proche"
+        for rang in range(1, nombre + 1)
+    )
+    return nombre, zooms
+
+
+def _mesures_paysageres_saisies() -> bool:
+    """Vrai si le projet porte des mesures paysagères, d'après l'écran."""
+    return bool(st.session_state.get(f"paysage_{_nom_depot(commune)}"))
+
+
+def _saisir_les_photomontages() -> None:
+    """Combien de DP 6, et à quelle distance chacune porte.
+
+    Deux choses que l'outil ne peut pas deviner et qu'il déclinait jusqu'ici en
+    diapos à trier :
+
+    - **le nombre.** Le socle rend une planche par photomontage depuis le lot 6
+      — le dossier de référence de Massay en porte deux — mais la sortie
+      PowerPoint se produit avant que les photomontages existent, et rien ne
+      disait combien en réserver.
+    - **la distance.** Le plan de repérage de DP 6 serrait à 50 m autour du
+      site. Un photomontage pris à 600 m tombait hors du cadre, sans recours.
+
+    Le niveau s'annonce en **mètres autour du site** et non par son échelle :
+    c'est la question que le chef de projet se pose — « mon point de vue est à
+    600 m, lequel prendre ? » —, et l'échelle, qui s'en déduit et dépend de la
+    taille du site, est écrite au cartouche de la planche produite.
+    """
+    from dp_socle.planches.reperage_vues import LIBELLES_ZOOM, ZOOMS_REPERAGE
+
+    depot = _nom_depot(commune)
+    st.number_input(
+        "Nombre de photomontages (planches DP 6)",
+        min_value=1, max_value=MAX_PHOTOMONTAGES, step=1, value=1,
+        key=f"nb_phom_{depot}",
+        help=(
+            "Une planche par photomontage, repérée « Vue A », « Vue B », "
+            "« Vue C ». Le dossier de référence HOCH de Massay en porte deux."
+        ),
+    )
+    nombre = int(st.session_state.get(f"nb_phom_{depot}") or 1)
+    if nombre > 1 or st.session_state.get(f"zoom_phom_{depot}_1", "proche") != "proche":
+        st.caption(
+            "Pour chaque photomontage, jusqu'où le plan de repérage doit "
+            "porter — assez loin pour que son point de vue y tombe."
+        )
+    for rang in range(1, nombre + 1):
+        st.radio(
+            f"Vue {chr(64 + rang)} — portée du plan de repérage",
+            options=list(ZOOMS_REPERAGE),
+            format_func=lambda cle: (
+                f"{LIBELLES_ZOOM[cle]} — jusqu'à {ZOOMS_REPERAGE[cle]:.0f} m "
+                "autour du site"
+            ),
+            key=f"zoom_phom_{depot}_{rang}",
+            horizontal=True,
+        )
+    st.checkbox(
+        "Le projet porte des **mesures paysagères**",
+        key=f"paysage_{depot}",
+        help=(
+            "Coché, chaque DP 6 porte trois cadres : l'état actuel, le "
+            "photomontage, et le photomontage avec les mesures paysagères. "
+            "Sinon deux. Sans cette réponse, la sortie rendait les deux "
+            "versions et vous laissiez supprimer la mauvaise."
+        ),
+    )
+
+
 def _saisir_les_choix_du_projet() -> None:
     """Les décisions qu'aucun fichier d'entrée ne porte, groupées et remontées.
 
@@ -1259,6 +1346,7 @@ def _saisir_les_choix_du_projet() -> None:
     )
     _saisir_les_fondations()
     _saisir_la_surelevation()
+    _saisir_les_photomontages()
 
 
 def _tableau_controles(controles) -> None:
@@ -3328,6 +3416,8 @@ voirie = st.session_state.get("voirie_tranchee")
 surelevation_locaux, phec_locaux = _surelevation_saisie()
 
 #: Fondation des tables, cochée en section 2. Lue ici comme le reste.
+nb_photomontages, zooms_photomontages = _photomontages_saisis()
+mesures_paysageres = _mesures_paysageres_saisies()
 fondation = _fondation_saisie()
 fondation_longrines = fondation == "longrines"
 fondation_mono_pieu = fondation == "mono_pieu"
@@ -3382,6 +3472,9 @@ def _construire_projet() -> Projet | None:
         phec_locaux_m=phec_locaux,
         fondation_longrines=fondation_longrines,
         fondation_mono_pieu=fondation_mono_pieu,
+        nb_photomontages=nb_photomontages,
+        zooms_photomontages=zooms_photomontages,
+        mesures_paysageres=mesures_paysageres,
     )
 
 
@@ -3422,6 +3515,9 @@ _entrees_generation = (
     phec_locaux,
     fondation_longrines,
     fondation_mono_pieu,
+    nb_photomontages,
+    zooms_photomontages,
+    mesures_paysageres,
     st.session_state.get("etat_ecrit"),
 )
 _generation_faite = _deja_fait("generation_faite", _entrees_generation)

@@ -384,7 +384,18 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
                 "DP 8 ne sont pas produites."
             )
         else:
-            codes.extend(ligne[0] for ligne in PIECES_PHOTO)
+            for ligne in PIECES_PHOTO:
+                # DP 6 revient autant de fois que le projet porte de
+                # photomontages : ce ne sont pas des alternatives à trier mais
+                # des planches distinctes, chacune son point de vue et son
+                # cadrage. `codes_produits` dédoublonne, donc la numérotation
+                # des pièces suivantes ne bouge pas.
+                nombre = (
+                    max(1, int(projet.nb_photomontages or 1))
+                    if ligne[0] == "DP 6"
+                    else 1
+                )
+                codes.extend([ligne[0]] * nombre)
     if projet.chemin_notice is not None:
         codes.append("DP 11")
 
@@ -396,10 +407,14 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
     # lui, et `codes_produits` renumérote ce qui suit.
     details_cadastre = {}
     index = 0
+    # Combien de planches de ce code ont déjà été rendues : DP 6 en a plusieurs,
+    # et chacune a son repère — « Vue A », « Vue B » — et son cadrage.
+    rangs = {}
     while index < len(codes):
         code = codes[index]
         index += 1
         numero = produits.index(code) + 1
+        rangs[code] = rangs.get(code, 0) + 1
         if code == "DP 11":
             # La notice se compose à part : son PDF est fusionné, pas dessiné.
             groupes.append(Groupe(code, numero, piece(code).titre, planches=[]))
@@ -408,6 +423,7 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
             groupe = _groupe_de_la_piece(
                 projet, code, numero, contrat, emprise, emprise_cloturee,
                 dossier, avertissements, dpi, fond_ign, details_cadastre,
+                rang=rangs[code],
             )
         except ErreurDP as exc:
             avertissements.append(f"{code} n'est pas produite : {exc}")
@@ -423,13 +439,15 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
 
 def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee,
                         dossier, avertissements, dpi, fond_ign=True,
-                        details_cadastre=None):
+                        details_cadastre=None, rang: int = 1):
     """Les planches d'une pièce : une seule, ou plusieurs alternatives."""
     if code in PHOTO_PAR_CODE:
         emplacements, vues, alternatives, marge = PHOTO_PAR_CODE[code]
+        if code == "DP 6":
+            emplacements, marge = _reglages_dp6(projet, rang)
         planches, messages = _planches_photo(
             projet, code, numero, emplacements, vues, alternatives,
-            emprise_cloturee, contrat, fond_ign, marge,
+            emprise_cloturee, contrat, fond_ign, marge, repere_depart=rang,
         )
         avertissements.extend(messages)
         return Groupe(code, numero, piece(code).titre, planches=planches)
@@ -504,15 +522,43 @@ class PlanchePPTX:
     libelle: str = ""
 
 
+def _reglages_dp6(projet, rang: int) -> tuple:
+    """Cadres et marge de la n-ième DP 6, d'après les choix du projet.
+
+    Deux décisions que le chef de projet prend maintenant, là où la sortie les
+    déclinait en alternatives à trier :
+
+    - le **nombre de cadres**. Le troisième volet, « projet avec mesures
+      paysagères », n'existe que si le projet en porte. La sortie rendait les
+      deux versions et laissait supprimer la mauvaise ; trois photomontages en
+      auraient fait six diapos. La question se pose une fois pour le projet.
+    - la **marge** du plan de repérage, c'est-à-dire son échelle. Elle valait
+      50 m pour toute DP 6 ; un photomontage pris à 600 m du site tombait hors
+      du cadre, sans recours. Chaque planche porte maintenant son niveau.
+    """
+    from .planches.reperage_vues import marge_du_zoom
+
+    zooms = tuple(projet.zooms_photomontages or ())
+    zoom = zooms[rang - 1] if rang <= len(zooms) else None
+    cadres = (3,) if projet.mesures_paysageres else (2,)
+    return cadres, marge_du_zoom(zoom)
+
+
 def _planches_photo(projet, code, numero, emplacements, vues, alternatives,
-                    emprise_cloturee, contrat, fond_ign=True, marge_m=None):
+                    emprise_cloturee, contrat, fond_ign=True, marge_m=None,
+                    repere_depart: int = 1):
     """Les diapos d'une pièce photographique : cadres vides et repères à poser.
 
     Le cadrage ne peut pas se calculer sur les points de vue — il n'y en a pas
     encore. Voir `reperage_vues.cadrages_sans_vues` : emprise plus 150 m, à la
     plus grande échelle qui la contient, déclinée aux crans suivants pour DP 8.
     """
-    reperes = [repere_de_vue(code, rang) for rang in range(1, vues + 1)]
+    # DP 6 décline une planche par photomontage, et chacune porte son repère —
+    # « Vue A », « Vue B », « Vue C » — là où DP 7 et DP 8 numérotent leurs
+    # points sur une planche unique et repartent donc de 1.
+    reperes = [
+        repere_de_vue(code, repere_depart + ecart) for ecart in range(vues)
+    ]
     modele = nouvelle_planche(projet, code, numero=str(numero))
     cadrages, messages = cadrages_sans_vues(
         emprise_cloturee,

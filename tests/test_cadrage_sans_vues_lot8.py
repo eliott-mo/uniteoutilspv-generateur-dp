@@ -180,15 +180,19 @@ def test_dp8_recoit_trois_cadrages_du_meme_cadre_a_trois_echelles():
 
 
 def test_un_site_deja_large_recoit_moins_de_cadrages_et_le_dit():
-    """La liste s'arrête au 1/10 000, et le rapport dit combien manquent.
+    """La liste s'arrête au 1/15 000, et le rapport dit combien manquent.
 
     Aucun repli silencieux : une alternative absente s'écrit, elle ne se devine
     pas au nombre de diapos.
+
+    Le site d'essai s'est élargi le 07/10/2026 : la liste a gagné deux crans —
+    1/12 500 et 1/15 000, pour les photomontages à 500–750 m du site — et
+    1 300 m de large y trouvaient de nouveau trois cadrages.
     """
     plan = disposition(_planche(), 2)
 
     reperages, avertissements = cadrages_sans_vues(
-        _emprise(1300.0, 900.0), plan.panneau, "DP 8", alternatives=3
+        _emprise(1500.0, 900.0), plan.panneau, "DP 8", alternatives=3
     )
 
     assert len(reperages) < 3

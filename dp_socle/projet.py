@@ -68,6 +68,14 @@ def identifiant_de_dossier(nom: str) -> str:
     return propre.strip("-. ")
 
 
+#: Nombre maximal de planches DP 6, une par photomontage.
+#:
+#: Trois : au-delà, la pièce cesse d'être une insertion paysagère pour devenir
+#: un carnet de photomontages, et le dossier de référence n'en porte que deux.
+#: Demande du 07/10/2026.
+MAX_PHOTOMONTAGES = 3
+
+
 @dataclass
 class Projet:
     """Métadonnées d'un dossier de déclaration préalable."""
@@ -192,6 +200,28 @@ class Projet:
     #: relevés dans les dossiers HOCH : Saint-Pierre-les-Étieux du 12/09/2025 et
     #: Saint-Lubin-en-Vergonnois du 16/12/2025.
     fondation_mono_pieu: bool = False
+    #: Nombre de planches DP 6, une par photomontage, de 1 à 3.
+    #:
+    #: Le socle sait depuis le lot 6 rendre une planche par prise de vue — le
+    #: dossier de référence de Massay en porte deux, « Vue A » et « Vue B ». Ce
+    #: qui manquait était le moyen de dire combien : la sortie PowerPoint se
+    #: produit **avant** que les photomontages existent (lot 8), et la saisie
+    #: des photographies a été retirée de l'interface.
+    nb_photomontages: int = 1
+    #: Niveau de zoom du plan de repérage de chaque DP 6, dans l'ordre.
+    #:
+    #: Un par planche, parmi `reperage_vues.ZOOMS_REPERAGE`. Plus court que
+    #: `nb_photomontages`, les planches suivantes prennent « proche » — celui
+    #: d'avant l'option, pour qu'un dossier déjà produit se régénère à
+    #: l'identique.
+    zooms_photomontages: tuple = ()
+    #: Le projet porte des mesures paysagères, et DP 6 a donc un troisième volet.
+    #:
+    #: Sans cette réponse, chaque DP 6 sortait en **deux** versions — deux ou
+    #: trois cadres — à trier à la main dans le PowerPoint. Trois photomontages
+    #: en auraient fait six. La question se pose une fois pour le projet, et
+    #: chaque planche sort dans sa seule bonne version.
+    mesures_paysageres: bool = False
 
     @property
     def libelle_affiche(self) -> str:
@@ -269,6 +299,7 @@ class Projet:
                 )
         self.valider_surelevation()
         self.valider_fondation()
+        self.valider_photomontages()
         if self.voirie is not None:
             # Le même ensemble que celui du contrat, et non une seconde liste :
             # « sans objet » n'était arrivé que dans `decrire_voiries`, et un
@@ -371,6 +402,40 @@ class Projet:
                             f"{code}, prise {rang} : image introuvable "
                             f"({image}). Redéposez-la, ou retirez la prise."
                         )
+
+    def valider_photomontages(self) -> None:
+        """Refuse un nombre ou un zoom que les planches ne sauraient pas rendre.
+
+        Contrôlé ici et pas seulement à l'écran : un `projet.json` repris à la
+        main ne passe pas par l'écran, et un zoom inconnu retomberait en silence
+        sur « proche » — une planche cadrée au mauvais endroit, d'aspect
+        parfaitement correct.
+        """
+        from .planches.reperage_vues import ZOOMS_REPERAGE
+
+        if not isinstance(self.nb_photomontages, int) or not (
+            1 <= self.nb_photomontages <= MAX_PHOTOMONTAGES
+        ):
+            raise ErreurDP(
+                f"Nombre de photomontages invalide ({self.nb_photomontages!r}) : "
+                f"DP 6 porte de 1 à {MAX_PHOTOMONTAGES} planches, une par "
+                "photomontage."
+            )
+        zooms = tuple(self.zooms_photomontages or ())
+        if len(zooms) > self.nb_photomontages:
+            raise ErreurDP(
+                f"{len(zooms)} niveau(x) de zoom pour {self.nb_photomontages} "
+                "photomontage(s) : il y en a plus que de planches."
+            )
+        inconnus = [z for z in zooms if z not in ZOOMS_REPERAGE]
+        if inconnus:
+            raise ErreurDP(
+                "Niveau(x) de zoom inconnu(s) pour DP 6 : "
+                + ", ".join(f"« {z} »" for z in inconnus)
+                + ". Attendus : "
+                + ", ".join(f"« {z} »" for z in ZOOMS_REPERAGE)
+                + "."
+            )
 
     def valider_fondation(self) -> None:
         """Refuse une fondation qui se contredit.
