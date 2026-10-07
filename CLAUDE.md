@@ -125,6 +125,14 @@ moteur `Planche` du lot 1.
   le 01/10/2026 pour une ligne d'affichage. Une fonction qu'`app.py` vient
   d'ajouter au socle s'importe **dans la fonction qui l'appelle**, et son échec
   ne coûte que ce qu'elle sert.
+  L'import local ne protège pas de tout : un **champ** ajouté à une dataclasse
+  du socle n'existe pas dans la classe en mémoire, et `Projet(...)` lève un
+  `TypeError` à la génération — après tout le travail du chef de projet, et sous
+  un libellé qui accuse l'outil (07/10/2026, `fondation_mono_pieu`).
+  `app.py` compare donc en tête de page les champs qu'il renseigne à ceux que le
+  socle porte (`CHAMPS_PROJET_ATTENDUS`, `_socle_en_retard`) et s'arrête en
+  nommant le reboot. Tout nouveau champ facultatif de `Projet` va dans cette
+  liste ; `test_ordre_app` refuse qu'elle prenne du retard sur l'appel.
 - **PIL** : `.convert("RGB")` avant toute conversion PDF, et aplatir sur blanc
   les images à canal alpha — un `convert("RGB")` direct remplit de noir.
 

@@ -201,3 +201,101 @@ def test_aucune_fonction_ne_lit_un_global_ecrit_plus_bas_qu_elle():
         f"écrit ligne {ecriture}"
         for nom_fonction, nom, ecriture in sorted(set(fautes))
     )
+
+
+# ---------------------------------------------------------------------------
+# Le socle en retard sur l'interface (07/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _arbre_app():
+    import ast
+
+    return ast.parse(
+        (Path(__file__).resolve().parent.parent / "app.py").read_text(encoding="utf-8")
+    )
+
+
+def _champs_facultatifs_passes() -> set:
+    """Les champs facultatifs de `Projet` que `_construire_projet` renseigne."""
+    import ast
+    import dataclasses
+
+    from dp_socle.projet import Projet
+
+    facultatifs = {
+        champ.name
+        for champ in dataclasses.fields(Projet)
+        if champ.default is not dataclasses.MISSING
+        or champ.default_factory is not dataclasses.MISSING
+    }
+    for noeud in ast.walk(_arbre_app()):
+        if not isinstance(noeud, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if noeud.name != "_construire_projet":
+            continue
+        for interne in ast.walk(noeud):
+            if (
+                isinstance(interne, ast.Call)
+                and isinstance(interne.func, ast.Name)
+                and interne.func.id == "Projet"
+            ):
+                return {
+                    mot.arg for mot in interne.keywords if mot.arg in facultatifs
+                }
+    raise AssertionError("appel à Projet introuvable dans _construire_projet")
+
+
+def test_le_garde_fou_couvre_tous_les_champs_facultatifs_renseignes():
+    """La liste du garde-fou ne doit pas prendre de retard sur l'appel.
+
+    Un champ ajouté à `Projet` et renseigné par l'interface, mais oublié dans
+    `CHAMPS_PROJET_ATTENDUS`, redonnerait le `TypeError` du 07/10/2026 : « got
+    an unexpected keyword argument 'fondation_mono_pieu' », levé à la dernière
+    étape de la génération, après tout le travail du chef de projet, et sous un
+    libellé qui accuse l'outil plutôt que le déploiement.
+    """
+    import ast
+
+    # Par l'arbre, comme le reste du fichier : importer `app` exécuterait le
+    # script Streamlit de haut en bas pour lire une constante.
+    attendus = None
+    for noeud in ast.walk(_arbre_app()):
+        if isinstance(noeud, ast.Assign) and any(
+            isinstance(c, ast.Name) and c.id == "CHAMPS_PROJET_ATTENDUS"
+            for c in noeud.targets
+        ):
+            attendus = set(ast.literal_eval(noeud.value))
+    assert attendus is not None, "CHAMPS_PROJET_ATTENDUS introuvable"
+    assert attendus == _champs_facultatifs_passes()
+
+
+def test_le_garde_fou_est_rendu_avant_toute_construction_de_projet():
+    """Posé en haut de page, pas au moment de générer.
+
+    « Une erreur d'environnement se signale au démarrage, pas au dernier
+    moment » : laisser le chef de projet importer son plan, tracer sa coupe et
+    valider pour buter sur la génération est exactement ce que la règle
+    interdit. L'arrêt est net et nomme le geste — dix secondes de reboot.
+    """
+    import ast
+
+    arbre = _arbre_app()
+    garde = [
+        noeud.lineno
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Call)
+        and isinstance(noeud.func, ast.Name)
+        and noeud.func.id == "_socle_en_retard"
+    ]
+    assert len(garde) == 1, garde
+
+    constructions = [
+        noeud.lineno
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.Call)
+        and isinstance(noeud.func, ast.Name)
+        and noeud.func.id == "Projet"
+    ]
+    assert constructions, "aucune construction de Projet dans app.py"
+    assert garde[0] < min(constructions)

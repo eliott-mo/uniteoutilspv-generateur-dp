@@ -156,6 +156,71 @@ st.caption(
     "persiste, redémarrez l'application depuis « Manage app »."
 )
 
+#: Champs de `Projet` que cet `app.py` renseigne à la génération.
+#:
+#: Ils sont listés pour être **vérifiés**, pas pour documenter : Streamlit
+#: Community Cloud rejoue `app.py` depuis le disque à chaque interaction mais
+#: garde les modules importés au démarrage, si bien qu'après une mise en ligne
+#: le processus exécute le nouvel `app.py` contre l'**ancien** `dp_socle`.
+#:
+#: Un champ ajouté au socle n'existe alors pas encore dans la classe en
+#: mémoire, et `Projet(...)` lève un `TypeError` — au dernier moment, après
+#: tout le travail du chef de projet, et sous un libellé qui accuse l'outil
+#: plutôt que le déploiement. Relevé le 07/10/2026 sur `fondation_mono_pieu`,
+#: après l'incident du 01/10/2026 sur un import de tête de fichier : l'astuce
+#: de l'import local ne protège pas d'un champ de dataclasse, la classe
+#: elle-même étant périmée.
+#: Tous les champs **facultatifs** que `_construire_projet` renseigne, et non
+#: les seuls récents : un socle à jour les porte tous, un socle périmé en perd
+#: un, et la liste n'a pas à être triée à la main selon l'ancienneté. Les champs
+#: obligatoires n'y sont pas — un socle qui les perdrait serait cassé bien
+#: au-delà de ce que ce garde-fou peut dire. `test_ordre_app` tient la liste
+#: alignée sur l'appel.
+CHAMPS_PROJET_ATTENDUS = (
+    "libelle",
+    "voirie",
+    "notice",
+    "legendes",
+    "surelevation_locaux_m",
+    "phec_locaux_m",
+    "fondation_longrines",
+    "fondation_mono_pieu",
+)
+
+
+def _socle_en_retard() -> tuple:
+    """Les champs que cet `app.py` renseigne et que le socle en mémoire ignore.
+
+    Par `dataclasses.fields` et non par un essai d'instanciation : la classe est
+    déjà importée, la lecture ne coûte rien, et elle n'écrit aucun dossier.
+    """
+    import dataclasses
+
+    portes = {champ.name for champ in dataclasses.fields(Projet)}
+    return tuple(c for c in CHAMPS_PROJET_ATTENDUS if c not in portes)
+
+
+_manquants = _socle_en_retard()
+if _manquants:
+    # Arrêt net, et non un avertissement : la génération lèverait de toute
+    # façon, et laisser importer un plan pour buter à la dernière étape est
+    # précisément ce que « une erreur d'environnement se signale au démarrage »
+    # interdit. Le geste qui débloque est nommé, il prend dix secondes.
+    st.error(
+        "**L'application tourne sur une version périmée de son socle.** Le "
+        "code de l'interface a été mis à jour, mais le processus garde en "
+        "mémoire les modules chargés à son démarrage : "
+        + ", ".join(f"`{c}`" for c in _manquants)
+        + " manque"
+        + ("nt" if len(_manquants) > 1 else "")
+        + " à `Projet`, et la génération échouerait à la dernière étape.\n\n"
+        "**Redémarrez l'application** — menu « ⋮ » en haut à droite, puis "
+        "« Reboot app ». Rien n'est perdu : les dossiers déjà importés sont "
+        "sur le disque.",
+        icon="🚫",
+    )
+    st.stop()
+
 
 @st.cache_resource
 def _etat_cairo():

@@ -685,6 +685,40 @@ téléchargement d'un fond, et il n'y a rien à corriger — ou une régression 
 dépôt, qui échoue sur une mesure. La fin du journal les sépare, et les confondre
 mène soit à ignorer une régression, soit à corriger une panne de service.
 
+### Le socle en retard sur l'interface
+
+Streamlit Community Cloud rejoue `app.py` depuis le disque à chaque
+interaction, mais garde en mémoire les modules importés au démarrage. Après
+une mise en ligne, le processus exécute donc le **nouvel** `app.py` contre
+l'**ancien** `dp_socle`, jusqu'au redémarrage.
+
+Deux incidents, deux formes :
+
+- **01/10/2026** — un `from dp_socle.x import nouvelle_fonction` en tête de
+  fichier lève avant tout le reste, et l'outil est inutilisable pour tout le
+  monde. Pour une ligne d'affichage de confort. La parade est connue : une
+  fonction que l'interface vient d'ajouter au socle s'importe **dans la
+  fonction qui l'appelle**, et son échec ne coûte que ce qu'elle sert ;
+- **07/10/2026** — `fondation_mono_pieu`, un **champ** ajouté à `Projet`.
+  L'import local n'y peut rien : la classe elle-même est périmée, et
+  `Projet(...)` lève « got an unexpected keyword argument » à la dernière
+  étape de la génération, après tout le travail du chef de projet, sous un
+  libellé qui accuse l'outil plutôt que le déploiement.
+
+`app.py` compare donc, en tête de page, les champs facultatifs qu'il renseigne
+à ceux que la classe en mémoire porte (`CHAMPS_PROJET_ATTENDUS`,
+`_socle_en_retard`). S'il en manque un, il **s'arrête net** en nommant le champ
+et le geste : « ⋮ → Reboot app ». L'arrêt plutôt que l'avertissement, parce que
+la génération échouerait de toute façon et que laisser importer un plan pour
+buter à la dernière étape est précisément ce que « une erreur d'environnement
+se signale au démarrage » interdit.
+
+Tout nouveau champ facultatif de `Projet` va dans cette liste.
+`tests/test_ordre_app.py` refuse qu'elle prenne du retard sur l'appel — il la
+compare aux mots-clés que `_construire_projet` passe — et
+`tests/test_app_streamlit.py` rejoue l'incident, socle amputé, pour vérifier ce
+que l'écran montre.
+
 La version de Python y est écrite en clair : **3.14**, celle du conteneur
 Streamlit Cloud relevée le 26/09/2026 dans « Manage app → Settings → Python
 version ». Ce n'est pas celle du poste de développement, qui est en 3.12, et

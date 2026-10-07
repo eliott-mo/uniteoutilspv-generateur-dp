@@ -1548,3 +1548,50 @@ def test_un_intitule_corrige_se_retrouve_dans_le_projet(tmp_path, monkeypatch):
 # DP 6 à DP 8 elles-mêmes. Ce qui n'est plus mesuré nulle part, parce que plus
 # personne ne le fait, c'est le contrôle de la position d'un cône contre l'EXIF
 # de sa photographie.
+
+
+def test_un_socle_perime_arrete_l_outil_en_le_disant(tmp_path, monkeypatch):
+    """Le 07/10/2026 rejoué : un champ de `Projet` que le socle en mémoire ignore.
+
+    Streamlit Community Cloud rejoue `app.py` depuis le disque à chaque
+    interaction mais garde les modules importés au démarrage : après une mise
+    en ligne, le processus exécute le nouvel `app.py` contre l'ancien
+    `dp_socle`. Le chef de projet a vu « TypeError : Projet.__init__() got an
+    unexpected keyword argument 'fondation_mono_pieu' » à la dernière étape de
+    la génération, après tout son travail, sous un libellé qui accuse l'outil.
+
+    Ici le socle est amputé du champ, et on vérifie ce que l'écran montre : un
+    message qui nomme la cause et le geste, en haut de page, avant que quoi que
+    ce soit d'autre ne se présente.
+    """
+    import dataclasses
+
+    import dp_socle.projet
+
+    complet = dp_socle.projet.Projet
+    retenus = [
+        champ
+        for champ in dataclasses.fields(complet)
+        if champ.name != "fondation_mono_pieu"
+    ]
+    perime = dataclasses.make_dataclass(
+        "Projet",
+        [
+            (c.name, c.type, dataclasses.field(default=c.default))
+            if c.default is not dataclasses.MISSING
+            else (c.name, c.type)
+            for c in retenus
+        ],
+    )
+    monkeypatch.setattr(dp_socle.projet, "Projet", perime)
+
+    application = _application(tmp_path, monkeypatch).run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    messages = [erreur.value for erreur in application.error]
+    assert any("version périmée de son socle" in m for m in messages), messages
+    assert any("fondation_mono_pieu" in m for m in messages), messages
+    assert any("Reboot app" in m for m in messages), messages
+    # Et rien derrière : l'arrêt est net, pas un bandeau de plus au milieu
+    # d'une page qui continue.
+    assert not application.get("file_uploader")
