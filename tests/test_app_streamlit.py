@@ -1595,3 +1595,28 @@ def test_un_socle_perime_arrete_l_outil_en_le_disant(tmp_path, monkeypatch):
     # Et rien derrière : l'arrêt est net, pas un bandeau de plus au milieu
     # d'une page qui continue.
     assert not application.get("file_uploader")
+
+
+def test_un_socle_date_d_avant_le_deploiement_arrete_l_outil(tmp_path, monkeypatch):
+    """Le garde-fou ne regarde plus seulement les champs de `Projet`.
+
+    Relevé le 09/10/2026 : le socle chargé portait tous les champs attendus — le
+    contrôle passait — mais `plan_pdf` y était vieux d'un commit, et le chef de
+    projet voyait le message d'une version antérieure sous une ligne annonçant
+    la bonne. La date des sources attrape le cas quel que soit ce qui a changé.
+    """
+    from dp_socle import environnement
+
+    monkeypatch.setattr(
+        environnement,
+        "HORODATAGE_AU_DEMARRAGE",
+        environnement.HORODATAGE_AU_DEMARRAGE - 3600.0,
+    )
+
+    application = _application(tmp_path, monkeypatch).run()
+
+    assert not application.exception, [str(e.value) for e in application.exception]
+    messages = [erreur.value for erreur in application.error]
+    assert any("version périmée de son socle" in m for m in messages), messages
+    assert any("plus récents que les modules chargés" in m for m in messages), messages
+    assert not application.get("file_uploader")

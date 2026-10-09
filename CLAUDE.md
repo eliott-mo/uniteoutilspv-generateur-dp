@@ -129,10 +129,18 @@ moteur `Planche` du lot 1.
   du socle n'existe pas dans la classe en mémoire, et `Projet(...)` lève un
   `TypeError` à la génération — après tout le travail du chef de projet, et sous
   un libellé qui accuse l'outil (07/10/2026, `fondation_mono_pieu`).
-  `app.py` compare donc en tête de page les champs qu'il renseigne à ceux que le
-  socle porte (`CHAMPS_PROJET_ATTENDUS`, `_socle_en_retard`) et s'arrête en
-  nommant le reboot. Tout nouveau champ facultatif de `Projet` va dans cette
-  liste ; `test_ordre_app` refuse qu'elle prenne du retard sur l'appel.
+  `app.py` s'arrête donc en tête de page, en nommant le reboot, dès que le socle
+  chargé n'est pas celui du disque. Il le mesure **sur la date des sources** :
+  `environnement` retient à son import la date du fichier le plus récent, et
+  `app.py`, relu du disque, la compare à celle du disque. Ne regarder que les
+  champs de `Projet` ne suffisait pas — le 09/10/2026, le socle chargé les
+  portait tous et `plan_pdf` y était vieux d'un commit, si bien que le chef de
+  projet lisait le message d'une version antérieure sous une ligne de pied de
+  page annonçant la bonne : elle datait le **disque**, pas la mémoire. Elle dit
+  maintenant les deux. Le contrôle des champs reste en second, pour nommer ce
+  qui manque quand les dates ne suffisent pas ; tout nouveau champ facultatif
+  de `Projet` va dans `CHAMPS_PROJET_ATTENDUS`, et `test_ordre_app` refuse que
+  la liste prenne du retard sur l'appel.
 - **PIL** : `.convert("RGB")` avant toute conversion PDF, et aplatir sur blanc
   les images à canal alpha — un `convert("RGB")` direct remplit de noir.
 

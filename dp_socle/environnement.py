@@ -255,6 +255,55 @@ _RACINE = Path(__file__).resolve().parent.parent
 _FUSEAU_DU_PROJET = ZoneInfo("Europe/Paris")
 
 
+def _horodatage_des_sources() -> float:
+    """La date du fichier source le plus récent du socle, en secondes.
+
+    Sert deux fois : à dater la version en ligne, et à savoir si le socle
+    **chargé en mémoire** est resté en arrière de celui du disque.
+    """
+    horodatages = []
+    for chemin in list((_RACINE / "dp_socle").rglob("*.py")) + [_RACINE / "app.py"]:
+        try:
+            horodatages.append(chemin.stat().st_mtime)
+        except OSError:
+            continue
+    return max(horodatages) if horodatages else 0.0
+
+
+#: La date des sources **au moment où ce module a été importé**.
+#:
+#: C'est la seule trace de ce que le processus exécute vraiment. Streamlit
+#: Community Cloud rejoue `app.py` depuis le disque à chaque interaction mais
+#: garde les modules chargés au démarrage : après une mise en ligne sans
+#: redémarrage, le disque porte le nouveau code et la mémoire l'ancien.
+#:
+#: La ligne de version lisait le disque, et annonçait donc le code **déployé**
+#: quand le chef de projet cherchait à savoir lequel **tournait**. Relevé le
+#: 09/10/2026 sur La Bruère-sur-Loir : « Version du 09/10/2026 à 17:11
+#: (77353c3) » affiché pendant que le calage échouait sur le message d'une
+#: version antérieure. La ligne mentait dans le cas précis pour lequel elle
+#: avait été écrite.
+#:
+#: Capturée à l'import, elle ne bouge plus : un déploiement postérieur rend le
+#: disque plus récent qu'elle, et l'écart se voit.
+HORODATAGE_AU_DEMARRAGE = _horodatage_des_sources()
+
+#: Écart au-delà duquel le disque est tenu pour plus récent que la mémoire.
+#:
+#: Une seconde : la cible de déploiement recopie le dépôt d'un coup, et les
+#: dates des fichiers d'une même copie se tiennent à bien moins que cela.
+TOLERANCE_HORODATAGE_S = 1.0
+
+
+def socle_en_retard() -> bool:
+    """Vrai si le disque porte un socle plus récent que celui qui tourne.
+
+    Appelée depuis `app.py`, qui est relu du disque, alors que ce module-ci est
+    celui de la mémoire : c'est tout l'intérêt de la comparaison.
+    """
+    return _horodatage_des_sources() > HORODATAGE_AU_DEMARRAGE + TOLERANCE_HORODATAGE_S
+
+
 @dataclass(frozen=True)
 class VersionDeployee:
     """Ce que l'outil en ligne porte, et depuis quand."""
@@ -262,9 +311,24 @@ class VersionDeployee:
     date: str
     commit: str | None
 
+    #: Vrai si le disque porte un code plus récent que celui qui tourne.
+    en_retard: bool = False
+
     @property
     def message(self) -> str:
-        return f"Version du {self.date}" + (f" ({self.commit})" if self.commit else "")
+        socle = f"Version du {self.date}" + (
+            f" ({self.commit})" if self.commit else ""
+        )
+        if not self.en_retard:
+            return socle
+        # La date et le commit sont ceux du **disque** : les annoncer seuls,
+        # alors que la mémoire est en arrière, est ce qui a coûté l'aller-retour
+        # du 09/10/2026.
+        return (
+            f"{socle} sur le disque — mais l'application tourne encore sur le "
+            "code chargé à son démarrage. Redémarrez-la (menu « ⋮ » puis "
+            "« Reboot app ») pour qu'elle exécute cette version."
+        )
 
 
 def _commit_du_depot() -> str | None:
@@ -313,17 +377,12 @@ def version_deployee() -> VersionDeployee:
     """
     from datetime import datetime
 
-    sources = list((_RACINE / "dp_socle").rglob("*.py")) + [_RACINE / "app.py"]
-    horodatages = []
-    for chemin in sources:
-        try:
-            horodatages.append(chemin.stat().st_mtime)
-        except OSError:
-            continue
-    if not horodatages:
+    horodatage = _horodatage_des_sources()
+    if not horodatage:
         return VersionDeployee(date="inconnue", commit=_commit_du_depot())
-    quand = datetime.fromtimestamp(max(horodatages), _FUSEAU_DU_PROJET)
+    quand = datetime.fromtimestamp(horodatage, _FUSEAU_DU_PROJET)
     return VersionDeployee(
         date=quand.strftime("%d/%m/%Y à %H:%M"),
         commit=_commit_du_depot(),
+        en_retard=socle_en_retard(),
     )

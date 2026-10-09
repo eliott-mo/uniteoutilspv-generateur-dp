@@ -708,7 +708,20 @@ Deux incidents, deux formes :
   étape de la génération, après tout le travail du chef de projet, sous un
   libellé qui accuse l'outil plutôt que le déploiement.
 
-`app.py` compare donc, en tête de page, les champs facultatifs qu'il renseigne
+- **09/10/2026** — le socle chargé portait tous les champs attendus, et `plan_pdf`
+  y était vieux d'un commit. Le contrôle passait, le chef de projet lisait le
+  message d'une version antérieure, et le pied de page annonçait « Version du
+  09/10/2026 à 17:11 (77353c3) » — la date du **disque**, pas celle de la
+  mémoire. La ligne mentait dans le cas précis pour lequel elle avait été écrite.
+
+Le contrôle se fait donc d'abord **sur la date des sources** : `environnement`
+retient à son import la date du fichier le plus récent, et `app.py`, relu du
+disque à chaque interaction, la compare à celle du disque. Un déploiement
+postérieur au démarrage rend le disque plus récent, et l'écart se voit quel que
+soit ce qui a changé. La ligne de pied de page le dit aussi, au lieu d'annoncer
+une version qui ne tourne pas.
+
+En second seulement, `app.py` compare les champs facultatifs qu'il renseigne
 à ceux que la classe en mémoire porte (`CHAMPS_PROJET_ATTENDUS`,
 `_socle_en_retard`). S'il en manque un, il **s'arrête net** en nommant le champ
 et le geste : « ⋮ → Reboot app ». L'arrêt plutôt que l'avertissement, parce que

@@ -196,32 +196,59 @@ CHAMPS_PROJET_ATTENDUS = (
 )
 
 
-def _socle_en_retard() -> tuple:
-    """Les champs que cet `app.py` renseigne et que le socle en mémoire ignore.
+def _socle_en_retard() -> str | None:
+    """Pourquoi le socle en mémoire ne correspond pas à cet `app.py`, ou None.
 
-    Par `dataclasses.fields` et non par un essai d'instanciation : la classe est
-    déjà importée, la lecture ne coûte rien, et elle n'écrit aucun dossier.
+    Trois questions, de la plus large à la plus précise.
+
+    **La date d'abord.** `environnement` retient à son import la date du fichier
+    source le plus récent ; `app.py`, relu du disque à chaque interaction, la
+    compare à celle du disque. Un déploiement postérieur au démarrage rend le
+    disque plus récent, et l'écart se voit quel que soit ce qui a changé.
+    C'est la leçon du 09/10/2026 : le contrôle ne regardait que les champs de
+    `Projet`, le socle chargé les portait tous, et un correctif de `plan_pdf`
+    vieux d'un commit passait au travers — le chef de projet voyait le message
+    d'une version antérieure sous une ligne annonçant la bonne.
+
+    **L'absence ensuite.** Un socle qui ne sait pas se dater est antérieur à ce
+    jour-là, donc en retard par construction.
+
+    **Les champs enfin**, qui nomment précisément ce qui manquerait si les dates
+    ne suffisaient pas — une copie qui préserverait les horodatages, par
+    exemple.
     """
     import dataclasses
 
+    from dp_socle import environnement
+
+    depasse = getattr(environnement, "socle_en_retard", None)
+    if depasse is None:
+        return (
+            "le socle chargé ne sait pas se dater, il est donc antérieur au "
+            "09/10/2026"
+        )
+    if depasse():
+        return (
+            "les fichiers du disque sont plus récents que les modules chargés "
+            "au démarrage"
+        )
     portes = {champ.name for champ in dataclasses.fields(Projet)}
-    return tuple(c for c in CHAMPS_PROJET_ATTENDUS if c not in portes)
+    manquants = [c for c in CHAMPS_PROJET_ATTENDUS if c not in portes]
+    if manquants:
+        return "il manque à `Projet` " + ", ".join(f"`{c}`" for c in manquants)
+    return None
 
 
-_manquants = _socle_en_retard()
-if _manquants:
+_retard = _socle_en_retard()
+if _retard:
     # Arrêt net, et non un avertissement : la génération lèverait de toute
     # façon, et laisser importer un plan pour buter à la dernière étape est
     # précisément ce que « une erreur d'environnement se signale au démarrage »
     # interdit. Le geste qui débloque est nommé, il prend dix secondes.
     st.error(
         "**L'application tourne sur une version périmée de son socle.** Le "
-        "code de l'interface a été mis à jour, mais le processus garde en "
-        "mémoire les modules chargés à son démarrage : "
-        + ", ".join(f"`{c}`" for c in _manquants)
-        + " manque"
-        + ("nt" if len(_manquants) > 1 else "")
-        + " à `Projet`, et la génération échouerait à la dernière étape.\n\n"
+        "code a été mis à jour sur le disque, mais le processus garde en "
+        f"mémoire les modules chargés à son démarrage : {_retard}.\n\n"
         "**Redémarrez l'application** — menu « ⋮ » en haut à droite, puis "
         "« Reboot app ». Rien n'est perdu : les dossiers déjà importés sont "
         "sur le disque.",

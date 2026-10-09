@@ -277,3 +277,60 @@ def test_la_version_se_date_a_l_heure_du_chef_de_projet():
     # Et en heure d'hiver, où l'écart n'est plus que d'une heure.
     hiver = datetime(2026, 12, 15, 11, 19, tzinfo=timezone.utc)
     assert hiver.astimezone(_FUSEAU_DU_PROJET).strftime("%H:%M") == "12:19"
+
+
+# ---------------------------------------------------------------------------
+# Le socle chargé, et celui du disque (09/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_socle_a_jour_ne_se_declare_pas_en_retard():
+    """Sans déploiement depuis le démarrage, les deux dates se valent."""
+    from dp_socle.environnement import socle_en_retard
+
+    assert not socle_en_retard()
+
+
+def test_un_disque_plus_recent_que_la_memoire_se_voit(monkeypatch):
+    """La seule trace de ce que le processus exécute vraiment.
+
+    Streamlit Community Cloud rejoue `app.py` depuis le disque à chaque
+    interaction mais garde les modules chargés au démarrage. Le 09/10/2026, le
+    pied de page annonçait « Version du 09/10/2026 à 17:11 (77353c3) » — lue
+    sur le disque — pendant que le calage échouait sur le message d'une version
+    antérieure, restée en mémoire. La ligne mentait dans le cas précis pour
+    lequel elle avait été écrite.
+    """
+    from dp_socle import environnement
+
+    monkeypatch.setattr(
+        environnement,
+        "HORODATAGE_AU_DEMARRAGE",
+        environnement.HORODATAGE_AU_DEMARRAGE - 3600.0,
+    )
+
+    assert environnement.socle_en_retard()
+
+
+def test_la_ligne_de_version_dit_que_le_code_affiche_n_est_pas_celui_qui_tourne(
+    monkeypatch
+):
+    """Annoncer la version du disque seule est ce qui a coûté l'aller-retour."""
+    from dp_socle import environnement
+
+    a_jour = environnement.version_deployee()
+    assert not a_jour.en_retard
+    assert "Reboot app" not in a_jour.message
+
+    monkeypatch.setattr(
+        environnement,
+        "HORODATAGE_AU_DEMARRAGE",
+        environnement.HORODATAGE_AU_DEMARRAGE - 3600.0,
+    )
+    en_retard = environnement.version_deployee()
+
+    assert en_retard.en_retard
+    assert "sur le disque" in en_retard.message
+    assert "Reboot app" in en_retard.message
+    # La date et le commit restent annoncés : c'est ce qu'on confronte au test.
+    assert en_retard.date == a_jour.date
