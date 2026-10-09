@@ -1189,8 +1189,86 @@ def _choisir(objet: Objet, legende: list[EntreeLegende]) -> tuple[EntreeLegende 
 # ---------------------------------------------------------------------------
 
 
+#: Écart admis entre deux tuiles d'un même fond, en points de la page.
+#:
+#: Un demi-point : les tuiles d'une image découpée se touchent au centième près
+#: — mesuré le 09/10/2026 sur La Bruère-sur-Loir, où la jointure tombe à
+#: 388,68 pt des deux côtés, à la virgule. Au-delà, ce sont deux images, et les
+#: coller inventerait du terrain entre elles.
+JOINTURE_TUILES_PT = 0.5
+
+#: Écart admis entre les résolutions de deux tuiles, en part de la plus grande.
+RESOLUTION_TUILES = 0.005
+
+
+def _assembler_les_tuiles(objets: list) -> tuple:
+    """Les tuiles d'un même fond empilées, ou l'objet seul s'il n'y en a qu'une.
+
+    Un plan peut porter sa vue aérienne en **plusieurs images empilées** plutôt
+    qu'en une seule : relevé le 09/10/2026 sur La Bruère-sur-Loir, dont le PDF
+    porte un pavé de 2 000 x 1 200 px et, juste dessous, une bande de
+    2 000 x 400 px — la même image coupée en deux par l'outil qui a produit le
+    plan.
+
+    L'outil ne lisait que la plus grande et perdait le quart bas du champ, soit
+    trois rangées sur dix-huit. Rien ne le disait : le contrôle d'échelle levait
+    bien, mais sur l'emprise en travers des rangées — 20,4 % d'écart — et son
+    message accusait une copie d'écran étirée.
+
+    Deux images ne s'assemblent que si elles sont **manifestement** deux
+    morceaux d'une même : même emprise en x, même résolution, posées droites, et
+    jointives à `JOINTURE_TUILES_PT` près. À défaut, on garde la plus grande,
+    comme avant — deux images sans rapport ne se collent pas.
+    """
+    def droite(m) -> bool:
+        return abs(m[1]) < 1e-6 and abs(m[2]) < 1e-6 and m[0] > 0 and m[3] > 0
+
+    def taille(objet) -> tuple:
+        bitmap = objet.get_bitmap(render=False).to_pil()
+        return bitmap.width, bitmap.height
+
+    poses = []
+    for objet in objets:
+        m = _matrice(objet)
+        if not droite(m):
+            continue
+        largeur_px, hauteur_px = taille(objet)
+        poses.append((objet, m, largeur_px, hauteur_px))
+
+    def aire(pose) -> float:
+        return pose[1][0] * pose[1][3]
+
+    if not poses:
+        return max(objets, key=lambda o: abs(_matrice(o)[0] * _matrice(o)[3])), None
+    plus_grande = max(poses, key=aire)
+    _o, m0, px0, _h0 = plus_grande
+    gauche0, largeur0 = m0[4], m0[0]
+    resolution0 = px0 / largeur0
+
+    famille = [
+        pose
+        for pose in poses
+        if abs(pose[1][4] - gauche0) <= JOINTURE_TUILES_PT
+        and abs(pose[1][0] - largeur0) <= JOINTURE_TUILES_PT
+        and abs(pose[2] / pose[1][0] - resolution0) <= RESOLUTION_TUILES * resolution0
+    ]
+    if len(famille) < 2:
+        return plus_grande[0], None
+
+    # Du haut vers le bas de la page : en PDF l'origine est en bas, donc la
+    # tuile la plus haute est celle dont le bord supérieur (f + d) est le plus
+    # grand — et c'est elle qui donne les premières lignes de pixels.
+    famille.sort(key=lambda pose: -(pose[1][5] + pose[1][3]))
+    for haute, basse in zip(famille, famille[1:]):
+        if abs(haute[1][5] - (basse[1][5] + basse[1][3])) > JOINTURE_TUILES_PT:
+            # Un trou ou un recouvrement : ce ne sont pas les tuiles d'une même
+            # image, et les empiler déplacerait les tables.
+            return plus_grande[0], None
+    return famille[0][0], famille
+
+
 def _image_de_fond(images, page_numero: int, source: str) -> ImageDeFond:
-    """La plus grande image de la page : la copie d'écran qui porte les tables."""
+    """La copie d'écran qui porte les tables, ses tuiles recollées s'il y en a."""
     if not images:
         raise ErreurPlanPDF(
             f"La page {page_numero} de « {source} » ne porte aucune image : les "
@@ -1198,18 +1276,33 @@ def _image_de_fond(images, page_numero: int, source: str) -> ImageDeFond:
             "il n'y a pas d'échelle à mesurer (décision D3)."
         )
 
-    def aire(objet) -> float:
-        m = _matrice(objet)
-        return abs(m[0] * m[3] - m[1] * m[2])
-
-    objet = max(images, key=aire)
+    objet, famille = _assembler_les_tuiles(list(images))
     try:
-        pixels = np.asarray(objet.get_bitmap(render=False).to_pil().convert("RGB"))
+        if famille is None:
+            pixels = np.asarray(objet.get_bitmap(render=False).to_pil().convert("RGB"))
+            return ImageDeFond(pixels=pixels, matrice=_matrice(objet))
+        morceaux = [
+            np.asarray(pose[0].get_bitmap(render=False).to_pil().convert("RGB"))
+            for pose in famille
+        ]
     except Exception as exc:  # noqa: BLE001 - remonté en erreur nommée
         raise ErreurPlanPDF(
             f"L'image de fond de « {source} » ne se décode pas ({exc})."
         ) from exc
-    return ImageDeFond(pixels=pixels, matrice=_matrice(objet))
+
+    largeurs = {morceau.shape[1] for morceau in morceaux}
+    if len(largeurs) != 1:
+        # Même emprise sur la page mais des largeurs de pixels différentes : on
+        # ne rééchantillonne pas, ce serait inventer de la mesure.
+        pixels = np.asarray(objet.get_bitmap(render=False).to_pil().convert("RGB"))
+        return ImageDeFond(pixels=pixels, matrice=_matrice(objet))
+
+    a, b, c, d, e, f = _matrice(famille[0][0])
+    bas = _matrice(famille[-1][0])
+    return ImageDeFond(
+        pixels=np.vstack(morceaux),
+        matrice=(a, b, c, sum(pose[1][3] for pose in famille), e, bas[5]),
+    )
 
 
 def masque_des_tables(fond: ImageDeFond) -> np.ndarray:
@@ -2389,6 +2482,46 @@ def _etendues_denses(points: np.ndarray, direction_deg: float, pixel: float):
     return etendues[0], etendues[1]
 
 
+def _cause_probable(direction: str, nb_plan: int, nb_dxf: int, ecart: float) -> str:
+    """Ce qu'un écart d'échelle désigne, d'après le comptage des rangées.
+
+    Le message ne disait qu'une chose — « sa copie d'écran a été étirée d'un
+    seul côté » — et c'est la cause la plus rare. La plus fréquente est que le
+    plan et l'export ne décrivent pas la même version du projet : le contrôle
+    qui le dit en clair se tient quinze lignes plus bas, et le chef de projet
+    ne l'atteint jamais, celui-ci levant d'abord. Relevé le 09/10/2026 sur un
+    plan dont l'écart était de +20,4 % en travers des rangées.
+
+    Le comptage tranche : à pas égal, une emprise plus large en travers, c'est
+    des rangées de plus. Le long des rangées, il ne dit rien — ce sont les
+    tables qui s'allongent, pas leur nombre — et c'est alors le recadrage du
+    plan qu'on soupçonne d'abord.
+    """
+    en_travers = direction == "en travers des rangées"
+    if en_travers and nb_plan != nb_dxf:
+        porte = "porte" if nb_dxf > nb_plan else "n'en porte que"
+        return (
+            f"Le plan montre {nb_plan} rangée(s) de tables et le DXF en "
+            f"{porte} {nb_dxf} : vérifiez d'abord que l'export HelioScope et le "
+            "plan PDF sont au même indice."
+        )
+    if en_travers:
+        return (
+            f"Les deux portent {nb_plan} rangées, et leur pas concorde : "
+            "l'emprise seule diverge, ce qui est la signature d'une copie "
+            "d'écran étirée d'un seul côté. Reprenez le plan sans le "
+            "redimensionner."
+        )
+    manque = ecart > 0
+    return (
+        "Les rangées du plan sont "
+        + ("plus courtes" if manque else "plus longues")
+        + " que celles du DXF à pas égal : le plan a probablement été recadré "
+        "sur une partie du champ, ou son export s'arrête avant le bout des "
+        "rangées. Reprenez un plan qui porte le calepinage entier."
+    )
+
+
 def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
     """Cale la page du plan sur les tables que le lot 2 a lues dans le DXF.
 
@@ -2432,6 +2565,7 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
     )
     echelle_long = long_dxf / (long_plan + pixel)
     echelle_travers = travers_dxf / (travers_plan + pixel)
+    nb_plan, nb_dxf = len(rangees.centres), implantation.calepinage.nb_rangees
     for nom, valeur in (
         ("le long des rangées", echelle_long),
         ("en travers des rangées", echelle_travers),
@@ -2442,9 +2576,9 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
                 f"pour {pas_dxf:.3f} m, soit {echelle * 72 / DPI_REFERENCE:.4f} m/px "
                 f"à {DPI_REFERENCE:.0f} dpi — s'écarte de {valeur / echelle - 1:+.1%} "
                 f"de celle qu'implique l'emprise des tables {nom} "
-                f"({valeur * 72 / DPI_REFERENCE:.4f} m/px). Au delà de "
-                f"{TOLERANCE_ECHELLE:.0%}, le plan ne montre pas le même calepinage "
-                "que le DXF, ou sa copie d'écran a été étirée d'un seul côté."
+                f"({valeur * 72 / DPI_REFERENCE:.4f} m/px), au delà des "
+                f"{TOLERANCE_ECHELLE:.0%} admis. "
+                + _cause_probable(nom, nb_plan, nb_dxf, valeur / echelle - 1.0)
             )
 
     rayon = 0.6 * rangees.pas_pt / pixel
@@ -2457,7 +2591,6 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         key=lambda essai: -essai[0],
     )
     recouvrement, translation, sens = essais[0]
-    nb_plan, nb_dxf = len(rangees.centres), implantation.calepinage.nb_rangees
     if abs(nb_plan - nb_dxf) > ECART_RANGEES_MAX:
         raise ErreurRecouvrementInsuffisant(
             f"Le plan montre {nb_plan} rangée(s) de tables et le DXF en porte "

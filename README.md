@@ -1595,6 +1595,41 @@ projet supprimait la mauvaise ; trois photomontages en auraient fait six
 diapos. La question se pose maintenant une fois, et chaque planche sort dans sa
 seule bonne version : trois photomontages donnent trois diapos.
 
+#### Un fond livré en plusieurs tuiles
+
+Le plan PDF porte sa vue aérienne en image, et l'outil y relève les tables :
+c'est de là que vient l'échelle. Il prenait **la plus grande image de la page**
+et ignorait les autres.
+
+Relevé le 09/10/2026 sur La Bruère-sur-Loir : le PDF portait un pavé de
+2 000 × 1 200 px et, juste dessous, une bande de 2 000 × 400 px — la même vue
+coupée en deux par l'outil qui avait produit le plan. Même largeur, même
+résolution (4,026 px/pt des deux côtés), jointives à la virgule en y = 388,68 pt.
+L'outil perdait le quart bas du champ, soit **trois rangées sur dix-huit**.
+
+Rien ne le disait franchement : le contrôle d'échelle levait bien — 20,4 %
+d'écart sur l'emprise en travers des rangées — mais son message n'offrait qu'une
+cause, « sa copie d'écran a été étirée d'un seul côté », et c'est la plus rare.
+Le chef de projet cherchait un étirement qui n'existait pas.
+
+Deux choses ont changé :
+
+- **les tuiles se recollent** quand elles sont manifestement deux morceaux d'une
+  même image : même emprise en x, même résolution, posées droites, jointives à
+  0,5 pt près. À défaut — un trou, un recouvrement, des largeurs de pixels
+  différentes — on garde la plus grande, comme avant : deux images sans rapport
+  ne se collent pas, et les empiler inventerait du terrain entre elles ;
+- **le refus d'échelle dit ce qui le discrimine.** Le comptage des rangées était
+  déjà calculé, quinze lignes plus bas, dans un contrôle que le chef de projet
+  n'atteignait jamais. Il est remonté dans le message, avec une cause adaptée à
+  la direction de l'écart : en travers, le comptage ; le long, un plan recadré.
+  Le message énonce le constat et invite à vérifier l'indice — il n'affirme pas
+  la conclusion, la détection pouvant elle aussi manquer une rangée, ce que ce
+  cas-là a précisément prouvé.
+
+Après recollage, sur les fichiers du chef de projet : 18 rangées des deux côtés,
+−0,0 % le long et −0,1 % en travers, 95,9 % de recouvrement et 100 % de fidélité.
+
 ### Contrôles croisés
 
 C'est la valeur de ce lot. Le scénario d'erreur réaliste n'est pas le fichier

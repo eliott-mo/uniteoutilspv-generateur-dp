@@ -273,6 +273,66 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
         caler_sur_tables(etiree, import_gannay.implantation)
 
 
+def test_un_plan_etire_nomme_l_etirement_et_non_la_version(
+    lecture_gannay, import_gannay
+):
+    """Le refus doit désigner la bonne cause, pas la première de la liste.
+
+    Même nombre de rangées des deux côtés : l'emprise seule diverge, et c'est
+    la signature d'une copie d'écran étirée. Le message le dit, et ne renvoie
+    pas le chef de projet vérifier des indices qui concordent.
+    """
+    from dataclasses import replace
+
+    from dp_socle.plan_pdf import ImageDeFond
+
+    a, b, c, d, e, f = lecture_gannay.fond.matrice
+    etiree = replace(
+        lecture_gannay,
+        fond=ImageDeFond(lecture_gannay.fond.pixels, (a * 1.05, b, c, d, e, f)),
+    )
+    with pytest.raises(ErreurEchelleIncoherente) as refus:
+        caler_sur_tables(etiree, import_gannay.implantation)
+
+    assert "rangées" in str(refus.value)
+    assert "même indice" not in str(refus.value)
+
+
+def test_le_refus_d_echelle_en_travers_compte_les_rangees():
+    """Relevé le 09/10/2026 chez un chef de projet : +20,4 % en travers.
+
+    Le message n'offrait qu'une cause — « sa copie d'écran a été étirée d'un
+    seul côté » — et c'est la plus rare. La plus fréquente est que le plan et
+    l'export ne décrivent pas la même version du projet : à pas égal, une
+    emprise plus large en travers, ce sont des rangées de plus. Le contrôle qui
+    le disait en clair se tient plus bas, et le chef de projet ne l'atteignait
+    jamais.
+    """
+    from dp_socle.plan_pdf import _cause_probable
+
+    desaccord = _cause_probable("en travers des rangées", 20, 24, 0.204)
+    assert "20 rangée(s)" in desaccord and "24" in desaccord
+    assert "même indice" in desaccord
+
+    accord = _cause_probable("en travers des rangées", 20, 20, 0.204)
+    assert "étirée" in accord
+    assert "indice" not in accord
+
+
+def test_un_ecart_le_long_des_rangees_soupconne_le_recadrage():
+    """Le comptage n'y dit rien : ce sont les tables qui s'allongent.
+
+    Le long des rangées, un écart ne vient pas d'un nombre de rangées mais
+    d'un plan recadré sur une partie du champ, ou dont l'export s'arrête avant
+    le bout des rangées.
+    """
+    from dp_socle.plan_pdf import _cause_probable
+
+    message = _cause_probable("le long des rangées", 20, 20, 0.08)
+    assert "recadré" in message
+    assert "rangée(s) de tables" not in message
+
+
 def test_deux_pastilles_de_meme_couleur_se_disent():
     """La carte devient indéchiffrable, et l'outil ne doit pas deviner.
 
@@ -1885,3 +1945,119 @@ def test_le_local_de_stockage_bess_se_tranche_au_lieu_de_disparaitre():
     assert categorie_proposee("Local de stockage BESS") is None
     motif = motif_a_trancher("Local de stockage BESS")
     assert motif and "conteneur" in motif
+
+
+# ---------------------------------------------------------------------------
+# Un fond livré en plusieurs tuiles (09/10/2026)
+# ---------------------------------------------------------------------------
+
+
+class _TuileFactice:
+    """Une image de page, réduite à ce que `_image_de_fond` lui demande."""
+
+    def __init__(self, matrice, largeur_px, hauteur_px, teinte):
+        from PIL import Image
+
+        self._matrice = tuple(matrice)
+        self._image = Image.new("RGB", (largeur_px, hauteur_px), teinte)
+        self.container = None
+
+    def get_matrix(self):
+        matrice = self._matrice
+
+        class _Matrice:
+            def get(self):
+                return matrice
+
+        return _Matrice()
+
+    def get_bitmap(self, render=False):  # noqa: ARG002 - signature de pdfium
+        image = self._image
+
+        class _Bitmap:
+            def to_pil(self):
+                return image
+
+        return _Bitmap()
+
+
+def _tuiles_de_la_bruere():
+    """Les deux tuiles relevées sur le plan de La Bruère-sur-Loir.
+
+    Un pavé de 2 000 x 1 200 px posé sur 496,80 x 298,08 pt, et juste dessous
+    une bande de 2 000 x 400 px sur 496,80 x 99,36 pt. Même largeur, même
+    résolution — 4,026 px/pt des deux côtés — et jointives à la virgule.
+    """
+    haute = _TuileFactice((496.8, 0.0, 0.0, 298.08, 297.72, 206.64), 2000, 1200,
+                          (10, 20, 30))
+    basse = _TuileFactice((496.8, 0.0, 0.0, 99.36, 297.72, 107.28), 2000, 400,
+                          (200, 210, 220))
+    return haute, basse
+
+
+def test_deux_tuiles_jointives_se_recollent_en_un_seul_fond():
+    """Relevé le 09/10/2026 sur La Bruère-sur-Loir.
+
+    Le PDF portait sa vue aérienne en deux images empilées ; l'outil ne lisait
+    que la plus grande et perdait le quart bas du champ — trois rangées sur
+    dix-huit. Rien ne le disait : le contrôle d'échelle levait bien, mais sur
+    l'emprise en travers des rangées, et son message accusait une copie d'écran
+    étirée.
+    """
+    from dp_socle.plan_pdf import _image_de_fond
+
+    haute, basse = _tuiles_de_la_bruere()
+    fond = _image_de_fond([haute, basse], 1, "essai.pdf")
+
+    assert fond.pixels.shape[:2] == (1600, 2000), "les 400 lignes du bas sont là"
+    # La tuile haute en premier : c'est elle qui donne les premières lignes.
+    assert tuple(fond.pixels[0, 0]) == (10, 20, 30)
+    assert tuple(fond.pixels[-1, 0]) == (200, 210, 220)
+    # Et l'emprise sur la page couvre les deux.
+    a, _b, _c, d, _e, f = fond.matrice
+    assert a == pytest.approx(496.8)
+    assert d == pytest.approx(298.08 + 99.36)
+    assert f == pytest.approx(107.28)
+
+
+def test_la_resolution_du_fond_recolle_reste_celle_des_tuiles():
+    """Recoller ne doit pas changer l'échelle : c'est elle qu'on mesure ensuite."""
+    from dp_socle.plan_pdf import _image_de_fond
+
+    fond = _image_de_fond(list(_tuiles_de_la_bruere()), 1, "essai.pdf")
+
+    largeur_px, hauteur_px = fond.taille
+    a, _b, _c, d, _e, _f = fond.matrice
+    assert largeur_px / a == pytest.approx(hauteur_px / d, rel=1e-3)
+    assert largeur_px / a == pytest.approx(2000 / 496.8, rel=1e-3)
+
+
+def test_deux_images_separees_par_un_trou_ne_se_collent_pas():
+    """Les coller inventerait du terrain entre elles.
+
+    Deux images d'une même page ne sont pas forcément les morceaux d'une même
+    vue : sans jointure franche, on garde la plus grande, comme avant.
+    """
+    from dp_socle.plan_pdf import _image_de_fond
+
+    haute = _TuileFactice((496.8, 0.0, 0.0, 298.08, 297.72, 206.64), 2000, 1200,
+                          (10, 20, 30))
+    ailleurs = _TuileFactice((496.8, 0.0, 0.0, 99.36, 297.72, 40.0), 2000, 400,
+                             (200, 210, 220))
+
+    fond = _image_de_fond([haute, ailleurs], 1, "essai.pdf")
+
+    assert fond.pixels.shape[:2] == (1200, 2000)
+
+
+def test_une_image_unique_passe_inchangee():
+    """Le cas courant : un seul fond, et rien à recoller."""
+    from dp_socle.plan_pdf import _image_de_fond
+
+    seule = _TuileFactice((496.8, 0.0, 0.0, 298.08, 297.72, 206.64), 2000, 1200,
+                          (10, 20, 30))
+
+    fond = _image_de_fond([seule], 1, "essai.pdf")
+
+    assert fond.pixels.shape[:2] == (1200, 2000)
+    assert fond.matrice == (496.8, 0.0, 0.0, 298.08, 297.72, 206.64)
