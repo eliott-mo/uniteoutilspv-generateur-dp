@@ -2144,3 +2144,107 @@ def test_une_cloture_d_un_seul_tenant_ne_parle_pas_de_troncons():
 
     assert "tronçons séparés" not in message
     assert "il lui manque" in message
+
+
+# ---------------------------------------------------------------------------
+# Refermer un trou de clôture, sur demande (12/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _carre_baillant(ecart: float):
+    """Un carré de 100 m dont le tracé unique bâille de `ecart` au nord."""
+    from shapely.geometry import LineString
+
+    return LineString(
+        [
+            (50.0 - ecart / 2.0, 100.0), (0.0, 100.0), (0.0, 0.0),
+            (100.0, 0.0), (100.0, 100.0), (50.0 + ecart / 2.0, 100.0),
+        ]
+    )
+
+
+def test_un_trace_unique_qui_baille_est_apparie_avec_lui_meme():
+    """Le cas le plus courant, et celui que la première version ratait.
+
+    Une clôture lue d'un seul tenant et ouverte en un point : la clé portait le
+    tracé et non le bout, si bien qu'il n'était jamais apparié avec lui-même et
+    que la correction ne se proposait pas. Relevé le 12/10/2026 sur le plan de
+    La Bruère-sur-Loir, dont le seul tracé bâillait de 2,8 m.
+    """
+    from dp_socle.plan_pdf import _trous_sans_ouvrage
+
+    trous = _trous_sans_ouvrage([_carre_baillant(3.0)], centre=(50.0, 50.0))
+
+    assert len(trous) == 1
+    longueur, secteur, _a, _b = trous[0]
+    assert longueur == pytest.approx(3.0)
+    assert secteur == "nord"
+
+
+def test_un_trou_trop_grand_n_est_pas_proposé_a_la_fermeture():
+    """Au-delà, ce n'est plus un sommet qui rate sa cible.
+
+    C'est un pan de clôture qui manque au plan, et le refermer d'un trait droit
+    dessinerait une enceinte que personne n'a voulue.
+    """
+    from dp_socle.plan_pdf import TROU_REFERMABLE_M, _correction_cloture_ouverte
+
+    assert TROU_REFERMABLE_M == 10.0
+    petit = _carre_baillant(TROU_REFERMABLE_M - 1.0)
+    grand = _carre_baillant(TROU_REFERMABLE_M + 5.0)
+
+    assert _correction_cloture_ouverte([petit], [petit]) is not None
+    assert _correction_cloture_ouverte([grand], [grand]) is None
+
+
+def test_la_correction_dit_la_mesure_et_l_endroit():
+    """Une case à cocher ne vaut que par ce qu'elle annonce."""
+    from dp_socle.plan_pdf import _correction_cloture_ouverte
+
+    baillant = _carre_baillant(2.8)
+    correction = _correction_cloture_ouverte([baillant], [baillant])
+
+    assert correction.intitule == (
+        "Refermer la clôture sur 2,8 m au nord de l'enceinte"
+    )
+    assert "qu'aucun ouvrage ne justifie" in correction.raison
+    assert "correction du plan, pas une lecture" in correction.raison
+
+
+def test_la_couture_referme_un_trace_sur_lui_meme():
+    """Cousu, l'anneau se ferme et la surface se calcule.
+
+    Ajouter un simple segment ne suffisait pas : `_refermer` ne chaîne deux
+    morceaux que s'il trouve un ouvrage au droit de leur écart, et c'est
+    précisément ce qui manque ici. Mesuré le 12/10/2026 — l'enceinte restait
+    ouverte « de 0,0 m ».
+    """
+    from shapely.geometry import Polygon
+
+    from dp_socle.plan_pdf import _coudre_les_trous, _trous_sans_ouvrage
+
+    baillant = _carre_baillant(2.8)
+    trous = _trous_sans_ouvrage([baillant], centre=(50.0, 50.0))
+    cousu = _coudre_les_trous([baillant], tuple(trous))
+
+    assert len(cousu) == 1
+    coords = list(cousu[0].coords)
+    assert coords[0] == coords[-1], "le tracé se referme sur lui-même"
+    assert Polygon(coords).area == pytest.approx(100.0 * 100.0, rel=0.02)
+
+
+def test_la_couture_raboute_deux_traces_distincts():
+    """Deux morceaux dont les bouts se font face se rejoignent en un seul."""
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _coudre_les_trous, _trous_sans_ouvrage
+
+    ouest = LineString([(50.0, 100.0), (0.0, 100.0), (0.0, 0.0), (50.0, 0.0)])
+    est = LineString([(53.0, 0.0), (100.0, 0.0), (100.0, 100.0), (53.0, 100.0)])
+    trous = _trous_sans_ouvrage([ouest, est], centre=(50.0, 50.0))
+
+    assert len(trous) == 2, "les deux extrémités se font face deux fois"
+    cousu = _coudre_les_trous([ouest, est], tuple(trous))
+
+    assert len(cousu) == 1
+    assert cousu[0].length > 300.0

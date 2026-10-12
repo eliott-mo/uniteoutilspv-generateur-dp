@@ -1637,6 +1637,43 @@ recollées — quatre sur ce plan-là, pas treize —, et le message le dit : un
 de projet qui compte ses formes dans PowerPoint et lit un autre nombre
 conclurait que l'outil se trompe.
 
+#### Refermer un trou de clôture, sur demande
+
+Un trou au droit d'un portail ou d'un poste est enjambé d'office : le plan
+dessine la clôture comme elle sera bâtie. Un trou en pleine clôture était un refus
+sec — à raison, puisque le combler en silence inventerait une enceinte que le plan
+ne porte pas.
+
+Mais la mesure a montré que c'est presque toujours **un sommet qui rate sa cible**.
+La fermeture se **propose** donc, comme les autres corrections du parcours PDF :
+une case à cocher qui annonce la mesure et l'endroit, et rien d'appliqué tant
+qu'elle n'est pas cochée. Sur le plan de La Bruère-sur-Loir du 12/10/2026,
+« Refermer la clôture sur 2,8 m au nord-est de l'enceinte » ferme l'anneau et donne
+2,71 ha clôturés.
+
+**Plafond à 10 m.** En deçà, c'est un connecteur qu'on n'a pas accroché au suivant ;
+au-delà, c'est un pan de clôture qui manque au plan, et le refermer d'un trait
+droit dessinerait une enceinte que personne n'a voulue. Les cas réels tiennent tous
+dessous : 1,9 et 2,2 m à La Bruère, 2,8 m sur son plan suivant, 6,02 m à
+La Chapelle-sous-Aubenas.
+
+**Pourquoi pas simplement élargir la tolérance de recouture.** Celle-ci vaut deux
+pas de pointillé ou deux largeurs de trait, avec un plancher de deux points : elle
+dépend donc du **style du trait**. Une clôture en pointillé en tolère six fois plus
+qu'un trait fin plein — à Gannay, pas de 6 pt, soit 12 pt de jeu, contre 2 pt sur le
+plan de La Bruère. C'est ce qui explique que d'autres chefs de projet aient de
+petits écarts sans jamais être bloqués. L'élargir rendrait l'écart muet au lieu de
+le rendre visible, et sur un critère que personne n'a choisi.
+
+Deux pièges rencontrés en l'écrivant, tous deux mesurés le 12/10/2026 :
+
+- l'appariement des bouts libres portait sur le **tracé** et non sur le bout, si
+  bien qu'une clôture lue d'un seul tenant et ouverte en un point n'était jamais
+  appariée avec elle-même — précisément le cas de La Bruère ;
+- ajouter un segment entre les deux bouts ne suffit pas : `_refermer` ne chaîne
+  deux morceaux que s'il trouve un ouvrage **au droit** de leur écart, et c'est ce
+  qui manque ici. Il faut coudre les tracés eux-mêmes.
+
 #### Un fond livré en plusieurs tuiles
 
 Le plan PDF porte sa vue aérienne en image, et l'outil y relève les tables :

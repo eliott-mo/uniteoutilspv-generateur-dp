@@ -2722,6 +2722,21 @@ GLISSEMENT_MAX_M = 40.0
 #: cadastrale, en Lambert 93, donc au calage courant.
 PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
 
+#: Préfixe de la correction qui referme un trou de clôture sans ouvrage.
+PREFIXE_CLOTURE_REFERMEE = "cloture_refermee"
+
+#: Trou de clôture au-delà duquel la fermeture n'est plus proposée, en mètres.
+#:
+#: Dix mètres : en deçà, c'est un sommet qui rate sa cible — le trait d'un
+#: connecteur PowerPoint qu'on n'a pas accroché au suivant. Au-delà, c'est un
+#: pan de clôture qui manque au plan, et le refermer d'un trait droit
+#: dessinerait une enceinte que personne n'a voulue.
+#:
+#: Mesuré sur les cas réels : 1,9 m et 2,2 m à La Bruère-sur-Loir le
+#: 12/10/2026, 2,8 m sur son plan suivant, 6,02 m à La Chapelle-sous-Aubenas le
+#: 02/10/2026. Les trois tiennent sous le seuil.
+TROU_REFERMABLE_M = 10.0
+
 #: Les catégories qu'un recalage de clôture entraîne avec lui.
 CATEGORIES_HAIE = ("haie", "haie_existante", "haie_a_renforcer")
 
@@ -2811,6 +2826,116 @@ class CorrectionProposee:
     @property
     def intitule(self) -> str:
         return f"Poser « {self.libelle} » sur la clôture"
+
+
+@dataclass(frozen=True)
+class CorrectionClotureRefermee:
+    """Les trous de clôture qu'aucun ouvrage ne justifie, refermés d'un trait.
+
+    Un trou au droit d'un portail ou d'un poste est enjambé d'office : le plan
+    dessine la clôture comme elle sera bâtie, et l'ouvrage en tient lieu. Un
+    trou en pleine clôture, lui, était un refus sec — à raison, puisque le
+    combler en silence inventerait une enceinte que le plan ne porte pas.
+
+    Mais la mesure a montré que c'est presque toujours un sommet qui rate sa
+    cible. À La Bruère-sur-Loir, le 12/10/2026 : une clôture dessinée en treize
+    connecteurs PowerPoint, onze jointures tenant à moins d'un mètre et deux se
+    manquant de 1,9 m et 2,2 m. Le chef de projet a repris son plan trois fois.
+
+    La fermeture se **propose** donc, comme les autres corrections du plan : une
+    case à cocher, la mesure et l'endroit en clair, et rien d'appliqué tant
+    qu'elle n'est pas cochée.
+
+    Pourquoi ce n'est pas un élargissement de la tolérance de recouture : celle-ci
+    vaut deux pas de pointillé ou deux largeurs de trait, avec un plancher de
+    deux points. Elle dépend donc du **style du trait** — une clôture en
+    pointillé en tolère six fois plus qu'un trait fin plein —, ce que personne
+    n'a choisi. L'élargir rendrait l'écart muet au lieu de le rendre visible.
+    """
+
+    identifiant: str
+    #: Les trous refermés : `(longueur_m, secteur, point_a, point_b)`.
+    trous: tuple
+    raison: str
+
+    @property
+    def intitule(self) -> str:
+        if len(self.trous) == 1:
+            longueur, secteur, *_ = self.trous[0]
+            return (
+                f"Refermer la clôture sur {nombre_fr(round(longueur, 1))} m "
+                f"au {secteur} de l'enceinte"
+            )
+        return (
+            f"Refermer la clôture en {len(self.trous)} endroits, "
+            f"d'au plus {nombre_fr(round(max(t[0] for t in self.trous), 1))} m"
+        )
+
+
+def _trous_sans_ouvrage(restes: list, centre: tuple | None) -> list:
+    """Les écarts entre bouts libres que la fermeture pourrait combler.
+
+    La clé porte le **bout** et non le tracé : un tracé unique dont les deux
+    extrémités s'écartent est le cas le plus courant — une clôture lue d'un seul
+    tenant, ouverte en un point. Clé par tracé, il n'était jamais apparié avec
+    lui-même et la correction ne se proposait pas (relevé le 12/10/2026 sur le
+    plan de La Bruère, dont le seul tracé bâillait de 2,8 m).
+
+    Un bout ne se referme qu'une fois : le plus petit écart l'emporte.
+    """
+    bouts = []
+    for ligne in restes:
+        sommets = list(ligne.coords)
+        bouts.append(((id(ligne), 0), sommets[0]))
+        bouts.append(((id(ligne), -1), sommets[-1]))
+    paires = sorted(
+        (math.dist(a[:2], b[:2]), cle_a, cle_b, a[:2], b[:2])
+        for i, (cle_a, a) in enumerate(bouts)
+        for cle_b, b in bouts[i + 1 :]
+        if cle_a != cle_b
+    )
+    pris, trous = set(), []
+    for ecart, cle_a, cle_b, a, b in paires:
+        if ecart > TROU_REFERMABLE_M:
+            break
+        if cle_a in pris or cle_b in pris:
+            continue
+        pris.update((cle_a, cle_b))
+        milieu = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+        secteur = _secteur(milieu, centre) if centre is not None else "?"
+        trous.append((ecart, secteur, a, b))
+    return trous
+
+
+def _correction_cloture_ouverte(restes: list, lignes: list):
+    """La fermeture à proposer, ou None si le plan ne s'y prête pas."""
+    sommets = [p[:2] for ligne in (lignes or restes) for p in ligne.coords]
+    centre = (
+        (sum(p[0] for p in sommets) / len(sommets),
+         sum(p[1] for p in sommets) / len(sommets))
+        if sommets
+        else None
+    )
+    trous = _trous_sans_ouvrage(restes, centre)
+    if not trous:
+        return None
+    detail = " ; ".join(
+        f"{nombre_fr(round(longueur, 1))} m au {secteur}"
+        for longueur, secteur, _a, _b in trous
+    )
+    return CorrectionClotureRefermee(
+        identifiant=f"{PREFIXE_CLOTURE_REFERMEE}:{len(trous)}",
+        trous=tuple(trous),
+        raison=(
+            f"La clôture s'ouvre en {len(trous)} endroit(s) qu'aucun ouvrage ne "
+            f"justifie : {detail}. Un portail ou un poste au droit d'un trou le "
+            "fait enjamber d'office ; là, il n'y a rien, et c'est presque "
+            "toujours un sommet qui rate sa cible — un connecteur du plan qu'on "
+            "n'a pas accroché au suivant. Refermée d'un trait droit, l'enceinte "
+            "se calcule et le dossier se génère. Sinon, reprenez le plan : "
+            "c'est une correction du plan, pas une lecture."
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -3561,6 +3686,47 @@ def _message_cloture_ouverte(
         + "Sans contour fermé, ni la surface clôturée ni la coupe A-A' ne se "
         "calculent, et le dossier ne peut pas être généré."
     )
+
+
+def _coudre_les_trous(lignes: list, trous: tuple) -> list:
+    """Raboute les tracés de part et d'autre de chaque trou retenu.
+
+    Une couture et non un simple segment ajouté : `_refermer` ne chaîne deux
+    morceaux que s'il trouve un **ouvrage au droit** de leur écart, et c'est
+    précisément ce qui manque ici. Lui donner le pont en plus le laissait
+    intact — mesuré le 12/10/2026, l'enceinte restait ouverte « de 0,0 m ».
+
+    Les indices sont recalculés à chaque trou : la fusion retire deux morceaux
+    de la liste et en remet un, et des indices gardés d'un tour sur l'autre
+    auraient désigné les mauvais.
+    """
+    morceaux = [list(l.coords) for l in lignes]
+
+    def bout_coincidant(point):
+        """Le `(indice, bout)` dont l'extrémité tombe sur ce point."""
+        meilleur, plus_proche = None, float("inf")
+        for indice, morceau in enumerate(morceaux):
+            for bout in (0, -1):
+                distance = math.dist(morceau[bout][:2], point)
+                if distance < plus_proche:
+                    meilleur, plus_proche = (indice, bout), distance
+        return meilleur
+
+    for _longueur, _secteur, a, b in trous:
+        depart, arrivee = bout_coincidant(a), bout_coincidant(b)
+        if depart is None or arrivee is None:
+            continue
+        (i, bout_i), (j, bout_j) = depart, arrivee
+        if i == j:
+            # Un tracé unique qui bâille : il se referme sur lui-même.
+            morceaux[i] = morceaux[i] + [morceaux[i][0]]
+            continue
+        tete = morceaux[i] if bout_i == -1 else morceaux[i][::-1]
+        queue = morceaux[j] if bout_j == 0 else morceaux[j][::-1]
+        for k in sorted((i, j), reverse=True):
+            morceaux.pop(k)
+        morceaux.append(tete + queue)
+    return [LineString(m) for m in morceaux]
 
 
 def _refermer(lignes: list[LineString], centres_ouvrages: list, libelles: list):
@@ -4363,8 +4529,30 @@ def construire(
             libelles.append(repere.libelle)
 
     enceinte = None
+    correction_cloture = None
     if cloture:
         anneau, restes, nb_anneaux, interruptions = _refermer(cloture, centres, libelles)
+        if restes:
+            correction_cloture = _correction_cloture_ouverte(restes, cloture)
+        if correction_cloture is not None and (
+            correction_cloture.identifiant in choix.corrections
+        ):
+            # Les bouts cousus, on repasse par `_refermer` : il refait les ponts
+            # au droit des ouvrages et rend l'anneau, ce qu'un recollage à la
+            # main ici aurait refait à moitié.
+            cloture = _coudre_les_trous(cloture, correction_cloture.trous)
+            anneau, restes, nb_anneaux, interruptions = _refermer(
+                cloture, centres, libelles
+            )
+            notes.append(
+                "Clôture refermée à votre demande sur "
+                + " ; ".join(
+                    f"{nombre_fr(round(longueur, 1))} m au {secteur}"
+                    for longueur, secteur, _a, _b in correction_cloture.trous
+                )
+                + " : un trait droit d'un bout à l'autre, là où le plan n'en "
+                "dessine aucun. C'est une correction du plan, pas une lecture."
+            )
         enceinte = Enceinte(lignes=cloture, anneau=anneau, interruptions=interruptions)
         for pont in interruptions:
             notes.append(
@@ -4425,6 +4613,10 @@ def construire(
             ouvrages.append(ouvrage)
 
     proposees, appliquees = [], []
+    if correction_cloture is not None:
+        proposees.append(correction_cloture)
+        if correction_cloture.identifiant in choix.corrections:
+            appliquees.append(correction_cloture)
     for rang, ouvrage in enumerate(ouvrages, start=1):
         correction, note = _correction_proposee(ouvrage, rang, anneau)
         if note:
