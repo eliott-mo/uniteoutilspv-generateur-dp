@@ -2061,3 +2061,86 @@ def test_une_image_unique_passe_inchangee():
 
     assert fond.pixels.shape[:2] == (1200, 2000)
     assert fond.matrice == (496.8, 0.0, 0.0, 298.08, 297.72, 206.64)
+
+
+# ---------------------------------------------------------------------------
+# Où est le trou, et en combien de tronçons (12/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_le_secteur_se_compte_depuis_le_nord():
+    """Le repère est celui du DXF, nord en haut, azimut dans le sens horaire."""
+    from dp_socle.plan_pdf import _secteur
+
+    centre = (0.0, 0.0)
+    assert _secteur((0.0, 10.0), centre) == "nord"
+    assert _secteur((10.0, 0.0), centre) == "est"
+    assert _secteur((0.0, -10.0), centre) == "sud"
+    assert _secteur((-10.0, 0.0), centre) == "ouest"
+    assert _secteur((-10.0, 10.0), centre) == "nord-ouest"
+    assert _secteur((10.0, -10.0), centre) == "sud-est"
+
+
+def test_le_lieu_du_trou_est_le_milieu_du_plus_petit_ecart():
+    """`_trou_de_cloture` en donne la longueur, celui-ci l'endroit."""
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _lieu_du_trou
+
+    # Deux tracés bout à bout, séparés de 4 m en x, et un écart bien plus grand
+    # ailleurs : c'est le petit qui doit être retenu.
+    ouest = LineString([(0.0, 0.0), (0.0, 100.0), (48.0, 100.0)])
+    est = LineString([(52.0, 100.0), (100.0, 100.0), (100.0, 0.0)])
+
+    assert _lieu_du_trou([ouest, est]) == pytest.approx((50.0, 100.0))
+    assert _lieu_du_trou([]) is None
+
+
+def test_le_refus_dit_ou_est_le_trou_et_en_combien_de_troncons():
+    """Mesuré le 12/10/2026 sur La Bruère-sur-Loir.
+
+    Le message donnait la taille du trou depuis le 02/10/2026, pas sa place :
+    le chef de projet a cherché sur tout le périmètre d'une clôture dessinée en
+    treize connecteurs PowerPoint, dont onze jointures tenaient à moins d'un
+    mètre et deux se manquaient de deux.
+
+    Le compte des tronçons est le vrai diagnostic quand il est grand : une
+    clôture d'un seul trait ne peut pas s'ouvrir en son milieu, une clôture en
+    morceaux, si.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _message_cloture_ouverte
+
+    # Un carré de 100 m ouvert de 4 m sur son côté nord, lu en quatre tronçons.
+    cotes = [
+        LineString([(0.0, 0.0), (0.0, 100.0), (48.0, 100.0)]),
+        LineString([(52.0, 100.0), (100.0, 100.0)]),
+        LineString([(100.0, 100.0), (100.0, 0.0)]),
+        LineString([(100.0, 0.0), (0.0, 0.0)]),
+    ]
+    message = _message_cloture_ouverte(cotes[:2], [], lignes=cotes)
+
+    assert "il lui manque 4.0 m" in message
+    assert "au nord de l'enceinte" in message
+    assert "4 tronçons séparés" in message
+    assert "jointures serrées déjà recollées" in message
+    # Le marqueur que l'interface reconnaît pour remonter le message en tête.
+    assert "le dossier ne peut pas être généré" in message
+
+
+def test_une_cloture_d_un_seul_tenant_ne_parle_pas_de_troncons():
+    """Le compte n'a de sens que s'il désigne quelque chose.
+
+    Un ou deux tronçons, c'est le cas ordinaire d'une clôture interrompue au
+    droit d'un ouvrage : l'annoncer ferait du bruit sans rien apprendre.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _message_cloture_ouverte
+
+    seule = LineString([(0.0, 0.0), (0.0, 100.0), (100.0, 100.0), (100.0, 4.0)])
+    message = _message_cloture_ouverte([seule], [], lignes=[seule])
+
+    assert "tronçons séparés" not in message
+    assert "il lui manque" in message

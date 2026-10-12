@@ -3454,8 +3454,66 @@ def _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie) -> list[str]:
     )
 
 
-def _message_cloture_ouverte(restes: list[LineString], manquants: list[str]) -> str:
+#: Les huit secteurs d'une rose des vents, dans le sens des aiguilles.
+SECTEURS = (
+    "nord", "nord-est", "est", "sud-est",
+    "sud", "sud-ouest", "ouest", "nord-ouest",
+)
+
+
+def _lieu_du_trou(restes: list[LineString]) -> tuple | None:
+    """Le milieu du plus petit écart entre deux bouts libres, ou None.
+
+    `_trou_de_cloture` en donne la longueur ; celle-ci donne l'endroit. Les
+    deux marchent ensemble : « il lui manque 1,9 m » dit quoi chercher, « au
+    nord-ouest » dit où. Relevé le 12/10/2026 sur La Bruère-sur-Loir, dont la
+    clôture est dessinée en treize connecteurs PowerPoint : deux sommets se
+    manquaient de 1,9 m et 2,2 m sur le tronçon nord-ouest, et le chef de
+    projet a cherché sur tout le périmètre.
+    """
+    bouts = []
+    for ligne in restes:
+        sommets = list(ligne.coords)
+        bouts.append(((id(ligne), 0), sommets[0]))
+        bouts.append(((id(ligne), -1), sommets[-1]))
+    paires = [
+        (math.dist(a[:2], b[:2]), a, b)
+        for i, (cle_a, a) in enumerate(bouts)
+        for cle_b, b in bouts[i + 1 :]
+        if cle_a != cle_b
+    ]
+    if not paires:
+        return None
+    _ecart, a, b = min(paires, key=lambda p: p[0])
+    return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+
+
+def _secteur(point: tuple, centre: tuple) -> str:
+    """Le secteur de la rose des vents où tombe un point, vu du centre.
+
+    Le repère est celui du DXF, nord en haut : l'azimut se compte donc depuis
+    l'axe des ordonnées, dans le sens des aiguilles.
+    """
+    azimut = math.degrees(
+        math.atan2(point[0] - centre[0], point[1] - centre[1])
+    ) % 360.0
+    return SECTEURS[int(((azimut + 22.5) % 360.0) // 45.0)]
+
+
+def _message_cloture_ouverte(
+    restes: list[LineString], manquants: list[str], lignes: list | None = None
+) -> str:
     """Ce qu'on dit d'une clôture qui ne se referme pas : la mesure et la cause.
+
+    Trois choses, et chacune a été ajoutée après qu'un chef de projet eut
+    cherché sans elle : **combien** il manque (02/10/2026), **où** et **en
+    combien de tronçons le plan dessine la clôture** (12/10/2026).
+
+    Le nombre de tronçons est le vrai diagnostic quand il est grand : une
+    clôture dessinée d'un seul trait ne peut pas s'ouvrir en son milieu, treize
+    connecteurs posés à la main, si. C'est le cas de La Bruère-sur-Loir, où
+    onze jointures sur treize tenaient à moins d'un mètre et deux se manquaient
+    de deux.
 
     La phrase finale — « le dossier ne peut pas être généré » — est le signal
     que l'interface reconnaît pour remonter ce message en tête, avec les
@@ -3464,11 +3522,33 @@ def _message_cloture_ouverte(restes: list[LineString], manquants: list[str]) -> 
     arrivait dix-septième sur vingt-trois à La Chapelle-sous-Aubenas.
     """
     trou = _trou_de_cloture(restes)
+    lieu = _lieu_du_trou(restes)
+    reference = lignes if lignes else restes
+    sommets = [p[:2] for ligne in reference for p in ligne.coords]
+    centre = (
+        (sum(p[0] for p in sommets) / len(sommets),
+         sum(p[1] for p in sommets) / len(sommets))
+        if sommets
+        else None
+    )
+    ou = (
+        f" au {_secteur(lieu, centre)} de l'enceinte"
+        if lieu is not None and centre is not None
+        else ""
+    )
     return (
         f"Clôture ouverte : {len(restes)} tracé(s) ne se referment sur aucun "
         "ouvrage"
-        + (f", et il lui manque {trou:.1f} m" if trou is not None else "")
+        + (f", et il lui manque {trou:.1f} m{ou}" if trou is not None else "")
         + ". "
+        + (
+            f"Elle arrive en {len(lignes)} tronçons séparés — c'est ce que "
+            "l'outil en lit, jointures serrées déjà recollées : c'est "
+            "d'ordinaire là que ça se joue, deux extrémités voisines qui ne se "
+            "touchent pas tout à fait. "
+            if lignes and len(lignes) > 2
+            else ""
+        )
         + (
             "La légende annonce pourtant "
             + " ; ".join(f"« {n} »" for n in manquants)
@@ -4298,6 +4378,7 @@ def construire(
                 _message_cloture_ouverte(
                     restes,
                     _ouvrages_annonces_sans_forme(lecture, reperes_par_categorie),
+                    lignes=cloture,
                 )
             )
             enceinte.anneau = None

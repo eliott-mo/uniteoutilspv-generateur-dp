@@ -1608,6 +1608,35 @@ projet supprimait la mauvaise ; trois photomontages en auraient fait six
 diapos. La question se pose maintenant une fois, et chaque planche sort dans sa
 seule bonne version : trois photomontages donnent trois diapos.
 
+#### Une clôture qui ne se referme pas : combien, où, en combien de morceaux
+
+Un trou dans la clôture n'est comblé que s'il y a un **ouvrage au droit** — un
+portail, un poste. Un trou en pleine clôture reste un trou : le combler en
+silence inventerait une enceinte que le plan ne dessine pas. Le refus est donc
+la bonne réponse ; reste à ce qu'il désigne l'endroit.
+
+Le message s'est enrichi trois fois, chaque fois après qu'un chef de projet eut
+cherché sans :
+
+- **combien** il manque (02/10/2026, La Chapelle-sous-Aubenas : un tracé de
+  659,9 m dont les deux bouts sont à 6,02 m l'un de l'autre) ;
+- **où**, en secteur de rose des vents compté depuis le centre de l'enceinte,
+  dans le repère du DXF où le nord est en haut (12/10/2026) ;
+- **en combien de tronçons** la clôture arrive, quand il y en a plus de deux.
+
+Le dernier est le vrai diagnostic quand le nombre est grand : une clôture d'un
+seul trait ne peut pas s'ouvrir en son milieu, une clôture en morceaux, si.
+Mesuré le 12/10/2026 sur La Bruère-sur-Loir, dessinée dans PowerPoint en **treize
+connecteurs** : onze jointures tenaient à moins d'un mètre et l'outil les a
+recollées, deux interruptions de 7,0 et 6,7 m tombaient au droit des portails et
+ont été enjambées, et **deux sommets se manquaient de 1,9 m et 2,2 m** sur le
+tronçon nord-ouest. Ce sont eux qui ouvraient l'enceinte.
+
+Le compte annoncé est celui que l'outil **lit**, jointures serrées déjà
+recollées — quatre sur ce plan-là, pas treize —, et le message le dit : un chef
+de projet qui compte ses formes dans PowerPoint et lit un autre nombre
+conclurait que l'outil se trompe.
+
 #### Un fond livré en plusieurs tuiles
 
 Le plan PDF porte sa vue aérienne en image, et l'outil y relève les tables :
