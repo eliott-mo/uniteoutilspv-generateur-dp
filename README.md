@@ -2654,6 +2654,32 @@ faute. La correspondance est proposée, puis modifiable. Deux libellés de Bray
 ne se rangent nulle part d'office : « Piste existante » et « Piste à créer » ne
 disent pas si la piste est lourde ou légère.
 
+**Un libellé sans catégorie proposée n'a pas de valeur par défaut.** « (ignorer) »
+posé d'office faisait disparaître les pistes de Bray sans que personne l'ait
+décidé (24/09/2026) ; le garde-fou ne couvrait que les libellés *déclarés*
+ambigus, et le piège est revenu le 13/10/2026 par la porte des libellés
+**inconnus**. À La Bruère-sur-Loir, « Piste lourde » et « Aire de retournement »
+ne sont ni dans `CORRESPONDANCE_LEGENDE` ni dans `LIBELLES_A_TRANCHER` : l'écran
+les posait sur « (ignorer) » sans rien bloquer, le chef de projet importait, et
+ses pistes n'étaient nulle part. Toute entrée dont la catégorie n'est pas
+proposée — inconnue, ou proposée hors de ce qu'un plan PDF sait importer — se
+choisit donc à la main, et l'import attend. « (ignorer) » reste offert : c'est
+alors une décision, pas un accident.
+
+**Deux libellés de la même couleur ne sont une ambiguïté que s'ils vont à des
+catégories différentes.** Le même gris à « Piste lourde » et à « Aire de
+retournement » est normal — une aire de retournement *est* de la piste lourde
+(chef de projet, 13/10/2026) —, et la palette du lot 4 fait déjà sortir l'aire
+de grutage et la voie lourde sous une entrée unique. Rangées dans la même
+catégorie, tout ce qui porte cette couleur y va et il n'y a rien à départager :
+l'import n'en dit rien. Le message disait l'inverse — « l'apparier à la main ne
+suffirait pas, donnez-lui une couleur propre sur le plan » —, ce qui était faux
+ici et coûtait ses pistes au chef de projet. Il donne maintenant les deux
+issues, dans cet ordre : la même catégorie si les entrées désignent la même
+chose, des couleurs distinctes si elles en désignent deux. La seconde reste la
+seule bonne quand elles diffèrent, comme à Lachapelle-sous-Aubenas, où le même
+orangé servait la clôture et le poste de transformation.
+
 **La végétation en place s'importe telle que dessinée.** Le plan de Bray du
 24/09/2026 ajoute une « Zone boisée ». Elle se range d'office avec les arbres
 existants du plan du BE (`arbre_existant`) : « Arbres existants » au dossier, à

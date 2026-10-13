@@ -1073,6 +1073,14 @@ def _pastilles_de_meme_couleur(entrees) -> list[str]:
     morceaux de grillage sont sortis en postes de transformation, posés au
     gabarit et éparpillés le long de l'enceinte.
 
+    **Encore faut-il que les deux entrées aillent ailleurs l'une que l'autre.**
+    Deux libellés de la même couleur rangés dans la **même** catégorie ne
+    posent aucune question : tout ce qui porte cette couleur y va, et il n'y a
+    rien à départager. C'est même la règle du métier — une aire de retournement
+    est de la piste lourde, et le dossier la dessine du même gris (chef de
+    projet, 13/10/2026, La Bruère-sur-Loir) ; la palette du lot 4 fait déjà
+    sortir l'aire de grutage et la voie lourde sous une entrée unique.
+
     `entrees` est une suite de (libellé, couleur, catégorie) : la fonction ne
     lit rien d'autre de la légende, et le dire ici permet de la mesurer sans
     fabriquer de fausse pastille.
@@ -1080,19 +1088,24 @@ def _pastilles_de_meme_couleur(entrees) -> list[str]:
     par_couleur: dict = {}
     for libelle, couleur, categorie in entrees:
         if categorie is not None:
-            par_couleur.setdefault(couleur, []).append(libelle)
+            par_couleur.setdefault(couleur, []).append((libelle, categorie))
     messages = []
-    for couleur, libelles in sorted(par_couleur.items()):
-        if len(libelles) > 1:
-            messages.append(
-                f"La légende donne la même couleur {couleur} à "
-                f"{len(libelles)} entrées — "
-                + " ; ".join(f"« {n} »" for n in sorted(libelles))
-                + ". Une forme de la carte qui la porte peut venir de n'importe "
-                "laquelle : le rattachement se fait alors sur la seule allure, et "
-                "il se trompe dès qu'un tracé coude. Donnez-leur des couleurs "
-                "distinctes sur le plan, et refaites l'import."
-            )
+    for couleur, partagees in sorted(par_couleur.items()):
+        libelles = sorted(libelle for libelle, _ in partagees)
+        categories = {categorie for _, categorie in partagees}
+        if len(libelles) < 2 or len(categories) < 2:
+            continue
+        messages.append(
+            f"La légende donne la même couleur {couleur} à "
+            f"{len(libelles)} entrées, rangées dans des catégories "
+            "différentes — "
+            + " ; ".join(f"« {n} »" for n in libelles)
+            + ". Une forme de la carte qui la porte peut venir de n'importe "
+            "laquelle : le rattachement se fait alors sur la seule allure, et "
+            "il se trompe dès qu'un tracé coude. Rangez-les dans la même "
+            "catégorie si elles désignent la même chose, ou donnez-leur des "
+            "couleurs distinctes sur le plan, et refaites l'import."
+        )
     return messages
 
 
@@ -1108,6 +1121,15 @@ def _conseils_des_libelles_non_rattaches(entrees) -> list[str]:
     dernières ne sont rattachées à rien. Suivi, le conseil aurait donné au poste
     de livraison les morceaux de clôture : le défaut même qui avait sorti
     dix-huit bouts de grillage en postes de transformation à Lachapelle.
+
+    Mais il ne vaut que si les deux entrées désignent deux choses. Quand elles
+    désignent la **même**, l'appariement à la main suffit très bien, et c'est
+    la bonne manœuvre : les ranger toutes deux dans la même catégorie. Le
+    conseil « donnez-lui une couleur propre » était faux à La Bruère-sur-Loir,
+    où « Piste lourde » et « Aire de retournement » partagent un gris que rien
+    ne demande de distinguer — une aire de retournement est de la piste lourde
+    (chef de projet, 13/10/2026). Le chef de projet lisait qu'apparier ne
+    servirait à rien, et ses pistes ne sortaient pas.
 
     `entrees` est une suite de (libellé, couleur, catégorie, à trancher) : la
     fonction ne lit rien d'autre de la légende, et le dire ici permet de la
@@ -1127,10 +1149,14 @@ def _conseils_des_libelles_non_rattaches(entrees) -> list[str]:
                 f"Libellé de légende « {libelle} » non rattaché, et sa couleur "
                 f"{couleur} est aussi celle de "
                 + " ; ".join(f"« {n} »" for n in voisines)
-                + ". L'apparier à la main ne suffirait pas — les formes se "
+                + ". Si ces entrées désignent la même chose — une aire de "
+                "retournement est de la piste lourde —, rangez-les dans la "
+                "même catégorie : tout ce qui porte cette couleur ira là, et "
+                "il n'y a rien à départager. Si elles désignent des choses "
+                "différentes, l'apparier ne suffira pas — les formes se "
                 "rattachent par la couleur, et l'outil ne saurait pas de "
-                "laquelle elles viennent. Donnez-lui une couleur propre sur le "
-                "plan, et refaites l'import."
+                "laquelle elles viennent : donnez-leur alors des couleurs "
+                "distinctes sur le plan, et refaites l'import."
             )
             continue
         messages.append(

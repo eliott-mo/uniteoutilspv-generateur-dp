@@ -483,6 +483,9 @@ def test_deux_pastilles_de_meme_couleur_se_disent():
     de transformation**, posés au gabarit et éparpillés le long de l'enceinte.
 
     Le même plan donne aussi un seul cyan à trois citernes et bacs.
+
+    Deux libellés de la même couleur rangés dans la **même** catégorie ne sont
+    pas dans ce cas : voir le test suivant.
     """
     from dp_socle.plan_pdf import _pastilles_de_meme_couleur
 
@@ -504,9 +507,44 @@ def test_deux_pastilles_de_meme_couleur_se_disent():
     orange = next(m for m in messages if "(255, 192, 0)" in m)
     assert "3 entrées" in cyan
     assert "« Clôture »" in orange and "« Poste de transformation »" in orange
+    assert "catégories différentes" in orange
     # Le portail garde sa couleur pour lui : la pastille sans catégorie
     # n'importe rien, et ne rend donc rien ambigu.
     assert not [m for m in messages if "Portail" in m]
+
+
+def test_deux_libelles_d_une_meme_categorie_partagent_leur_couleur_sans_rien_dire():
+    """Demande du chef de projet du 13/10/2026, sur La Bruère-sur-Loir.
+
+    « Piste lourde » et « Aire de retournement » y portent le même gris, et
+    c'est **normal** : une aire de retournement est de la piste lourde. Rien
+    n'est à départager — tout ce qui porte ce gris va à la même couche —, et
+    la palette du lot 4 fait déjà sortir l'aire de grutage et la voie lourde
+    sous une entrée unique.
+
+    L'outil l'annonçait pourtant comme une ambiguïté, et conseillait de donner
+    une couleur propre à chacune : le chef de projet lisait qu'apparier ne
+    servirait à rien, et ses pistes ne sortaient pas.
+    """
+    from dp_socle.plan_pdf import _pastilles_de_meme_couleur
+
+    assert (
+        _pastilles_de_meme_couleur(
+            [
+                ("Piste lourde", (127, 127, 127), "piste_lourde_a_creer"),
+                ("Aire de retournement", (127, 127, 127), "piste_lourde_a_creer"),
+            ]
+        )
+        == []
+    )
+
+    # Même couleur, catégories différentes : là, il y a bien à départager.
+    assert _pastilles_de_meme_couleur(
+        [
+            ("Piste lourde", (127, 127, 127), "piste_lourde_a_creer"),
+            ("Aire de retournement", (127, 127, 127), "piste_legere"),
+        ]
+    )
 
 
 def test_le_plan_ne_porte_que_les_haies_du_projet():
@@ -1673,6 +1711,12 @@ def test_un_libelle_non_rattache_qui_partage_sa_couleur_ne_s_apparie_pas_a_la_ma
 
     Le libellé dont la couleur n'appartient qu'à lui garde, lui, le conseil
     d'origine : il est praticable.
+
+    Le conseil donne les **deux** issues depuis le 13/10/2026 : ranger les deux
+    entrées dans la même catégorie quand elles désignent la même chose — à La
+    Bruère-sur-Loir, « Piste lourde » et « Aire de retournement » —, et des
+    couleurs distinctes seulement quand elles désignent deux choses. Ne donner
+    que la seconde était faux, et coûtait ses pistes au chef de projet.
     """
     from dp_socle.plan_pdf import _conseils_des_libelles_non_rattaches
 
@@ -1687,8 +1731,9 @@ def test_un_libelle_non_rattache_qui_partage_sa_couleur_ne_s_apparie_pas_a_la_ma
     # Rien à dire de l'entrée rattachée : elle importe ce qu'elle doit.
     assert len(messages) == 2
     partagee = next(m for m in messages if "PDL /PTR" in m)
-    assert "ne suffirait pas" in partagee and "« Clôture »" in partagee
-    assert "couleur propre" in partagee
+    assert "« Clôture »" in partagee
+    assert "la même catégorie" in partagee, "l'issue praticable est donnée d'abord"
+    assert "ne suffira pas" in partagee and "couleurs distinctes" in partagee
 
     seule = next(m for m in messages if "Piste à renforcer" in m)
     assert "Appariez-le à la main" in seule

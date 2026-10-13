@@ -2139,6 +2139,16 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> tuple[dict, list]:
     faisait disparaître les pistes de Bray sans que personne l'ait décidé
     (retour d'usage du 24/09/2026). Rend la correspondance, et les libellés
     encore à trancher avec la raison de chacun.
+
+    **Aucune catégorie proposée, aucun défaut** : le piège est revenu le
+    13/10/2026 par la porte des libellés inconnus. À La Bruère-sur-Loir,
+    « Piste lourde » et « Aire de retournement » ne sont dans aucune des deux
+    listes du socle — ni connus, ni déclarés ambigus —, et l'écran les posait
+    donc sur « (ignorer) » sans rien bloquer : le chef de projet importait, et
+    ses pistes n'étaient nulle part. Un libellé dont la catégorie n'est pas
+    proposée, ou proposée hors de ce qu'un plan PDF sait importer, se choisit
+    donc à la main. « (ignorer) » reste offert — c'est alors une décision, pas
+    un accident.
     """
     from dp_socle.plan_pdf import CATEGORIES_IMPORTABLES
 
@@ -2146,7 +2156,7 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> tuple[dict, list]:
     # Seulement ce qu'un plan PDF sait importer : une autre catégorie, choisie
     # ici, ne sortait pas du plan, et rien ne le disait (24/09/2026).
     options = ["(ignorer)"] + [c for c in CATEGORIES_DE_LEGENDE if c in CATEGORIES_IMPORTABLES]
-    a_decider = [e for e in entrees if e[2] is None]
+    a_decider = [e for e in entrees if e[3] or e[2] not in options]
     choix, a_trancher_encore = {}, []
     with st.expander(
         f"La légende du plan — {len(entrees)} entrée(s)"
@@ -2172,20 +2182,19 @@ def _correspondance_de_la_legende(chemin_pdf: Path) -> tuple[dict, list]:
             with colonne_libelle:
                 st.markdown(f"**{libelle}**" + (f" — {a_trancher}" if a_trancher else ""))
             with colonne_categorie:
+                propose = categorie if categorie in options else None
                 retenue = st.selectbox(
                     "Catégorie",
                     options,
-                    index=(
-                        None
-                        if a_trancher
-                        else options.index(categorie) if categorie in options else 0
-                    ),
+                    index=None if a_trancher or propose is None else options.index(propose),
                     placeholder="à choisir",
                     key=f"categorie_legende_{rang}_{libelle}",
                     label_visibility="collapsed",
                 )
             if retenue is None:
-                a_trancher_encore.append((libelle, a_trancher))
+                a_trancher_encore.append(
+                    (libelle, a_trancher or "libellé que l'outil ne connaît pas")
+                )
             choix[libelle] = None if retenue in (None, "(ignorer)") else retenue
     return choix, a_trancher_encore
 

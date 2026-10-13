@@ -214,6 +214,98 @@ def test_une_piste_dont_le_type_manque_se_tranche_avant_l_import(tmp_path, monke
     assert not importer().disabled
     assert not a_trancher()
 
+
+def test_un_libelle_que_l_outil_ne_connait_pas_bloque_l_import(tmp_path, monkeypatch):
+    """Relevé le 13/10/2026 sur La Bruère-sur-Loir : les pistes manquaient.
+
+    « Piste lourde » et « Aire de retournement » n'y sont ni connues du socle
+    ni déclarées ambiguës : l'écran les posait donc sur « (ignorer) » sans rien
+    bloquer, et le chef de projet importait un dossier sans ses pistes. C'est
+    le piège du 24/09/2026 revenu par la porte des libellés inconnus — et il ne
+    se voyait pas, le plan de Bray n'en portant aucun.
+
+    Le plan de Bray en reçoit un ici : on retire sa catégorie à « Citerne
+    Incendie », ce qui la rend inconnue sans fabriquer de fausse pastille.
+    """
+    from dp_socle import plan_pdf
+
+    from tests.jeux_plan_pdf import (
+        DXF_BRAY,
+        EMPRISE_SITE_BRAY,
+        FOND_BRAY,
+        PLAN_BRAY_ZONE_BOISEE,
+        bray_present,
+        layout_cad,
+    )
+
+    if not (bray_present() and PLAN_BRAY_ZONE_BOISEE.exists()):
+        pytest.skip("plan de Bray du 24/09 absent")
+
+    lire_vraiment = plan_pdf.lire_legende
+
+    def sans_la_citerne(chemin):
+        entrees = lire_vraiment(chemin)
+        for entree in entrees:
+            if "Citerne Incendie" in entree.libelle:
+                entree.categorie = None
+                entree.a_trancher = None
+        return entrees
+
+    monkeypatch.setattr(plan_pdf, "lire_legende", sans_la_citerne)
+    # La lecture de la légende est mise en cache sur (chemin, taille), et
+    # `DOSSIER_PROJETS` est relatif : le plan de Bray tombe au même chemin dans
+    # tous les tests, et celui du test précédent répondrait à la place.
+    import streamlit as st
+
+    st.cache_data.clear()
+
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("Bray-Saint-Aignan")
+    _televerser(
+        application,
+        "Emprise cadastrale",
+        (EMPRISE_SITE_BRAY.name, EMPRISE_SITE_BRAY.read_bytes(), "application/zip"),
+    )
+    application = application.run()
+    application.radio(key="source_plan").set_value(SOURCE_PLAN_PDF)
+    application = application.run()
+    export = layout_cad(tmp_path, DXF_BRAY, FOND_BRAY)
+    _televerser(application, "Export HelioScope", (export.name, export.read_bytes(), "application/zip"))
+    _televerser(
+        application,
+        "Plan projet (PDF)",
+        (PLAN_BRAY_ZONE_BOISEE.name, PLAN_BRAY_ZONE_BOISEE.read_bytes(), "application/pdf"),
+    )
+    application = application.run()
+    assert not application.exception, application.exception
+
+    def importer():
+        return next(b for b in application.button if b.label == "Importer et caler le plan")
+
+    citerne = next(
+        s
+        for s in application.selectbox
+        if (s.key or "").startswith("categorie_legende_") and "Citerne" in s.key
+    )
+    assert citerne.value is None, "aucun défaut : « (ignorer) » serait une perte muette"
+    assert importer().disabled
+    assert any(
+        "Citerne Incendie" in w.value and "ne connaît pas" in w.value
+        for w in application.warning
+    ), "le message nomme le libellé et dit pourquoi il faut trancher"
+
+    # Tranchés — « (ignorer) » compris —, l'import repart.
+    citerne.set_value("bache_incendie")
+    for piste in [
+        s
+        for s in application.selectbox
+        if (s.key or "").startswith("categorie_legende_") and "Piste" in s.key
+    ]:
+        piste.set_value("piste_lourde_a_creer" if "créer" in piste.key else "(ignorer)")
+    application = application.run()
+    assert not application.exception, application.exception
+    assert not importer().disabled
+
 def _dans_l_ordre_de_la_page(application) -> list:
     """Les éléments de la page principale, dans l'ordre où ils s'affichent."""
     elements = []
