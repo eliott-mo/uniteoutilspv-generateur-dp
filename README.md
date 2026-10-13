@@ -2641,8 +2641,9 @@ règles près, toutes mesurées :
   dessiné, sans que rien ne le montre à l'écran. Le plan de Bray du 24/09/2026
   fermait sa clôture au nord-ouest d'une droite, exportée en trait quand le
   reste l'était en contours remplis. Refusée, elle laissait l'enceinte
-  ouverte : pas de surface clôturée, et les deux portails « à plus de 10 m de
-  la clôture ». Rattachée, elle le dit au rapport.
+  ouverte : pas de surface clôturée, et deux portails posés hors du tracé —
+  depuis le 13/10/2026 ils y sont ramenés, et le rapport dit de combien.
+  Rattachée, la droite le dit au rapport.
 
 Une forme qu'aucune pastille n'explique n'est rangée nulle part, et le rapport
 le dit ; une entrée de légende sans rien sur la carte aussi.
@@ -2856,6 +2857,22 @@ clôture, deux vantaux de 3,5 m ouverts à angle droit vers l'intérieur de
 l'enceinte, et deux quarts de cercle qui ramènent chaque vantail au milieu de
 l'ouverture. Le portail du plan PDF s'écrit désormais ainsi, et le lot 4 le
 dessine comme celui du BE.
+
+**Un portail se pose toujours sur la clôture.** Demande du chef de projet du
+13/10/2026 : ailleurs, il ne veut rien dire — on n'entre pas dans une enceinte
+par un vantail posé dans un champ. Il y était déjà ramené, mais à deux
+conditions : en être à moins de 10 m, **et** que la clôture se referme en
+anneau. Les deux portails de La Bruère-sur-Loir, dont la clôture reste ouverte,
+sortaient donc flottants. Une clôture ouverte reste une clôture : le portail se
+pose désormais sur le tracé tel qu'il est lu, anneau ou non, au point le plus
+proche, et prend l'orientation du brin sur lequel il tombe. Lu en morceaux, ce
+tracé arrive en `MultiLineString`, dont `_direction_de_ligne` ne sait pas lire
+les sommets — c'est le brin le plus proche qui donne la direction
+(`_brin_le_plus_proche`). Au delà de `PORTAIL_SUR_LA_CLOTURE_M` (10 m), le
+déplacement se dit au rapport avec sa mesure : un portail qui saute de vingt
+mètres mérite un coup d'œil sur la planche. En deçà, c'est l'imprécision d'un
+dessin PowerPoint et rien ne s'affiche. Sans aucune clôture lue, le portail
+garde ce que le plan lui donne, et le rapport le dit.
 
 ### Une piste se dessine comme sur un vrai plan
 

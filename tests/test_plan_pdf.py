@@ -2346,3 +2346,61 @@ def test_la_cloture_en_pointille_de_gannay_reste_muette(lecture_gannay, import_g
     _lus, _remarques, soudures = traces(lecture_gannay, "cloture", frozenset())
 
     assert soudures == [], [round(e, 2) for _l, e in soudures]
+
+
+# ---------------------------------------------------------------------------
+# Un portail se pose toujours sur la clôture (13/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_le_brin_retenu_est_le_plus_proche_du_portail():
+    """Une clôture lue en morceaux arrive en `MultiLineString`.
+
+    `_direction_de_ligne` lit les sommets d'un tracé, et un multi-tracé n'en a
+    pas : il faut choisir le brin — et c'est celui dont le portail prend
+    l'orientation.
+    """
+    from shapely.geometry import MultiLineString, Point
+
+    from dp_socle.plan_pdf import _brin_le_plus_proche
+
+    nord = [(0.0, 100.0), (100.0, 100.0)]
+    sud = [(0.0, 0.0), (100.0, 0.0)]
+    trace = MultiLineString([nord, sud])
+
+    assert list(_brin_le_plus_proche(trace, Point(50.0, 90.0)).coords) == nord
+    assert list(_brin_le_plus_proche(trace, Point(50.0, 10.0)).coords) == sud
+
+
+def test_sans_cloture_il_n_y_a_pas_de_brin():
+    """Rien à quoi raccrocher : le portail garde ce que le plan lui donne."""
+    from shapely.geometry import LineString, Point
+
+    from dp_socle.plan_pdf import _brin_le_plus_proche
+
+    assert _brin_le_plus_proche(None, Point(0.0, 0.0)) is None
+    assert _brin_le_plus_proche(LineString(), Point(0.0, 0.0)) is None
+
+
+@besoin_bray_2
+def test_les_portails_tombent_sur_le_trace_de_la_cloture(import_bray_2):
+    """Demande du chef de projet du 13/10/2026 : un portail est sur la clôture.
+
+    Ailleurs, il ne veut rien dire — on n'entre pas dans une enceinte par un
+    vantail posé dans un champ. Il y était déjà ramené, mais seulement s'il en
+    était à moins de 10 m **et** si la clôture se refermait : les deux portails
+    de La Bruère-sur-Loir, dont la clôture reste ouverte, sortaient flottants.
+    """
+    construction = import_bray_2.construction
+    anneau = construction.enceinte.anneau
+    assert anneau is not None
+
+    # Les portails sont un symbole — ouverture et vantaux —, pas un ouvrage à
+    # gabarit : ils vivent dans `construction.portails`.
+    from shapely.ops import unary_union
+
+    assert construction.portails, "le plan de Bray porte des portails"
+    for libelle, entites in construction.portails:
+        symbole = unary_union(list(entites))
+        # Posé dessus : son ouverture tombe sur le tracé de la clôture.
+        assert anneau.distance(symbole) < 0.5, libelle

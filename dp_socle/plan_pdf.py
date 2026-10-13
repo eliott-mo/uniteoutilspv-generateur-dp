@@ -2713,8 +2713,18 @@ RETRAIT_CORRIGEABLE_M = 15.0
 #: degrés, pour lui proposer de s'y poser.
 PARALLELISME_DEG = 15.0
 
-#: Distance au delà de laquelle un portail n'est plus tenu pour posé sur la
-#: clôture, en mètres : il garde alors sa propre orientation, et le rapport le dit.
+#: Distance au delà de laquelle le déplacement d'un portail sur la clôture se
+#: dit au rapport, en mètres.
+#:
+#: Le portail est **toujours** ramené sur la clôture : ailleurs, il ne veut rien
+#: dire — on n'entre pas dans une enceinte par un vantail posé dans un champ.
+#: C'était un seuil au-delà duquel il gardait sa place, et les deux portails de
+#: La Bruère-sur-Loir, dessinés à distance du tracé, sortaient flottants
+#: (demande du chef de projet du 13/10/2026).
+#:
+#: En deçà, le recalage est de l'ordre de l'imprécision d'un dessin PowerPoint
+#: et n'appelle rien ; au-delà, il se dit, parce qu'un portail qui saute de
+#: vingt mètres mérite un coup d'œil sur la planche.
 PORTAIL_SUR_LA_CLOTURE_M = 10.0
 
 #: Segments d'un arc de débattement de portail. Relevé le 23/09/2026 sur le
@@ -3557,6 +3567,20 @@ def _normale_vers(enceinte: Polygon | None, centre: Point, direction_deg: float,
     elif (repere.x - centre.x) * nx + (repere.y - centre.y) * ny < 0:
         nx, ny = -nx, -ny
     return nx, ny
+
+
+def _brin_le_plus_proche(trace, point):
+    """Le brin d'une clôture le plus proche d'un point, ou None.
+
+    `_direction_de_ligne` lit les sommets d'un tracé : une clôture lue en
+    plusieurs morceaux arrive en `MultiLineString`, qui n'en a pas. On choisit
+    donc le brin — et c'est de toute façon celui dont le portail prend
+    l'orientation.
+    """
+    if trace is None or trace.is_empty:
+        return None
+    brins = [b for b in getattr(trace, "geoms", [trace]) if not b.is_empty]
+    return min(brins, key=lambda b: b.distance(point)) if brins else None
 
 
 def _direction_de_ligne(ligne: LineString, point: Point) -> float:
@@ -4778,17 +4802,32 @@ def construire(
         repere_interieur = unary_union(cloture).convex_hull.centroid
     else:
         repere_interieur = None
+    # Le tracé sur lequel poser les portails : l'anneau fermé s'il y en a un,
+    # sinon la clôture telle qu'elle est lue. Une clôture ouverte reste une
+    # clôture, et le portail a autant besoin d'y être posé.
+    trace_cloture = anneau if anneau is not None else (
+        unary_union(cloture) if cloture else None
+    )
     for repere in reperes_par_categorie["portail"]:
         centre = Point(calage.point_vers_dxf(*repere.centre))
         direction = calage.direction_vers_dxf(repere.direction_deg)
-        if anneau is not None and anneau.distance(centre) <= PORTAIL_SUR_LA_CLOTURE_M:
-            centre = nearest_points(anneau, centre)[0]
-            direction = _direction_de_ligne(anneau, centre)
+        brin = _brin_le_plus_proche(trace_cloture, centre)
+        if brin is not None:
+            ecart = brin.distance(centre)
+            centre = nearest_points(brin, centre)[0]
+            direction = _direction_de_ligne(brin, centre)
+            if ecart > PORTAIL_SUR_LA_CLOTURE_M:
+                notes.append(
+                    f"« {repere.libelle} » était à {nombre_fr(round(ecart, 1))} m "
+                    "de la clôture : posé dessus, au point le plus proche, et "
+                    "orienté comme elle. Un portail ailleurs que sur la clôture "
+                    "ne veut rien dire — mais vérifiez sur la planche que c'est "
+                    "le bon endroit."
+                )
         else:
             notes.append(
-                f"« {repere.libelle} » à plus de {PORTAIL_SUR_LA_CLOTURE_M:.0f} m de "
-                "la clôture : posé selon sa propre orientation au plan, ses "
-                "vantaux ouverts du côté de la clôture."
+                f"« {repere.libelle} » : aucune clôture lue au plan, le portail "
+                "garde la position et l'orientation qu'il y a."
             )
         largeur = cotes.get(repere.libelle, {}).get("largeur_portail_m")
         source = "largeur portée en légende"
