@@ -2448,19 +2448,21 @@ def _tirets(depart_x: float, nombre: int, pas: float = 6.0):
     ]
 
 
-def test_le_rythme_du_pointille_se_recoud_sans_se_dire():
-    """Un raccord d'un pas est le rythme du tiret, pas une anomalie.
+def test_tous_les_raccords_se_mesurent_meme_ceux_du_rythme():
+    """`_relier` mesure, il ne décide pas de ce qui se dit (13/10/2026).
 
-    Mesuré le 12/10/2026 sur Gannay : trente et un raccords, tous à 3,9 m, soit
-    un pas. Les annoncer à chaque plan en pointillé ferait du bruit sans rien
-    apprendre — c'est ce que l'allègement des alertes cherche à éviter.
+    Il ne rendait que les raccords au-delà d'un seuil, et le cumul n'était donc
+    mesurable nulle part : à Gannay, trente-deux raccords d'un pas chacun font
+    116,7 m de clôture tenus pour acquis sur 684. Aucun raccord pris isolément
+    ne le dit, et c'est le chiffre que le chef de projet n'avait pas.
     """
     from dp_socle.plan_pdf import _relier
 
-    lignes, soudures = _relier(_tirets(0.0, 6), jeu=12.0, seuil_dit=9.0)
+    lignes, soudures = _relier(_tirets(0.0, 6), jeu=12.0)
 
     assert len(lignes) == 1, "les tirets se recousent en un seul tracé"
-    assert soudures == [], "rien à dire : chaque raccord vaut un demi-pas"
+    assert len(soudures) == 5, "cinq raccords entre six tirets, tous mesurés"
+    assert all(e == pytest.approx(3.0, abs=0.1) for e in soudures), soudures
 
 
 def test_un_trou_cache_dans_le_pointille_se_dit():
@@ -2476,15 +2478,17 @@ def test_un_trou_cache_dans_le_pointille_se_dit():
     # seuil de 9. Le premier pan s'arrête à x = 15 — trois tirets au pas de 6,
     # longs d'un demi-pas —, le second part donc de 25.
     morceaux = _tirets(0.0, 3) + _tirets(25.0, 3)
-    lignes, soudures = _relier(morceaux, jeu=12.0, seuil_dit=9.0)
+    lignes, soudures = _relier(morceaux, jeu=12.0)
 
     assert len(lignes) == 1, "le trou est recousu, faute de pouvoir le distinguer"
-    assert len(soudures) == 1
-    assert soudures[0] == pytest.approx(10.0, abs=0.6)
+    # Quatre raccords de rythme, et le trou de 10 pt parmi eux : c'est la note
+    # qui fait le tri, sur le seuil, et non `_relier`.
+    assert len(soudures) == 5
+    assert max(soudures) == pytest.approx(10.0, abs=0.6)
 
 
-def test_un_trait_plein_ne_declenche_aucune_soudure_a_dire():
-    """Son jeu et son seuil se valent : il n'y a rien à annoncer."""
+def test_un_trait_plein_se_recoud_et_son_raccord_se_mesure():
+    """Mesuré aussi — c'est la note qui jugera qu'il n'y a rien à en dire."""
     from shapely.geometry import LineString
 
     from dp_socle.plan_pdf import _relier
@@ -2493,42 +2497,117 @@ def test_un_trait_plein_ne_declenche_aucune_soudure_a_dire():
         LineString([(0.0, 0.0), (50.0, 0.0)]),
         LineString([(51.0, 0.0), (100.0, 0.0)]),
     ]
-    lignes, soudures = _relier(morceaux, jeu=2.0, seuil_dit=2.0)
+    lignes, soudures = _relier(morceaux, jeu=2.0)
 
     assert len(lignes) == 1
-    assert soudures == []
+    assert soudures == [pytest.approx(1.0)]
 
 
-def test_la_note_de_soudure_dit_la_mesure_en_metres():
-    """En mètres, et non en points : c'est le plan que le chef de projet lit."""
+def _recouture(libelle, ecarts, seuil, longueur, pointille=True):
+    from dp_socle.plan_pdf import RecoutureDuTrait
+
+    return RecoutureDuTrait(
+        libelle=libelle,
+        ecarts=tuple(ecarts),
+        seuil=seuil,
+        longueur=longueur,
+        pointille=pointille,
+    )
+
+
+def test_la_note_de_soudure_dit_le_cumul_puis_ce_qui_depasse():
+    """En mètres, et non en points : c'est le plan que le chef de projet lit.
+
+    Le cumul passe devant (demande du 13/10/2026) : un raccord d'un pas est
+    anodin, leur somme ne l'est pas.
+    """
     from dp_socle.plan_pdf import _notes_des_soudures
 
     notes = _notes_des_soudures(
-        [("Clôture", 10.0), ("Clôture", 11.0), ("Haie", 9.5)], m_par_pt=0.6361
+        [_recouture("Clôture", [10.0, 11.0, 4.0], seuil=9.0, longueur=200.0)],
+        m_par_pt=0.6361,
     )
 
-    assert len(notes) == 2
-    cloture = next(n for n in notes if "Clôture" in n)
-    assert "2 raccord(s)" in cloture
+    assert len(notes) == 1
+    cloture = notes[0]
+    assert "3 raccord(s)" in cloture
+    # 25 pt recousus sur 200 pt de tracé : le cumul et sa part. 12,5 % arrondi
+    # au pair par `round`, comme partout en Python.
+    assert "15,9 m recousus en tout" in cloture
+    assert "12 % de sa longueur" in cloture
     # `nombre_fr` laisse tomber la décimale nulle : « 7 m », pas « 7,0 m ».
+    assert "2 dépasse(nt) ce rythme" in cloture
     assert "7 m" in cloture and "6,4 m" in cloture
-    assert "rythme du trait" in cloture
     assert "Vérifiez sur le plan" in cloture
 
 
-@besoin_gannay
-def test_la_cloture_en_pointille_de_gannay_reste_muette(lecture_gannay, import_gannay):
-    """Le plan de référence du parcours PDF ne doit pas se mettre à parler.
+def test_un_trace_presque_continu_ne_dit_rien():
+    """Deux raccords d'un mètre sur six cents ne s'écrivent pas.
 
-    Ses trente et un raccords valent un pas de tiret chacun : c'est la lecture
-    normale d'un pointillé, et le seuil est placé au-dessus.
+    Le cumul ne mérite une ligne que s'il pèse — un vingtième de la longueur —,
+    ou si l'un des raccords dépasse le rythme du trait. Mesuré le 13/10/2026 :
+    les deux raccords de la piste de Gannay valent 2 m sur 600.
     """
-    from dp_socle.plan_pdf import caler_sur_tables, traces
+    from dp_socle.plan_pdf import _notes_des_soudures
 
-    caler_sur_tables(lecture_gannay, import_gannay.implantation)
+    assert (
+        _notes_des_soudures(
+            [_recouture("Piste lourde à créer", [1.5, 1.5], seuil=6.0, longueur=900.0)],
+            m_par_pt=0.6361,
+        )
+        == []
+    )
+
+    # Le même tracé avec un raccord au-dessus du rythme se dit, lui.
+    assert _notes_des_soudures(
+        [_recouture("Piste lourde à créer", [1.5, 8.0], seuil=6.0, longueur=900.0)],
+        m_par_pt=0.6361,
+    )
+
+
+def test_la_note_dit_le_pointille_ou_le_trait_plein():
+    """« À moins d'un pas de tiret » n'a pas de sens sur un trait plein."""
+    from dp_socle.plan_pdf import _notes_des_soudures
+
+    pointille = _notes_des_soudures(
+        [_recouture("Clôture", [10.0], seuil=9.0, longueur=50.0)], m_par_pt=0.6361
+    )[0]
+    plein = _notes_des_soudures(
+        [_recouture("Clôture", [10.0], seuil=9.0, longueur=50.0, pointille=False)],
+        m_par_pt=0.6361,
+    )[0]
+
+    assert "pas de tiret" in pointille
+    assert "pas de tiret" not in plein
+    assert "épaisseur du trait" in plein
+
+
+@besoin_gannay
+def test_la_cloture_de_gannay_dit_ce_qu_elle_a_coute_de_raccords(
+    lecture_gannay, import_gannay
+):
+    """Le chiffre qui manquait, mesuré sur le plan de référence (13/10/2026).
+
+    Ses raccords valent un pas de tiret chacun : aucun ne dépasse le rythme, et
+    c'est bien la lecture normale d'un pointillé. Mais ils sont trente-deux, et
+    leur somme fait 116,7 m de clôture tenus pour acquis sur 684 — 17 % du
+    tour, que rien ne disait tant qu'on ne regardait que les raccords un par un.
+    """
+    from dp_socle.plan_pdf import _notes_des_soudures, caler_sur_tables, traces
+
+    calage = caler_sur_tables(lecture_gannay, import_gannay.implantation)
     _lus, _remarques, soudures = traces(lecture_gannay, "cloture", frozenset())
 
-    assert soudures == [], [round(e, 2) for _l, e in soudures]
+    assert len(soudures) == 1
+    recouture = soudures[0]
+    assert len(recouture.ecarts) == 32
+    assert max(recouture.ecarts) <= recouture.seuil, "aucun ne dépasse le rythme"
+
+    note = _notes_des_soudures(soudures, calage.echelle_m_par_pt)[0]
+    assert "32 raccord(s)" in note
+    assert "116,7 m recousus en tout" in note
+    assert "17 % de sa longueur" in note
+    assert "Aucun ne dépasse le rythme du trait" in note
 
 
 # ---------------------------------------------------------------------------

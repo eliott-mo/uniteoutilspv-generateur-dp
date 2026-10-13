@@ -2666,6 +2666,37 @@ proposée — inconnue, ou proposée hors de ce qu'un plan PDF sait importer —
 choisit donc à la main, et l'import attend. « (ignorer) » reste offert : c'est
 alors une décision, pas un accident.
 
+**Ce qu'un trait a coûté de raccords se dit en cumul, pas raccord par
+raccord.** Un trait de PowerPoint arrive en morceaux et se recoud bout à bout ;
+sur un pointillé, le jeu admis vaut deux pas de tiret, et un raccord d'un pas
+est le rythme du trait, pas une anomalie. Pris un par un ils sont tous anodins
+— et c'est pourquoi ils restaient muets. Leur **somme** ne l'est pas : à
+Gannay, trente-deux raccords d'un pas font 116,7 m de clôture tenus pour acquis
+sur 684, soit 17 % du tour, et aucun raccord pris isolément ne le disait
+(demande du chef de projet du 13/10/2026).
+
+`_relier` mesure donc tous les raccords, y compris celui qui referme la boucle,
+et ne décide plus de ce qui se dit ; `RecoutureDuTrait` les porte par entrée de
+légende avec la longueur du tracé obtenu, et la note donne d'abord **combien et
+quelle part**, puis détaille les seuls raccords qui dépassent le rythme. Un
+tracé quasi continu ne dit rien : en deçà de `PART_RECOUSUE_DITE` (un
+vingtième) et sans raccord au-dessus du rythme, l'écrire ferait du bruit — les
+deux raccords de la piste de Gannay valent 2 m sur 600. La note dit « pas de
+tiret » sur un pointillé et « épaisseur du trait » sur un trait plein, et celle
+dont aucun raccord ne dépasse le rythme est rangée en information, pas en
+correction.
+
+**Pourquoi le pointillé n'achète pas plus qu'un recollage.** L'idée d'un jeu de
+deux pas réservé à la *continuation* d'un même trait, les tronçons distincts
+restant à la tolérance d'un trait plein, a été mesurée le 13/10/2026 et
+abandonnée : PowerPoint sort **chaque pan de pointillé comme son propre objet**
+— 32 objets pour les 32 pans de la clôture de Gannay, soit 0 paire soudable à
+l'intérieur d'un objet et 32 entre objets. Le critère ferait éclater cette
+clôture en 32 morceaux, et rien d'autre dans le fichier ne sépare un trou d'un
+intervalle. `jeu` sert par ailleurs à `_retrouver_les_angles` : ramené à la
+valeur d'un trait plein, il coûte 4,1 pt — 2,6 m — de périmètre à Gannay et
+rabote ses quatre angles. C'est le cumul, ci-dessus, qui répond au besoin.
+
 **Deux libellés de la même couleur ne sont une ambiguïté que s'ils vont à des
 catégories différentes.** Le même gris à « Piste lourde » et à « Aire de
 retournement » est normal — une aire de retournement *est* de la piste lourde

@@ -937,6 +937,11 @@ MOTIFS_DE_ROUTINE = (
     "zone(s) évitée(s) reconstituée(s)",
     "on n'en garde que l'axe",
     "Gabarits UNITe",
+    # Le cumul des raccords d'un trait dont aucun ne dépasse le rythme : c'est
+    # la lecture normale d'un pointillé, et elle n'appelle qu'un coup d'œil.
+    # Celui qui porte un raccord au-dessus du rythme n'a pas cette formule, et
+    # reste donc à lire (13/10/2026).
+    "Aucun ne dépasse le rythme du trait",
 )
 
 

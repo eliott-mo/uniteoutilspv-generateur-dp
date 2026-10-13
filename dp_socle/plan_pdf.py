@@ -1722,7 +1722,7 @@ def _morceaux_de_trace(objet: Objet) -> tuple[list[LineString], float, list[str]
 
 
 def _relier(
-    morceaux: list[LineString], jeu: float, seuil_dit: float = 0.0
+    morceaux: list[LineString], jeu: float
 ) -> tuple[list[LineString], list[float]]:
     """Recoud des morceaux de trait bout à bout, quand leurs bouts se touchent.
 
@@ -1732,17 +1732,19 @@ def _relier(
     le plus proche, à moins de `jeu`, jusqu'à ce qu'il n'y en ait plus ; un
     tracé dont les deux bouts se rejoignent est refermé.
 
-    Rend aussi les écarts recousus **au-delà de `seuil_dit`**. Sur un trait en
-    pointillé, `jeu` vaut deux pas de tiret — 12 pt à Gannay, soit 7,65 m — là
-    où un trait plein n'en admettrait que 2,7 : la clôture s'y recousait sur
-    près de quatre mètres sans que rien ne le dise, quand deux mètres
-    bloquaient un plan au trait plein (12/10/2026).
+    Rend aussi **tous** les écarts recousus, sans en écarter aucun : ce qui se
+    dit n'est pas son affaire. Sur un trait en pointillé, `jeu` vaut deux pas
+    de tiret — 12 pt à Gannay, soit 7,65 m — là où un trait plein n'en
+    admettrait que 2,7 : la clôture s'y recousait sur près de quatre mètres
+    sans que rien ne le dise, quand deux mètres bloquaient un plan au trait
+    plein (12/10/2026). La soudure reste, parce qu'à moins d'un pas de tiret
+    rien ne distingue un trou d'un intervalle.
 
-    La soudure reste, parce qu'à moins d'un pas de tiret rien ne distingue un
-    trou d'un intervalle. Mais tout n'est pas à dire non plus : à Gannay, les
-    trente et un raccords valent 3,9 m, soit **un pas** — c'est le rythme du
-    pointillé, et l'annoncer à chaque plan ferait du bruit sans rien apprendre.
-    Le seuil se place donc au-delà du rythme, là où un vrai trou peut se cacher.
+    Il rendait auparavant les seuls écarts au-delà d'un seuil, et le cumul
+    n'était donc mesurable nulle part : à Gannay, trente et un raccords d'un
+    pas chacun font 121 m de clôture tenus pour acquis sur 684 — c'est le
+    chiffre qui manquait, et qu'aucun raccord pris isolément ne donne (demande
+    du chef de projet du 13/10/2026).
     """
     restants = [list(m.coords) for m in morceaux if len(m.coords) >= 2]
     lignes, soudures = [], []
@@ -1762,8 +1764,7 @@ def _relier(
             if meilleur is None:
                 break
             ecart, indice, bout_chaine, bout_morceau = meilleur
-            if ecart > seuil_dit:
-                soudures.append(ecart)
+            soudures.append(ecart)
             morceau = restants.pop(indice)
             if bout_chaine == -1:
                 chaine = chaine + (morceau if bout_morceau == 0 else morceau[::-1])
@@ -1771,8 +1772,9 @@ def _relier(
                 chaine = (morceau[::-1] if bout_morceau == 0 else morceau) + chaine
         fermeture = math.dist(chaine[0], chaine[-1])
         if len(chaine) > 3 and 1e-9 <= fermeture <= jeu:
-            if fermeture > seuil_dit:
-                soudures.append(fermeture)
+            # Le raccord qui referme la boucle compte comme les autres : c'est
+            # de la clôture tenue pour acquise au même titre.
+            soudures.append(fermeture)
             chaine = chaine + [chaine[0]]
         lignes.append(LineString(chaine))
     return lignes, soudures
@@ -1909,8 +1911,16 @@ def traces(
             1.5 * statistics.median(espacements) if espacements else 0.0,
             2.0,
         )
-        lignes, recousues = _relier(morceaux, jeu, seuil_dit)
-        soudures.extend((entree.libelle, ecart) for ecart in recousues)
+        lignes, recousues = _relier(morceaux, jeu)
+        soudures.append(
+            RecoutureDuTrait(
+                libelle=entree.libelle,
+                ecarts=tuple(recousues),
+                seuil=seuil_dit,
+                longueur=sum(ligne.length for ligne in lignes),
+                pointille=bool(espacements),
+            )
+        )
         for ligne in lignes:
             resultat.append(
                 TracePlan(
@@ -1920,6 +1930,30 @@ def traces(
                 )
             )
     return resultat, remarques, soudures
+
+
+@dataclass(frozen=True)
+class RecoutureDuTrait:
+    """Ce qu'une entrée de légende a coûté de raccords, et sur quelle longueur.
+
+    Le cumul est l'information qui manquait : un raccord d'un pas de tiret ne
+    dit rien, trente et un en disent beaucoup — 121 m de clôture tenus pour
+    acquis sur 684 à Gannay. Il se porte donc par entrée, avec la longueur du
+    tracé obtenu, pour que la part se calcule au rapport.
+
+    Les écarts et la longueur sont en points de la page : l'échelle n'est pas
+    connue de `traces`.
+    """
+
+    libelle: str
+    #: Tous les écarts recousus, en points.
+    ecarts: tuple
+    #: Au-delà duquel un raccord se détaille, en points.
+    seuil: float
+    #: Longueur du tracé une fois recousu, en points.
+    longueur: float
+    #: Trait en pointillé : ce qui justifie un jeu de deux pas de tiret.
+    pointille: bool = False
 
 
 @dataclass(frozen=True)
@@ -2931,6 +2965,17 @@ PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
 
 #: Préfixe de la correction qui referme un trou de clôture sans ouvrage.
 PREFIXE_CLOTURE_REFERMEE = "cloture_refermee"
+
+#: Part de la longueur d'un tracé au-delà de laquelle son cumul de raccords
+#: se dit, même si aucun ne dépasse le rythme du trait.
+#:
+#: Un raccord isolé est anodin ; leur somme ne l'est pas. À Gannay, trente-deux
+#: raccords d'un pas de tiret font 116,7 m de clôture tenus pour acquis sur 684,
+#: soit 17 % du tour — le chiffre que le chef de projet n'avait nulle part
+#: (13/10/2026). En deçà d'un vingtième, le trait est continu à peu de chose
+#: près, et l'écrire à chaque plan ferait du bruit : les deux raccords de la
+#: piste de Gannay valent 2 m sur 600.
+PART_RECOUSUE_DITE = 0.05
 
 #: Préfixe de la correction qui sépare deux ouvrages qui se chevauchent.
 PREFIXE_OUVRAGES_SEPARES = "ouvrages_separes"
@@ -4131,21 +4176,54 @@ def _notes_des_soudures(soudures: list, m_par_pt: float) -> list:
 
     La soudure reste ; elle se dit. Le chef de projet peut alors vérifier sur
     son plan que c'en étaient bien.
+
+    **Le cumul passe devant le détail** (demande du chef de projet du
+    13/10/2026). Les raccords au rythme du trait restaient muets, chacun étant
+    anodin : à Gannay, trente et un raccords d'un pas font pourtant 121 m de
+    clôture tenus pour acquis sur 684, soit près d'un cinquième du tour, et
+    aucun raccord pris isolément ne le disait. La note donne donc d'abord
+    combien et quelle longueur, puis détaille les seuls raccords qui dépassent
+    le rythme — ceux où un vrai trou peut se cacher.
     """
-    par_libelle: dict = {}
-    for libelle, ecart in soudures:
-        par_libelle.setdefault(libelle, []).append(ecart * m_par_pt)
     notes = []
-    for libelle, ecarts in par_libelle.items():
-        ecarts.sort(reverse=True)
+    for recouture in soudures:
+        if not recouture.ecarts:
+            continue
+        cumul = sum(recouture.ecarts) * m_par_pt
+        longueur = recouture.longueur * m_par_pt
+        part = cumul / longueur if longueur > 0 else 0.0
+        dessus = sorted(
+            (e * m_par_pt for e in recouture.ecarts if e > recouture.seuil),
+            reverse=True,
+        )
+        # Rien à dire d'un trait quasi continu dont aucun raccord ne dépasse :
+        # deux raccords de 1 m sur 600 m de piste ne s'écrivent pas.
+        if not dessus and part < PART_RECOUSUE_DITE:
+            continue
+        lecture = (
+            "à moins d'un pas de tiret, rien n'y distingue un trou d'un "
+            "intervalle"
+            if recouture.pointille
+            else "deux bouts plus proches que l'épaisseur du trait ne se "
+            "distinguent pas d'un trait continu"
+        )
+        debut = (
+            f"« {recouture.libelle} » : {len(recouture.ecarts)} raccord(s), "
+            f"{nombre_fr(round(cumul, 1))} m recousus en tout, soit "
+            f"{nombre_fr(round(part * 100))} % de sa longueur. Le trait arrive "
+            f"en morceaux et se recoud bout à bout — {lecture}."
+        )
+        if not dessus:
+            notes.append(
+                f"{debut} Aucun ne dépasse le rythme du trait, mais vérifiez "
+                "sur le plan que ce tracé est bien continu."
+            )
+            continue
         notes.append(
-            f"« {libelle} » : {len(ecarts)} raccord(s) recousus au-delà du "
-            "rythme du trait — "
-            + ", ".join(f"{nombre_fr(round(e, 1))} m" for e in ecarts[:5])
-            + ("…" if len(ecarts) > 5 else "")
-            + ". Le trait est en pointillé, et à moins d'un pas de tiret rien "
-            "n'y distingue un trou d'un intervalle : la lecture les recoud. "
-            "Vérifiez sur le plan que ce sont bien des raccords."
+            f"{debut} {len(dessus)} dépasse(nt) ce rythme — "
+            + ", ".join(f"{nombre_fr(round(e, 1))} m" for e in dessus[:5])
+            + ("…" if len(dessus) > 5 else "")
+            + ". Vérifiez sur le plan que ce sont bien des raccords."
         )
     return notes
 
