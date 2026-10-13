@@ -2248,3 +2248,101 @@ def test_la_couture_raboute_deux_traces_distincts():
 
     assert len(cousu) == 1
     assert cousu[0].length > 300.0
+
+
+# ---------------------------------------------------------------------------
+# Les soudures que le pointillé autorise, et celles qui se disent (12/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _tirets(depart_x: float, nombre: int, pas: float = 6.0):
+    """Des tirets alignés, un par morceau, au pas donné."""
+    from shapely.geometry import LineString
+
+    return [
+        LineString([(depart_x + i * pas, 0.0), (depart_x + i * pas + pas / 2.0, 0.0)])
+        for i in range(nombre)
+    ]
+
+
+def test_le_rythme_du_pointille_se_recoud_sans_se_dire():
+    """Un raccord d'un pas est le rythme du tiret, pas une anomalie.
+
+    Mesuré le 12/10/2026 sur Gannay : trente et un raccords, tous à 3,9 m, soit
+    un pas. Les annoncer à chaque plan en pointillé ferait du bruit sans rien
+    apprendre — c'est ce que l'allègement des alertes cherche à éviter.
+    """
+    from dp_socle.plan_pdf import _relier
+
+    lignes, soudures = _relier(_tirets(0.0, 6), jeu=12.0, seuil_dit=9.0)
+
+    assert len(lignes) == 1, "les tirets se recousent en un seul tracé"
+    assert soudures == [], "rien à dire : chaque raccord vaut un demi-pas"
+
+
+def test_un_trou_cache_dans_le_pointille_se_dit():
+    """Au-delà du rythme, la soudure reste mais elle s'annonce.
+
+    C'est tout l'objet : à Gannay la clôture se recousait sur près de quatre
+    mètres sans que rien ne le dise, quand deux mètres bloquaient un plan au
+    trait plein.
+    """
+    from dp_socle.plan_pdf import _relier
+
+    # Deux pans de tirets séparés de 10 pt : sous le jeu de 12, au-dessus du
+    # seuil de 9. Le premier pan s'arrête à x = 15 — trois tirets au pas de 6,
+    # longs d'un demi-pas —, le second part donc de 25.
+    morceaux = _tirets(0.0, 3) + _tirets(25.0, 3)
+    lignes, soudures = _relier(morceaux, jeu=12.0, seuil_dit=9.0)
+
+    assert len(lignes) == 1, "le trou est recousu, faute de pouvoir le distinguer"
+    assert len(soudures) == 1
+    assert soudures[0] == pytest.approx(10.0, abs=0.6)
+
+
+def test_un_trait_plein_ne_declenche_aucune_soudure_a_dire():
+    """Son jeu et son seuil se valent : il n'y a rien à annoncer."""
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _relier
+
+    morceaux = [
+        LineString([(0.0, 0.0), (50.0, 0.0)]),
+        LineString([(51.0, 0.0), (100.0, 0.0)]),
+    ]
+    lignes, soudures = _relier(morceaux, jeu=2.0, seuil_dit=2.0)
+
+    assert len(lignes) == 1
+    assert soudures == []
+
+
+def test_la_note_de_soudure_dit_la_mesure_en_metres():
+    """En mètres, et non en points : c'est le plan que le chef de projet lit."""
+    from dp_socle.plan_pdf import _notes_des_soudures
+
+    notes = _notes_des_soudures(
+        [("Clôture", 10.0), ("Clôture", 11.0), ("Haie", 9.5)], m_par_pt=0.6361
+    )
+
+    assert len(notes) == 2
+    cloture = next(n for n in notes if "Clôture" in n)
+    assert "2 raccord(s)" in cloture
+    # `nombre_fr` laisse tomber la décimale nulle : « 7 m », pas « 7,0 m ».
+    assert "7 m" in cloture and "6,4 m" in cloture
+    assert "rythme du trait" in cloture
+    assert "Vérifiez sur le plan" in cloture
+
+
+@besoin_gannay
+def test_la_cloture_en_pointille_de_gannay_reste_muette(lecture_gannay, import_gannay):
+    """Le plan de référence du parcours PDF ne doit pas se mettre à parler.
+
+    Ses trente et un raccords valent un pas de tiret chacun : c'est la lecture
+    normale d'un pointillé, et le seuil est placé au-dessus.
+    """
+    from dp_socle.plan_pdf import caler_sur_tables, traces
+
+    caler_sur_tables(lecture_gannay, import_gannay.implantation)
+    _lus, _remarques, soudures = traces(lecture_gannay, "cloture", frozenset())
+
+    assert soudures == [], [round(e, 2) for _l, e in soudures]

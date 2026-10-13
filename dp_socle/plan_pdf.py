@@ -1683,7 +1683,9 @@ def _morceaux_de_trace(objet: Objet) -> tuple[list[LineString], float, list[str]
     )
 
 
-def _relier(morceaux: list[LineString], jeu: float) -> list[LineString]:
+def _relier(
+    morceaux: list[LineString], jeu: float, seuil_dit: float = 0.0
+) -> tuple[list[LineString], list[float]]:
     """Recoud des morceaux de trait bout à bout, quand leurs bouts se touchent.
 
     Un trait de PowerPoint arrive en morceaux : 32 pans de points pour la
@@ -1691,9 +1693,21 @@ def _relier(morceaux: list[LineString], jeu: float) -> list[LineString]:
     pour celle de Bray. Chaque morceau est prolongé par celui dont un bout est
     le plus proche, à moins de `jeu`, jusqu'à ce qu'il n'y en ait plus ; un
     tracé dont les deux bouts se rejoignent est refermé.
+
+    Rend aussi les écarts recousus **au-delà de `seuil_dit`**. Sur un trait en
+    pointillé, `jeu` vaut deux pas de tiret — 12 pt à Gannay, soit 7,65 m — là
+    où un trait plein n'en admettrait que 2,7 : la clôture s'y recousait sur
+    près de quatre mètres sans que rien ne le dise, quand deux mètres
+    bloquaient un plan au trait plein (12/10/2026).
+
+    La soudure reste, parce qu'à moins d'un pas de tiret rien ne distingue un
+    trou d'un intervalle. Mais tout n'est pas à dire non plus : à Gannay, les
+    trente et un raccords valent 3,9 m, soit **un pas** — c'est le rythme du
+    pointillé, et l'annoncer à chaque plan ferait du bruit sans rien apprendre.
+    Le seuil se place donc au-delà du rythme, là où un vrai trou peut se cacher.
     """
     restants = [list(m.coords) for m in morceaux if len(m.coords) >= 2]
-    lignes = []
+    lignes, soudures = [], []
     while restants:
         chaine = restants.pop(0)
         if len(chaine) > 3 and math.dist(chaine[0], chaine[-1]) < 1e-6:
@@ -1709,16 +1723,21 @@ def _relier(morceaux: list[LineString], jeu: float) -> list[LineString]:
                             meilleur = (d, indice, bout_chaine, bout_morceau)
             if meilleur is None:
                 break
-            _, indice, bout_chaine, bout_morceau = meilleur
+            ecart, indice, bout_chaine, bout_morceau = meilleur
+            if ecart > seuil_dit:
+                soudures.append(ecart)
             morceau = restants.pop(indice)
             if bout_chaine == -1:
                 chaine = chaine + (morceau if bout_morceau == 0 else morceau[::-1])
             else:
                 chaine = (morceau[::-1] if bout_morceau == 0 else morceau) + chaine
-        if len(chaine) > 3 and 1e-9 <= math.dist(chaine[0], chaine[-1]) <= jeu:
+        fermeture = math.dist(chaine[0], chaine[-1])
+        if len(chaine) > 3 and 1e-9 <= fermeture <= jeu:
+            if fermeture > seuil_dit:
+                soudures.append(fermeture)
             chaine = chaine + [chaine[0]]
         lignes.append(LineString(chaine))
-    return lignes
+    return lignes, soudures
 
 
 def _intersection_des_droites(a1, a2, b1, b2):
@@ -1811,9 +1830,11 @@ def traces(
     et se touchent bout à bout — recousues ensemble, elles ne faisaient plus
     qu'un tracé, et le libellé de l'une disparaissait.
 
-    Rend aussi ce qu'il faut en dire : un morceau de trait qui n'est pas droit.
+    Rend aussi ce qu'il faut en dire : un morceau de trait qui n'est pas droit,
+    et les écarts recousus au-delà de ce qu'un trait plein admettrait — en
+    points de la page, l'échelle n'étant pas encore connue ici.
     """
-    resultat, remarques = [], []
+    resultat, remarques, soudures = [], [], []
     for entree in plan.entree(categorie):
         morceaux, largeurs, espacements = [], [], []
         for element in plan.elements:
@@ -1839,7 +1860,20 @@ def traces(
             2.0,
         )
         tolerance = max(0.1, 0.1 * statistics.median(largeurs)) if largeurs else 0.1
-        for ligne in _relier(morceaux, jeu):
+        # Ce qui se dit : au-delà de ce qu'un trait plein admettrait, et
+        # au-delà d'une fois et demie le pas du pointillé. Un raccord d'un pas
+        # est le rythme du tiret — trente et un sur la clôture de Gannay, tous
+        # à 3,9 m —, et le dire à chaque plan ferait du bruit. Une fois et
+        # demie, c'est entre le rythme et la tolérance : assez large pour
+        # cacher un trou, trop large pour être un intervalle.
+        seuil_dit = max(
+            2.0 * statistics.median(largeurs) if largeurs else 0.0,
+            1.5 * statistics.median(espacements) if espacements else 0.0,
+            2.0,
+        )
+        lignes, recousues = _relier(morceaux, jeu, seuil_dit)
+        soudures.extend((entree.libelle, ecart) for ecart in recousues)
+        for ligne in lignes:
             resultat.append(
                 TracePlan(
                     categorie=categorie,
@@ -1847,7 +1881,7 @@ def traces(
                     ligne=_retrouver_les_angles(ligne, jeu, tolerance),
                 )
             )
-    return resultat, remarques
+    return resultat, remarques, soudures
 
 
 @dataclass(frozen=True)
@@ -3688,6 +3722,36 @@ def _message_cloture_ouverte(
     )
 
 
+def _notes_des_soudures(soudures: list, m_par_pt: float) -> list:
+    """Ce qu'on dit des écarts recousus au-delà du jeu d'un trait plein.
+
+    Un trait en pointillé ne se lit pas plus fin que son pas : à moins d'un pas
+    de tiret, rien ne distingue un trou d'un intervalle, et recoudre est la
+    seule lecture possible. Mais c'était muet, et l'écart de traitement était
+    grand — 7,65 m recousus en silence sur la clôture en pointillé de Gannay,
+    quand 1,9 m bloquaient le plan au trait plein de La Bruère (12/10/2026).
+
+    La soudure reste ; elle se dit. Le chef de projet peut alors vérifier sur
+    son plan que c'en étaient bien.
+    """
+    par_libelle: dict = {}
+    for libelle, ecart in soudures:
+        par_libelle.setdefault(libelle, []).append(ecart * m_par_pt)
+    notes = []
+    for libelle, ecarts in par_libelle.items():
+        ecarts.sort(reverse=True)
+        notes.append(
+            f"« {libelle} » : {len(ecarts)} raccord(s) recousus au-delà du "
+            "rythme du trait — "
+            + ", ".join(f"{nombre_fr(round(e, 1))} m" for e in ecarts[:5])
+            + ("…" if len(ecarts) > 5 else "")
+            + ". Le trait est en pointillé, et à moins d'un pas de tiret rien "
+            "n'y distingue un trou d'un intervalle : la lecture les recoud. "
+            "Vérifiez sur le plan que ce sont bien des raccords."
+        )
+    return notes
+
+
 def _coudre_les_trous(lignes: list, trous: tuple) -> list:
     """Raboute les tracés de part et d'autre de chaque trou retenu.
 
@@ -4462,8 +4526,11 @@ def construire(
             if forme is not None and 2.0 * forme.area / forme.length > epaisseur_pt:
                 surfaces_de_piste[id(element.objet)] = (categorie, element.entree.libelle, forme)
     for categorie in CATEGORIES_TRACEES:
-        lus, remarques = traces(lecture, categorie, frozenset(surfaces_de_piste))
+        lus, remarques, soudures = traces(
+            lecture, categorie, frozenset(surfaces_de_piste)
+        )
         notes.extend(remarques)
+        notes.extend(_notes_des_soudures(soudures, calage.echelle_m_par_pt))
         for trace in lus:
             ligne = calage.vers_dxf(trace.ligne)
             if categorie == "cloture":
