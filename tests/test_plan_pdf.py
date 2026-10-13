@@ -2404,3 +2404,204 @@ def test_les_portails_tombent_sur_le_trace_de_la_cloture(import_bray_2):
         symbole = unary_union(list(entites))
         # Posé dessus : son ouverture tombe sur le tracé de la clôture.
         assert anneau.distance(symbole) < 0.5, libelle
+
+
+# ---------------------------------------------------------------------------
+# Deux ouvrages ne peuvent pas se chevaucher (13/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _ouvrage_pose(libelle, centre, longueur, largeur, categorie="local_technique"):
+    """Un `OuvragePlace` aux cotes voulues, orienté selon l'axe des x.
+
+    Les cas de chevauchement se construisent : ni Gannay ni Bray n'en portent,
+    et le plan qui a motivé la règle vient d'un autre dossier.
+    """
+    from dp_socle.plan_pdf import OuvragePlace
+
+    return OuvragePlace(
+        categorie=categorie,
+        libelle=libelle,
+        gabarit=libelle,
+        longueur_m=longueur,
+        largeur_m=largeur,
+        centre=centre,
+        direction_deg=0.0,
+        orientation="grand côté dessiné",
+        dessine_m=(longueur, largeur),
+    )
+
+
+def _enceinte_carree(cote=100.0):
+    """Un anneau de clôture fermé, coin sud-ouest à l'origine."""
+    from shapely.geometry import LinearRing
+
+    return LinearRing(
+        [(0.0, 0.0), (cote, 0.0), (cote, cote), (0.0, cote), (0.0, 0.0)]
+    )
+
+
+def test_celui_qui_est_sur_la_cloture_ne_bouge_pas():
+    """Règle du chef de projet du 13/10/2026, et elle prime sur la taille.
+
+    Un poste de livraison tient lieu de clôture sur sa longueur : l'écarter la
+    percerait. C'est donc le local technique qui recule, bien qu'il soit le plus
+    gros des deux.
+    """
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    sur_cloture = _ouvrage_pose("Poste de livraison", (50.0, 1.0), 3.0, 4.0, "pdl")
+    dedans = _ouvrage_pose("Local technique", (52.0, 5.0), 8.0, 6.0)
+
+    correction, note = _ouvrages_superposes(
+        [sur_cloture, dedans], _enceinte_carree(), []
+    )
+
+    assert note is None
+    assert correction is not None
+    assert len(correction.paires) == 1
+    fixe, mobile, recul = correction.paires[0]
+    assert (fixe, mobile) == ("Poste de livraison", "Local technique")
+    assert recul > 0.0
+    # Seul le mobile a un nouveau centre : le rang 1 n'est pas touché.
+    assert set(correction.centres) == {2}
+
+
+def test_a_defaut_de_cloture_c_est_le_plus_petit_qui_recule():
+    """Déplacer un gros poste se voit davantage (règle du 13/10/2026).
+
+    Aucun des deux n'est sur la clôture ici : c'est l'aire du rectangle qui
+    tranche.
+    """
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 50.0), 10.0, 6.0, "ptr")
+    petit = _ouvrage_pose("Local technique", (56.0, 52.0), 4.0, 3.0)
+
+    correction, note = _ouvrages_superposes([grand, petit], None, [])
+
+    assert note is None
+    fixe, mobile, _recul = correction.paires[0]
+    assert (fixe, mobile) == ("Poste de transformation", "Local technique")
+    assert set(correction.centres) == {2}
+    # Les formes sont bien séparées après coup, aux 0,5 m² tolérés près.
+    from shapely.affinity import translate
+
+    deplace = translate(
+        petit.geometrie(),
+        correction.centres[2][0] - 56.0,
+        correction.centres[2][1] - 52.0,
+    )
+    assert deplace.intersection(grand.geometrie()).area <= 0.5
+
+
+def test_deux_ouvrages_jointifs_ne_declenchent_rien():
+    """Deux coins qui se mordent de quelques décimètres carrés sont un dessin.
+
+    Le plan projet est un PowerPoint : ses repères valent au mètre près, et
+    proposer une correction pour 0,3 m² serait du bruit.
+    """
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 50.0), 10.0, 6.0, "ptr")
+    frolant = _ouvrage_pose("Local technique", (56.9, 50.0), 4.0, 3.0)
+
+    assert grand.geometrie().intersection(frolant.geometrie()).area < 0.5
+    assert _ouvrages_superposes([grand, frolant], None, []) == (None, None)
+
+
+def test_un_chevauchement_qu_on_ne_peut_defaire_se_dit_au_rapport():
+    """Aucun repli silencieux : ce qu'on renonce à corriger s'écrit.
+
+    L'écarter le poserait sur les tables — la correction n'en serait pas une, et
+    c'est au plan de séparer les deux ouvrages.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 50.0), 10.0, 6.0, "ptr")
+    petit = _ouvrage_pose("Local technique", (56.0, 52.0), 4.0, 3.0)
+
+    correction, note = _ouvrages_superposes(
+        [grand, petit], None, [box(0.0, 0.0, 200.0, 200.0)]
+    )
+
+    assert correction is None
+    assert note is not None
+    assert "Chevauchement non corrigé" in note
+    assert "Local technique" in note and "Poste de transformation" in note
+    assert "C'est au plan de les séparer." in note
+
+
+def test_l_intitule_dit_l_ouvrage_deplace_et_de_combien():
+    """C'est la case que le chef de projet coche : elle doit se lire seule."""
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 50.0), 10.0, 6.0, "ptr")
+    petit = _ouvrage_pose("Local technique", (56.0, 52.0), 4.0, 3.0)
+
+    correction, _note = _ouvrages_superposes([grand, petit], None, [])
+
+    assert correction.intitule.startswith("Écarter « Local technique »")
+    assert correction.intitule.endswith(" m")
+    assert "," in correction.intitule or correction.intitule.endswith("1 m")
+    assert "même terrain" in correction.raison
+    assert "sur la clôture" in correction.raison
+
+
+def test_un_seul_ouvrage_ne_chevauche_personne():
+    """La combinaison de paires sur un singleton ne doit pas lever."""
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    seul = _ouvrage_pose("Local technique", (50.0, 50.0), 4.0, 3.0)
+
+    assert _ouvrages_superposes([seul], _enceinte_carree(), []) == (None, None)
+    assert _ouvrages_superposes([], None, []) == (None, None)
+
+
+def test_un_ouvrage_dessine_dans_un_autre_en_sort_du_bon_cote():
+    """L'écart suit l'axe des deux centres, pas la normale au bord le plus proche.
+
+    Un petit ouvrage dessiné **dans** un grand a son centre à l'intérieur : le
+    recul contre les pistes, qui pousse à l'opposé du bord le plus proche,
+    l'enfoncerait vers le fond. C'est le cas qu'un plan PowerPoint produit le
+    plus volontiers, deux repères voisins suffisant à emboîter deux gabarits.
+    """
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 50.0), 10.0, 6.0, "ptr")
+    dedans = _ouvrage_pose("Local technique", (52.5, 50.0), 3.0, 2.0)
+    assert dedans.geometrie().within(grand.geometrie()), "dessiné dans le grand"
+
+    correction, note = _ouvrages_superposes([grand, dedans], None, [])
+
+    assert note is None
+    _fixe, mobile, ecart = correction.paires[0]
+    assert mobile == "Local technique"
+    # Sorti par l'est, le côté où il penchait : son centre passe la face est.
+    x, y = correction.centres[2]
+    assert x > 55.0 and y == pytest.approx(50.0)
+    # 3,75 m suffisent à ramener le recouvrement sous le demi-mètre carré
+    # toléré : il reste au petit 12,5 cm de large dans le grand.
+    assert ecart == pytest.approx(3.8, abs=0.15)
+
+
+def test_un_ouvrage_n_est_pas_pousse_a_travers_la_cloture():
+    """La clôture est un obstacle, comme pour le recul contre les pistes.
+
+    Écarter un ouvrage jusqu'à le faire sortir de l'enceinte remplacerait un
+    défaut par un autre : rien ne se propose, et le rapport dit pourquoi.
+    """
+    from dp_socle.plan_pdf import _ouvrages_superposes
+
+    grand = _ouvrage_pose("Poste de transformation", (50.0, 5.0), 10.0, 6.0, "ptr")
+    coince = _ouvrage_pose("Local technique", (50.0, 2.6), 4.0, 3.0)
+
+    correction, note = _ouvrages_superposes(
+        [grand, coince], _enceinte_carree(), []
+    )
+
+    assert correction is None
+    assert note is not None
+    assert "sortir de l'enceinte" in note

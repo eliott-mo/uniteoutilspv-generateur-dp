@@ -2846,6 +2846,44 @@ jusqu'aux pignons, et c'est d'elle que se lit le côté d'un couloir de portail.
 Les deux corrections cochées, la bande entre le poste et la clôture ne vaut
 plus que 29 m² au lieu de 72.
 
+**Deux ouvrages ne peuvent pas se chevaucher.** Demande du chef de projet du
+13/10/2026, sur un plan où le local technique était dessiné sur le poste de
+transformation : deux ouvrages n'occupent pas le même terrain, et une planche
+qui les y montre est fausse. Le plan projet est un dessin PowerPoint — ses
+repères valent au mètre près, et l'ouvrage prend les cotes de son gabarit
+*autour* du repère : deux repères voisins suffisent à faire se mordre deux
+rectangles que personne n'a voulu superposer. Au delà d'un demi-mètre carré
+(`CHEVAUCHEMENT_TOLERE_M2` — deux coins qui se touchent au dessin n'en sont
+pas un), l'import propose d'écarter l'un des deux, sans le faire pivoter : son
+orientation vient du plan et n'a pas à changer pour un chevauchement.
+
+**Lequel bouge** : jamais celui qui est sur la clôture, puisqu'un poste de
+livraison y tient lieu de clôture sur sa longueur et que l'en écarter la
+percerait ; à défaut, le plus petit, parce qu'un gros poste déplacé se voit
+davantage (règle du chef de projet du 13/10/2026). Le chevauchement se mesure
+**en dernier**, sur les ouvrages tels qu'ils seront dessinés : les corrections
+précédentes en déplacent, et deux formes qui se mordaient peuvent s'être
+séparées d'elles-mêmes.
+
+L'écart suit l'axe des deux centres et non la normale au bord le plus proche :
+le recul contre les pistes, qui pousse à l'opposé du point le plus proche de la
+bande, enfoncerait vers le fond un ouvrage dont le centre est tombé *à
+l'intérieur* de l'autre — un petit local dessiné dans un grand poste, ce qu'un
+plan PowerPoint produit le plus volontiers. Une bande de piste refuse ce cas en
+amont, deux rectangles qui se mordent l'admettent très bien ; c'est pourquoi
+l'écart a sa propre fonction (`_ecarter_l_ouvrage`).
+
+L'ouvrage écarté **reste dans l'enceinte** quand il y est : la clôture mise
+parmi les obstacles ne suffisait pas, la forme la franchissait d'un pas et se
+retrouvait entière dehors sans plus la toucher, ce que le test mesure. S'il
+n'est pas dans l'enceinte — un poste de livraison qui en tient lieu est à
+cheval dessus —, il n'y a pas de dedans où le tenir. Au delà de
+`ECART_OUVRAGES_MAX_M` (10 m), ou si l'écart devait poser l'ouvrage sur les
+tables ou sur un troisième, rien ne se propose : le rapport dit lequel
+chevauche lequel et de combien de mètres carrés, et c'est au plan de les
+séparer. Ni Gannay ni Bray ne portent le défaut — les cas sont construits dans
+`tests/test_plan_pdf.py`.
+
 ### Le portail se dessine comme sa légende
 
 Posé d'abord en simple segment sur la clôture, le portail sortait au DP 2 en

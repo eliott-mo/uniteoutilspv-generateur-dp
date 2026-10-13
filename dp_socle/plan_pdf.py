@@ -36,6 +36,7 @@ cale sur les tables ; le passage en Lambert 93 est celui du lot 2.
 from __future__ import annotations
 
 import ctypes
+import itertools
 import math
 import re
 import statistics
@@ -2769,6 +2770,25 @@ PREFIXE_CLOTURE_EN_LIMITE = "cloture_en_limite"
 #: Préfixe de la correction qui referme un trou de clôture sans ouvrage.
 PREFIXE_CLOTURE_REFERMEE = "cloture_refermee"
 
+#: Préfixe de la correction qui sépare deux ouvrages qui se chevauchent.
+PREFIXE_OUVRAGES_SEPARES = "ouvrages_separes"
+
+#: Écart maximal dont on écarte un ouvrage de celui qu'il chevauche, en mètres.
+#:
+#: Au-delà, ce n'est plus une imprécision de dessin mais un ouvrage mal placé,
+#: et c'est au plan de le dire. Dix mètres couvrent le cas le plus profond que
+#: la correction ait à défaire — le petit ouvrage dessiné entièrement dans le
+#: grand, qui doit traverser la moitié du grand plus sa propre moitié : un
+#: poste de 8 m et un local de 4 m demandent 6 m.
+ECART_OUVRAGES_MAX_M = 10.0
+
+#: Chevauchement en deçà duquel deux ouvrages sont tenus pour jointifs, en m².
+#:
+#: Un demi-mètre carré : deux rectangles posés côte à côte au plan se touchent
+#: au centimètre près, et leurs coins se mordent de quelques décimètres carrés
+#: sans que ce soit un défaut. Au-delà, l'un est dessiné sur l'autre.
+CHEVAUCHEMENT_TOLERE_M2 = 0.5
+
 #: Trou de clôture au-delà duquel la fermeture n'est plus proposée, en mètres.
 #:
 #: Dix mètres : en deçà, c'est un sommet qui rate sa cible — le trait d'un
@@ -2979,6 +2999,198 @@ def _correction_cloture_ouverte(restes: list, lignes: list):
             "se calcule et le dossier se génère. Sinon, reprenez le plan : "
             "c'est une correction du plan, pas une lecture."
         ),
+    )
+
+
+@dataclass(frozen=True)
+class CorrectionOuvragesSuperposes:
+    """Les ouvrages dessinés l'un sur l'autre, écartés jusqu'à se toucher.
+
+    Demande du chef de projet du 13/10/2026, sur un plan où le local technique
+    et le poste de transformation se chevauchaient : deux ouvrages ne peuvent
+    pas occuper le même terrain, et une planche qui les y montre est fausse.
+
+    Le plan projet est un dessin PowerPoint : ses repères valent à un mètre
+    près, et les ouvrages sont posés aux cotes de leur gabarit autour d'eux.
+    Deux repères voisins donnent donc deux rectangles qui se mordent, sans que
+    personne l'ait voulu.
+
+    **Lequel bouge** : celui qui n'est pas sur la clôture, qu'un poste de
+    livraison y tienne lieu de clôture sur sa longueur et n'ait donc pas à s'en
+    écarter. Si aucun des deux n'y est — ou si les deux y sont —, c'est le plus
+    petit, parce que déplacer un gros poste se voit davantage (règle du chef de
+    projet du 13/10/2026).
+    """
+
+    identifiant: str
+    #: Les paires séparées : `(libelle_immobile, libelle_deplace, recul_m)`.
+    paires: tuple
+    raison: str
+    #: Nouveau centre par rang d'ouvrage, `{rang: (x, y)}`.
+    centres: dict
+
+    @property
+    def intitule(self) -> str:
+        if len(self.paires) == 1:
+            _fixe, mobile, recul = self.paires[0]
+            return (
+                f"Écarter « {mobile} » de l'ouvrage qu'il chevauche, "
+                f"de {nombre_fr(round(recul, 1))} m"
+            )
+        return (
+            f"Séparer les {len(self.paires)} ouvrages qui se chevauchent, "
+            f"d'au plus {nombre_fr(round(max(p[2] for p in self.paires), 1))} m"
+        )
+
+
+def _ecarter_l_ouvrage(mobile, fixe, interdits, dedans=None):
+    """Le plus petit écart qui sort `mobile` de `fixe`, ou None.
+
+    L'écart suit l'axe des deux centres, dans le sens où l'ouvrage penche
+    déjà, et ne le fait pas pivoter — son orientation vient du plan et n'a pas
+    à changer pour un chevauchement.
+
+    `_cale_contre_la_piste` ne convient pas ici : il pousse à l'opposé du point
+    le plus proche du **bord** de la forme à quitter, ce qui, pour un centre
+    tombé à l'intérieur de cette forme, pousse vers le fond au lieu d'en
+    sortir. Une bande de piste refuse ce cas en amont — un ouvrage dont le
+    centre est sous la bande est dessiné *sur* la piste, et le reculer serait
+    le replacer. Deux rectangles qui se mordent l'admettent très bien.
+
+    Il s'arrête dès que le chevauchement est défait **sans** mordre ailleurs :
+    tables ou troisième ouvrage. Une correction qui échange un défaut contre un
+    autre n'en est pas une.
+
+    `dedans` est l'enceinte, quand l'ouvrage y est : il doit y rester. Y mettre
+    la clôture parmi les interdits ne suffisait pas — la forme la franchissait
+    d'un pas et se retrouvait entière dehors, sans plus la toucher.
+
+    Rend `(forme écartée, écart en mètres)`, ou None.
+    """
+    from shapely.affinity import translate
+
+    vx = mobile.centroid.x - fixe.centroid.x
+    vy = mobile.centroid.y - fixe.centroid.y
+    norme = math.hypot(vx, vy)
+    if norme < 1e-9:
+        return None
+    vx, vy = vx / norme, vy / norme
+
+    pas = 0.1
+    for k in range(1, int(ECART_OUVRAGES_MAX_M / pas) + 1):
+        ecart = k * pas
+        essai = translate(mobile, vx * ecart, vy * ecart)
+        if essai.intersection(fixe).area > CHEVAUCHEMENT_TOLERE_M2:
+            continue
+        if any(essai.intersects(interdit) for interdit in interdits):
+            continue
+        if dedans is not None and not dedans.covers(essai):
+            continue
+        return essai, ecart
+    return None
+
+
+def _ouvrages_superposes(ouvrages: list, anneau, tables) -> tuple:
+    """La correction qui sépare les ouvrages dessinés l'un sur l'autre.
+
+    Calculée **après** les reculs contre les pistes : un ouvrage qu'on vient
+    d'écarter d'une bande n'est plus sur le même voisin, et proposer une
+    séparation contre une forme qui va bouger ne voudrait rien dire.
+
+    Rend `(correction, note)` — la note dit ce qu'on a vu et renoncé à corriger.
+    """
+    formes = {rang: o.geometrie() for rang, o in enumerate(ouvrages, start=1)}
+    formes = {r: f for r, f in formes.items() if f is not None and not f.is_empty}
+    if len(formes) < 2:
+        return None, None
+
+    def sur_la_cloture(forme) -> bool:
+        return anneau is not None and anneau.distance(forme) <= SUR_LA_CLOTURE_M
+
+    enceinte = None
+    if anneau is not None:
+        essai_enceinte = Polygon(anneau.coords)
+        if essai_enceinte.is_valid:
+            enceinte = essai_enceinte
+
+    paires, centres, rebelles = [], {}, []
+    for rang_a, rang_b in itertools.combinations(sorted(formes), 2):
+        a, b = formes[rang_a], formes[rang_b]
+        if a.intersection(b).area <= CHEVAUCHEMENT_TOLERE_M2:
+            continue
+        # Qui bouge : jamais celui qui est sur la clôture ; sinon le plus petit.
+        if sur_la_cloture(a) and not sur_la_cloture(b):
+            fixe, mobile = rang_a, rang_b
+        elif sur_la_cloture(b) and not sur_la_cloture(a):
+            fixe, mobile = rang_b, rang_a
+        else:
+            fixe, mobile = (
+                (rang_a, rang_b) if a.area >= b.area else (rang_b, rang_a)
+            )
+        interdits = [
+            f for autre, f in formes.items() if autre not in (fixe, mobile)
+        ]
+        if tables:
+            interdits.append(unary_union(list(tables)))
+        # L'ouvrage reste dans l'enceinte s'il y est. S'il n'y est pas — un
+        # poste de livraison qui tient lieu de clôture sur sa longueur est à
+        # cheval dessus —, il n'y a pas de dedans où le tenir, et le lui
+        # imposer refuserait la correction au lieu de la faire.
+        dedans = (
+            enceinte
+            if enceinte is not None and enceinte.covers(formes[mobile])
+            else None
+        )
+        separe = _ecarter_l_ouvrage(
+            formes[mobile], formes[fixe], interdits, dedans
+        )
+        if separe is None:
+            rebelles.append(
+                f"« {ouvrages[mobile - 1].libelle} » chevauche "
+                f"« {ouvrages[fixe - 1].libelle} » sur "
+                f"{nombre_fr(round(a.intersection(b).area, 1))} m², et aucun "
+                f"écart sous {nombre_fr(ECART_OUVRAGES_MAX_M)} m ne les sépare "
+                "sans sortir de l'enceinte ou buter sur les tables ou un autre "
+                "ouvrage"
+            )
+            continue
+        forme_separee, recul = separe
+        formes[mobile] = forme_separee
+        centres[mobile] = (forme_separee.centroid.x, forme_separee.centroid.y)
+        paires.append(
+            (ouvrages[fixe - 1].libelle, ouvrages[mobile - 1].libelle, recul)
+        )
+
+    note = None
+    if rebelles:
+        note = (
+            "Chevauchement non corrigé : "
+            + " ; ".join(rebelles)
+            + ". C'est au plan de les séparer."
+        )
+    if not paires:
+        return None, note
+    detail = " ; ".join(
+        f"« {mobile} » de {nombre_fr(round(recul, 1))} m, hors de « {fixe} »"
+        for fixe, mobile, recul in paires
+    )
+    return (
+        CorrectionOuvragesSuperposes(
+            identifiant=f"{PREFIXE_OUVRAGES_SEPARES}:{len(paires)}",
+            paires=tuple(paires),
+            raison=(
+                f"{len(paires)} ouvrage(s) sont dessinés l'un sur l'autre : "
+                f"{detail}. Deux ouvrages ne peuvent pas occuper le même "
+                "terrain, et une planche qui les y montre est fausse. Le plan "
+                "projet pose ses repères à un mètre près et l'ouvrage prend les "
+                "cotes de son gabarit autour : deux repères voisins suffisent à "
+                "les faire se mordre. Celui qui bouge n'est jamais celui qui est "
+                "sur la clôture ; à défaut, c'est le plus petit. C'est une "
+                "correction du plan, pas une lecture."
+            ),
+            centres=centres,
+        ),
+        note,
     )
 
 
@@ -4778,6 +4990,27 @@ def construire(
                     if ouvrage.correction
                     else correction_ouvrages.identifiant
                 )
+    # Les chevauchements se mesurent **en dernier**, sur les ouvrages tels
+    # qu'ils seront dessinés : les corrections précédentes en déplacent, et
+    # deux formes qui se mordaient peuvent s'être séparées d'elles-mêmes.
+    correction_superposes, note_superposes = _ouvrages_superposes(
+        ouvrages, anneau, tables
+    )
+    if note_superposes:
+        notes.append(note_superposes)
+    if correction_superposes is not None:
+        proposees.append(correction_superposes)
+        if correction_superposes.identifiant in choix.corrections:
+            appliquees.append(correction_superposes)
+            for rang, centre in correction_superposes.centres.items():
+                ouvrage = ouvrages[rang - 1]
+                ouvrage.centre = centre
+                ouvrage.correction = (
+                    f"{ouvrage.correction}+{correction_superposes.identifiant}"
+                    if ouvrage.correction
+                    else correction_superposes.identifiant
+                )
+
     notes.extend(notes_pistes)
     # Les mises en limite de propriété se vérifient au calage, dans
     # `ImportPlanPDF` : la construction ne connaît pas l'emprise cadastrale.
