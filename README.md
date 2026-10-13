@@ -2698,6 +2698,52 @@ Le cartouche du plan de Bray annonce 5 296 modules quand son DXF en porte
 4 590 : le recouvrement de 98,5 % dit que c'est le cartouche qui est périmé,
 pas le dessin.
 
+**Quand l'échelle est refusée, le message nomme la cause, et il doit la
+nommer juste.** Le refus tombe avant tous les contrôles qui s'expliquent en
+clair — comptage des rangées, recoupement du cartouche —, et le chef de projet
+ne les atteint jamais : ce que dit `ErreurEchelleIncoherente` est tout ce qu'il
+aura. En travers des rangées, le comptage tranche — à pas égal, une emprise
+plus large, ce sont des rangées de plus. Le long des rangées il ne dit rien,
+et le message accusait un recadrage par défaut.
+
+Il s'est trompé le 13/10/2026 sur Chaumont-sur-Aire (+21,7 % le long) : rien
+n'était recadré, et le chef de projet a cherché un bout d'image manquant. Trois
+mesures tranchent, dans cet ordre, et le message les porte désormais :
+
+- **la distance des tables au bord de l'image** (`_marge_de_l_image`). Un plan
+  recadré laisse ses tables *à fleur* du bord, puisque c'est le bord qui les a
+  coupées ; en deçà de `MARGE_RECADRAGE_M` c'est un recadrage, au delà ce n'en
+  est pas un. Chaumont : 19,8 m ;
+- **le cumul des longueurs de rangées** (`_longueur_cumulee`), plan contre
+  DXF. L'emprise d'ensemble ne voit pas dix pour cent de tables en moins — un
+  seul bout de rangée qui dépasse la tient —, le cumul si, et il suit le
+  nombre de modules. Chaumont : 8,8 % de longueur en moins, soit « de l'ordre
+  de 460 modules sur 5 188 » annoncés au message, pour 456 de différence
+  réelle (5 188 au DXF, 4 732 au plan) ;
+- **le même facteur sur toutes les rangées, ou non.** Une copie d'écran
+  redimensionnée le long des rangées les change toutes d'autant : le cumul
+  suit alors exactement l'écart d'emprise, et `(1 − manquant)(1 + écart)`
+  vaut 1. Deux versions du calepinage, non. Mesuré : **0,0006** sur Gannay
+  étiré de 5 %, **0,110** sur Chaumont, pour une tolérance de 0,02 — c'est le
+  test d'étirement qui a trouvé le trou, le message renvoyait vérifier des
+  indices qui concordaient.
+
+Le bord passe en premier parce qu'il est la seule preuve matérielle : une
+coupe droite ôte à chaque rangée la même longueur, et se lit sinon comme un
+redimensionnement. Et le bord ne se consulte que si le plan porte **moins** de
+tables que le DXF — un recadrage n'en ajoute pas.
+
+Les cases du cumul se calent sur la **phase** des rangées et non sur le premier
+point : un pixel égaré sous le champ décalerait l'origine d'une demi-case, et
+chaque rangée tomberait alors à cheval sur deux cases, comptée presque deux
+fois.
+
+C'est la **longueur mesurée** qui compte les modules, pas le nombre écrit au
+cartouche : à Bray, c'est le cartouche qui se trompait. Et un plan dont les
+rangées sont plus *longues* que celles du DXF ne peut pas être recadré — un
+recadrage retire des tables, il n'en ajoute pas ; le message y soupçonne deux
+versions, ou une tache de la teinte des tables hors du champ.
+
 ### Le tableau du plan : la hauteur des tables s'y prend, le reste s'y recoupe
 
 Les deux plans portent, sur leur page de plan, un tableau en deux colonnes —

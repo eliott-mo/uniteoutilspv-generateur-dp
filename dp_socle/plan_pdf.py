@@ -427,6 +427,17 @@ FIDELITE_MIN = 0.75
 #: anisotrope, que le pas seul ne verrait pas.
 TOLERANCE_ECHELLE = 0.02
 
+#: Distance au bord de l'image en deçà de laquelle les tables y sont tenues
+#: pour coupées, en mètres.
+#:
+#: C'est ce qui sépare les deux causes d'un écart d'échelle le long des
+#: rangées : un plan recadré laisse ses tables **à fleur** du bord de l'image,
+#: puisque c'est le bord qui les a coupées ; un plan dressé sur une autre
+#: version du calepinage les a toutes entières, à bonne distance. Mesuré le
+#: 13/10/2026 sur Chaumont-sur-Aire : 16,7 m du bord le plus proche, et le
+#: message accusait pourtant un recadrage.
+MARGE_RECADRAGE_M = 2.0
+
 #: Écart admis entre le rapport de deux rangées voisines et le nombre entier de
 #: pas qu'il devrait valoir.
 #:
@@ -2517,7 +2528,56 @@ def _etendues_denses(points: np.ndarray, direction_deg: float, pixel: float):
     return etendues[0], etendues[1]
 
 
-def _cause_probable(direction: str, nb_plan: int, nb_dxf: int, ecart: float) -> str:
+def _longueur_cumulee(points: np.ndarray, direction_deg: float, pas: float) -> float:
+    """La longueur totale des rangées d'un nuage, rangée par rangée.
+
+    L'emprise d'ensemble ne dit pas où est la différence : deux calepinages de
+    même emprise peuvent porter dix pour cent de tables d'écart, et un seul
+    bout de rangée qui dépasse l'emporte. Le cumul des longueurs, lui, suit le
+    **nombre de modules** — mesuré le 13/10/2026 sur Chaumont-sur-Aire, où il
+    valait +9,6 % quand le DXF portait +9,6 % de modules (5 188 contre 4 732).
+
+    Les cases se calent sur la phase des rangées et non sur le premier point :
+    une rangée à cheval sur deux cases y serait comptée deux fois, presque en
+    entier chaque fois.
+    """
+    u = (math.cos(math.radians(direction_deg)), math.sin(math.radians(direction_deg)))
+    le_long = points[:, 0] * u[0] + points[:, 1] * u[1]
+    en_travers = -points[:, 0] * u[1] + points[:, 1] * u[0]
+    tours = 2.0 * math.pi * en_travers / pas
+    phase = math.atan2(float(np.sin(tours).mean()), float(np.cos(tours).mean()))
+    rangs = np.round(en_travers / pas - phase / (2.0 * math.pi)).astype(int)
+    total = 0.0
+    for rang in np.unique(rangs):
+        dans = le_long[rangs == rang]
+        if dans.size < 2:
+            continue
+        total += float(np.ptp(dans))
+    return total
+
+
+def _marge_de_l_image(fond: ImageDeFond, points: np.ndarray, echelle: float) -> float:
+    """La plus courte distance des tables au bord de l'image, en mètres."""
+    colonnes, lignes = fond.vers_pixels(points[:, 0], points[:, 1])
+    largeur, hauteur = fond.taille
+    marge_px = min(
+        float(colonnes.min()),
+        float(largeur - 1 - colonnes.max()),
+        float(lignes.min()),
+        float(hauteur - 1 - lignes.max()),
+    )
+    return max(0.0, marge_px) * _pas_pixel(fond) * echelle
+
+
+def _cause_probable(
+    direction: str,
+    nb_plan: int,
+    nb_dxf: int,
+    ecart: float,
+    marge_m: float,
+    manquant: float | None = None,
+    nb_modules: int | None = None,
+) -> str:
     """Ce qu'un écart d'échelle désigne, d'après le comptage des rangées.
 
     Le message ne disait qu'une chose — « sa copie d'écran a été étirée d'un
@@ -2529,8 +2589,14 @@ def _cause_probable(direction: str, nb_plan: int, nb_dxf: int, ecart: float) -> 
 
     Le comptage tranche : à pas égal, une emprise plus large en travers, c'est
     des rangées de plus. Le long des rangées, il ne dit rien — ce sont les
-    tables qui s'allongent, pas leur nombre — et c'est alors le recadrage du
-    plan qu'on soupçonne d'abord.
+    tables qui s'allongent, pas leur nombre —, et le message accusait alors un
+    recadrage par défaut. Il s'est trompé le 13/10/2026 sur Chaumont-sur-Aire :
+    rien n'était recadré, le DXF portait 456 modules de plus que le plan, et le
+    chef de projet cherchait un bout d'image manquant.
+
+    Deux mesures le tranchent, et ce sont elles que le message porte désormais :
+    la distance des tables au bord de l'image — un recadrage coupe au bord — et
+    le cumul des longueurs de rangées, qui suit le nombre de modules.
     """
     en_travers = direction == "en travers des rangées"
     if en_travers and nb_plan != nb_dxf:
@@ -2547,13 +2613,67 @@ def _cause_probable(direction: str, nb_plan: int, nb_dxf: int, ecart: float) -> 
             "d'écran étirée d'un seul côté. Reprenez le plan sans le "
             "redimensionner."
         )
-    manque = ecart > 0
-    return (
+    longues = ecart < 0
+    debut = (
         "Les rangées du plan sont "
-        + ("plus courtes" if manque else "plus longues")
-        + " que celles du DXF à pas égal : le plan a probablement été recadré "
-        "sur une partie du champ, ou son export s'arrête avant le bout des "
-        "rangées. Reprenez un plan qui porte le calepinage entier."
+        + ("plus longues" if longues else "plus courtes")
+        + " que celles du DXF à pas égal"
+    )
+    # Un recadrage retire des tables, il n'en ajoute pas : le bord de l'image
+    # ne se consulte que si le plan en porte moins. Il passe avant le reste
+    # parce qu'il est la seule preuve matérielle — une coupe droite ôte à
+    # chaque rangée la même longueur, et se lit alors comme un
+    # redimensionnement.
+    if not longues and marge_m <= MARGE_RECADRAGE_M:
+        return (
+            f"{debut}, et ses tables touchent le bord de l'image (à "
+            f"{nombre_fr(round(marge_m, 1))} m) : le plan a été recadré sur une "
+            "partie du champ, ou son export s'arrête avant le bout des rangées. "
+            "Reprenez un plan qui porte le calepinage entier."
+        )
+    # Une copie d'écran redimensionnée le long des rangées les change **toutes
+    # du même facteur** : le cumul des longueurs suit alors exactement l'écart
+    # d'emprise. Deux versions du calepinage, non — à Chaumont-sur-Aire,
+    # l'emprise divergeait de 21,7 % et le cumul de 8,8 %. Mesuré le
+    # 13/10/2026 : 0,0006 sur Gannay étiré de 5 %, 0,110 sur Chaumont.
+    if (
+        manquant is not None
+        and abs((1.0 - manquant) * (1.0 + ecart) - 1.0) <= TOLERANCE_ECHELLE
+    ):
+        return (
+            f"{debut}, et toutes du même facteur : c'est la signature d'une "
+            "copie d'écran redimensionnée le long des rangées, qui y garde son "
+            "pas en travers et perd son échelle le long. Reprenez le plan sans "
+            "le redimensionner."
+        )
+    if longues:
+        return (
+            f"{debut}, et pas toutes du même facteur : le plan porte des tables "
+            "là où le calepinage n'en a pas. Soit les deux fichiers ne sont pas "
+            "au même indice, soit la copie d'écran porte, hors du champ, une "
+            "tache de la teinte des tables."
+        )
+    vu = (
+        f"{debut}, et ses tables sont à {nombre_fr(round(marge_m, 1))} m du bord "
+        "le plus proche de l'image : rien n'y est coupé."
+    )
+    combien = ""
+    if manquant is not None and manquant > 0:
+        combien = (
+            f" Le plan porte {nombre_fr(round(manquant * 100, 1))} % de longueur "
+            "de tables en moins que le DXF"
+            + (
+                f", soit de l'ordre de {round(manquant * nb_modules, -1):.0f} "
+                f"modules sur {nb_modules}"
+                if nb_modules
+                else ""
+            )
+            + "."
+        )
+    return (
+        f"{vu}{combien} Les deux fichiers ne décrivent donc pas la même version "
+        "du projet : réexportez le DXF depuis la version HelioScope sur "
+        "laquelle le plan a été dressé."
     )
 
 
@@ -2606,6 +2726,12 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         ("en travers des rangées", echelle_travers),
     ):
         if abs(valeur / echelle - 1.0) > TOLERANCE_ECHELLE:
+            # Mesuré ici seulement : ces deux chiffres ne servent qu'à nommer
+            # la cause, et le cas courant est que l'échelle concorde.
+            cumul_dxf = _longueur_cumulee(sommets_dxf, direction_dxf, pas_dxf)
+            cumul_plan = echelle * _longueur_cumulee(
+                rangees.points, rangees.direction_deg, rangees.pas_pt
+            )
             raise ErreurEchelleIncoherente(
                 f"L'échelle mesurée sur le pas des rangées — {rangees.pas_pt:.2f} pt "
                 f"pour {pas_dxf:.3f} m, soit {echelle * 72 / DPI_REFERENCE:.4f} m/px "
@@ -2613,7 +2739,17 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
                 f"de celle qu'implique l'emprise des tables {nom} "
                 f"({valeur * 72 / DPI_REFERENCE:.4f} m/px), au delà des "
                 f"{TOLERANCE_ECHELLE:.0%} admis. "
-                + _cause_probable(nom, nb_plan, nb_dxf, valeur / echelle - 1.0)
+                + _cause_probable(
+                    nom,
+                    nb_plan,
+                    nb_dxf,
+                    valeur / echelle - 1.0,
+                    marge_m=_marge_de_l_image(plan.fond, rangees.points, echelle),
+                    manquant=(
+                        1.0 - cumul_plan / cumul_dxf if cumul_dxf > 0 else None
+                    ),
+                    nb_modules=implantation.calepinage.nb_modules,
+                )
             )
 
     rayon = 0.6 * rangees.pas_pt / pixel

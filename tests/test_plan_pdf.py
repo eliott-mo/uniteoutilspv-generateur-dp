@@ -310,27 +310,165 @@ def test_le_refus_d_echelle_en_travers_compte_les_rangees():
     """
     from dp_socle.plan_pdf import _cause_probable
 
-    desaccord = _cause_probable("en travers des rangées", 20, 24, 0.204)
+    desaccord = _cause_probable("en travers des rangées", 20, 24, 0.204, 12.0)
     assert "20 rangée(s)" in desaccord and "24" in desaccord
     assert "même indice" in desaccord
 
-    accord = _cause_probable("en travers des rangées", 20, 20, 0.204)
+    accord = _cause_probable("en travers des rangées", 20, 20, 0.204, 12.0)
     assert "étirée" in accord
     assert "indice" not in accord
 
 
-def test_un_ecart_le_long_des_rangees_soupconne_le_recadrage():
-    """Le comptage n'y dit rien : ce sont les tables qui s'allongent.
+def test_des_tables_a_fleur_du_bord_designent_un_recadrage():
+    """Le long des rangées, le comptage ne dit rien : c'est le bord qui parle.
 
-    Le long des rangées, un écart ne vient pas d'un nombre de rangées mais
-    d'un plan recadré sur une partie du champ, ou dont l'export s'arrête avant
-    le bout des rangées.
+    Un plan recadré laisse ses tables **à fleur** du bord de l'image, puisque
+    c'est le bord qui les a coupées.
     """
     from dp_socle.plan_pdf import _cause_probable
 
-    message = _cause_probable("le long des rangées", 20, 20, 0.08)
+    message = _cause_probable("le long des rangées", 20, 20, 0.08, 0.0)
     assert "recadré" in message
+    assert "touchent le bord" in message
     assert "rangée(s) de tables" not in message
+
+
+def test_des_tables_loin_du_bord_designent_deux_versions():
+    """Relevé le 13/10/2026 sur Chaumont-sur-Aire : +21,7 % le long.
+
+    Le message accusait un recadrage par défaut, et il n'y en avait pas : les
+    tables étaient à 19,8 m du bord le plus proche, et le DXF portait 456
+    modules de plus que le plan. Le chef de projet a cherché un bout d'image
+    manquant.
+    """
+    from dp_socle.plan_pdf import _cause_probable
+
+    message = _cause_probable(
+        "le long des rangées", 14, 14, 0.217, 19.8, manquant=0.088, nb_modules=5188
+    )
+    assert "recadré" not in message
+    assert "rien n'y est coupé" in message
+    assert "19,8 m" in message
+    # Le chiffre qui ferme le dossier : la longueur manquante compte les
+    # modules, à dix près — 456 au relevé.
+    assert "460 modules sur 5188" in message
+    assert "8,8 %" in message, "le message est écrit en français, virgule comprise"
+    assert "pas la même version" in message
+    assert "réexportez le DXF" in message
+
+
+def test_un_redimensionnement_se_distingue_de_deux_versions():
+    """Ce qui les sépare : le même facteur sur toutes les rangées.
+
+    Une copie d'écran étirée le long des rangées les allonge toutes d'autant,
+    et le cumul des longueurs suit exactement l'écart d'emprise. Deux versions
+    du calepinage, non : à Chaumont-sur-Aire l'emprise divergeait de 21,7 % et
+    le cumul de 8,8 %. Mesuré le 13/10/2026 sur Gannay étiré de 5 % — l'écart
+    au facteur unique y vaut 0,0006, contre 0,110 à Chaumont.
+    """
+    from dp_socle.plan_pdf import _cause_probable
+
+    etire = _cause_probable(
+        "le long des rangées", 16, 16, -0.0458, 50.3, manquant=-0.0474
+    )
+    assert "redimensionnée" in etire
+    assert "même facteur" in etire
+    assert "indice" not in etire, "les deux fichiers concordent, c'est le plan"
+
+    versions = _cause_probable(
+        "le long des rangées", 14, 14, 0.217, 19.8, manquant=0.088, nb_modules=5188
+    )
+    assert "redimensionnée" not in versions
+    assert "pas la même version" in versions
+
+
+def test_un_plan_plus_long_que_le_dxf_n_accuse_pas_le_recadrage():
+    """Un recadrage retire des tables, il n'en ajoute pas.
+
+    Le message disait « plus longues que celles du DXF […] le plan a
+    probablement été recadré », ce qui se contredit.
+    """
+    from dp_socle.plan_pdf import _cause_probable
+
+    # Pas du même facteur : 10 % de longueur en plus pour 21,7 % d'emprise.
+    message = _cause_probable(
+        "le long des rangées", 14, 14, -0.217, 19.8, manquant=-0.10
+    )
+    assert "plus longues" in message
+    assert "recadré" not in message
+    assert "teinte des tables" in message
+
+
+def test_la_longueur_cumulee_suit_le_nombre_de_tables():
+    """L'emprise d'ensemble ne voit pas dix pour cent de tables en moins.
+
+    Deux calepinages de même emprise peuvent porter dix pour cent d'écart : un
+    seul bout de rangée qui dépasse tient l'emprise. Le cumul des longueurs,
+    lui, suit le nombre de modules — c'est ce qui a nommé Chaumont-sur-Aire.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _longueur_cumulee
+
+    def nuage(longueurs, pas=10.0, epaisseur=2.0):
+        points = []
+        for rang, longueur in enumerate(longueurs):
+            for y in (rang * pas - epaisseur / 2, rang * pas + epaisseur / 2):
+                points.extend((x, y) for x in np.arange(0.0, longueur + 0.5, 1.0))
+        return np.asarray(points)
+
+    entier = nuage([100.0, 100.0, 100.0])
+    assert _longueur_cumulee(entier, 0.0, 10.0) == pytest.approx(300.0, abs=0.5)
+
+    # Une rangée raccourcie de 10 % : l'emprise ne bouge pas, le cumul si.
+    ampute = nuage([100.0, 70.0, 100.0])
+    assert _longueur_cumulee(ampute, 0.0, 10.0) == pytest.approx(270.0, abs=0.5)
+    assert np.ptp(entier[:, 0]) == pytest.approx(np.ptp(ampute[:, 0]))
+
+
+def test_un_pixel_egare_ne_fait_pas_compter_une_rangee_deux_fois():
+    """Les cases se calent sur la phase des rangées, pas sur le premier point.
+
+    Un pixel égaré sous le champ — le terrain nu prend par endroits la teinte
+    des tables — décalerait l'origine d'une demi-case, et chaque rangée
+    tomberait alors à cheval sur deux cases, comptée presque deux fois.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _longueur_cumulee
+
+    points = [
+        (x, rang * 10.0 + dy)
+        for rang in range(3)
+        for dy in (-1.0, 1.0)
+        for x in np.arange(0.0, 100.5, 1.0)
+    ]
+    egare = np.asarray(points + [(50.0, -5.0)])
+
+    assert _longueur_cumulee(egare, 0.0, 10.0) == pytest.approx(300.0, abs=0.5)
+
+
+def test_la_marge_se_mesure_au_bord_le_plus_proche():
+    """En mètres au sol, car c'est ce que le message dit au chef de projet."""
+    import numpy as np
+
+    from dp_socle.plan_pdf import ImageDeFond, _marge_de_l_image
+
+    # 200 x 100 px posés sur 200 x 100 pt : un point de page par pixel.
+    fond = ImageDeFond(
+        pixels=np.zeros((100, 200, 3), dtype=np.uint8),
+        matrice=(200.0, 0.0, 0.0, 100.0, 0.0, 0.0),
+    )
+    # Un carré de tables à 10 px de la gauche et 20 px du bas de l'image.
+    points = np.array([[10.0, 20.0], [150.0, 80.0]])
+
+    assert _marge_de_l_image(fond, points, echelle=2.0) == pytest.approx(
+        10.0 * 2.0, abs=0.1
+    )
+
+    # Collées au bord : rien ne sépare plus les tables de la coupe.
+    au_bord = np.array([[0.0, 20.0], [150.0, 80.0]])
+    assert _marge_de_l_image(fond, au_bord, echelle=2.0) == pytest.approx(0.0, abs=0.1)
 
 
 def test_deux_pastilles_de_meme_couleur_se_disent():
