@@ -106,7 +106,18 @@ moteur `Planche` du lot 1.
   de police crénées par FreeType et ignorées par DirectWrite, et un import non
   déclaré dans `requirements.txt`. `.github/workflows/tests.yml` rejoue donc la
   suite sur `ubuntu-latest` à chaque poussée. Un vert local ne suffit plus à
-  dire qu'un lot est livrable.
+  dire qu'un lot est livrable — et un rouge que personne ne lit ne vaut pas
+  mieux que pas de CI du tout. **Le résultat se lit depuis le poste, sans
+  `gh`** : le dépôt est public, donc l'API GitHub répond sans authentification.
+  À faire après chaque poussée :
+
+  ```bash
+  curl -s "https://api.github.com/repos/eliott-mo/uniteoutilspv-generateur-dp/actions/runs?per_page=5"
+  ```
+
+  Les champs qui comptent sont `head_sha`, `status` et `conclusion`. Vérifié le
+  14/10/2026 : les cinq poussées du 13/10 étaient vertes, et personne ne l'avait
+  regardé.
 - **Console Windows** : préfixer les commandes Python par
   `PYTHONIOENCODING=utf-8`, sinon les accents lèvent une `UnicodeEncodeError` à
   l'affichage.
