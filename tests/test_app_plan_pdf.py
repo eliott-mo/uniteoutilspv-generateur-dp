@@ -306,6 +306,60 @@ def test_un_libelle_que_l_outil_ne_connait_pas_bloque_l_import(tmp_path, monkeyp
     assert not application.exception, application.exception
     assert not importer().disabled
 
+
+def test_une_emprise_illisible_se_dit_au_lieu_d_etre_caviardee(tmp_path, monkeypatch):
+    """Relevé le 14/10/2026 : « The original error message is redacted ».
+
+    L'archive d'emprise d'un chef de projet ne portait aucun `.shp`.
+    `charger_emprise` le disait, avec le contenu de l'archive — mais elle était
+    appelée **hors** du `try` qui attrape les erreurs nommées, l'exception
+    sortait donc non attrapée, et Streamlit Cloud masque le message de
+    celles-là. Le chef de projet n'avait qu'une trace sans cause.
+
+    Le parcours du plan du BE chargeait déjà la sienne sous son `try` ; celui
+    du plan projet PDF ne le faisait pas.
+    """
+    import zipfile
+
+    donnees = tmp_path / "donnees"
+    donnees.mkdir()
+    # Une archive sans le moindre .shp, comme celle qui a été déposée.
+    archive = donnees / "emprise_sans_shapefile.zip"
+    with zipfile.ZipFile(archive, "w") as zip_:
+        zip_.writestr("lisez-moi.txt", "ceci n'est pas un shapefile")
+
+    application = _application(tmp_path, monkeypatch).run()
+    application.text_input[0].set_value("Gannay-sur-Loire")
+    _televerser(
+        application,
+        "Emprise cadastrale",
+        (archive.name, archive.read_bytes(), "application/zip"),
+    )
+    application = application.run()
+    application.radio(key="source_plan").set_value(SOURCE_PLAN_PDF)
+    application = application.run()
+    _televerser(
+        application,
+        "Export HelioScope",
+        (EXPORT_GANNAY.name, EXPORT_GANNAY.read_bytes(), "application/zip"),
+    )
+    _televerser(
+        application,
+        "Plan projet (PDF)",
+        (PLAN_GANNAY.name, PLAN_GANNAY.read_bytes(), "application/pdf"),
+    )
+    application = application.run()
+    _cliquer(application, "Importer et caler le plan")
+    application = application.run()
+
+    # Rien ne s'échappe : c'est ce qui déclenchait le caviardage.
+    assert not application.exception, application.exception
+    refus = [e.value for e in application.error if "ErreurEmprise" in e.value]
+    assert refus, [e.value for e in application.error]
+    assert "aucun fichier .shp" in refus[0]
+    # Et le message dit ce que l'archive portait, pour que le dépôt se corrige.
+    assert "lisez-moi.txt" in refus[0]
+
 def _dans_l_ordre_de_la_page(application) -> list:
     """Les éléments de la page principale, dans l'ordre où ils s'affichent."""
     elements = []

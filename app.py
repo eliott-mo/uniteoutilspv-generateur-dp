@@ -2270,15 +2270,24 @@ def _importer_le_plan_pdf(
     st.session_state["origine_coupe"] = None
     # Pas d'indice : il vient du tableau bilan, et il n'y en a pas.
     nom_importe = identifiant_de_dossier(nom_de_projet(commune))
-    chemin_emprise = _enregistrer_fichiers(nom_importe, fichiers_emprise)
-    emprise_cadastrale = (
-        charger_emprise(chemin_emprise).geometrie if chemin_emprise is not None else None
-    )
+    # L'emprise se charge **dans** le `try` : son refus est une erreur nommée
+    # comme les autres, et levée dehors elle sortait non attrapée — donc
+    # caviardée par Streamlit Cloud, qui n'en laisse que « The original error
+    # message is redacted ». Relevé le 14/10/2026 chez un chef de projet dont
+    # l'archive d'emprise ne portait aucun `.shp` : le message le disait, avec
+    # le contenu de l'archive, et il ne l'a jamais lu. Le parcours du plan du
+    # BE, lui, chargeait déjà la sienne sous son `try`.
     try:
         with st.spinner(
-            "Lecture de l'export HelioScope et du plan, calage du plan sur les "
-            "tables… (une dizaine de secondes)"
+            "Lecture de l'emprise, de l'export HelioScope et du plan, calage du "
+            "plan sur les tables… (une dizaine de secondes)"
         ):
+            chemin_emprise = _enregistrer_fichiers(nom_importe, fichiers_emprise)
+            emprise_cadastrale = (
+                charger_emprise(chemin_emprise).geometrie
+                if chemin_emprise is not None
+                else None
+            )
             resultat = importer_plan_pdf(
                 chemin_pdf,
                 chemin_export,
@@ -2287,6 +2296,11 @@ def _importer_le_plan_pdf(
             )
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
+        return
+    except Exception as erreur:  # noqa: BLE001 - rendu lisible, puis on s'arrête
+        # Même filet que le parcours du plan du BE : sans lui, un imprévu sort
+        # caviardé lui aussi.
+        _signaler_l_imprevu(erreur, "pendant l'import du plan projet")
         return
     st.session_state.import_be = resultat
     st.session_state["indice_tableau_bilan"] = None

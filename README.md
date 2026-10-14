@@ -596,6 +596,22 @@ Trois précisions qui font tenir l'ensemble :
   `assert not application.exception` de la suite continuent donc d'attraper un
   vrai plantage : attraper l'erreur à l'écran n'a pas émoussé le filet.
 
+**Une erreur nommée levée hors du `try` est aussi muette qu'un imprévu.** La
+censure ne regarde pas le type : elle masque tout ce qui sort non attrapé, un
+`ErreurEmprise` soigneusement rédigé comme un `AttributeError`. Le 14/10/2026,
+l'archive d'emprise d'un chef de projet ne portait aucun `.shp` ;
+`charger_emprise` le disait, en listant le contenu de l'archive, et il n'a lu
+que « The original error message is redacted » sous une trace de douze lignes.
+L'appel était deux lignes au-dessus du `try` qui aurait affiché le message.
+
+Le parcours du plan du BE chargeait déjà son emprise sous son `try` ; celui du
+plan projet PDF ne le faisait pas, et n'avait pas non plus le filet
+`_signaler_l_imprevu`. Les deux l'ont maintenant, et
+`test_une_emprise_illisible_se_dit_au_lieu_d_etre_caviardee` dépose une archive
+sans shapefile pour vérifier que rien ne s'échappe et que le message nomme ce
+que l'archive portait. La règle : **tout ce qui lit un fichier du chef de
+projet travaille sous le `try`**, le chargement de l'emprise compris.
+
 ## Verser la notice dans un dossier fini (lot 7)
 
 Le chef de projet travaille en trois temps : il génère **sans notice** pour
