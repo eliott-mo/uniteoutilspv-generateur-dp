@@ -2664,6 +2664,33 @@ règles près, toutes mesurées :
 Une forme qu'aucune pastille n'explique n'est rangée nulle part, et le rapport
 le dit ; une entrée de légende sans rien sur la carte aussi.
 
+**Le cadre de la carte se reconnaît à sa forme, pas à sa seule aire.** Ni le
+cadre ni un fond qui couvre la carte n'est un ouvrage, et à Gannay le cadre
+porte le vert des pistes existantes : pris pour une piste, il dessinerait une
+bande de 5 m tout autour de la carte. La règle ne regardait que l'aire — plus
+de la moitié de la carte —, et elle a jeté la clôture de Chaumont-sur-Aire le
+15/10/2026 : la couche sortait vide et le rapport accusait « aucune forme ne
+porte sa couleur », alors que la forme écartée la portait **à zéro près**.
+Mesuré ce jour-là sur les trois plans :
+
+| | part d'aire | largeur | hauteur | sommets |
+|---|---|---|---|---|
+| Clôture de Chaumont-sur-Aire | 68 % | 72,5 % | 93,6 % | 19 |
+| Cadre de Gannay | 100 % | 100,1 % | 99,6 % | 5 |
+| Fond blanc de Bray | 142 % | 142 % | 100 % | 5 |
+
+Un cadre est un **rectangle qui épouse la carte dans les deux directions** :
+il faut donc les deux marques, une couverture d'au moins `PART_DU_CADRE_MIN`
+(97 %) en largeur **et** en hauteur, et des sous-chemins d'au plus cinq points.
+Une clôture qui tient les trois quarts de la carte n'en est pas un, et une
+copie d'écran cadrée serré sur le site est le cas courant, pas l'exception.
+
+Et l'exclusion **se dit** : une forme écartée comme cadre qui portait la
+couleur d'une entrée de légende est signalée au rapport. Son silence est ce qui
+a produit le message faux de Chaumont ; sur Gannay, il cachait deux exclusions
+depuis le début — le cadre vert des pistes existantes, et le fond blanc qui
+porte la couleur du BESS.
+
 Les libellés, eux, changent d'un plan à l'autre comme les calques du BE :
 « Réserve Incendie » ici, « Citerne Incendie » là, et « Haie à crée » avec sa
 faute. La correspondance est proposée, puis modifiable. Deux libellés de Bray

@@ -2611,6 +2611,116 @@ def test_la_cloture_de_gannay_dit_ce_qu_elle_a_coute_de_raccords(
 
 
 # ---------------------------------------------------------------------------
+# Le cadre de la carte, et ce qui n'en est pas (Chaumont-sur-Aire, 15/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def _forme(points, couleur=(247, 150, 70), nature="trait"):
+    """Un `Objet` d'un seul sous-chemin, aux sommets donnés."""
+    from dp_socle.plan_pdf import Objet, Trace
+
+    trace = Trace(
+        rang=0,
+        remplissage=couleur if nature == "aplat" else None,
+        trait=couleur if nature == "trait" else None,
+        epaisseur_pt=1.0,
+        sous_chemins=(tuple(points),),
+        fermes=(True,),
+        courbe=False,
+    )
+    return Objet(
+        traces=[trace], couleur=couleur, nature=nature, lisere=None, motif="plein"
+    )
+
+
+def _rectangle(x0, y0, x1, y1):
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+
+
+def test_le_cadre_de_la_carte_s_ecarte_encore():
+    """Mesuré sur Gannay : 100,1 % de la largeur, 99,6 % de la hauteur, 5 points.
+
+    Il porte le vert des pistes existantes, et le prendre pour une piste
+    dessinerait une bande de 5 m tout autour de la carte.
+    """
+    from dp_socle.plan_pdf import _epouse_le_cadre
+
+    cadre = (340.0, 36.0, 931.0, 513.0)
+    largeur, hauteur = cadre[2] - cadre[0], cadre[3] - cadre[1]
+    frame = _forme(
+        _rectangle(
+            cadre[0] - 0.4, cadre[1] + 1.0, cadre[0] + 1.0014 * largeur,
+            cadre[1] + 0.9955 * hauteur + 1.0,
+        ),
+        couleur=(6, 177, 74),
+    )
+
+    assert _epouse_le_cadre(frame, cadre)
+
+
+def test_une_cloture_qui_tient_toute_la_carte_n_est_pas_le_cadre():
+    """Relevé le 15/10/2026 sur Chaumont-sur-Aire, et c'est le défaut corrigé.
+
+    La règle ne regardait que l'aire — plus de la moitié de la carte. La
+    clôture de ce plan en couvre 68 %, parce que la copie d'écran y est cadrée
+    serré sur le site : elle était jetée, la couche sortait vide, et le rapport
+    accusait « aucune forme ne porte sa couleur » alors qu'elle la portait à
+    zéro près.
+    """
+    from dp_socle.plan_pdf import _epouse_le_cadre, _surface_bornes
+
+    cadre = (444.0, 166.0, 1187.0, 765.0)
+    cloture = _forme(
+        [
+            (548.0, 181.0), (1087.0, 200.0), (1080.0, 742.0), (700.0, 700.0),
+            (600.0, 500.0), (560.0, 400.0), (548.0, 300.0), (548.0, 181.0),
+        ]
+    )
+
+    # Elle dépasse bien la moitié de la carte : c'est ce qui la condamnait.
+    assert _surface_bornes(cloture.bornes) > 0.5 * _surface_bornes(cadre)
+    assert not _epouse_le_cadre(cloture, cadre)
+
+
+def test_un_rectangle_qui_ne_couvre_pas_la_carte_n_est_pas_le_cadre():
+    """Un grand ouvrage rectangulaire reste un ouvrage."""
+    from dp_socle.plan_pdf import _epouse_le_cadre
+
+    cadre = (0.0, 0.0, 1000.0, 1000.0)
+    plateforme = _forme(_rectangle(10.0, 10.0, 900.0, 900.0), nature="aplat")
+
+    assert not _epouse_le_cadre(plateforme, cadre)
+
+
+def test_un_fond_blanc_couvre_la_carte_et_s_ecarte():
+    """Le fond de page déborde la carte dans les deux directions."""
+    from dp_socle.plan_pdf import _epouse_le_cadre
+
+    cadre = (285.0, 0.0, 960.0, 540.0)
+    fond = _forme(_rectangle(0.0, 0.0, 1190.0, 842.0), (255, 255, 255), "aplat")
+
+    assert _epouse_le_cadre(fond, cadre)
+
+
+@besoin_gannay
+def test_l_exclusion_du_cadre_se_dit_au_rapport(lecture_gannay):
+    """Une exclusion muette est un repli silencieux.
+
+    C'est son silence qui a fait dire à l'outil, sur Chaumont-sur-Aire,
+    qu'aucune forme ne portait la couleur de la clôture — alors qu'il venait
+    d'en écarter une qui la portait exactement. Le cadre de Gannay porte le
+    vert des pistes existantes : il s'écarte toujours, et il se dit.
+    """
+    dits = [
+        a for a in lecture_gannay.avertissements if "épouse le cadre" in a
+    ]
+    assert dits, lecture_gannay.avertissements
+    piste = next(a for a in dits if "Piste lourde existante" in a)
+    assert "(6, 177, 74)" in piste
+    assert "pas un ouvrage" in piste
+
+
+# ---------------------------------------------------------------------------
 # Un portail se pose toujours sur la clôture (13/10/2026)
 # ---------------------------------------------------------------------------
 

@@ -329,6 +329,16 @@ ECART_PASTILLE_LIBELLE_PT = 20.0
 #: trait de clôture de Bray, 25,6 pt.
 TAILLE_PASTILLE_MAX_PT = 40.0
 
+#: Part du cadre de la carte, dans les deux directions, au-delà de laquelle
+#: une forme l'épouse — c'est alors le cadre lui-même, ou un fond qui le
+#: couvre, et non un ouvrage.
+#:
+#: Mesuré le 15/10/2026 sur les trois plans de référence : le cadre de Gannay
+#: fait 100,1 % de la largeur et 99,6 % de la hauteur, les fonds blancs de Bray
+#: et de Chaumont-sur-Aire 142 % et 160 %. La clôture de Chaumont, elle, fait
+#: 72,5 % et 93,6 % — et c'est la plus large des trois clôtures.
+PART_DU_CADRE_MIN = 0.97
+
 #: Distance de couleur — euclidienne, sur les composantes RGB de 0 à 255 — au
 #: delà de laquelle un tracé n'est rattaché à aucune pastille. Le plan ne
 #: reprend pas toujours la couleur exacte de sa légende : l'orangé des pistes à
@@ -866,6 +876,32 @@ def _lignes_de_texte(page) -> list[LigneTexte]:
 # ---------------------------------------------------------------------------
 # Formes : regrouper, caractériser, comparer
 # ---------------------------------------------------------------------------
+
+
+def _epouse_le_cadre(objet, cadre) -> bool:
+    """La forme est-elle le cadre de la carte, ou un fond qui la couvre ?
+
+    Deux marques, et il les faut toutes les deux : une boîte qui couvre la
+    carte **dans les deux directions**, et des sous-chemins d'au plus cinq
+    points — un cadre est un rectangle.
+
+    L'aire seule ne suffit pas, et c'est ce qui a coûté sa clôture à
+    Chaumont-sur-Aire le 15/10/2026 : 68 % de l'aire de la carte, au-dessus de
+    la moitié qui était admise, parce que la copie d'écran y est cadrée serré
+    sur le site. La couche « cloture » sortait vide et le rapport accusait une
+    couleur qui ne correspondait à rien — alors qu'elle correspondait
+    exactement, à zéro près. Mesuré le même jour : cette clôture fait 72,5 % de
+    la largeur et 93,6 % de la hauteur en dix-neuf points, là où le cadre de
+    Gannay fait 100,1 % et 99,6 % en cinq.
+    """
+    b = objet.bornes
+    largeur = (b[2] - b[0]) / (cadre[2] - cadre[0])
+    hauteur = (b[3] - b[1]) / (cadre[3] - cadre[1])
+    if min(largeur, hauteur) < PART_DU_CADRE_MIN:
+        return False
+    return all(
+        len(chemin) <= 5 for trace in objet.traces for chemin in trace.sous_chemins
+    )
 
 
 def _surface_bornes(b) -> float:
@@ -1526,7 +1562,7 @@ def lire_plan_pdf(
     surface_cadre = _surface_bornes(cadre)
     pastilles = {id(e.pastille) for e in legende}
 
-    elements, non_reconnus = [], []
+    elements, non_reconnus, cadres_ecartes = [], [], []
     replis: dict = {}
     for objet in objets:
         if id(objet) in pastilles:
@@ -1535,10 +1571,11 @@ def lire_plan_pdf(
         milieu = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
         if not (cadre[0] <= milieu[0] <= cadre[2] and cadre[1] <= milieu[1] <= cadre[3]):
             continue
-        if _surface_bornes(b) > 0.5 * surface_cadre:
+        if _surface_bornes(b) > 0.5 * surface_cadre and _epouse_le_cadre(objet, cadre):
             # Le cadre de la carte, ou un fond qui la couvre : ni l'un ni
             # l'autre n'est un ouvrage. À Gannay, le cadre porte le vert des
-            # pistes existantes.
+            # pistes existantes — et c'est bien pour ça qu'on le dit plus bas.
+            cadres_ecartes.append(objet)
             continue
         entree, raison = _rattacher(objet, legende)
         if entree is None:
@@ -1549,6 +1586,27 @@ def lire_plan_pdf(
                 ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
             )
         elements.append(ElementPlan(entree=entree, objet=objet))
+
+    # Une exclusion muette est un repli silencieux : celle-ci a fait dire à
+    # l'outil qu'aucune forme ne portait la couleur de la clôture, alors qu'il
+    # venait d'en écarter une qui la portait exactement (Chaumont-sur-Aire,
+    # 15/10/2026). On ne la dit que si elle pouvait être prise pour un ouvrage.
+    for objet in cadres_ecartes:
+        proches = [
+            e.libelle
+            for e in legende
+            if _distance(objet.couleur, e.pastille.couleur) <= ECART_COULEUR_MAX
+        ]
+        if not proches:
+            continue
+        avertissements.append(
+            f"Une forme rectangulaire de couleur {objet.couleur} épouse le cadre "
+            "de la carte : écartée, c'est le cadre ou un fond, pas un ouvrage. "
+            "Elle porte pourtant la couleur de "
+            + " ; ".join(f"« {n} »" for n in proches)
+            + " — si c'en était un, redessinez-le sans qu'il couvre la carte "
+            "entière."
+        )
 
     # Un même repli vaut pour toutes les formes qu'il concerne : le dire une
     # fois par forme noyait le reste du rapport. Mesuré le 02/10/2026 sur
