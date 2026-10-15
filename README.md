@@ -612,6 +612,22 @@ sans shapefile pour vérifier que rien ne s'échappe et que le message nomme ce
 que l'archive portait. La règle : **tout ce qui lit un fichier du chef de
 projet travaille sous le `try`**, le chargement de l'emprise compris.
 
+**Et ce qu'on met sous le `try`, c'est le travail, pas l'appel qui en a
+l'air.** La construction du plan est paresseuse : `importer_plan_pdf` ne fait
+que lire et caler, et c'est le premier accès à `import_be.plan` qui la
+déclenche. Cet accès avait lieu deux lignes plus bas, hors du `try` — le
+lendemain de la correction ci-dessus, un portail dessiné en simple segment y a
+levé un `AttributeError` qui est reparti caviardé (Chaumont-sur-Aire,
+15/10/2026). La construction se force donc explicitement sous le `try`, et
+**avant** toute mise en session : un import dont la construction tombe ne doit
+pas rester derrière, à faire tomber chaque écran qui le relit.
+`test_un_plantage_de_la_construction_se_lit_au_lieu_d_etre_caviarde` remplace
+`construire` par une fonction qui lève, et vérifie le texte affiché.
+
+Le critère de ces tests n'est pas l'absence d'`st.exception` — il en reste un,
+émis exprès — mais la présence du **texte à nous**, seul à traverser la
+censure.
+
 ## Verser la notice dans un dossier fini (lot 7)
 
 Le chef de projet travaille en trois temps : il génère **sans notice** pour
@@ -2865,6 +2881,18 @@ Instruction du chef de projet du 23/09/2026 :
 `projet.json` garde le tableau tel qu'il a été lu, sous `informations_plan`.
 
 ### Ce que le plan ne dit pas, et comment on le complète
+
+**Un ouvrage dessiné en simple segment n'a pas de rectangle.** Les deux
+portails de Chaumont-sur-Aire sont deux points posés sur la clôture
+(15/10/2026) — c'est une façon normale de dessiner un portail, et celle que ce
+lot employait lui-même avant d'adopter le symbole à cinq entités du bureau
+d'études. Leurs points étant alignés, `minimum_rotated_rectangle` rend une
+`LineString`, qui n'a pas d'`exterior` : tout l'import tombait dessus.
+`_rectangle_minimal` rend désormais, pour une forme plate, le segment comme
+grand côté et **zéro** comme petit côté — ce qui rend l'orientation ambiguë au
+sens de `Repere.orientation_ambigue`, donc prise sur la clôture voisine. C'est
+exactement ce qu'on veut d'un portail : il s'oriente comme la clôture qu'il
+perce, pas comme le trait qu'on a tiré.
 
 **Un ouvrage n'est retenu que par sa position et son orientation** : les
 formes du plan ne sont pas à l'échelle (instruction du chef de projet du

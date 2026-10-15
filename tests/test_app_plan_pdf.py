@@ -360,6 +360,78 @@ def test_une_emprise_illisible_se_dit_au_lieu_d_etre_caviardee(tmp_path, monkeyp
     # Et le message dit ce que l'archive portait, pour que le dépôt se corrige.
     assert "lisez-moi.txt" in refus[0]
 
+
+def test_un_plantage_de_la_construction_se_lit_au_lieu_d_etre_caviarde(
+    tmp_path, monkeypatch
+):
+    """La construction du plan est paresseuse, et son échec sortait du `try`.
+
+    `importer_plan_pdf` ne fait que lire et caler : c'est le premier accès à
+    `import_be.plan` qui construit, et il avait lieu deux lignes plus bas, hors
+    du `try`. Relevé le 15/10/2026 sur Chaumont-sur-Aire — un portail dessiné
+    en simple segment y levait un `AttributeError`, et le chef de projet n'a vu
+    qu'une trace caviardée. Ce qu'on met sous le `try`, c'est le travail, pas
+    l'appel qui en a l'air.
+    """
+    from dp_socle import plan_pdf
+
+    def construire_qui_tombe(*_args, **_kwargs):
+        raise AttributeError("'LineString' object has no attribute 'exterior'")
+
+    monkeypatch.setattr(plan_pdf, "construire", construire_qui_tombe)
+
+    application = _plan_pdf_importe(tmp_path, monkeypatch)
+
+    # Rien ne s'échappe : c'est ce qui déclenchait le caviardage.
+    assert not application.exception, application.exception
+    refus = [e.value for e in application.error if "ErreurEmprise" in e.value]
+    assert refus, [e.value for e in application.error]
+    assert "aucun fichier .shp" in refus[0]
+    # Et le message dit ce que l'archive portait, pour que le dépôt se corrige.
+    assert "lisez-moi.txt" in refus[0]
+
+
+def test_un_plantage_de_la_construction_se_lit_au_lieu_d_etre_caviarde(
+    tmp_path, monkeypatch
+):
+    """La construction du plan est paresseuse, et son échec sortait du `try`.
+
+    `importer_plan_pdf` ne fait que lire et caler : c'est le premier accès à
+    `import_be.plan` qui construit, et il avait lieu deux lignes plus bas, hors
+    du `try`. Relevé le 15/10/2026 sur Chaumont-sur-Aire — un portail dessiné
+    en simple segment y levait un `AttributeError`, et le chef de projet n'a vu
+    qu'une trace caviardée. Ce qu'on met sous le `try`, c'est le travail, pas
+    l'appel qui en a l'air.
+    """
+    from dp_socle import plan_pdf
+
+    def construire_qui_tombe(*_args, **_kwargs):
+        raise AttributeError("'LineString' object has no attribute 'exterior'")
+
+    monkeypatch.setattr(plan_pdf, "construire", construire_qui_tombe)
+
+    application = _plan_pdf_importe(tmp_path, monkeypatch)
+
+    # Le critère n'est pas l'absence d'`st.exception` : `_signaler_l_imprevu`
+    # en réémet un exprès, pour le poste de développement. C'est le texte à
+    # nous qui compte — lui seul traverse la censure de Streamlit Cloud.
+    dits = [
+        e.value
+        for e in application.error
+        if "pendant l'import du plan projet" in e.value
+    ]
+    assert dits, [e.value for e in application.error]
+    assert "AttributeError" in dits[0]
+    assert "exterior" in dits[0]
+    # Et rien n'est resté en session : un import dont la construction tombe
+    # ferait tomber chaque écran qui le relit.
+    en_session = (
+        application.session_state["import_be"]
+        if "import_be" in application.session_state
+        else None
+    )
+    assert en_session is None
+
 def _dans_l_ordre_de_la_page(application) -> list:
     """Les éléments de la page principale, dans l'ordre où ils s'affichent."""
     elements = []

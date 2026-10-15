@@ -2294,6 +2294,24 @@ def _importer_le_plan_pdf(
                 emprise_cadastrale=emprise_cadastrale,
                 correspondance=correspondance,
             )
+            # La construction du plan est **paresseuse** : `importer_plan_pdf`
+            # ne fait que lire et caler, et c'est le premier accès à
+            # `import_be.plan` qui la déclenche — ici, depuis la reprise de
+            # l'import précédent. Appelée hors du `try`, elle y faisait sortir
+            # un `AttributeError` non attrapé, donc caviardé, sur un portail
+            # dessiné en simple segment (Chaumont-sur-Aire, 15/10/2026). Ce
+            # qu'on met sous le `try`, c'est le travail, pas l'appel qui en a
+            # l'air. On la force donc ici, avant de ranger quoi que ce soit
+            # en session : un import dont la construction tombe ne doit pas
+            # rester derrière, à faire tomber chaque écran qui le relit.
+            _ = resultat.construction
+            st.session_state.import_be = resultat
+            st.session_state["indice_tableau_bilan"] = None
+            st.session_state.emprise_cadastrale_be = emprise_cadastrale
+            _reprendre_import_precedent(
+                DOSSIER_SORTIE / nom_importe, resultat, emprise_cadastrale
+            )
+            _proposer_la_coupe(resultat)
     except ErreurDP as erreur:
         st.error(f"{type(erreur).__name__} : {erreur}")
         return
@@ -2302,11 +2320,6 @@ def _importer_le_plan_pdf(
         # caviardé lui aussi.
         _signaler_l_imprevu(erreur, "pendant l'import du plan projet")
         return
-    st.session_state.import_be = resultat
-    st.session_state["indice_tableau_bilan"] = None
-    st.session_state.emprise_cadastrale_be = emprise_cadastrale
-    _reprendre_import_precedent(DOSSIER_SORTIE / nom_importe, resultat, emprise_cadastrale)
-    _proposer_la_coupe(resultat)
     # Même raison qu'au plan BE : le bouton s'est rendu avant ce bloc.
     st.rerun()
 

@@ -1693,8 +1693,37 @@ def _polygone_de(trace: Trace) -> Polygon | None:
 
 
 def _rectangle_minimal(geometrie: BaseGeometry):
-    """Centre, direction du grand côté (degrés), grand côté et petit côté."""
+    """Centre, direction du grand côté (degrés), grand côté et petit côté.
+
+    Une forme **plate** — tous ses points alignés — n'a pas de rectangle :
+    Shapely rend alors une `LineString`, et un seul point rend un `Point`.
+    Ni l'une ni l'autre n'a d'`exterior`, et l'import tombait tout entier sur
+    un `AttributeError`, caviardé par Streamlit Cloud. Relevé le 15/10/2026 sur
+    Chaumont-sur-Aire, dont les deux portails sont dessinés en **simple segment
+    de deux points** posé sur la clôture — une façon parfaitement normale de
+    dessiner un portail, et celle que le lot 2ter employait lui-même avant
+    d'adopter le symbole à cinq entités du bureau d'études.
+
+    Le grand côté est alors le segment, et le petit est nul. Un petit côté nul
+    rend l'orientation ambiguë (`Repere.orientation_ambigue`), donc prise sur
+    la clôture voisine : c'est exactement ce qu'on veut d'un portail.
+    """
     rectangle = geometrie.minimum_rotated_rectangle
+    if rectangle.geom_type == "Point":
+        return (rectangle.x, rectangle.y), 0.0, 0.0, 0.0
+    if rectangle.geom_type != "Polygon":
+        bouts = list(rectangle.coords)
+        depart, arrivee = bouts[0], bouts[-1]
+        centre = rectangle.centroid
+        direction = math.degrees(
+            math.atan2(arrivee[1] - depart[1], arrivee[0] - depart[0])
+        )
+        return (
+            (centre.x, centre.y),
+            _dans_demi_tour(direction),
+            math.dist(depart, arrivee),
+            0.0,
+        )
     sommets = list(rectangle.exterior.coords)[:4]
     cotes = [
         (math.dist(sommets[i], sommets[(i + 1) % 4]), sommets[i], sommets[(i + 1) % 4])

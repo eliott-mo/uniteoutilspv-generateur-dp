@@ -2611,6 +2611,68 @@ def test_la_cloture_de_gannay_dit_ce_qu_elle_a_coute_de_raccords(
 
 
 # ---------------------------------------------------------------------------
+# Un ouvrage dessiné en simple segment (Chaumont-sur-Aire, 15/10/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_un_segment_n_a_pas_de_rectangle_mais_garde_sa_direction():
+    """Relevé le 15/10/2026 : l'import tombait sur un `AttributeError`.
+
+    Les deux portails de Chaumont-sur-Aire sont dessinés en simple segment de
+    deux points posé sur la clôture — c'est une façon normale de dessiner un
+    portail, et celle que le lot 2ter employait lui-même avant d'adopter le
+    symbole à cinq entités du bureau d'études. Ses points sont alignés, donc
+    Shapely rend une `LineString` au lieu d'un rectangle, et une `LineString`
+    n'a pas d'`exterior`.
+    """
+    from shapely.geometry import LineString
+
+    from dp_socle.plan_pdf import _rectangle_minimal
+
+    # Le premier portail de Chaumont, aux points mesurés sur le plan.
+    segment = LineString([(863.6, 696.4), (870.6, 686.7)])
+    (x, y), direction, longueur, largeur = _rectangle_minimal(segment)
+
+    assert (x, y) == pytest.approx((867.1, 691.55), abs=0.05)
+    assert longueur == pytest.approx(11.96, abs=0.05)
+    assert largeur == 0.0, "un segment n'a pas de petit côté"
+    # La direction est celle du segment, à un demi-tour près.
+    assert direction == pytest.approx(-54.2, abs=0.5)
+
+
+def test_un_point_seul_ne_fait_pas_tomber_la_lecture():
+    """Le cas dégénéré d'après : une forme réduite à un point."""
+    from shapely.geometry import Point
+
+    from dp_socle.plan_pdf import _rectangle_minimal
+
+    (x, y), direction, longueur, largeur = _rectangle_minimal(Point(10.0, 20.0))
+
+    assert (x, y) == (10.0, 20.0)
+    assert (direction, longueur, largeur) == (0.0, 0.0, 0.0)
+
+
+def test_un_repere_plat_laisse_son_orientation_a_la_cloture():
+    """Petit côté nul : l'orientation est ambiguë, donc prise sur la clôture.
+
+    C'est exactement ce qu'on veut d'un portail — il s'oriente comme la clôture
+    qu'il perce, pas comme le trait que le dessinateur a tiré.
+    """
+    from dp_socle.plan_pdf import Repere
+
+    repere = Repere(
+        categorie="portail",
+        libelle="Portail",
+        centre=(867.1, 691.5),
+        direction_deg=-54.2,
+        longueur_dessinee=11.96,
+        largeur_dessinee=0.0,
+    )
+
+    assert repere.orientation_ambigue
+
+
+# ---------------------------------------------------------------------------
 # Le cadre de la carte, et ce qui n'en est pas (Chaumont-sur-Aire, 15/10/2026)
 # ---------------------------------------------------------------------------
 
