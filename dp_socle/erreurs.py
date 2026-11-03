@@ -149,3 +149,17 @@ class ErreurMontagePPTX(ErreurSortiePPTX):
     25/09/2026). Ce qui s'écrit à la main se relit donc dans l'élément produit,
     et cette erreur est ce qui reste quand la relecture échoue.
     """
+
+
+class ErreurPlafondWFS(ErreurService):
+    """Une lecture WFS a atteint son plafond d'entités : la liste serait tronquée.
+
+    `_interroger_wfs` lit le service par pages, jusqu'à `maximum` entités, et
+    rendait alors les premières sans le dire (relevé à la lecture du code le
+    03/11/2026). Le parcellaire d'un plan de masse n'atteint pas ce nombre ;
+    les bâtiments à un kilomètre d'un bourg, que le lot 10 interroge, peuvent
+    l'atteindre, et l'habitation la plus proche pouvait être celle qui
+    manquait. Dérivée d'`ErreurService`, elle prend le chemin d'une panne du
+    WFS : une planche qui se produit sans le service l'écrit au rapport, les
+    autres arrêtent la génération.
+    """

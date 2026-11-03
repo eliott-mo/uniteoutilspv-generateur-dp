@@ -998,6 +998,11 @@ réponse de l'IGN, très variable. Une reprise après un échec repart d'une
 connexion neuve, comme avant : sur une connexion réutilisée, le 24/09/2026,
 les trois tentatives d'un GetMap ont reçu le même « LayerNotDefined ».
 
+**Une lecture WFS ne se tronque pas en silence.** Lue par pages de 1 000
+entités jusqu'à un plafond de 5 000, elle lève `ErreurPlafondWFS`, qui nomme le
+service, la bbox et le plafond, quand une page pleine atteint ce plafond — là
+où elle rendait jusqu'au 03/11/2026 les 5 000 premières sans un mot.
+
 ## Comparaison au dossier de référence
 
 Le critère de validation n°2 du brief demande de comparer le dossier produit à

@@ -42,7 +42,7 @@ from requests.utils import DEFAULT_CA_BUNDLE_PATH
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from .erreurs import ErreurAltimetrie, ErreurService
+from .erreurs import ErreurAltimetrie, ErreurPlafondWFS, ErreurService
 
 URL_WMS = "https://data.geopf.fr/wms-r/wms"
 URL_WFS = "https://data.geopf.fr/wfs/ows"
@@ -298,7 +298,12 @@ def _interroger_wfs(
     maximum: int,
     libelle: str,
 ) -> list:
-    """GetFeature paginé, en EPSG:2154, sur une couche du Parcellaire Express."""
+    """GetFeature paginé, en EPSG:2154, sur une couche du Parcellaire Express.
+
+    Les pages de `taille_page` se lisent jusqu'à la première incomplète. Une
+    page pleine qui mènerait au plafond `maximum` lève `ErreurPlafondWFS`
+    plutôt que de rendre une liste tronquée.
+    """
     minx, miny, maxx, maxy = bbox
     if maxx <= minx or maxy <= miny:
         raise ErreurService(f"BBOX dégénérée transmise au WFS : {bbox}")
@@ -344,6 +349,17 @@ def _interroger_wfs(
         entites.extend(page)
         if len(page) < taille_page:
             break
+        # Une page pleine ne dit pas si le service en porte d'autres : au
+        # plafond, rendre ce qui est lu, c'était rendre sans un mot une liste
+        # tronquée. Une emprise qui en porte exactement `maximum` lève aussi —
+        # sans lire au-delà du plafond, rien ne la distingue d'une liste coupée.
+        if index + taille_page >= maximum:
+            raise ErreurPlafondWFS(
+                f"Service WFS ({libelle}) : plafond de {maximum} entités atteint "
+                f"sur la bbox {bbox}, la dernière page lue étant pleine. Le "
+                "service en porte peut-être davantage, et une liste tronquée "
+                "n'est pas rendue à la place de la liste complète."
+            )
         index += taille_page
     return entites
 
