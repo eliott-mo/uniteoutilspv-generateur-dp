@@ -80,8 +80,15 @@ def test_la_chasse_mesuree_est_celle_du_fichier_de_police():
 
     C'est le critère du contrôle de démarrage, posé ici en test : il n'a de sens
     que si Aptos est réellement résolue par cairo — sur un poste de
-    développement, cela demande de l'avoir installée (voir le README).
+    développement Windows, cela demande de l'avoir installée (voir le README).
+
+    Sous Linux, la copie pour fontconfig est automatique (`tests/conftest.py`,
+    comme `app.py`) : une Aptos non résolue n'y est pas un état du poste mais un
+    défaut, et le test tombe au lieu de sauter. Il sautait du 28/09 au
+    06/11/2026, pendant que toute la suite Linux composait en Liberation Sans.
     """
+    import sys
+
     from dp_socle.polices import (
         POLICE_PRINCIPALE,
         _TAILLE_TEMOIN,
@@ -92,8 +99,11 @@ def test_la_chasse_mesuree_est_celle_du_fichier_de_police():
         fichier_principal,
     )
 
-    if not etat_polices().disponible:
-        pytest.skip("Aptos n'est pas résolue par cairo sur ce poste")
+    etat = etat_polices()
+    if not etat.disponible:
+        if not sys.platform.startswith("linux"):
+            pytest.skip("Aptos n'est pas résolue par cairo sur ce poste")
+        pytest.fail(etat.message)
     attendue = _chasse_ttf(fichier_principal(), _TEMOIN, _TAILLE_TEMOIN)
     mesuree = chasse_cairo(_TEMOIN, POLICE_PRINCIPALE, _TAILLE_TEMOIN)
     assert mesuree == pytest.approx(attendue, rel=1e-6)
