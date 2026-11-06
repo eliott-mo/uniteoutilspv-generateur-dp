@@ -368,6 +368,57 @@ def test_un_plan_etire_nomme_l_etirement_et_non_la_version(
     assert "même indice" not in str(refus.value)
 
 
+@besoin_gannay
+def test_une_tache_au_bout_d_une_rangee_ne_masque_pas_l_etirement(
+    lecture_gannay, import_gannay
+):
+    """Relevé le 06/11/2026 sur Montholon (89) : l'étirement pris pour deux versions.
+
+    L'ombre d'une haie, à l'est de deux rangées, portait la teinte des tables :
+    27 et 15 pixels retenus dans leurs rangées, détachés de leur bout, qui les
+    allongeaient de 12 à 14 m. Le cumul des rangées en sortait à +5,7 % au lieu de +2,6 %, le
+    « même facteur » tombait à 1,035 pour 2 % admis, et le message renvoyait
+    vérifier des indices qui concordaient. Ces pixels ne sont pas épars — 3 à 6
+    par case, pour 17 dans la rangée — : c'est leur **épaisseur** qui les
+    trahit, pas leur densité.
+
+    L'étirement est ici dans les pixels — l'image rééchantillonnée, ses pixels
+    restés carrés —, là où la matrice ne prouve rien : c'est au recoupement
+    d'en nommer la cause, malgré la tache.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from dp_socle.plan_pdf import masque_des_tables
+
+    fond = lecture_gannay.fond
+    hauteur, largeur = fond.pixels.shape[:2]
+    nouvelle = round(largeur * 1.05)
+    pixels = np.array(
+        Image.fromarray(fond.pixels).resize((nouvelle, hauteur), Image.NEAREST)
+    )
+    a, b, c, d, e, f = fond.matrice
+    matrice = (a * nouvelle / largeur, b, c, d, e, f)
+
+    # L'ombre, au bout de la rangée du haut — la plus courte du losange : six
+    # pixels de haut sur cinq, à la teinte des tables, à soixante pixels du
+    # bout est du champ. Bien au-delà de la rangée, en deçà de l'emprise.
+    tables = masque_des_tables(ImageDeFond(pixels, matrice))
+    lignes, colonnes = np.nonzero(tables)
+    haut, est = int(lignes.min()), int(colonnes.max())
+    pixels[haut + 9 : haut + 15, est - 60 : est - 55] = np.median(pixels[tables], axis=0)
+
+    tachee = replace(lecture_gannay, fond=ImageDeFond(pixels, matrice))
+    with pytest.raises(ErreurEchelleIncoherente, match="le long des rangées") as refus:
+        caler_sur_tables(tachee, import_gannay.implantation)
+
+    message = str(refus.value)
+    assert "redimensionnée" in message
+    assert "toutes du même facteur" in message
+    assert "pas toutes" not in message
+    assert "indice" not in message, "les deux fichiers concordent, c'est le plan"
+
+
 def test_le_refus_d_echelle_en_travers_compte_les_rangees():
     """Relevé le 09/10/2026 chez un chef de projet : +20,4 % en travers.
 
@@ -516,6 +567,69 @@ def test_un_pixel_egare_ne_fait_pas_compter_une_rangee_deux_fois():
     egare = np.asarray(points + [(50.0, -5.0)])
 
     assert _longueur_cumulee(egare, 0.0, 10.0) == pytest.approx(300.0, abs=0.5)
+
+
+def test_une_rangee_detachee_et_negligeable_ne_compte_pas():
+    """Relevé le 06/11/2026 sur Montholon (89) : une vingtième rangée, de bruit.
+
+    Des pixels épars le long de l'autoroute, en haut de la photo, formaient une
+    rangée de plus : 164 pixels à 14,8 pas de la dernière, pour un champ de
+    180 000. Elle comptait 78,5 m au cumul — de quoi faire accuser deux
+    versions du projet.
+
+    Les deux conditions comptent, comme pour les isolats le long des rangées :
+    un projet en deux zones, comme Saint-Aubin-sur-Loire, garde la seconde,
+    loin du champ mais lourde de ses tables.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _longueur_cumulee
+
+    def rangees(rangs, longueur, pas_x=1.0):
+        return [
+            (x, rang * 10.0 + dy)
+            for rang in rangs
+            for dy in (-1.0, 1.0)
+            for x in np.arange(0.0, longueur + 0.5, pas_x)
+        ]
+
+    champ = rangees(range(19), 100.0)
+    egaree = rangees([34], 60.0, pas_x=6.0)
+    seconde_zone = rangees(range(30, 40), 100.0)
+
+    assert _longueur_cumulee(np.asarray(champ + egaree), 0.0, 10.0) == pytest.approx(
+        1900.0, abs=0.5
+    )
+    assert _longueur_cumulee(
+        np.asarray(champ + seconde_zone), 0.0, 10.0
+    ) == pytest.approx(2900.0, abs=0.5)
+
+
+def test_un_bout_de_rangee_ne_compte_que_s_il_a_l_epaisseur_d_une_table():
+    """Ce qui sépare une table d'une ombre au bout d'une rangée : son épaisseur.
+
+    Une table a toute la profondeur de sa rangée, détachée d'elle ou non. Une
+    ombre de haie à la teinte des tables, non : à Montholon, 3 à 6 pixels par
+    case pour 17 dans la rangée. Et ce n'est pas l'écart qui les sépare — une
+    table peut se tenir au-delà d'un obstacle, comme l'ombre au-delà du bout.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import _longueur_cumulee
+
+    def bloc(debut, fin, epaisseur):
+        # Des centres de pixels, d'un pixel de côté.
+        return [(x + 0.5, y + 0.5) for x in range(debut, fin) for y in range(epaisseur)]
+
+    rangee = bloc(0, 100, 20)
+    table = bloc(130, 140, 20)
+    ombre = bloc(130, 135, 6)
+
+    avec_table = _longueur_cumulee(np.asarray(rangee + table), 0.0, 40.0, pixel=1.0)
+    avec_ombre = _longueur_cumulee(np.asarray(rangee + ombre), 0.0, 40.0, pixel=1.0)
+
+    assert avec_table == pytest.approx(140.0, abs=1.0)
+    assert avec_ombre == pytest.approx(100.0, abs=1.0)
 
 
 def test_la_marge_se_mesure_au_bord_le_plus_proche():

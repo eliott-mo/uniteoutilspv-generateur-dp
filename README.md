@@ -2854,10 +2854,10 @@ seul cas que l'outil ne sait pas distinguer est celui d'une image étirée seule
 **après** le dessin : le redressement déplace alors les tracés, et la note le
 dit, en renvoyant à la planche DP 2.
 
-Le test étire un vrai PDF — celui de Gannay, image et tracés ensemble, comme
-l'exporte PowerPoint —, en largeur de 2,11 % puis en hauteur de 5 %, et
-vérifie que la clôture du contrat écrit est celle du plan non étiré, à 0,05 %
-près.
+Le test étire un vrai PDF — celui de Gannay, réécrit par PDFium, l'image et
+tous les tracés transformés ensemble comme ceux d'un plan dessiné sur une
+image étirée —, en largeur de 2,11 % puis en hauteur de 5 %. La clôture du
+contrat écrit y est celle du plan non étiré, à 0,05 % près (0,3 % tolérés).
 
 **Quand l'échelle est refusée, le message nomme la cause, et il doit la
 nommer juste.** Le refus tombe avant tous les contrôles qui s'expliquent en
@@ -2889,7 +2889,8 @@ mesures tranchent, dans cet ordre, et le message les porte désormais :
   test d'étirement qui a trouvé le trou, le message renvoyait vérifier des
   indices qui concordaient.
 
-Le bord passe en premier parce qu'il est la seule preuve matérielle : une
+Le bord passe en premier parce qu'il est la seule preuve matérielle qui reste
+à ce stade — la matrice de l'image, l'autre, a déjà redressé la page : une
 coupe droite ôte à chaque rangée la même longueur, et se lit sinon comme un
 redimensionnement. Et le bord ne se consulte que si le plan porte **moins** de
 tables que le DXF — un recadrage n'en ajoute pas.
@@ -2898,6 +2899,41 @@ Les cases du cumul se calent sur la **phase** des rangées et non sur le premier
 point : un pixel égaré sous le champ décalerait l'origine d'une demi-case, et
 chaque rangée tomberait alors à cheval sur deux cases, comptée presque deux
 fois.
+
+**Le cumul se prend sur les tables, pas sur leur teinte.** Relevé le
+06/11/2026 sur Montholon (89), rejoué sans son redressement : deux taches à la
+teinte des tables faisaient accuser deux versions du projet à une copie d'écran
+seulement étirée. L'ombre d'une haie, à l'est de deux rangées, les allongeait
+de 12 à 14 m ; des pixels épars le long de l'autoroute, en haut de la photo,
+formaient une vingtième rangée de 164 pixels, à 14,8 pas du champ. Le cumul
+sortait à +5,7 % au lieu de +2,5 %, le même facteur à 1,035. Deux règles le
+tiennent désormais :
+
+- **une rangée de pixels se mesure là où elle a l'épaisseur d'une table**
+  (`EPAISSEUR_RANGEE_MIN` : la moitié de son épaisseur médiane, sur un profil
+  lissé comme celui de `_etendues_denses`). Le seuil de `_etendues_denses`
+  lui-même, envisagé d'abord, ne suffisait pas : les ombres ne sont pas
+  éparses — 3 à 6 pixels par case pour 17 dans la rangée, de 20 à 35 % —, et
+  5 % ne suffisent qu'à l'emprise du champ entier, où chaque case cumule toutes
+  les rangées. Leur écart au bout de la rangée ne les sépare pas non plus : une
+  table peut se tenir au-delà d'un obstacle. À 50 %, les deux ombres tombent ;
+  Gannay perd un pixel au plus par bout de rangée (0,06 % du cumul), Bray
+  rien ;
+- **un groupe de rangées détaché du champ et négligeable n'y compte pas**
+  (`ECART_RANGEES_DETACHEES`, trois pas, et `PART_ISOLAT_MAX`) : la règle des
+  isolats, en travers des rangées. Un projet en deux zones garde la seconde.
+  Le DXF passe par cette règle aussi, pour que les deux cumuls se comparent à
+  règle égale, mais pas par la première : ses sommets n'ont ni épaisseur ni
+  bruit.
+
+Rejoué ainsi, Montholon sort à +2,5 % de cumul et 1,004 au même facteur, et le
+message nomme la copie d'écran redimensionnée. Le test pose une ombre de six
+pixels sur cinq au bout de la rangée la plus courte de Gannay, rééchantillonné
+de 5 % — l'étirement dans les pixels, là où la matrice ne prouve rien : sans la
+règle d'épaisseur, le message renvoyait vérifier les indices. La vingtième
+rangée de Montholon compte toujours au **nombre** de rangées, 20 contre 19, et
+mange ainsi la tolérance d'une rangée de `ECART_RANGEES_MAX` : ce compte n'a
+pas été touché.
 
 C'est la **longueur mesurée** qui compte les modules, pas le nombre écrit au
 cartouche : à Bray, c'est le cartouche qui se trompait. Et un plan dont les

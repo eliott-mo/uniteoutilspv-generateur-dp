@@ -2819,7 +2819,76 @@ def _etendues_denses(points: np.ndarray, direction_deg: float, pixel: float):
     return etendues[0], etendues[1]
 
 
-def _longueur_cumulee(points: np.ndarray, direction_deg: float, pas: float) -> float:
+#: Part de son épaisseur qu'une rangée doit porter, case par case de son profil
+#: en long, pour qu'on l'y mesure.
+#:
+#: Une table a toute la profondeur de sa rangée ; une ombre à sa teinte, non.
+#: Mesuré le 06/11/2026 sur Montholon (89) : l'ombre d'une haie, à l'est des
+#: rangées 27 et 36, porte 3 à 6 pixels par case pour 17 dans la rangée, soit
+#: 20 à 35 % — quatre fois et plus les 5 % de `PART_BORD_MIN`, qui suffisent à
+#: l'emprise du champ entier, où une case cumule toutes les rangées. Ce n'est
+#: donc pas la densité qui la trahit, c'est l'épaisseur. À 50 %, les deux
+#: ombres tombent, Gannay perd un pixel au plus par bout de rangée (0,06 % du
+#: cumul), Bray rien ; à 25 %, l'ombre de la rangée 27 reste ; à 75 %, Gannay
+#: et Bray perdent 0,5 à 0,6 %.
+EPAISSEUR_RANGEE_MIN = 0.5
+
+#: Écart, en pas de rangées, au-delà duquel un groupe de rangées se tient à
+#: l'écart du champ.
+#:
+#: Mesuré le 06/11/2026 sur Montholon (89) : des pixels épars le long de
+#: l'autoroute, en haut de la photo, forment une vingtième rangée — 164 pixels
+#: à 14,8 pas de la dernière, pour un champ de 180 000 —, qui comptait 78,5 m
+#: au cumul. Comme le long des rangées (`_sans_les_isolats`), il faut **à la
+#: fois** être loin et peser moins de `PART_ISOLAT_MAX` : un projet en deux
+#: zones, comme Saint-Aubin-sur-Loire, garde la seconde. Trois pas laissent
+#: dans le champ l'allée de Sarnois (1,35 pas) et une rangée manquante (2).
+ECART_RANGEES_DETACHEES = 3
+
+
+def _rangees_du_champ(rangs: np.ndarray) -> list[int]:
+    """Les rangs d'un nuage, sans les groupes de rangées détachés et négligeables."""
+    valeurs, poids = np.unique(rangs, return_counts=True)
+    coupures = np.nonzero(np.diff(valeurs) > ECART_RANGEES_DETACHEES)[0]
+    minimum = PART_ISOLAT_MAX * len(rangs)
+    return [
+        int(rang)
+        for groupe in np.split(np.arange(len(valeurs)), coupures + 1)
+        if poids[groupe].sum() >= minimum
+        for rang in valeurs[groupe]
+    ]
+
+
+def _longueur_de_rangee(le_long: np.ndarray, pixel: float) -> float:
+    """La longueur d'une rangée de pixels, là où elle a l'épaisseur d'une table.
+
+    Le profil se prend comme celui de `_etendues_denses` — cases d'un pixel,
+    lissées sur `LARGEUR_LISSAGE_BORD` —, mais rapporté à la rangée seule : voir
+    `EPAISSEUR_RANGEE_MIN`. L'écart au bout de la rangée n'y entre pas : une
+    table peut se tenir au-delà d'un obstacle, comme l'ombre au-delà du bout.
+    """
+    brute = float(np.ptp(le_long))
+    cases = max(1, int(math.ceil(brute / pixel)))
+    histo, bords = np.histogram(le_long, bins=cases)
+    # Bourré à la main plutôt qu'en `mode="same"` : sur un profil plus court
+    # que le lissage, `same` rend la longueur du noyau, et les cases ne
+    # tombent plus en face de leurs bords. Une bande de bruit retenue comme
+    # rangée peut n'en compter que quatre.
+    lisse = np.convolve(
+        np.pad(histo, LARGEUR_LISSAGE_BORD // 2),
+        np.ones(LARGEUR_LISSAGE_BORD) / LARGEUR_LISSAGE_BORD,
+        mode="valid",
+    )
+    gardes = np.nonzero(lisse >= EPAISSEUR_RANGEE_MIN * np.median(histo[histo > 0]))[0]
+    if gardes.size == 0:
+        # Nulle part l'épaisseur d'une table : ce n'est pas une rangée.
+        return 0.0
+    return float(bords[gardes[-1] + 1] - bords[gardes[0]])
+
+
+def _longueur_cumulee(
+    points: np.ndarray, direction_deg: float, pas: float, pixel: float | None = None
+) -> float:
     """La longueur totale des rangées d'un nuage, rangée par rangée.
 
     L'emprise d'ensemble ne dit pas où est la différence : deux calepinages de
@@ -2831,6 +2900,14 @@ def _longueur_cumulee(points: np.ndarray, direction_deg: float, pas: float) -> f
     Les cases se calent sur la phase des rangées et non sur le premier point :
     une rangée à cheval sur deux cases y serait comptée deux fois, presque en
     entier chaque fois.
+
+    Il se prend sur les tables, pas sur leur teinte. Une rangée détachée du
+    champ et négligeable n'y compte pas (`_rangees_du_champ`), du plan comme
+    du DXF, pour qu'ils se comparent à règle égale. Et un nuage de pixels —
+    `pixel` donné — se mesure rangée par rangée là où elle a l'épaisseur d'une
+    table (`_longueur_de_rangee`). Les sommets du DXF n'ont ni épaisseur ni
+    bruit : leur étendue est exacte. Relevé le 06/11/2026 sur Montholon (89),
+    où deux taches faisaient accuser deux versions à un plan étiré.
     """
     u = (math.cos(math.radians(direction_deg)), math.sin(math.radians(direction_deg)))
     le_long = points[:, 0] * u[0] + points[:, 1] * u[1]
@@ -2839,11 +2916,11 @@ def _longueur_cumulee(points: np.ndarray, direction_deg: float, pas: float) -> f
     phase = math.atan2(float(np.sin(tours).mean()), float(np.cos(tours).mean()))
     rangs = np.round(en_travers / pas - phase / (2.0 * math.pi)).astype(int)
     total = 0.0
-    for rang in np.unique(rangs):
+    for rang in _rangees_du_champ(rangs):
         dans = le_long[rangs == rang]
         if dans.size < 2:
             continue
-        total += float(np.ptp(dans))
+        total += float(np.ptp(dans)) if pixel is None else _longueur_de_rangee(dans, pixel)
     return total
 
 
@@ -3021,7 +3098,7 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
             # la cause, et le cas courant est que l'échelle concorde.
             cumul_dxf = _longueur_cumulee(sommets_dxf, direction_dxf, pas_dxf)
             cumul_plan = echelle * _longueur_cumulee(
-                rangees.points, rangees.direction_deg, rangees.pas_pt
+                rangees.points, rangees.direction_deg, rangees.pas_pt, pixel=pixel
             )
             raise ErreurEchelleIncoherente(
                 f"L'échelle mesurée sur le pas des rangées — {rangees.pas_pt:.2f} pt "
