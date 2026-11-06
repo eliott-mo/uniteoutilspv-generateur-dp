@@ -40,7 +40,7 @@ import itertools
 import math
 import re
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -437,6 +437,22 @@ FIDELITE_MIN = 0.75
 #: anisotrope, que le pas seul ne verrait pas.
 TOLERANCE_ECHELLE = 0.02
 
+#: Écart admis entre les deux côtés d'un pixel de la copie d'écran, tels que la
+#: matrice de l'image les pose sur la page. Au-delà, l'image a été étirée.
+#:
+#: Une copie d'écran a des pixels carrés, et PowerPoint ne les déforme que si on
+#: l'étire d'un seul côté : c'est une preuve matérielle, que le recoupement
+#: d'échelle ne fait qu'approcher. Mesuré le 06/11/2026 : 0,05 % à Gannay
+#: (1 232 x 995 px sur 591,4 x 477,4 pt, un demi-pixel sur la hauteur), 0
+#: exactement à Bray, 2,11 % à Montholon (89). Un pixel d'arrondi sur chaque
+#: côté vaut au plus 1/L + 1/H : 0,18 % à Gannay, 0,28 % sur la copie d'écran
+#: la plus fruste rencontrée, celle de Saint-Aubin-sur-Loire (807 x 645 px).
+#:
+#: Le seuil est bien en deçà de `TOLERANCE_ECHELLE`, et c'est voulu : Gannay
+#: étiré de 2,11 % passait le recoupement **sans rien dire**, sa planche fausse
+#: de 2 % et d'aspect correct.
+ETIREMENT_TOLERE = 0.005
+
 #: Distance au bord de l'image en deçà de laquelle les tables y sont tenues
 #: pour coupées, en mètres.
 #:
@@ -617,6 +633,89 @@ class ImageDeFond:
         return (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))
 
 
+@dataclass(frozen=True)
+class Redressement:
+    """Un étirement de la copie d'écran, lu dans sa matrice, et ce qui l'annule.
+
+    Relevé le 06/11/2026 sur Montholon (89) : la copie d'écran de
+    2 000 x 1 600 px y est posée sur 620,7 x 486,3 pt, des pixels 2,11 % plus
+    larges que hauts. La clôture, les pistes et les ouvrages ont été dessinés
+    **sur l'image déjà étirée** : ne redresser que l'image posait la piste sur
+    52 tables (205 m² de recouvrement) et la clôture à 5 m des tables à
+    l'ouest, 21 m à l'est ; redresser l'image et les tracés ensemble ne touche
+    aucune table, et la clôture se tient à 10 et 12 m. C'est donc la page
+    entière qui se resserre le long du côté étiré, autour du coin haut gauche
+    de l'image. Ce point fixe ne change rien au calage, qui trouve sa
+    translation sur les tables ; il garde seulement l'image où elle était.
+
+    Une image dont les lignes et les colonnes de pixels ne seraient plus
+    perpendiculaires sur la page — étirée en biais — n'a jamais été rencontrée,
+    et n'est pas traitée ici.
+    """
+
+    #: Côté de l'image qui a été étiré : « largeur » ou « hauteur ».
+    cote: str
+    #: Le pixel le long de ce côté, rapporté à son autre côté : plus que 1.
+    etirement: float
+    #: Direction du côté étiré, vecteur unitaire en points de page.
+    axe: tuple[float, float]
+    #: Le point de la page qui ne bouge pas : le coin haut gauche de l'image.
+    origine: tuple[float, float]
+    #: Ce que la matrice posait : les pixels de l'image, et les points de page
+    #: qu'ils couvraient, largeur puis hauteur.
+    taille_px: tuple[int, int]
+    pose_pt: tuple[float, float]
+
+    def point(self, x: float, y: float) -> tuple[float, float]:
+        """Un point de la page, là où il serait si l'image n'avait pas été étirée."""
+        ox, oy = self.origine
+        ux, uy = self.axe
+        retrait = ((x - ox) * ux + (y - oy) * uy) * (1.0 / self.etirement - 1.0)
+        return (x + retrait * ux, y + retrait * uy)
+
+    def du_fond(self, fond: ImageDeFond) -> ImageDeFond:
+        a, b, c, d, e, f = fond.matrice
+        e2, f2 = self.point(e, f)
+        u = self.point(e + a, f + b)
+        v = self.point(e + c, f + d)
+        return ImageDeFond(
+            pixels=fond.pixels,
+            matrice=(u[0] - e2, u[1] - f2, v[0] - e2, v[1] - f2, e2, f2),
+        )
+
+    def du_trace(self, trace: Trace) -> Trace:
+        return replace(
+            trace,
+            sous_chemins=tuple(
+                tuple(self.point(x, y) for x, y in chemin) for chemin in trace.sous_chemins
+            ),
+            # La convention de `_trace` : l'épaisseur suit la racine du
+            # déterminant, qui vaut ici l'inverse de l'étirement.
+            epaisseur_pt=trace.epaisseur_pt / math.sqrt(self.etirement),
+        )
+
+    @property
+    def message(self) -> str:
+        largeur_px, hauteur_px = self.taille_px
+        largeur_pt, hauteur_pt = self.pose_pt
+        return (
+            "La copie d'écran du plan est étirée de "
+            f"{nombre_fr(round((self.etirement - 1.0) * 100.0, 1))} % en {self.cote} : "
+            f"ses {f'{largeur_px:,}'.replace(',', ' ')} x "
+            f"{f'{hauteur_px:,}'.replace(',', ' ')} pixels sont posés sur "
+            f"{nombre_fr(round(largeur_pt, 1))} x {nombre_fr(round(hauteur_pt, 1))} pt, "
+            "et ne sont plus carrés — PowerPoint ne le fait qu'en étirant l'image "
+            f"d'un seul côté. La page entière a été resserrée d'autant en {self.cote}, "
+            "l'image et tous les tracés ensemble, comme si les tracés avaient été "
+            "dessinés sur l'image déjà étirée. Si l'image a été étirée seule, après "
+            "le dessin, ce redressement déplace les tracés : vérifiez la clôture et "
+            "les pistes sur la planche DP 2. Pour corriger le plan lui-même, dans "
+            "PowerPoint : groupez l'image avec tous les tracés posés dessus, ramenez "
+            f"la {self.cote} du groupe à {nombre_fr(round(100.0 / self.etirement, 1))} % "
+            "sans conserver les proportions, et ne redimensionnez jamais l'image seule."
+        )
+
+
 @dataclass
 class PlanPDF:
     """Ce que le plan PDF dit, en points de la page. Rien n'y est encore calé."""
@@ -634,6 +733,10 @@ class PlanPDF:
     #: Ce que le tableau d'informations du plan déclare, quand il en porte un :
     #: clé de `INFORMATIONS_DU_PLAN` → valeur, et le texte d'où elle vient.
     informations: dict = field(default_factory=dict)
+    #: L'étirement de la copie d'écran que la page a été resserrée pour
+    #: annuler, ou None. Quand il y en a un, les points de la page ne sont plus
+    #: ceux du fichier : c'est ce qui le dit.
+    redressement: Redressement | None = None
 
     def entree(self, categorie: str) -> list:
         return [e for e in self.legende if e.categorie == categorie]
@@ -1379,6 +1482,37 @@ def _image_de_fond(images, page_numero: int, source: str) -> ImageDeFond:
     )
 
 
+def _etirement_de_l_image(fond: ImageDeFond) -> Redressement | None:
+    """L'étirement que la matrice de l'image prouve, ou None si ses pixels sont carrés.
+
+    C'est la mesure qui manquait au recoupement d'échelle : lui compare des
+    emprises de tables, à 2 % près, et nomme sa cause sur des statistiques que
+    la moindre tache de teinte fausse — à Montholon, il a accusé deux versions
+    du projet. La matrice ne se trompe pas : elle dit sur combien de points
+    de la page chaque pixel est posé, dans chaque direction.
+    """
+    largeur_px, hauteur_px = fond.taille
+    a, b, c, d, e, f = fond.matrice
+    largeur_pt, hauteur_pt = math.hypot(a, b), math.hypot(c, d)
+    rapport = (largeur_pt / largeur_px) / (hauteur_pt / hauteur_px)
+    if max(rapport, 1.0 / rapport) - 1.0 <= ETIREMENT_TOLERE:
+        return None
+    if rapport > 1.0:
+        cote, etirement, axe = "largeur", rapport, (a / largeur_pt, b / largeur_pt)
+    else:
+        cote, etirement, axe = "hauteur", 1.0 / rapport, (c / hauteur_pt, d / hauteur_pt)
+    return Redressement(
+        cote=cote,
+        etirement=etirement,
+        axe=axe,
+        # Le coin haut gauche : la première ligne de pixels est en haut, au
+        # bout du vecteur (c, d) de la matrice.
+        origine=(e + c, f + d),
+        taille_px=(largeur_px, hauteur_px),
+        pose_pt=(largeur_pt, hauteur_pt),
+    )
+
+
 def masque_des_tables(fond: ImageDeFond) -> np.ndarray:
     """Pixels de l'image qui portent la teinte des tables HelioScope.
 
@@ -1558,6 +1692,15 @@ def lire_plan_pdf(
     )
 
     fond = _image_de_fond(images, indice + 1, chemin.name)
+    # Avant tout ce qui mesure la page : le cadre, les rangées, l'échelle. Les
+    # formes gardent leur identité — la légende y renvoie —, seuls leurs
+    # tracés sont ramenés là où l'étirement les aurait laissés.
+    redressement = _etirement_de_l_image(fond)
+    if redressement is not None:
+        fond = redressement.du_fond(fond)
+        for objet in objets:
+            objet.traces = [redressement.du_trace(t) for t in objet.traces]
+        avertissements.append(redressement.message)
     cadre = fond.cadre
     surface_cadre = _surface_bornes(cadre)
     pastilles = {id(e.pastille) for e in legende}
@@ -1662,6 +1805,7 @@ def lire_plan_pdf(
         non_reconnus=[o for o, _ in non_reconnus],
         avertissements=avertissements,
         informations=_informations(lignes),
+        redressement=redressement,
     )
 
 

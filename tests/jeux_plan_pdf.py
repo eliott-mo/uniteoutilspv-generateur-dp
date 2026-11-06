@@ -71,6 +71,42 @@ def layout_cad(dossier: Path, dxf: Path, fond: Path) -> Path:
     return chemin
 
 
+def plan_etire(
+    dossier: Path, source: Path, page: int, largeur: float = 1.0, hauteur: float = 1.0
+) -> Path:
+    """Le plan `source` tel que PowerPoint l'exporte quand on en étire la carte.
+
+    La page `page` (à partir de 1) est étirée **entière** — la copie d'écran et
+    tous les tracés posés dessus —, autour du coin haut gauche de l'image.
+    C'est le cas de Montholon (89), relevé le 06/11/2026 : les tracés y ont été
+    dessinés sur une image déjà étirée de 2,11 % en largeur, et la suivent.
+    """
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as brut
+
+    chemin = Path(dossier) / f"{source.stem}_etire_{largeur:g}x{hauteur:g}.pdf"
+    document = pdfium.PdfDocument(str(source))
+    try:
+        feuille = document[page - 1]
+        objets = list(feuille.get_objects(max_depth=1))
+        image = next(o for o in objets if o.type == brut.FPDF_PAGEOBJ_IMAGE)
+        a, b, c, d, e, f = image.get_matrix().get()
+        x0, y0 = e + c, f + d
+        etirement = (
+            pdfium.PdfMatrix()
+            .translate(-x0, -y0)
+            .scale(largeur, hauteur)
+            .translate(x0, y0)
+        )
+        for objet in objets:
+            objet.transform(etirement)
+        feuille.gen_content()
+        document.save(str(chemin))
+    finally:
+        document.close()
+    return chemin
+
+
 def gannay_present() -> bool:
     return all(p.exists() for p in (PLAN_GANNAY, EXPORT_GANNAY))
 

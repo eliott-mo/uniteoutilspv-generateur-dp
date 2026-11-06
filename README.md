@@ -2797,8 +2797,10 @@ découle sans rien chercher. Deux recoupements la tiennent :
 
 - **l'emprise des tables**, le long des rangées et en travers, doit donner la
   même échelle à 2 % près (`ErreurEchelleIncoherente`). Une copie d'écran
-  étirée d'un seul côté dans PowerPoint garde son pas en travers et le perd le
-  long : c'est ce que le test simule ;
+  étirée d'un seul côté garde son pas en travers et le perd le long. Quand la
+  matrice de l'image le prouve, la page est redressée avant toute mesure (voir
+  plus bas) ; ce recoupement reste seul juge d'un étirement que la matrice ne
+  voit pas, celui d'une image rééchantillonnée ;
 - **le recouvrement** des deux damiers, une fois la translation trouvée, doit
   atteindre 70 % (`ErreurRecouvrementInsuffisant`). La translation maximise le
   recouvrement de Jaccard sur un domaine borné à 0,6 pas autour de
@@ -2818,6 +2820,44 @@ découle sans rien chercher. Deux recoupements la tiennent :
 Le cartouche du plan de Bray annonce 5 296 modules quand son DXF en porte
 4 590 : le recouvrement de 98,5 % dit que c'est le cartouche qui est périmé,
 pas le dessin.
+
+#### Une copie d'écran étirée se redresse, et le rapport le dit
+
+Relevé le 06/11/2026 sur Montholon (89) : un plan juste, refusé à −2,1 % le
+long des rangées pour 2 % admis, et dont le message accusait deux versions du
+projet. Les deux fichiers étaient au même indice. La copie d'écran de
+2 000 × 1 600 px y est posée sur 620,7 × 486,3 pt : son pixel fait 0,31035 pt
+de large pour 0,30394 de haut. PowerPoint l'avait étirée de 2,11 % en largeur.
+
+**La matrice de l'image est une preuve matérielle**, au même titre que la marge
+au bord de l'image : une copie d'écran a des pixels carrés, et la matrice dit
+sur combien de points de la page chaque pixel est posé, dans chaque direction.
+Au-delà de 0,5 % d'écart (`ETIREMENT_TOLERE` ; Gannay 0,05 %, Bray 0,
+Montholon 2,11 %), `lire_plan_pdf` redresse la page avant toute mesure, et le
+rapport le dit : la valeur, et la manœuvre qui corrige le plan lui-même —
+grouper l'image avec tous les tracés posés dessus, ramener la largeur du
+groupe à 97,9 % sans conserver les proportions, ne jamais redimensionner
+l'image seule. Le seuil est bien en deçà des 2 % du recoupement, et c'est
+voulu : Gannay étiré de 2,11 % passait le recoupement **sans rien dire**, sa
+planche fausse de 2 % et d'aspect correct. `PlanPDF.redressement` garde ce qui
+a été fait : les points de la page ne sont plus alors ceux du fichier.
+
+**C'est la page entière qui se redresse, pas l'image seule.** La clôture, les
+pistes et les ouvrages de Montholon ont été dessinés sur l'image déjà étirée.
+Ne redresser que l'image posait la piste sur 52 tables — 205 m² de
+recouvrement — et la clôture à 5 m des tables à l'ouest, 21 m à l'est ;
+redresser l'image et les tracés ensemble ne touche aucune table, et la clôture
+se tient à 10 et 12 m. Redressé ainsi, Montholon sort comme le PDF corrigé à la
+main : −0,16 % le long, −1,04 % en travers, recouvrement 94,0 %, fidélité
+99,2 %, clôture de 4,12 ha et 820 m, six ouvrages, un portail, trois pistes. Le
+seul cas que l'outil ne sait pas distinguer est celui d'une image étirée seule,
+**après** le dessin : le redressement déplace alors les tracés, et la note le
+dit, en renvoyant à la planche DP 2.
+
+Le test étire un vrai PDF — celui de Gannay, image et tracés ensemble, comme
+l'exporte PowerPoint —, en largeur de 2,11 % puis en hauteur de 5 %, et
+vérifie que la clôture du contrat écrit est celle du plan non étiré, à 0,05 %
+près.
 
 **Quand l'échelle est refusée, le message nomme la cause, et il doit la
 nommer juste.** Le refus tombe avant tous les contrôles qui s'expliquent en

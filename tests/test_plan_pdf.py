@@ -47,6 +47,7 @@ from tests.jeux_plan_pdf import (
     bray_present,
     gannay_present,
     layout_cad,
+    plan_etire,
 )
 
 besoin_gannay = pytest.mark.skipif(not gannay_present(), reason="jeu de Gannay absent")
@@ -253,6 +254,70 @@ def test_un_fichier_qui_n_est_pas_un_pdf_est_refuse(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Une copie d'écran étirée dans PowerPoint : la matrice le prouve
+# ---------------------------------------------------------------------------
+
+
+@besoin_gannay
+@pytest.mark.parametrize(
+    "largeur, hauteur, constat, consigne",
+    [
+        # L'étirement de Montholon. Le pixel de Gannay est déjà 0,05 % plus
+        # large que haut (591,359 pt sur 1 232 px, 477,359 sur 995) : posé
+        # 2,11 % plus large, il l'est de 2,16 %, et 1 / 1,0216 = 97,88 %.
+        (1.0211, 1.0, "étirée de 2,2 % en largeur", "largeur du groupe à 97,9 %"),
+        # L'autre côté : 1,05 / 1,0005 = 1,0495, et 1 / 1,0495 = 95,29 %.
+        (1.0, 1.05, "étirée de 4,9 % en hauteur", "hauteur du groupe à 95,3 %"),
+    ],
+)
+def test_une_copie_d_ecran_etiree_se_redresse_avec_ses_traces(
+    tmp_path, contrat_gannay, largeur, hauteur, constat, consigne
+):
+    """Relevé le 06/11/2026 sur Montholon (89) : un plan juste, refusé.
+
+    La copie d'écran de 2 000 x 1 600 px y est posée sur 620,7 x 486,3 pt :
+    son pixel fait 0,31035 pt de large pour 0,30394 de haut. PowerPoint l'a
+    étirée de 2,11 % en largeur, et la clôture, les pistes et les ouvrages ont
+    été dessinés **par-dessus**. Le recoupement d'échelle l'a vu de justesse —
+    -2,1 % pour 2 % admis — et son message accusait deux versions du projet.
+    Sur Gannay, le même étirement passe le recoupement **sans rien dire** :
+    la planche sort fausse de 2 % et s'affiche correctement.
+
+    La matrice de l'image, elle, le prouve sans statistique : une copie d'écran
+    a des pixels carrés. La page entière se redresse — l'image et les tracés
+    ensemble, puisqu'ils ont été dessinés sur l'image déjà étirée — et le
+    rapport dit l'étirement et la manœuvre qui corrige le plan lui-même.
+    """
+    from dp_socle.contrat import charger_contrat
+
+    etire = plan_etire(tmp_path, PLAN_GANNAY, page=2, largeur=largeur, hauteur=hauteur)
+    resultat = importer_plan_pdf(
+        etire,
+        EXPORT_GANNAY,
+        longitude_origine=LONGITUDE_GANNAY,
+        correction_nord_sud_m=NORD_SUD_GANNAY_M,
+        choix=CHOIX_GANNAY,
+    )
+
+    notes = [a for a in resultat.lecture.avertissements if "copie d'écran" in a]
+    assert len(notes) == 1, resultat.lecture.avertissements
+    assert constat in notes[0]
+    assert consigne in notes[0]
+    assert "sans conserver les proportions" in notes[0]
+    assert "jamais l'image seule" in notes[0]
+
+    # Le résultat est celui du plan qui n'a pas été étiré : la clôture du
+    # contrat écrit garde sa longueur et sa surface mesurées, et sa place.
+    sortie = tmp_path / "sortie"
+    resultat.ecrire(sortie)
+    enceinte = charger_contrat(sortie).geometries("cloture")[0]
+    assert enceinte.exterior.length == pytest.approx(683.8, rel=0.003)
+    assert enceinte.area == pytest.approx(29_145, rel=0.003)
+    reference = contrat_gannay.geometries("cloture")[0]
+    assert enceinte.symmetric_difference(reference).area < 0.003 * reference.area
+
+
+# ---------------------------------------------------------------------------
 # Les refus du calage (D7)
 # ---------------------------------------------------------------------------
 
@@ -263,6 +328,11 @@ def test_un_plan_etire_d_un_seul_cote_est_refuse(lecture_gannay, import_gannay):
 
     Le pas seul ne le verrait pas : c'est l'emprise des tables le long des
     rangées qui le trahit.
+
+    Le plan est bâti à la main et ne passe pas par `lire_plan_pdf`, qui
+    l'aurait redressé sur sa matrice (test précédent) : c'est le recoupement
+    qu'on éprouve ici, seul juge d'un étirement que la matrice ne voit pas —
+    celui d'une image rééchantillonnée.
     """
     a, b, c, d, e, f = lecture_gannay.fond.matrice
     etiree = replace(
