@@ -64,9 +64,10 @@ jobs:
       # `shell: bash`, déclaré, et non le shell par défaut. Sans lui, GitHub
       # lance le pas en `bash -e`, **sans `pipefail`** : il prend le code de
       # sortie de `tee`, toujours 0, et aucun test ne peut faire virer la suite
-      # au rouge. C'était le cas du 28/09 au 06/11/2026. Depuis le passage de
-      # `ubuntu-latest` à Ubuntu 26 (19/10), pytest s'y arrêtait en douze
-      # secondes au lieu de sept minutes, et le run restait vert. Déclaré, `bash`
+      # au rouge. C'était le cas du 28/09 au 06/11/2026. Depuis pandas 3.1.0
+      # (22/10), que rien n'épinglait, pytest s'y arrêtait en douze secondes au
+      # lieu de sept minutes — voir `requirements.txt` —, et le run restait
+      # vert. Déclaré, `bash`
       # devient `bash --noprofile --norc -eo pipefail` (documentation GitHub,
       # vérifiée le 06/11/2026).
       #

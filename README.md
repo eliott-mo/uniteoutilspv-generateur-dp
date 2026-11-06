@@ -711,10 +711,16 @@ pas envoie pytest dans `tee` pour que « Dire ce qui est tombé » ait de quoi
 lire. Or, sans `shell:` déclaré, GitHub lance un pas `run` en `bash -e`, **sans
 `pipefail`** : le pas prend le code de sortie de `tee`, toujours 0. Pendant
 cinq semaines, aucun test n'a pu faire virer la suite au rouge — le seul rouge
-de la période, le 05/10, était un runner introuvable. Et depuis le passage de
-`ubuntu-latest` à Ubuntu 26, annoncé pour le 19/10, pytest s'y arrêtait en
-quelques secondes : les tests réseau du lundi, sur le même commit, sont passés
-de 4 min 45 à 7 puis 4 secondes, toujours verts. Les deux pas portent désormais
+de la période, le 05/10, était un runner introuvable. Et depuis la sortie de
+pandas 3.1.0, le 22/10, pytest s'y arrêtait en quelques secondes : les tests
+réseau du lundi, sur le même commit, sont passés de 4 min 45 à 7 puis 4
+secondes, toujours verts. pandas n'était pas épinglé, la CI prenait la dernière,
+et celle-ci rend obsolète l'option `future.infer_string` que geopandas 1.1.3 lit
+dès son import : une `DeprecationWarning`, que `pytest.ini` change en erreur, et
+la collecte s'interrompt. Le premier diagnostic accusait le passage de
+`ubuntu-latest` à Ubuntu 26, annoncé pour le 19/10 dans une note de chaque
+run : la date collait, la cause non. Ce sont les annotations rétablies plus bas
+qui l'ont nommée. pandas est épinglé en 3.0.2 depuis. Les deux pas portent désormais
 `shell: bash`, qui vaut `bash --noprofile --norc -eo pipefail`. Le pas qui dit
 les échecs, lui, reste sans `pipefail` : ses `| head` y lèveraient un SIGPIPE.
 Le premier rouge rendu par `pipefail` — code 2 en six secondes, une collecte
