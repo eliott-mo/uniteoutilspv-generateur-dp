@@ -53,10 +53,11 @@ jobs:
       # `shell: bash` pour `pipefail`, comme dans `tests.yml` : sans lui, le pas
       # prend le code de sortie de `tee`. Les 26/10 et 02/11/2026, ce pas a duré
       # 7 et 4 secondes au lieu de 4 min 45, sur le même commit, et le rendez-vous
-      # est resté vert.
+      # est resté vert. Et `-rfE` pour que les erreurs de collecte arrivent au
+      # résumé, donc aux annotations.
       - name: Les tests réseau, et eux seuls
         shell: bash
-        run: python -m pytest -q -m "reseau" -rf | tee pytest.log
+        run: python -m pytest -q -m "reseau" -rfE | tee pytest.log
 
       # Comme dans `tests.yml` : les journaux demandent des droits
       # d'administration, le résumé et les annotations non. Un rendez-vous
@@ -76,3 +77,5 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           grep -E '^(FAILED|ERROR)' pytest.log | head -10 | sed 's|^|::error::|' || true
+          # La raison aussi, comme dans `tests.yml`.
+          grep -E '^E   ' pytest.log | sort -u | head -5 | sed 's|^E   |::error::|' || true

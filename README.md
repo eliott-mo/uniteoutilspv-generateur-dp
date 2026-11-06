@@ -717,6 +717,14 @@ quelques secondes : les tests réseau du lundi, sur le même commit, sont passé
 de 4 min 45 à 7 puis 4 secondes, toujours verts. Les deux pas portent désormais
 `shell: bash`, qui vaut `bash --noprofile --norc -eo pipefail`. Le pas qui dit
 les échecs, lui, reste sans `pipefail` : ses `| head` y lèveraient un SIGPIPE.
+Le premier rouge rendu par `pipefail` — code 2 en six secondes, une collecte
+interrompue — n'a laissé aucune annotation qui dise quoi : pytest tournait en
+`-rf`, et son résumé court, le seul que lise ce pas, n'y liste pas les erreurs
+de collecte. Les deux pas sont passés en `-rfE`, le défaut de pytest, et « Dire
+ce qui est tombé » annote aussi les premières lignes `E` du journal : la
+raison, pas seulement le nom du fichier. Le résumé du job, lui, ne s'affiche
+qu'aux visiteurs connectés — constaté le même jour, page publique du run en
+main.
 
 La leçon vaut pour la lecture : `conclusion: success` ne dit rien si le pas
 des tests n'a pas duré le temps d'une suite. La durée de chaque pas se lit sans

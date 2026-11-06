@@ -69,9 +69,15 @@ jobs:
       # secondes au lieu de sept minutes, et le run restait vert. Déclaré, `bash`
       # devient `bash --noprofile --norc -eo pipefail` (documentation GitHub,
       # vérifiée le 06/11/2026).
+      #
+      # `-rfE`, et non `-rf` : le résumé court de pytest ne liste les erreurs —
+      # de collecte comme de mise en place — qu'avec `E`, et « Dire ce qui est
+      # tombé » ne lit que lui. Le premier rouge rendu par `pipefail`, le
+      # 06/11/2026 — code 2 en six secondes, une collecte interrompue —, n'a
+      # laissé aucune annotation qui dise quoi.
       - name: La suite, tests réseau exclus
         shell: bash
-        run: python -m pytest -q -rf -m "not reseau" | tee pytest.log
+        run: python -m pytest -q -rfE -m "not reseau" | tee pytest.log
 
       # Les journaux d'un run demandent des droits d'administration sur le
       # dépôt ; les annotations et le résumé du job, non. Relevé le
@@ -92,3 +98,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           grep -E '^(FAILED|ERROR)' pytest.log | head -10 | sed 's|^|::error::|' || true
+          # La raison, et pas seulement le nom : une erreur de collecte ne se
+          # dit qu'à sa ligne `E`, et le résumé du job ne s'affiche qu'aux
+          # visiteurs connectés (constaté le 06/11/2026).
+          grep -E '^E   ' pytest.log | sort -u | head -5 | sed 's|^E   |::error::|' || true
