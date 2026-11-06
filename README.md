@@ -2930,10 +2930,24 @@ Rejoué ainsi, Montholon sort à +2,5 % de cumul et 1,004 au même facteur, et l
 message nomme la copie d'écran redimensionnée. Le test pose une ombre de six
 pixels sur cinq au bout de la rangée la plus courte de Gannay, rééchantillonné
 de 5 % — l'étirement dans les pixels, là où la matrice ne prouve rien : sans la
-règle d'épaisseur, le message renvoyait vérifier les indices. La vingtième
-rangée de Montholon compte toujours au **nombre** de rangées, 20 contre 19, et
-mange ainsi la tolérance d'une rangée de `ECART_RANGEES_MAX` : ce compte n'a
-pas été touché.
+règle d'épaisseur, le message renvoyait vérifier les indices.
+
+**Une bande détachée du champ n'est pas une rangée, au compte non plus.** La
+vingtième rangée de Montholon — une bande de 592 pixels, dont 164 survivaient
+aux isolats — comptait au **nombre** de rangées, 20 contre 19 : elle mangeait
+la tolérance d'une rangée de `ECART_RANGEES_MAX`, qui laisse passer une rangée
+d'un bout cachée sous la légende, et un plan à qui il en manquait une vraie
+aurait été refusé. Sur Gannay, une bande pareille — dix taches de
+14 × 4 pixels, cinq pas et demi sous le champ — faisait pire : elle allongeait
+l'emprise en travers de 26 %, et le refus accusait deux versions du projet,
+« 17 rangées contre 16 ». `mesurer_rangees` écarte donc, avant de mesurer le
+pas, les groupes de bandes détachés et négligeables, par la règle du cumul
+(`_rattachees_au_champ`). Ce qu'il écarte ne compte ni au nombre de rangées,
+ni à l'emprise, ni au calage, et le contrôle « Calage du plan sur les tables »
+le dit : une bande que l'outil a vue et n'a pas comptée n'est pas une bande
+qu'il n'a pas vue. Montholon montre alors 19 rangées pour 19 ; son calage
+bouge à peine (−0,90 % en travers au lieu de −1,04 %, recouvrement 94,1 %,
+fidélité 99,3 %), et Gannay comme Bray n'écartent rien.
 
 C'est la **longueur mesurée** qui compte les modules, pas le nombre écrit au
 cartouche : à Bray, c'est le cartouche qui se trompait. Et un plan dont les

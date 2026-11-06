@@ -419,6 +419,52 @@ def test_une_tache_au_bout_d_une_rangee_ne_masque_pas_l_etirement(
     assert "indice" not in message, "les deux fichiers concordent, c'est le plan"
 
 
+@besoin_gannay
+def test_une_bande_de_bruit_loin_du_champ_n_est_pas_une_rangee(
+    lecture_gannay, import_gannay
+):
+    """Relevé le 06/11/2026 sur Montholon (89) : 20 rangées au plan, 19 au DXF.
+
+    La vingtième était faite de pixels épars le long de l'autoroute, en haut de
+    la photo : une bande de 592 pixels à 14,8 pas de la dernière rangée. Elle
+    mangeait la tolérance d'une rangée de `ECART_RANGEES_MAX`, celle qui laisse
+    passer une rangée d'un bout cachée sous la légende. Sur Gannay, une bande pareille —
+    dix taches de 14 x 4 pixels, cinq pas et demi sous le champ — fait pire :
+    elle allonge l'emprise en travers de 26 %, et le refus accuse deux versions
+    du projet, « 17 rangées contre 16 ».
+
+    Écartée, elle se dit au rapport : c'est une bande que l'outil a vue et n'a
+    pas comptée, pas une bande qu'il n'a pas vue.
+    """
+    import numpy as np
+
+    from dp_socle.plan_pdf import masque_des_tables
+
+    pixels = lecture_gannay.fond.pixels.copy()
+    tables = masque_des_tables(lecture_gannay.fond)
+    lignes, _ = np.nonzero(tables)
+    bas = int(lignes.max())
+    for x in range(400, 700, 30):
+        pixels[bas + 180 : bas + 194, x : x + 4] = np.median(pixels[tables], axis=0)
+    bruitee = replace(
+        lecture_gannay, fond=ImageDeFond(pixels, lecture_gannay.fond.matrice)
+    )
+
+    calage = caler_sur_tables(bruitee, import_gannay.implantation)
+
+    assert calage.nb_rangees_plan == calage.nb_rangees_dxf == 16
+    controle = next(
+        c
+        for c in replace(
+            import_gannay, lecture=bruitee, calage=calage, _memoire={}
+        ).controles
+        if c.libelle == "Calage du plan sur les tables"
+    )
+    # Dix taches de 14 x 4 : 560 pixels, comptés à la main.
+    assert "Une bande de 560 pixels" in controle.message
+    assert "pas été comptée" in controle.message
+
+
 def test_le_refus_d_echelle_en_travers_compte_les_rangees():
     """Relevé le 09/10/2026 chez un chef de projet : +20,4 % en travers.
 

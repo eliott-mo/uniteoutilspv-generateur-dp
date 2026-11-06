@@ -2262,6 +2262,10 @@ class RangeesDuPlan:
     #: Écarts entre rangées voisines qui ne sont pas un multiple du pas : les
     #: allées entre blocs. Elles ne comptent pas dans la mesure du pas.
     allees: int = 0
+    #: Les bandes du profil qui avaient l'air de rangées et n'en sont pas —
+    #: détachées du champ et négligeables, voir `ECART_RANGEES_DETACHEES` :
+    #: pour chaque groupe écarté, son écart au champ en pas, et ses pixels.
+    rangees_detachees: list = field(default_factory=list)
 
 
 #: Part des pixels de table sous laquelle un groupe isolé n'est pas le champ.
@@ -2306,6 +2310,70 @@ def _sans_les_isolats(points, retenus, direction: float, pas: float):
     for groupe in gardes:
         filtre[groupe] = True
     return filtre, int(retenus.sum() - filtre.sum())
+
+
+#: Écart, en pas de rangées, au-delà duquel un groupe de rangées se tient à
+#: l'écart du champ.
+#:
+#: Mesuré le 06/11/2026 sur Montholon (89) : des pixels épars le long de
+#: l'autoroute, en haut de la photo, forment une vingtième rangée — une bande
+#: de 592 pixels à 14,8 pas de la dernière, pour un champ de 180 000, dont 164
+#: survivaient aux isolats. Elle comptait 78,5 m au cumul des rangées, et une
+#: rangée au compte, dont `ECART_RANGEES_MAX` ne tolère qu'une. Comme le long
+#: des rangées (`_sans_les_isolats`), il faut **à la fois** être loin et peser
+#: moins de `PART_ISOLAT_MAX` : un projet en deux zones, comme
+#: Saint-Aubin-sur-Loire, garde la seconde. Trois pas laissent dans le champ
+#: l'allée de Sarnois (1,35 pas) et une rangée manquante (2).
+ECART_RANGEES_DETACHEES = 3
+
+
+def _rattachees_au_champ(places: np.ndarray, poids: np.ndarray) -> np.ndarray:
+    """Les rangées qui tiennent au champ : places triées, en pas ; poids en points.
+
+    Un groupe de rangées qui s'en tient à plus de `ECART_RANGEES_DETACHEES`
+    pas et pèse moins de `PART_ISOLAT_MAX` des points n'en est pas.
+    """
+    places = np.asarray(places, dtype=float)
+    poids = np.asarray(poids)
+    coupures = np.nonzero(np.round(np.diff(places)) > ECART_RANGEES_DETACHEES)[0]
+    gardes = np.zeros(len(places), dtype=bool)
+    minimum = PART_ISOLAT_MAX * poids.sum()
+    for groupe in np.split(np.arange(len(places)), coupures + 1):
+        if poids[groupe].sum() >= minimum:
+            gardes[groupe] = True
+    if not gardes.any():
+        # Il y faudrait plus de cent groupes, chacun à plus de trois pas des
+        # autres : sans champ où se rattacher, la règle ne dit rien.
+        return np.ones(len(places), dtype=bool)
+    return gardes
+
+
+def _sans_les_rangees_detachees(bandes: list) -> tuple[list, list]:
+    """Les bandes du profil en travers, sans celles qui ne tiennent pas au champ.
+
+    `bandes` : couples (centre, pixels de la bande), triés en travers. Le pas
+    n'est pas encore mesuré : la médiane des écarts en tient lieu, qu'une
+    bande égarée ne déplace pas. Rend les bandes gardées et, pour chaque
+    groupe écarté, son écart à la bande gardée la plus proche, en pas, et ses
+    pixels — pour que le rapport le dise.
+    """
+    if len(bandes) < 3:
+        return bandes, []
+    centres = np.array([centre for centre, _ in bandes])
+    poids = np.array([int(dans.sum()) for _, dans in bandes])
+    pas = float(np.median(np.diff(centres)))
+    gardes = _rattachees_au_champ(centres / pas, poids)
+    if gardes.all():
+        return bandes, []
+    ecartees = []
+    for groupe in np.split(np.arange(len(bandes)), np.nonzero(np.diff(gardes))[0] + 1):
+        if gardes[groupe[0]]:
+            continue
+        ecart = min(
+            abs(centres[i] - centres[j]) for i in groupe for j in np.nonzero(gardes)[0]
+        )
+        ecartees.append((ecart / pas, int(poids[groupe].sum())))
+    return [bande for bande, garde in zip(bandes, gardes) if garde], ecartees
 
 
 def _pas_pixel(fond: ImageDeFond) -> float:
@@ -2535,15 +2603,21 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
     direction = _dans_demi_tour(reference + float(np.average(ecarts, weights=poids)))
 
     histogramme, origine, projection = _profil(points, direction + 90.0, pas)
-    centres = []
-    dans_une_bande = np.zeros(len(points), dtype=bool)
+    bandes = []
     for bande in _bandes(histogramme):
         dans = _dans_la_bande(projection, origine, pas, bande)
         if dans.sum() < 20:
             continue
-        centres.append(float(projection[dans].mean()))
+        bandes.append((float(projection[dans].mean()), dans))
+    bandes.sort(key=lambda bande: bande[0])
+    # Avant le pas, pas après : une bande égarée qui tomberait près d'un
+    # multiple du pas entrerait dans la droite des centres. Et ce qu'on écarte
+    # ici ne compte ni au nombre de rangées, ni à l'emprise, ni au calage.
+    bandes, rangees_detachees = _sans_les_rangees_detachees(bandes)
+    centres = [centre for centre, _ in bandes]
+    dans_une_bande = np.zeros(len(points), dtype=bool)
+    for _, dans in bandes:
         dans_une_bande |= dans
-    centres.sort()
     ecarts_rangees = np.diff(centres)
     if len(ecarts_rangees) < 2:
         # La cause est presque toujours la finesse de la copie d'écran, et le
@@ -2576,6 +2650,7 @@ def mesurer_rangees(fond: ImageDeFond, masque: np.ndarray | None = None) -> Rang
         points=points[dans_une_bande],
         masque=masque_rangees,
         isolats_ecartes=isolats,
+        rangees_detachees=rangees_detachees,
     )
 
 
@@ -2614,6 +2689,8 @@ class CalagePlan:
     recouvrement_retourne: float
     direction_plan_deg: float
     direction_dxf_deg: float
+    #: Les bandes écartées du compte des rangées : voir `RangeesDuPlan`.
+    rangees_detachees: list = field(default_factory=list)
 
     @property
     def m_par_px_reference(self) -> float:
@@ -2833,30 +2910,15 @@ def _etendues_denses(points: np.ndarray, direction_deg: float, pixel: float):
 #: et Bray perdent 0,5 à 0,6 %.
 EPAISSEUR_RANGEE_MIN = 0.5
 
-#: Écart, en pas de rangées, au-delà duquel un groupe de rangées se tient à
-#: l'écart du champ.
-#:
-#: Mesuré le 06/11/2026 sur Montholon (89) : des pixels épars le long de
-#: l'autoroute, en haut de la photo, forment une vingtième rangée — 164 pixels
-#: à 14,8 pas de la dernière, pour un champ de 180 000 —, qui comptait 78,5 m
-#: au cumul. Comme le long des rangées (`_sans_les_isolats`), il faut **à la
-#: fois** être loin et peser moins de `PART_ISOLAT_MAX` : un projet en deux
-#: zones, comme Saint-Aubin-sur-Loire, garde la seconde. Trois pas laissent
-#: dans le champ l'allée de Sarnois (1,35 pas) et une rangée manquante (2).
-ECART_RANGEES_DETACHEES = 3
-
 
 def _rangees_du_champ(rangs: np.ndarray) -> list[int]:
-    """Les rangs d'un nuage, sans les groupes de rangées détachés et négligeables."""
+    """Les rangs d'un nuage, sans les groupes de rangées détachés et négligeables.
+
+    La règle de `mesurer_rangees`, appliquée ici aux deux nuages : le plan en
+    est déjà passé, le DXF non, et les deux cumuls se comparent à règle égale.
+    """
     valeurs, poids = np.unique(rangs, return_counts=True)
-    coupures = np.nonzero(np.diff(valeurs) > ECART_RANGEES_DETACHEES)[0]
-    minimum = PART_ISOLAT_MAX * len(rangs)
-    return [
-        int(rang)
-        for groupe in np.split(np.arange(len(valeurs)), coupures + 1)
-        if poids[groupe].sum() >= minimum
-        for rang in valeurs[groupe]
-    ]
+    return [int(rang) for rang in valeurs[_rattachees_au_champ(valeurs, poids)]]
 
 
 def _longueur_de_rangee(le_long: np.ndarray, pixel: float) -> float:
@@ -3172,6 +3234,7 @@ def caler_sur_tables(plan: PlanPDF, implantation) -> CalagePlan:
         recouvrement_retourne=essais[1][0],
         direction_plan_deg=rangees.direction_deg,
         direction_dxf_deg=direction_dxf,
+        rangees_detachees=rangees.rangees_detachees,
     )
 
 
@@ -6204,6 +6267,16 @@ class ImportPlanPDF:
                     "l'emprise mesurée."
                     if self.calage.isolats_ecartes
                     else ""
+                )
+                # Une bande vue et écartée se dit : autrement, le chef de
+                # projet qui la verrait sur la photo croirait l'outil aveugle.
+                + "".join(
+                    f" Une bande de {f'{pixels:,}'.replace(',', ' ')} pixels à la "
+                    f"teinte des tables, à {nombre_fr(round(ecart, 1))} pas du champ, "
+                    "n'a pas été comptée parmi ses rangées : si loin et si "
+                    "légère, c'est la photo qui porte cette teinte — une route, "
+                    "une toiture —, pas le calepinage."
+                    for ecart, pixels in self.calage.rangees_detachees
                 ),
                 f"{self.calage.nb_rangees_dxf} rangées",
             ),
