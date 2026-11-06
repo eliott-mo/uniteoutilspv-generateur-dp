@@ -50,7 +50,12 @@ jobs:
       - name: Dépendances Python, aux versions épinglées
         run: python -m pip install -r requirements-dev.txt
 
+      # `shell: bash` pour `pipefail`, comme dans `tests.yml` : sans lui, le pas
+      # prend le code de sortie de `tee`. Les 26/10 et 02/11/2026, ce pas a duré
+      # 7 et 4 secondes au lieu de 4 min 45, sur le même commit, et le rendez-vous
+      # est resté vert.
       - name: Les tests réseau, et eux seuls
+        shell: bash
         run: python -m pytest -q -m "reseau" -rf | tee pytest.log
 
       # Comme dans `tests.yml` : les journaux demandent des droits

@@ -704,6 +704,24 @@ L'action installe les paquets système en lisant `packages.txt` lui-même : les
 deux ne peuvent pas diverger, et un `packages.txt` repassé en CRLF fait échouer
 apt bruyamment là où Streamlit l'ignore en silence.
 
+**Un vert n'est un vert que si pytest peut le refuser.** Relevé le 06/11/2026,
+en lisant la CI après une poussée : le pas des tests avait duré **12 secondes**,
+contre 7 minutes jusqu'au 15/10, et le run était vert. Depuis le 28/09/2026, le
+pas envoie pytest dans `tee` pour que « Dire ce qui est tombé » ait de quoi
+lire. Or, sans `shell:` déclaré, GitHub lance un pas `run` en `bash -e`, **sans
+`pipefail`** : le pas prend le code de sortie de `tee`, toujours 0. Pendant
+cinq semaines, aucun test n'a pu faire virer la suite au rouge — le seul rouge
+de la période, le 05/10, était un runner introuvable. Et depuis le passage de
+`ubuntu-latest` à Ubuntu 26, annoncé pour le 19/10, pytest s'y arrêtait en
+quelques secondes : les tests réseau du lundi, sur le même commit, sont passés
+de 4 min 45 à 7 puis 4 secondes, toujours verts. Les deux pas portent désormais
+`shell: bash`, qui vaut `bash --noprofile --norc -eo pipefail`. Le pas qui dit
+les échecs, lui, reste sans `pipefail` : ses `| head` y lèveraient un SIGPIPE.
+
+La leçon vaut pour la lecture : `conclusion: success` ne dit rien si le pas
+des tests n'a pas duré le temps d'une suite. La durée de chaque pas se lit sans
+droits, dans `actions/runs/{id}/jobs`.
+
 Les tests marqués `reseau` ont leur propre rendez-vous, `tests-reseau.yml`, le
 **lundi matin** — et un déclenchement à la main quand on veut. Ils sont exclus
 de la suite de chaque poussée à dessein : le vert du dépôt ne doit pas dépendre

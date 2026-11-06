@@ -117,7 +117,11 @@ moteur `Planche` du lot 1.
 
   Les champs qui comptent sont `head_sha`, `status` et `conclusion`. Vérifié le
   14/10/2026 : les cinq poussées du 13/10 étaient vertes, et personne ne l'avait
-  regardé.
+  regardé. Mais ce vert-là ne prouvait rien : du 28/09 au 06/11/2026, le pas des
+  tests envoyait pytest dans `tee` sans `pipefail`, et sortait à 0 quoi qu'il
+  arrive (voir README, « La suite tourne aussi sur Linux »). Lire aussi la
+  durée du pas des tests dans `actions/runs/{id}/jobs` : une suite ne passe pas
+  en douze secondes.
 - **Console Windows** : préfixer les commandes Python par
   `PYTHONIOENCODING=utf-8`, sinon les accents lèvent une `UnicodeEncodeError` à
   l'affichage.

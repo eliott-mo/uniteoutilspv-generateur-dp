@@ -60,7 +60,17 @@ jobs:
       # Aptos est embarquée dans le dépôt et installée par `polices.installer_polices()`
       # au premier appel. Ce pas ne fait que le dire : si fontconfig ne la voyait
       # pas, `test_typographie.py` le montrerait.
+      #
+      # `shell: bash`, déclaré, et non le shell par défaut. Sans lui, GitHub
+      # lance le pas en `bash -e`, **sans `pipefail`** : il prend le code de
+      # sortie de `tee`, toujours 0, et aucun test ne peut faire virer la suite
+      # au rouge. C'était le cas du 28/09 au 06/11/2026. Depuis le passage de
+      # `ubuntu-latest` à Ubuntu 26 (19/10), pytest s'y arrêtait en douze
+      # secondes au lieu de sept minutes, et le run restait vert. Déclaré, `bash`
+      # devient `bash --noprofile --norc -eo pipefail` (documentation GitHub,
+      # vérifiée le 06/11/2026).
       - name: La suite, tests réseau exclus
+        shell: bash
         run: python -m pytest -q -rf -m "not reseau" | tee pytest.log
 
       # Les journaux d'un run demandent des droits d'administration sur le
