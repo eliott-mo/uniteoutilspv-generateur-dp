@@ -554,7 +554,11 @@ texte se calculait sur des chasses que le dossier n'emploie pas.
 
 - **Linux** (cible de déploiement) : cairo passe par FreeType et fontconfig. Le
   TTF est copié dans `~/.local/share/fonts` et le cache rafraîchi
-  automatiquement au démarrage. Rien à faire.
+  automatiquement au démarrage. Rien à faire — pourvu que la copie précède tout
+  rendu du processus : `app.py` la fait en tête, `tests/conftest.py` à son
+  import. Faite après un premier usage de fontconfig, elle arrive trop tard
+  pour la police déjà retenue, et la relecture de fontconfig qu'elle provoque
+  dérègle cairo (voir « La suite tourne aussi sur Linux »).
 - **Windows** : cairo 1.18 passe par **DirectWrite**, qui ne voit que les
   polices installées pour l'utilisateur ou la machine. `AddFontResourceEx`
   (polices privées GDI), `FcConfigAppFontAddFile` et `FONTCONFIG_FILE` ont été
@@ -735,6 +739,54 @@ main.
 La leçon vaut pour la lecture : `conclusion: success` ne dit rien si le pas
 des tests n'a pas duré le temps d'une suite. La durée de chaque pas se lit sans
 droits, dans `actions/runs/{id}/jobs`.
+
+**Une session de tests compose comme la production, ou elle ne mesure rien.**
+Rendue capable de dire rouge, la suite Linux est tombée le 06/11/2026 sur cinq
+tests qui lisent le texte des planches : le cartouche de la notice s'y
+éclatait en « D », « A », « T », « E » (`test_notice_lot5.py`), la DP 4-1
+surélevée s'y lisait « Plandetoiture » (`test_surelevation_lot9.py`). Ni la
+production ni la lecture des tests n'étaient en cause : le PDF faux était celui
+de la session, qui ne composait pas comme l'application.
+
+- **Elle ne composait pas en Aptos.** Depuis le 28/09/2026,
+  `test_ajout_notice_lot7.py` est le premier module trié, et il compose du
+  texte avec CairoSVG dès ses premières lignes : fontconfig s'initialisait dans
+  le processus de pytest avant qu'Aptos lui soit copiée — seul `etat_polices()`
+  la copiait, c'est-à-dire le premier test qui joue `app.py`. `famille_active()`,
+  en cache pour la session, se figeait sur Liberation Sans, et
+  `test_la_chasse_mesuree_est_celle_du_fichier_de_police`, qui l'aurait dit,
+  sautait. Le premier rouge de la CI, le 28/09 à 21:05, est celui du commit qui
+  a ajouté ce module ; son journal ne se lit pas, et ce qu'il disait n'est pas
+  établi.
+- **Et la copie, faite en cours de route, déréglait cairo.** Un dossier de
+  polices modifié sous un fontconfig déjà chargé le fait se relire : cairo
+  appelle `FcInitBringUptoDate()` quand une police manque à son cache, et
+  fontconfig revérifie alors ses dossiers, au plus toutes les 30 s par défaut.
+  Mesuré dans la séquence fautive : la configuration courante de fontconfig
+  change à 83,9 s, au premier test du lot 5, et la DP 4-1 qui suit porte
+  **582 polices** — 581 sous-ensembles de LiberationSans, un par glyphe romain,
+  plus le gras — au lieu de deux. pypdf, qui coupe son texte à chaque changement de police, n'y
+  retrouve plus ni espace ni mot. Le chemin, lu dans le code de cairo 1.18.4 et
+  cohérent avec ces mesures : un PDF range chaque sous-ensemble sous la face de
+  la police qui dessine, mais le fabrique depuis une police de taille 1 recréée
+  à partir de la face « toy » ; après la relecture, la police de dessin gardée
+  en cache porte l'ancienne face, la police de taille 1 la nouvelle, la
+  recherche manque à chaque glyphe, et chaque glyphe ouvre son sous-ensemble.
+
+Mesuré sur une branche jetable le 06/11/2026 (`ubuntu-latest` : Ubuntu
+26.04.1, cairo 1.18.4, fontconfig 2.17.1, FreeType 2.14.2) : isolés, les cinq
+tests passent, qu'Aptos soit copiée avant la session ou jamais ; ils passent
+encore après le lot 7 suivi de n'importe lequel des dix tests de
+`test_app_plan_pdf.py` ; ils tombent après le lot 7 et le module entier, et la
+relecture se mesure alors juste avant eux. Avec Aptos copiée dès l'import de
+`tests/conftest.py`, la suite complète passe : 989 tests, aucun échec, en
+7 min 04.
+
+La production n'y est pas exposée : `app.py` copie Aptos au démarrage, avant
+tout rendu, et fontconfig ne voit jamais un dossier changer après son
+chargement. C'est ce que `tests/conftest.py` fait désormais à son import. Et
+sous Linux, où la copie est automatique, le test de chasse tombe au lieu de
+sauter : une session qui composerait dans une autre police se dirait.
 
 Les tests marqués `reseau` ont leur propre rendez-vous, `tests-reseau.yml`, le
 **lundi matin** — et un déclenchement à la main quand on veut. Ils sont exclus
