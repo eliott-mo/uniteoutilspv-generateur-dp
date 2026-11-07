@@ -9,12 +9,20 @@
 > pas. En particulier, les règles « aucun repli silencieux » et « vérifier
 > plutôt que supposer » s'appliquent telles quelles.
 >
-> Posé le 03/11/2026, repris le 07/11/2026. Entre les deux, une maquette
-> jetable, restée hors du dépôt, a été relue par le chef de projet du lot,
-> puis par les chefs de projet de Saint-Cyr-en-Val et d'Auzainvilliers, les
-> deux projets qui ont reçu la demande de compléments. Les décisions ci-dessous
-> sont celles de ces relectures. Chacune porte sa date, et dit ce que la
-> maquette a montré quand c'est la mesure qui a tranché.
+> Posé le 03/11/2026, repris le 07/11/2026. Entre les deux, une maquette a été
+> relue par le chef de projet du lot, puis par les chefs de projet de
+> Saint-Cyr-en-Val et d'Auzainvilliers, les deux projets qui ont reçu la
+> demande de compléments. Les décisions ci-dessous sont celles de ces
+> relectures. Chacune porte sa date, et dit ce que la maquette a montré quand
+> c'est la mesure qui a tranché.
+>
+> La maquette est versée à côté de ce brief, dans
+> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 07/11/2026. C'est une
+> référence, pas du code à reprendre : elle remplace à l'exécution des fonctions
+> du socle pour poser ses cotes sur la DP 2 du lot 4, et rien ne la teste. On y
+> lit le détail de ce que les décisions résument — le placement des valeurs
+> (`poser`), le voisinage relatif, les essais de la DP 2 — et, en commentaire,
+> les pièges mesurés en chemin.
 
 ---
 
@@ -429,9 +437,9 @@ une sonde jetable restée hors du dépôt. Les lignes « Ouvrages » et
 
 ### Saint-Cyr-en-Val et Auzainvilliers, le 07/11/2026
 
-Mesuré sur la troisième version de la maquette, avec des contrats refaits par
-`importer_be` à partir des fichiers du bureau d'études, comme l'application le
-fait, sans ligne de coupe.
+Mesuré avec `maquette_lot10_cotes_dp2.py` dans son état versé, sur des
+contrats refaits par `importer_be` à partir des fichiers du bureau d'études,
+comme l'application le fait, sans ligne de coupe.
 
 | Grandeur | Saint-Cyr-en-Val IND07 | Auzainvilliers IND03 |
 |---|---|---|
