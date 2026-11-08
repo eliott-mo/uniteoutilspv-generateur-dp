@@ -475,26 +475,25 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
     seul rectangle de 10 x 3 m là où le tableau déclare un PDL/PTR de 12 x 3 —
     on retombe sur l'ancienne règle : l'union du calque, redressée si elle est
     déjà rectangulaire, et l'écart au tableau écrit au rapport.
+
+    Le nombre et la surface des postes se recoupent avec le tableau bilan, voir
+    `_recouper_avec_le_tableau` — même quand le calque est vide.
     """
     parties = contrat.geometries(categorie)
-    if not parties:
+    union = union_valide(parties) if parties else None
+    if union is not None and (union.is_empty or union.area <= 0):
+        union = None
+    postes, autour, copies = (
+        separer_les_corps(contrat, categorie, parties)
+        if union is not None
+        else ([], list(parties), {})
+    )
+    _recouper_avec_le_tableau(
+        contrat, categorie, postes, autour, union, avertissements
+    )
+    if union is None:
         return parties, []
 
-    union = union_valide(parties)
-    if union is None or union.is_empty or union.area <= 0:
-        return parties, []
-
-    cles = COMPTEES_AU_TABLEAU.get(categorie)
-    if cles:
-        declaree = (contrat.postes or {}).get(cles[1])
-        if declaree and abs(union.area - declaree) > TOLERANCE_EMPRISE_POSTE * declaree:
-            avertissements.append(
-                f"« {categorie} » : {union.area:.1f} m² dessinés au plan pour "
-                f"{declaree:.1f} m² déclarés au tableau bilan. La planche "
-                "montre ce que le plan porte."
-            )
-
-    postes, autour, copies = separer_les_corps(contrat, categorie, parties)
     if postes:
         if autour or copies:
             avertissements.append(
@@ -518,6 +517,115 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
             )
 
     return dessinee, []
+
+
+def _recouper_avec_le_tableau(
+    contrat, categorie: str, postes: list, autour: list, union, avertissements: list
+) -> None:
+    """Le nombre et la surface des postes d'une catégorie, recoupés avec le tableau.
+
+    **La surface déclarée se lit de deux façons**, et les deux se rencontrent.
+    Le tableau intitule la ligne « Surface des PTR (m²) » : la surface des
+    postes eux-mêmes, tous ceux de la catégorie. Auzainvilliers V3 déclare ainsi
+    30 m² pour un PTR de 10 x 3 m et 36 m² pour un PDL/PTR de 12 x 3 m ; mais
+    Saint-Cyr, en V6 comme en V7, déclare 66 m² pour un PDL/PTR de 36 m² flanqué
+    de deux bandes de 18 et 12 m² — l'union du calque. Le contrôle accepte l'une
+    ou l'autre, à `TOLERANCE_EMPRISE_POSTE` près. Il ne lisait que l'union, et
+    annonçait à Auzainvilliers « 132.4 m² dessinés au plan pour 36.0 m²
+    déclarés » pour un poste dessiné au centimètre (relevé le 07/11/2026) : le
+    message laissait croire le poste faux. Hors des deux lectures, il dit la
+    déclaration, les postes et leur surface, et l'union avec la terre remise.
+    Sans rien au plan, seul le nombre parle.
+
+    **Le nombre se compare toujours** : les postes reconnus, copies comptées une
+    fois, contre la ligne « Nombre de … ». À Auzainvilliers, le calque 0 apparié
+    au PTR, le plan porte deux PTR pour un au tableau : le second est celui des
+    batteries, que le catalogue range dans sa section « Aire de charge (BESS) —
+    PTR » et que le tableau peut ne pas compter avec les autres. Le message le
+    rappelle quand le plan porte une aire de charge.
+
+    Aucun des deux messages ne bloque : ce sont des écarts à lire.
+    """
+    cles = COMPTEES_AU_TABLEAU.get(categorie)
+    if not cles:
+        return
+    cle_nombre, cle_surface = cles
+    declares = contrat.postes or {}
+    nombre = declares.get(cle_nombre)
+    surface = declares.get(cle_surface)
+
+    if surface and union is not None:
+        corps = sum(g.area for g in postes)
+        lectures = ([corps] if postes else []) + [union.area]
+        if not any(
+            abs(lue - surface) <= TOLERANCE_EMPRISE_POSTE * surface for lue in lectures
+        ):
+            tolerance = f"{TOLERANCE_EMPRISE_POSTE * 100:.0f} %"
+            declaration = (
+                f"« {categorie} » : {surface:.1f} m² déclarés au tableau bilan "
+                f"(« {_libelle_au_tableau(cle_surface)} »)"
+            )
+            if postes:
+                texte = (
+                    f"{declaration}, pour {_postes(len(postes))} aux cotes du "
+                    f"catalogue au plan, {corps:.1f} m²"
+                    + (" au total" if len(postes) > 1 else "")
+                )
+                if autour:
+                    qui = "de lui" if len(postes) == 1 else "d'eux"
+                    texte += (
+                        f", et {union.area:.1f} m² avec la terre remise autour "
+                        f"{qui} : aucune des deux surfaces ne correspond à la "
+                        f"déclaration, à {tolerance} près."
+                    )
+                else:
+                    texte += (
+                        " : la surface ne correspond pas à la déclaration, à "
+                        f"{tolerance} près."
+                    )
+                texte += " La planche dessine les postes à leurs cotes de catalogue."
+            else:
+                texte = (
+                    f"{declaration}, pour {union.area:.1f} m² dessinés au plan, "
+                    "où aucun objet n'a les cotes du catalogue : la planche "
+                    "montre ce que le plan porte."
+                )
+            avertissements.append(texte)
+
+    if nombre is not None and len(postes) != int(nombre):
+        texte = (
+            f"« {categorie} » : {_postes(len(postes))} aux cotes du catalogue au "
+            f"plan, pour {int(nombre)} au tableau bilan "
+            f"(« {_libelle_au_tableau(cle_nombre)} »)."
+        )
+        if categorie == "ptr" and len(postes) > int(nombre) and contrat.presente("bess"):
+            # Le libellé de la section est celui du catalogue des gabarits UNITe,
+            # relevé le 07/11/2026 ; `contrat.LIBELLES_COTES` ne le rattache à
+            # aucune catégorie, et c'est bien le problème.
+            texte += (
+                " Le catalogue range le PTR d'une aire de charge BESS dans sa "
+                "propre section, « Aire de charge (BESS) — PTR » : le tableau peut "
+                "ne pas le compter avec les autres PTR."
+            )
+        avertissements.append(texte)
+
+
+def _postes(nombre: int) -> str:
+    if nombre == 0:
+        return "aucun poste"
+    return f"{nombre} poste" + ("s" if nombre > 1 else "")
+
+
+def _libelle_au_tableau(cle: str) -> str:
+    """La ligne du tableau bilan qui porte `cle`, telle que le chef de projet la lit.
+
+    Lue dans `tableau_bilan.PARAMETRES`, qui la cherche par ce libellé : la
+    recopier ici la laisserait dériver. Importée dans la fonction : le module
+    des planches ne dépend pas de la lecture du tableau pour se charger.
+    """
+    from ..tableau_bilan import PARAMETRES
+
+    return {cle_: libelle for cle_, libelle, *_ in PARAMETRES["postes"]}[cle]
 
 
 def emprise_de_conteneur(contrat, categorie: str, avertissements: list) -> tuple:

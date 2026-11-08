@@ -4152,9 +4152,27 @@ remise, et compte les copies.
 
 Faute d'objet aux cotes du catalogue — Sarnois indice A porte un 10 x 3 là où le
 tableau déclare un PDL/PTR de 12 x 3 — rien n'est reconstruit : le plan se
-dessine tel quel. Le recoupement avec la surface déclarée porte, lui, sur le
-calque entier dans tous les cas : c'est bien poste **et** abords que le tableau
-compte, et Saint-Cyr y déclare 66 m² pour 36 m² de poste.
+dessine tel quel.
+
+**La surface déclarée se lit de deux façons.** Le tableau intitule la ligne
+« Surface des PTR (m²) » : la surface des postes eux-mêmes, tous ceux de la
+catégorie, et Auzainvilliers V3 déclare 30 m² pour son PTR de 10 x 3 m. Mais
+Saint-Cyr, en V6 comme en V7, déclare 66 m² pour un PDL/PTR de 36 m² flanqué de
+deux bandes de 18 et 12 m² : l'union du calque. Le recoupement accepte l'une ou
+l'autre, à 8 % près. Il ne lisait que l'union, et annonçait à Auzainvilliers
+« 132.4 m² dessinés au plan pour 36.0 m² déclarés » pour un poste dessiné au
+centimètre. Hors des deux lectures, le message dit la déclaration, le nombre de
+postes et leur surface, et l'union avec la terre remise.
+
+Le **nombre** de postes reconnus, copies comptées une fois, se compare toujours
+à la ligne « Nombre de … » du tableau. À Auzainvilliers, le calque 0 apparié au
+PTR, le message dit deux PTR au plan pour un au tableau, et rappelle que le
+catalogue range le PTR des batteries dans sa section « Aire de charge (BESS) —
+PTR », que le tableau peut ne pas compter avec les autres PTR. Sur le DXF V2 de
+Sarnois indice B, il dit un PTR au plan pour zéro au tableau — celui de l'aire
+de charge —, et aucun PDL/PTR au plan pour un au tableau : le calque `UNI_PDL`
+n'y porte qu'un remplissage, que l'import a déjà signalé. Aucun de ces messages
+ne bloque ; ils se lisent parmi les points à savoir du dossier.
 
 ### Le conteneur aussi, et son aplat passe en plateforme
 

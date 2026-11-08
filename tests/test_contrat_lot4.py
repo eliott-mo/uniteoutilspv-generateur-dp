@@ -493,17 +493,26 @@ def test_un_ecart_de_surface_avec_le_tableau_est_signale(tmp_path):
     assert any("déclarés au tableau bilan" in m for m in avertissements)
 
 
-def _contrat_avec_calque(dossier, categorie: str, objets, cotes=()):
-    """Le site synthétique, dont le calque `categorie` porte `objets`."""
+def _contrat_avec_calque(
+    dossier, categorie: str, objets, cotes=(), autres=None, postes=None
+):
+    """Le site synthétique, dont le calque `categorie` porte `objets`.
+
+    `autres` ajoute des calques, `{catégorie: géométries}` ; `postes` remplace
+    des lignes du tableau bilan.
+    """
     from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
 
-    lot = [e for e in synthese.entites() if e.categorie != categorie] + [
-        EntiteBE(categorie=categorie, calque="SYNTHESE", geometrie=g, z_reel=False)
-        for g in objets
+    calques = {categorie: list(objets), **(autres or {})}
+    lot = [e for e in synthese.entites() if e.categorie not in calques] + [
+        EntiteBE(categorie=nom, calque="SYNTHESE", geometrie=g, z_reel=False)
+        for nom, geometries in calques.items()
+        for g in geometries
     ]
     ecrire_geopackage(lot, dossier, synthese.ligne_coupe())
     donnees = synthese.parametres()
     donnees["cotes_normalisees"] = synthese.COTES + list(cotes)
+    donnees["parametres"]["postes"].update(postes or {})
     ecrire_parametres(donnees, dossier)
     return charger_contrat(dossier)
 
@@ -546,6 +555,115 @@ def test_chaque_objet_aux_cotes_du_catalogue_est_un_poste(tmp_path):
     assert "10.00 x 3.00 m" in message
     assert "l'un d'eux deux fois à l'identique" in message
     assert "Les 1 autre(s) objet(s) du calque, 98.0 m² au total, sont la terre" in message
+
+
+def test_la_surface_declaree_se_lit_sur_les_postes_ou_sur_le_calque(tmp_path):
+    """Deux tableaux, deux lectures de « Surface des PDL/PTR (m²) », toutes deux justes.
+
+    Auzainvilliers V3 déclare 36 m² pour son PDL/PTR de 12 x 3 m : la surface du
+    poste. Saint-Cyr V6 en déclare 66 pour le même poste flanqué de deux bandes
+    de 18 et 12 m² : l'union du calque. Le contrôle ne lisait que la seconde, et
+    disait à Auzainvilliers « 132.4 m² dessinés au plan pour 36.0 m²
+    déclarés » d'un poste dessiné au centimètre (relevé le 07/11/2026).
+    """
+    from shapely.geometry import box
+
+    from dp_socle.planches.palette import emprise_de_poste
+
+    x0, y0 = synthese.ORIGINE_L93
+    poste = box(x0 + 170, y0 + 8, x0 + 182, y0 + 11)
+    bandes = [
+        box(x0 + 170, y0 + 11, x0 + 182, y0 + 12.5),
+        box(x0 + 170, y0 + 12.5, x0 + 182, y0 + 13.5),
+    ]
+    contrat = _contrat_avec_calque(tmp_path, "pdl_ptr", [poste, *bandes])
+
+    def ecarts_pour(surface):
+        contrat.donnees["parametres"]["postes"]["surface_pdl_ptr_m2"] = surface
+        avertissements = []
+        emprise_de_poste(contrat, "pdl_ptr", avertissements)
+        return [m for m in avertissements if "déclarés au tableau bilan" in m]
+
+    assert ecarts_pour(36.0) == []  # la surface du poste, comme à Auzainvilliers
+    assert ecarts_pour(66.0) == []  # l'union du calque, comme à Saint-Cyr
+
+    # Hors des deux lectures, le message dit tout, et n'accuse pas le poste.
+    (ecart,) = ecarts_pour(90.0)
+    assert ecart.startswith(
+        "« pdl_ptr » : 90.0 m² déclarés au tableau bilan "
+        "(« Surface des PDL/PTR (m²) »), pour 1 poste aux cotes du catalogue au "
+        "plan, 36.0 m², et 66.0 m² avec la terre remise autour de lui"
+    )
+    assert ecart.endswith("La planche dessine les postes à leurs cotes de catalogue.")
+
+
+def test_le_nombre_de_postes_se_compare_au_tableau(tmp_path):
+    """Deux PTR au plan pour un au tableau : l'écart se dit, avec sa cause probable.
+
+    Mesuré le 07/11/2026 à Auzainvilliers, le calque 0 apparié au PTR : le PTR
+    principal et celui des batteries pour « Nombre de PTR » à 1. Le catalogue
+    range le second dans sa section « Aire de charge (BESS) — PTR », et le
+    tableau ne le compte pas avec les autres : le message le rappelle quand le
+    plan porte une aire de charge, et seulement alors.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.planches.palette import objets_a_dessiner
+
+    x0, y0 = synthese.ORIGINE_L93
+    ptr = [
+        box(x0 + 20, y0 + 85, x0 + 30, y0 + 88),
+        box(x0 + 40, y0 + 85, x0 + 50, y0 + 88),
+    ]
+    conteneur = box(x0 + 60, y0 + 85, x0 + 66.06, y0 + 88)
+    tableau = {"nb_ptr": 1, "surface_ptr_m2": 30.0}
+
+    def messages_de(dossier, **options):
+        messages = []
+        objets_a_dessiner(
+            _contrat_avec_calque(dossier, "ptr", ptr, postes=tableau, **options),
+            messages,
+        )
+        return messages
+
+    avec_bess = messages_de(
+        tmp_path / "bess",
+        cotes=[synthese.COTE_CONTENEUR_BESS],
+        autres={"bess": [conteneur]},
+    )
+    (ecart,) = [m for m in avec_bess if "(« Nombre de PTR »)" in m]
+    assert ecart.startswith(
+        "« ptr » : 2 postes aux cotes du catalogue au plan, pour 1 au tableau "
+        "bilan (« Nombre de PTR »)."
+    )
+    assert "« Aire de charge (BESS) — PTR »" in ecart
+    # La surface, elle, dit ce que portent les postes, sans les accuser.
+    (surface,) = [m for m in avec_bess if "déclarés au tableau bilan" in m]
+    assert "pour 2 postes aux cotes du catalogue au plan, 60.0 m² au total" in surface
+    # Le PDL/PTR du site, un au plan pour un au tableau, ne dit rien.
+    assert not any(m.startswith("« pdl_ptr »") for m in avec_bess)
+
+    sans_bess = messages_de(tmp_path / "sans")
+    (ecart,) = [m for m in sans_bess if "(« Nombre de PTR »)" in m]
+    assert "Aire de charge" not in ecart
+
+
+def test_un_poste_declare_et_absent_du_plan_se_dit(tmp_path):
+    """Un PDL/PTR au tableau, aucun au plan : le nombre parle, même calque vide.
+
+    Sur le DXF V2 de Sarnois indice B, le calque `UNI_PDL` ne porte qu'un
+    remplissage, que l'import signale et n'importe pas : le plan n'a plus de
+    PDL/PTR, et le tableau en déclare un (relevé le 08/11/2026).
+    """
+    from dp_socle.planches.palette import objets_a_dessiner
+
+    contrat = _contrat_avec_calque(tmp_path, "pdl_ptr", [])
+    messages = []
+    objets_a_dessiner(contrat, messages)
+    assert (
+        "« pdl_ptr » : aucun poste aux cotes du catalogue au plan, pour 1 au "
+        "tableau bilan (« Nombre de PDL /PTR »)."
+    ) in messages
 
 
 def test_un_conteneur_se_separe_de_son_aplat(tmp_path):
