@@ -1225,6 +1225,72 @@ def test_calque_par_defaut_ecarte_mais_appariable(tmp_path):
     assert recuperees[0].geometrie.area == pytest.approx(40.0)
 
 
+def test_un_calque_ecarte_dit_ce_qu_il_porte(tmp_path):
+    """Le calque 0 portait le PTR des batteries, et le message n'en disait rien.
+
+    Relevé le 07/11/2026 à Auzainvilliers (DXF du 01/10/2026) : la seule entité
+    du calque 0 est une polyligne fermée de 3,00 x 10,00 m — le corps du PTR des
+    batteries, dont le calque prévu, `UNI_BESS_PTR`, est vide. Le message disait
+    « calque de travail du BE, censé être vide à l'export : 0 », et il fallait
+    ouvrir le DXF pour savoir qu'un ouvrage s'y trouvait. Il dit maintenant ce
+    que le calque porte : ses entités, ses rectangles fermés et leurs cotes, et
+    l'ouvrage du catalogue qu'ils rappellent.
+    """
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    # Dessiné debout, 3 m de large pour 10 de haut : les cotes se disent quand
+    # même du plus grand côté au plus petit.
+    espace.add_lwpolyline(
+        [(622_940, 6_750_700), (622_943, 6_750_700), (622_943, 6_750_710),
+         (622_940, 6_750_710)],
+        close=True,
+        dxfattribs={"layer": "0"},
+    )
+    chemin = tmp_path / "ptr_egare.dxf"
+    document.saveas(str(chemin))
+
+    message = next(
+        m for m in lire_plan_be(chemin).avertissements if "calque de travail" in m
+    )
+    attendu = (
+        "censé être vide à l'export : 0 (1 entité : un rectangle fermé de "
+        "10.00 x 3.00 m, aux cotes du catalogue UNITe pour "
+        "« Poste de transformation - PTR » ou « Aire de charge (BESS) — PTR »)"
+    )
+    assert attendu in message
+    # Il reste le message d'un calque écarté, qu'on apparie à la main.
+    assert message.startswith("1 calque(s) écarté(s) — ")
+    assert "Appariez-en un à l'écran de correspondance" in message
+
+
+def test_un_calque_ecarte_compte_ses_rectangles_sans_inventer_d_ouvrage(tmp_path):
+    """Un rectangle hors catalogue se décrit sans être nommé ; un trait se compte.
+
+    À Sarnois, le calque 0 de l'indice A porte une zone de contention de
+    10,00 x 7,00 m, qui n'a pas de cote au catalogue (relevé le 07/11/2026) : le
+    message en donne les cotes, et rien de plus.
+    """
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    _ajouter_table(espace, (622_900, 6_750_700))
+    espace.add_lwpolyline(
+        [(622_940, 6_750_700), (622_950, 6_750_700), (622_950, 6_750_707),
+         (622_940, 6_750_707)],
+        close=True,
+        dxfattribs={"layer": "0"},
+    )
+    espace.add_line((622_960, 6_750_700), (622_970, 6_750_700), dxfattribs={"layer": "0"})
+    chemin = tmp_path / "contention.dxf"
+    document.saveas(str(chemin))
+
+    message = next(
+        m for m in lire_plan_be(chemin).avertissements if "calque de travail" in m
+    )
+    assert ": 0 (2 entités, dont un rectangle fermé de 10.00 x 7.00 m)." in message
+    assert "catalogue" not in message
+
+
 def test_les_trois_types_de_poste_sont_distincts():
     """PDL seul, PTR seul, PDL/PTR combiné : trois légendes au dossier.
 

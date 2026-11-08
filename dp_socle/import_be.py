@@ -1034,6 +1034,205 @@ def _points_terrain(modelspace) -> dict[str, list[tuple[float, float, float]]]:
                     releves.setdefault(nom, []).append((p.x, p.y, p.z))
     return releves
 
+
+# ---------------------------------------------------------------------------
+# Ce que porte un calque écarté
+# ---------------------------------------------------------------------------
+#
+# Relevé le 07/11/2026 à Auzainvilliers (DXF du 01/10/2026) : le calque 0,
+# écarté d'office, ne porte qu'une polyligne fermée de 3,00 x 10,00 m — le
+# corps du PTR des batteries, dont le calque prévu, « UNI_BESS_PTR », est vide.
+# Le message disait « 1 calque(s) écarté(s) — calque de travail du BE, censé
+# être vide à l'export : 0 », et rien de ce qu'il portait : il fallait ouvrir
+# le DXF pour savoir qu'un ouvrage s'y trouvait.
+
+#: Part de son rectangle minimal qu'un contour fermé doit remplir pour être dit
+#: « rectangle » quand on décrit un calque écarté.
+#:
+#: 0,97, comme l'emprise d'un poste tenue pour rectangulaire
+#: (`palette.REMPLISSAGE_RECTANGULAIRE`) : les quatre congés d'une citerne de
+#: refroidissement n'en font pas une autre forme, un triangle ou un L en sont
+#: une.
+REMPLISSAGE_RECTANGLE = 0.97
+
+#: Écart admis entre les côtés d'un rectangle et les cotes d'un ouvrage du
+#: catalogue pour dire qu'il les rappelle.
+#:
+#: 5 %, la tolérance à laquelle les planches reconnaissent un poste ou un
+#: conteneur à ses cotes (`palette.TOLERANCE_COTES_POSTE`) : ce que le message
+#: annonce, la planche le reconnaîtra une fois le calque apparié. Le PTR égaré
+#: sur le calque 0 d'Auzainvilliers y est au centimètre. La surface départage
+#: ensuite, quand le catalogue en donne une : le local de stockage au-delà de
+#: 17 MWc s'écrit « 2 conteneurs 40 pieds 12 x 3 x 3m » pour 72 m², et un
+#: rectangle de 12 x 3 m n'en est pas un.
+TOLERANCE_COTES_CATALOGUE = 0.05
+
+#: Formats de rectangle détaillés par calque écarté ; au-delà, on les compte.
+#: Ceux qui rappellent un ouvrage du catalogue passent devant.
+#:
+#: Six : c'est ce que porte le calque 0 de Sarnois indice A (DXF complet,
+#: relevé le 07/11/2026), dont la zone de contention de 10,00 x 7,00 m, sans
+#: cote au catalogue, se perdait à quatre dans « et 2 autre(s) format(s) ». Le
+#: plafond ne sert qu'à borner un calque pathologique.
+FORMATS_DECRITS_MAX = 6
+
+
+def _ce_que_porte(entites, remplissages, facteur, nom_fichier, lire_catalogue) -> str:
+    """Ce qu'un calque écarté porte, à dire entre parenthèses après son nom.
+
+    Ses entités, ses rectangles fermés et leurs cotes, et l'ouvrage du
+    catalogue qu'ils rappellent quand c'est le cas. `lire_catalogue` rend les
+    ouvrages du catalogue et la panne qui empêche de les lire ; il n'est appelé
+    que si un rectangle est à nommer.
+    """
+    # Les remplissages d'abord : « dont » se rapporte ainsi aux entités, parmi
+    # lesquelles se comptent les rectangles.
+    morceaux = []
+    if remplissages:
+        morceaux.append(_compter(len(remplissages), "remplissage"))
+    if entites:
+        morceaux.append(_compter(len(entites), "entité"))
+    texte = " et ".join(morceaux)
+
+    rectangles, illisibles = _rectangles_fermes(entites, facteur, nom_fichier)
+    if rectangles:
+        ouvrages, panne = lire_catalogue()
+        formats: dict[tuple, list] = {}
+        for grand, petit, aire in rectangles:
+            cle = (round(grand, 2), round(petit, 2))
+            if cle not in formats:
+                formats[cle] = [0, _ouvrages_rappeles(grand, petit, aire, ouvrages)]
+            formats[cle][0] += 1
+        ordre = sorted(
+            formats.items(),
+            key=lambda item: (not item[1][1], -item[1][0], -item[0][0]),
+        )
+        decrits = []
+        for (grand, petit), (nombre, rappels) in ordre[:FORMATS_DECRITS_MAX]:
+            format_ = f"{nombre} de " if nombre > 1 else ""
+            format_ += f"{grand:.2f} x {petit:.2f} m"
+            if rappels:
+                format_ += ", aux cotes du catalogue UNITe pour " + " ou ".join(
+                    f"« {libelle} »" for libelle in rappels
+                )
+            decrits.append(format_)
+        if len(ordre) > FORMATS_DECRITS_MAX:
+            decrits.append(
+                f"et {len(ordre) - FORMATS_DECRITS_MAX} autre(s) format(s)"
+            )
+        if len(rectangles) == 1:
+            phrase = f"un rectangle fermé de {decrits[0]}"
+        else:
+            phrase = f"{len(rectangles)} rectangles fermés : " + " ; ".join(decrits)
+        texte += (" : " if len(entites) == 1 else ", dont ") + phrase
+        if panne:
+            texte += f" ; ouvrages du catalogue non recherchés, {panne}"
+    if illisibles:
+        texte += (
+            f", {_compter(illisibles, 'polyligne')} "
+            + ("illisible" if illisibles == 1 else "illisibles")
+        )
+    return texte
+
+
+def _compter(nombre: int, mot: str) -> str:
+    return f"{nombre} {mot}" + ("s" if nombre > 1 else "")
+
+
+def _rectangles_fermes(entites, facteur: float, nom_fichier: str) -> tuple[list, int]:
+    """Les rectangles fermés d'un calque, en `(grand côté, petit côté, aire)`.
+
+    Seules les polylignes se lisent : une ligne, un arc ou un cercle ne ferment
+    pas un rectangle à eux seuls, et lire tous les traits d'un calque
+    d'habillage — 3 188 sur « GREY » à Sarnois — coûterait sans rien apprendre.
+    Rend aussi le nombre de polylignes illisibles, que le message dit : une
+    entité qu'on ne sait pas lire n'est pas une entité vide.
+    """
+    rectangles, illisibles = [], 0
+    for entite in entites:
+        if entite.dxftype() not in ("LWPOLYLINE", "POLYLINE"):
+            continue
+        if entite.dxftype() == "POLYLINE" and (
+            entite.is_poly_face_mesh or entite.is_polygon_mesh
+        ):
+            continue
+        try:
+            geometrie, _ = _geometrie_de(entite, facteur, nom_fichier)
+        except ErreurImportBE:
+            illisibles += 1
+            continue
+        if geometrie is None or geometrie.geom_type != "Polygon" or geometrie.interiors:
+            continue
+        rectangle = geometrie.minimum_rotated_rectangle
+        if rectangle.geom_type != "Polygon" or rectangle.area <= 0:
+            continue
+        if geometrie.area < REMPLISSAGE_RECTANGLE * rectangle.area:
+            continue
+        sommets = list(rectangle.exterior.coords)[:4]
+        cotes = sorted(
+            hypot(
+                sommets[rang][0] - sommets[(rang + 1) % 4][0],
+                sommets[rang][1] - sommets[(rang + 1) % 4][1],
+            )
+            for rang in range(4)
+        )
+        rectangles.append((cotes[-1], cotes[0], float(geometrie.area)))
+    return rectangles, illisibles
+
+
+def _ouvrages_du_catalogue() -> tuple[list, str | None]:
+    """Les ouvrages des gabarits UNITe et leurs cotes au sol, ou la panne qui l'empêche.
+
+    Le catalogue du classeur des gabarits, et non celui du tableau bilan : le
+    DXF se lit avant le tableau, et sans lui à l'écran de correspondance. C'est
+    le même dans tous les tableaux — `tableau_bilan` s'en sert pour compléter
+    ceux qui n'en portent qu'une partie. Ses 17 ouvrages ont tous une longueur
+    et une largeur (vérifié le 07/11/2026).
+
+    Rend `(ouvrages, panne)` : les ouvrages en `(libellé, grand côté, petit
+    côté, surface ou None)`, et le motif quand le classeur ne se lit pas.
+    Importés dans la fonction : `contrat` et `tableau_bilan` importent ce
+    module.
+    """
+    from dataclasses import asdict
+
+    from .contrat import decoder_cote
+    from .erreurs import ErreurCoteOuvrage, ErreurTableauBilan
+    from .tableau_bilan import CHEMIN_GABARITS, lire_gabarits
+
+    try:
+        cotes, _ = lire_gabarits(CHEMIN_GABARITS)
+        decodees = [(cote, decoder_cote(asdict(cote))) for cote in cotes]
+    except (ErreurTableauBilan, ErreurCoteOuvrage, OSError) as exc:
+        return [], f"classeur des gabarits UNITe illisible ({exc})"
+    ouvrages = []
+    for cote, decodee in decodees:
+        longueur = decodee.valeurs.get("longueur")
+        largeur = decodee.valeurs.get("largeur")
+        if not longueur or not largeur:
+            continue
+        ouvrages.append(
+            (cote.ouvrage, max(longueur, largeur), min(longueur, largeur), cote.surface_m2)
+        )
+    return ouvrages, None
+
+
+def _ouvrages_rappeles(grand: float, petit: float, aire: float, ouvrages) -> list[str]:
+    """Les ouvrages du catalogue dont un rectangle a les cotes, et la surface s'il en a une."""
+    from .contrat import TOLERANCE_VARIANTE
+
+    rappels = []
+    for libelle, grand_catalogue, petit_catalogue, surface in ouvrages:
+        if abs(grand - grand_catalogue) > TOLERANCE_COTES_CATALOGUE * grand_catalogue:
+            continue
+        if abs(petit - petit_catalogue) > TOLERANCE_COTES_CATALOGUE * petit_catalogue:
+            continue
+        if surface and abs(aire - surface) > TOLERANCE_VARIANTE * surface:
+            continue
+        rappels.append(libelle)
+    return rappels
+
+
 def lire_plan_be(
     chemin: str | Path,
     correspondance: dict[str, str] | None = None,
@@ -1178,11 +1377,33 @@ def lire_plan_be(
         if motif is not None:
             ecartes.setdefault(motif, []).append(calque)
 
+    # Chaque calque écarté dit ce qu'il porte : un calque censé être vide peut
+    # porter un ouvrage, et son nom seul ne le laissait pas deviner. Le
+    # catalogue ne se lit que si un rectangle est à nommer.
+    catalogue: list = []
+
+    def lire_catalogue():
+        if not catalogue:
+            catalogue.append(_ouvrages_du_catalogue())
+        return catalogue[0]
+
     for motif, calques in sorted(ecartes.items()):
+        details = ", ".join(
+            f"{calque} ("
+            + _ce_que_porte(
+                entites_par_calque.get(calque, []),
+                hatch_par_calque.get(calque, []),
+                facteur,
+                chemin.name,
+                lire_catalogue,
+            )
+            + ")"
+            for calque in sorted(calques)
+        )
         avertissements.append(
-            f"{len(calques)} calque(s) écarté(s) — {motif} : "
-            f"{', '.join(sorted(calques))}. Appariez-en un à l'écran de "
-            "correspondance si son contenu doit figurer sur les planches."
+            f"{len(calques)} calque(s) écarté(s) — {motif} : {details}. "
+            "Appariez-en un à l'écran de correspondance si son contenu doit "
+            "figurer sur les planches."
         )
 
     entites: list[EntiteBE] = []

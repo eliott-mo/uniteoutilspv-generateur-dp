@@ -1593,6 +1593,21 @@ le jaune ne signalait plus rien puisqu'il était partout (26/09/2026). Il en va
 de même des points laissés à faire par la sortie PowerPoint et des surfaces de
 voirie qui ne concordent pas.
 
+**Le groupe d'un calque écarté dit ce que ce calque porte** : ses entités, ses
+rectangles fermés et leurs cotes, et l'ouvrage du catalogue des gabarits UNITe
+qu'ils rappellent, à 5 % près sur les côtés et à 15 % sur la surface quand le
+catalogue en donne une. Il ne donnait que le nom du calque, et un calque censé
+être vide peut porter un ouvrage : relevé le 07/11/2026 à Auzainvilliers, le
+calque 0 ne porte qu'une polyligne fermée de 10,00 x 3,00 m, le corps du PTR
+des batteries, quand le calque prévu, `UNI_BESS_PTR`, est vide. Le message le
+dit maintenant, et nomme les deux ouvrages du catalogue à ces cotes, le PTR et
+le PTR de l'aire de charge BESS ; on apparie le calque, entier, à l'écran de
+correspondance. Le message nomme ce qu'il trouve, il ne tranche pas : sur les
+DXF complets de Sarnois, la légende du BE porte un rectangle de 8,00 x 4,00 m
+que le message rapproche de l'aire d'aspiration — c'en est la vignette — et le
+calque 0 de l'indice A, à côté d'une zone de contention de 10,00 x 7,00 m, un
+rectangle aux cotes de la citerne de 120 m³.
+
 Deux détails du tri méritent d'être dits. « cosntruction » est la faute de
 frappe du fichier réel, reprise telle quelle : la normalisation efface les
 accents et les séparateurs, pas les fautes. Et `GREY` et `Edges`, 1 594 et 195
