@@ -94,6 +94,20 @@ Et ce que leur application a montré, le même jour :
   là où elle gêne le moins les autres cotes ;
 - la cote vers l'axe d'une voie qui longe le terrain se superposait à celle de
   la même construction à la limite : l'axe se dit dans le libellé de celle-ci.
+
+Puis la seconde relecture du chef de projet, le 08/11/2026 (v5) :
+- la cote vers une voie publique est perpendiculaire à son axe, et ses flèches
+  le touchent : à Auzainvilliers, la cote fondue dans celle de la limite
+  s'arrêtait au bord de la D18. Elle part de la face de la construction tournée
+  vers la voie, et s'y décale pour ne pas se superposer à la cote à la limite.
+  Quand la voie publique s'arrête avant le site — à Saint-Cyr, la route
+  empierrée finit à l'angle nord-ouest, et les chemins qui longent le côté
+  ouest sont sur des parcelles —, aucune perpendiculaire n'existe : la cote va
+  à son extrémité, et le dit ;
+- la valeur d'une cote vers la limite se pose de préférence au-delà de la
+  limite, hors de la centrale ; aucune valeur ne recouvre un numéro de parcelle,
+  et les tables sont à éviter ;
+- la légende passe sur deux colonnes quand aucun coin ne la reçoit en une.
 """
 
 import math
@@ -109,7 +123,7 @@ import pypdfium2 as pdfium  # noqa: E402
 import shapely  # noqa: E402
 from pyogrio import list_layers  # noqa: E402
 from shapely.geometry import LineString, Point, box, shape  # noqa: E402
-from shapely.ops import nearest_points, substring, unary_union  # noqa: E402
+from shapely.ops import linemerge, nearest_points, substring, unary_union  # noqa: E402
 
 from dp_socle import ign  # noqa: E402
 from dp_socle.environnement import preparer_cairo  # noqa: E402
@@ -120,7 +134,8 @@ from dp_socle.contrat import NOM_GEOPACKAGE, charger_contrat  # noqa: E402
 from dp_socle.erreurs import ErreurDP  # noqa: E402
 from dp_socle.geometrie import charger_emprise  # noqa: E402
 from dp_socle.import_be import CATEGORIES_PISTE_LEGERE, CATEGORIES_VOIE_LOURDE  # noqa: E402
-from dp_socle.planche import EntreeLegende, Style, nombre_fr  # noqa: E402
+from dp_socle.planche import (NOIR, TAILLE_CARTOUCHE, TAILLE_COURANTE, EntreeLegende,  # noqa: E402
+                              Planche, Style, nombre_fr)
 from dp_socle.planches import commun, dp2_plan_masse  # noqa: E402
 from dp_socle.planches.dp1_3_cadastre import PART_MIN_ASSIETTE  # noqa: E402
 from dp_socle.planches.dp3_coupes import resoudre_parametre  # noqa: E402
@@ -151,6 +166,9 @@ SEPARATION_COTES_COTE_MM = 20.0
 # Fractions du côté où l'on essaie de poser la cote clôture → limite, dans
 # l'ordre : le milieu d'abord.
 FRACTIONS_COTE_CLOTURE = (0.5, 0.35, 0.65, 0.2, 0.8)
+# Écart minimal, sur le papier, entre une cote vers l'axe d'une voie et une cote
+# qui lui serait parallèle : en deçà, les deux se lisent comme une seule.
+ECART_COTES_PARALLELES_MM = 4.0
 # Les pistes existantes comptent : à Saint-Cyr elles sont « à renforcer si
 # nécessaire », donc des travaux du projet. L'aire de grutage n'est pas une piste.
 CATEGORIES_PISTES = tuple(
@@ -316,7 +334,7 @@ for troncon in troncons:
         continue
     cote_tables = LineString([(p_t.x, p_t.y), (p_l.x, p_l.y)])
     cotes_dp2.append(cote_simple((p_t.x, p_t.y), (p_l.x, p_l.y),
-                                 f"{nombre_fr(p_t.distance(p_l), 1)} m (tables – limite parcellaire)"))
+                                 f"{nombre_fr(p_t.distance(p_l), 1)} m (tables – limite parcellaire)", "dehors"))
     nb_c1 += 1
     # 2. Clôture → limite parcellaire, ailleurs sur le même côté, si l'écart y
     #    dépasse 0,5 m. Posée dans le prolongement de la première, ses flèches
@@ -582,14 +600,14 @@ for i, (_, a) in enumerate(ouvrages):
     pa, pl = nearest_points(a, limite)
     sur_le_trajet = traverses(LineString([pa, pl]), {i})
     if ouvrages[i][0] in TOUJOURS_A_LA_LIMITE:
-        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", -1))
+        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", "dehors"))
         liens_c3.append((i, i))
         if d >= SEUIL_VOISINS_M or sur_le_trajet:
             pourquoi = ([f"au-delà de {SEUIL_VOISINS_M:.0f} m"] if d >= SEUIL_VOISINS_M else []) + (
                 [f"par-dessus {', '.join(sur_le_trajet)}"] if sur_le_trajet else [])
             rapport.append(f"C3 : {ouvrages[i][0]} à {d:.1f} m de la limite, coté {' et '.join(pourquoi)}")
     elif d < SEUIL_VOISINS_M and not sur_le_trajet:
-        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", -1))
+        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", "dehors"))
         liens_c3.append((i, i))
 rapport.append(f"C3 : {len(ouvrages)} ouvrage(s) ; {paires_sous_seuil} paire(s) à moins de "
                f"{SEUIL_VOISINS_M:.0f} m, {sum(1 for i, j in liens_c3 if i != j)} gardée(s) "
@@ -615,41 +633,107 @@ for v, p in voies:
     if pres.intersection(enclos).length / pres.length < 0.5 and \
             pres.difference(cadastre_site).length / pres.length >= 0.5:
         publiques_site.append((a_c.distance(a_v), v, p, a_c, a_v))
-def fusionner_avec_l_axe(depart, arrivee, texte_axe):
-    """Dit l'axe dans la cote qui part déjà du même point, dans la même direction.
+ECART_PARALLELES_M = ECART_COTES_PARALLELES_MM * DENOMINATEUR_DP2 / 1000.0
 
-    Une voie qui longe le terrain est parallèle à sa limite : la cote vers son
-    axe part alors du même point, dans la même direction, que la cote de la même
-    construction à la limite, et les deux se superposent — la chaîne que la
-    relecture du 08/11/2026 a retirée. Elles n'en font qu'une, et l'axe se lit
-    dans le libellé : « 5,5 m (limite parcellaire ; axe de la D18 à 11,0 m) »,
-    la citerne incendie d'Auzainvilliers. Rend le libellé fusionné, ou None.
+
+def superpose(segment, ligne, ecart_m):
+    """Deux cotes parallèles à moins de `ecart_m` : elles se liraient comme une seule."""
+    (x0, y0), (x1, y1) = segment.coords[0], segment.coords[-1]
+    (u0, v0), (u1, v1) = ligne.coords[0], ligne.coords[-1]
+    a = math.atan2(y1 - y0, x1 - x0)
+    b = math.atan2(v1 - v0, u1 - u0)
+    parallele = abs((a - b + math.pi / 2) % math.pi - math.pi / 2) < math.radians(15)
+    return parallele and segment.distance(ligne) < ecart_m
+
+
+def pieds_perpendiculaires(g, axe, pas=0.25):
+    """(distance, point du bord de g, pied sur l'axe) quand le pied tombe dans l'axe.
+
+    Un pied qui tombe au bout de l'axe n'est pas perpendiculaire : c'est le point
+    le plus proche d'une voie qui s'arrête là.
     """
-    direction = math.atan2(arrivee.y - depart.y, arrivee.x - depart.x)
-    for points_, textes_, _ in cotes_dp2 + cotes_c3:
-        if len(points_) != 2 or Point(points_[0]).distance(depart) > 1.0 or not textes_[0].endswith(")"):
+    resultats = []
+    for poly in getattr(g, "geoms", [g]):
+        if poly.geom_type != "Polygon":
             continue
-        direction_ = math.atan2(points_[1][1] - points_[0][1], points_[1][0] - points_[0][0])
-        if abs((direction_ - direction + math.pi) % (2 * math.pi) - math.pi) <= math.radians(15):
-            textes_[0] = textes_[0][:-1] + f" ; {texte_axe})"
-            return textes_[0]
-    return None
+        bord = poly.exterior
+        n = max(8, int(bord.length / pas))
+        for k in range(n):
+            pt = bord.interpolate(k * bord.length / n)
+            abscisse = axe.project(pt)
+            if abscisse <= 0.05 or abscisse >= axe.length - 0.05:
+                continue
+            pied = axe.interpolate(abscisse)
+            segment = LineString([pt, pied])
+            if segment.length < 0.05 or segment.intersection(poly).length > 0.05:
+                continue
+            resultats.append((segment.length, pt, pied))
+    return resultats
+
+
+def cote_vers_voie(objets, publiques_vp):
+    """La cote la plus courte des objets à une voie publique, et son genre.
+
+    Perpendiculaire à l'axe quand c'est possible (relecture du 08/11/2026), depuis
+    la face de l'objet tournée vers la voie, décalée le long de cette face pour
+    ne se superposer à aucune autre cote. Les tronçons se fondent en un réseau :
+    la BD TOPO coupe une route à chaque carrefour, et le bout d'un tronçon n'est
+    pas le bout de la route. Quand le point le plus proche est l'extrémité d'une
+    voie qui s'arrête avant le site, aucune perpendiculaire n'existe : la cote va
+    à cette extrémité. Rend (distance, départ, pied, propriétés, genre), le genre
+    valant « axe » ou « extrémité ».
+    """
+    reseau = linemerge(unary_union([v for v, _ in publiques_vp]))
+    lignes_reseau = list(getattr(reseau, "geoms", [reseau]))
+    objets_union = unary_union(objets)
+    a_o, a_r = nearest_points(objets_union, reseau)
+    d_min = a_o.distance(a_r)
+
+    def proprietes(pied):
+        return min(publiques_vp, key=lambda vp: vp[0].distance(pied))[1]
+
+    candidats = []
+    for axe in lignes_reseau:
+        if axe.distance(objets_union) > d_min + 60.0:
+            continue
+        for g in sorted(objets, key=lambda g: g.distance(axe))[:6]:
+            candidats.extend(pieds_perpendiculaires(g, axe))
+    candidats.sort(key=lambda c: c[0])
+    if not candidats or candidats[0][0] > d_min + 1.0:
+        return d_min, a_o, a_r, proprietes(a_r), "extrémité"
+    posees = [LineString(p) for p, _, _ in cotes_dp2 + cotes_c3]
+    for d, pt, pied in candidats:
+        if not any(superpose(LineString([pt, pied]), ligne, ECART_PARALLELES_M) for ligne in posees):
+            if d > candidats[0][0] + 0.05:
+                rapport.append(f"cote vers l'axe décalée le long de la face : {d:.2f} m au lieu de "
+                               f"{candidats[0][0]:.2f} m, pour ne pas se superposer à une autre cote")
+            return d, pt, pied, proprietes(pied), "axe"
+    d, pt, pied = candidats[0]
+    rapport.append(f"!! cote vers l'axe ({d:.1f} m) superposée à une autre cote, faute de place sur la face")
+    return d, pt, pied, proprietes(pied), "axe"
+
+
+def texte_voie(d, p, genre):
+    valeur = nombre_fr(d, 0 if d >= 100 else 1)
+    return f"{valeur} m ({'axe' if genre == 'axe' else 'extrémité'} {nom_de_voie(p)})"
+
+
+def dessiner_l_axe(pied, tronçons):
+    v_axe = min(tronçons, key=lambda v: v.distance(pied))
+    abscisse = v_axe.project(pied)
+    axes.append(substring(v_axe, max(0.0, abscisse - 25.0), min(v_axe.length, abscisse + 25.0)))
 
 
 c2_segment = None
 if publiques_site:
-    d, v, p, a_c, a_v = min(publiques_site, key=lambda c: c[0])
-    valeur_c2 = nombre_fr(d, 0 if d >= 100 else 1)
-    fusion = fusionner_avec_l_axe(a_c, a_v, f"axe {nom_de_voie(p)} à {valeur_c2} m")
-    if fusion is not None:
-        rapport.append(f"C2 : construction la plus proche à {d:.1f} m de l'axe {nom_de_voie(p)} "
-                       f"({p.get('nature')}), dit dans la cote « {fusion} »")
-    else:
-        cotes_dp2.append(cote_simple((a_c.x, a_c.y), (a_v.x, a_v.y), f"{valeur_c2} m (axe {nom_de_voie(p)})"))
-        rapport.append(f"C2 : construction la plus proche à {d:.1f} m de l'axe {nom_de_voie(p)} ({p.get('nature')})")
-    s_ = v.project(a_v)
-    axes.append(substring(v, max(0.0, s_ - 25.0), min(v.length, s_ + 25.0)))
-    c2_segment = (a_c, a_v)
+    publiques_c2 = [(v, p) for _, v, p, _, _ in publiques_site]
+    objets_c2 = list(tables_liste) + [g for _, g in ouvrages]
+    d, depart, pied, p, genre = cote_vers_voie(objets_c2, publiques_c2)
+    cotes_dp2.append(cote_simple((depart.x, depart.y), (pied.x, pied.y), texte_voie(d, p, genre)))
+    dessiner_l_axe(pied, [v for v, _ in publiques_c2])
+    c2_segment = (depart, pied)
+    rapport.append(f"C2 : {d:.1f} m de la construction la plus proche à "
+                   f"{'l’axe' if genre == 'axe' else 'l’extrémité'} {nom_de_voie(p)} ({p.get('nature')})")
 else:
     rapport.append(f"C2 : aucune voie publique à moins de {RAYON_VOIE_M:.0f} m des constructions")
 
@@ -699,20 +783,15 @@ for i, (categorie, g) in enumerate(ouvrages):
         + ("dans la clôture" if c[3] >= 0.5 else "sur des parcelles cadastrées")
         for c in plus_proches[:4])
     if publiques and publiques[0][0] < SEUIL_VOIE_PDL_M:
-        d, v, p, _, _ = publiques[0]
-        pa, pv = nearest_points(g, v)
+        d, pa, pv, p, genre = cote_vers_voie([g], [(c[1], c[2]) for c in publiques])
         if c2_segment is not None and pa.distance(c2_segment[0]) < 0.5 and pv.distance(c2_segment[1]) < 0.5:
-            rapport.append(f"C8 : {categorie} à {d:.1f} m de l'axe {nom_de_voie(p)}, confondue avec C2")
+            rapport.append(f"C8 : {categorie} à {d:.1f} m {nom_de_voie(p)}, confondue avec C2")
             continue
-        fusion = fusionner_avec_l_axe(pa, pv, f"axe {nom_de_voie(p)} à {nombre_fr(d, 1)} m")
-        if fusion is None:
-            cotes_c3.append(cote_simple((pa.x, pa.y), (pv.x, pv.y), f"{nombre_fr(d, 1)} m (axe {nom_de_voie(p)})"))
-            liens_c3.append((i, i))
-        else:
-            rapport.append(f"C8 : {categorie}, l'axe est dit dans la cote « {fusion} »")
-        s_ = v.project(pv)
-        axes.append(substring(v, max(0.0, s_ - 25.0), min(v.length, s_ + 25.0)))
-        rapport.append(f"C8 : {categorie} à {d:.1f} m de l'axe {nom_de_voie(p)} ({p.get('nature')})"
+        cotes_c3.append(cote_simple((pa.x, pa.y), (pv.x, pv.y), texte_voie(d, p, genre)))
+        liens_c3.append((i, i))
+        dessiner_l_axe(pv, [c[1] for c in publiques])
+        rapport.append(f"C8 : {categorie} à {d:.1f} m de {'l’axe' if genre == 'axe' else 'l’extrémité'} "
+                       f"{nom_de_voie(p)} ({p.get('nature')})"
                        + (f" ; plus proches mais écartées : {ecartees}" if ecartees else ""))
     else:
         loin = (f"la plus proche à {publiques[0][0]:.0f} m ({publiques[0][2].get('nature')})"
@@ -869,7 +948,7 @@ for longueur, d_tables, candidats in cotes_cloture_a_poser:
         key=lambda c: min((LineString([c[1], c[2]]).distance(ligne_) for ligne_ in lignes_posees),
                           default=math.inf))
     cotes_dp2.append(cote_simple((q_reel.x, q_reel.y), (r.x, r.y),
-                                 f"{nombre_fr(ecart, 1)} m (clôture – limite parcellaire)"))
+                                 f"{nombre_fr(ecart, 1)} m (clôture – limite parcellaire)", "dehors"))
     lignes_posees.append(LineString([q_reel, r]))
     rapport.append(f"C1 : côté de {longueur:.0f} m, tables → limite {d_tables:.1f} m ; "
                    f"clôture → limite {ecart:.1f} m à {f:.0%} du côté")
@@ -979,7 +1058,7 @@ def poser(planche, cotes, occupees, obstacles_l93=(), souples_l93=(), masques=()
     # détail n'est qu'un trait de repère. On retient la place qui en touche le moins.
     # Seuls les deux premiers genres font dire qu'une valeur se lit mal : le
     # cadre d'un détail n'est qu'un repère, le traverser ne cache rien.
-    souples = ([(c, g) for c, g in ouvrages] + [("clôture", anneau)]
+    souples = ([(c, g) for c, g in ouvrages] + [("clôture", anneau), ("tables", tables)]
                + [("cadre de détail", g) for g in souples_l93])
 
     # 1. Tous les segments d'abord : chaque étiquette doit éviter les lignes des autres.
@@ -1097,11 +1176,18 @@ def poser(planche, cotes, occupees, obstacles_l93=(), souples_l93=(), masques=()
         for rang, c in enumerate(candidats):
             touches = conflits(c)
             if touches is not None:
-                notes.append((len(touches) + (1 if c[0] == "renvoi" else 0), rang, touches))
+                # Une cote vers la limite porte sa valeur au-delà de la limite, hors
+                # de la centrale (relecture du 08/11/2026) : toute autre place
+                # compte une gêne de plus.
+                dehors = s["cote"][2][0] == "dehors" and c[0] != "fin"
+                notes.append((len(touches) + (1 if c[0] == "renvoi" else 0) + (1 if dehors else 0),
+                              rang, touches))
         if notes:
             _, rang, touches = min(notes, key=lambda n: n[:2])
             choix = candidats[rang]
-            genants = [nom for nom in touches if nom != "cadre de détail"]
+            # Les tables sont à éviter, pas interdites : une valeur posée dessus
+            # se lit, et ne fait pas partir une zone en détail.
+            genants = [nom for nom in touches if nom not in ("cadre de détail", "tables")]
             if genants:
                 problemes.append((s["cote"], s["texte"], f"posée sur {', '.join(genants)}"))
         else:
@@ -1152,6 +1238,38 @@ SOURCE_DP2 = ("Parcellaire et bâtiments : IGN — Parcellaire Express (PCI), WF
               "Géoplateforme. Ouvrages : plan du bureau d'études.")
 
 
+def legende_en_deux_colonnes(planche, entrees, position, largeur_colonne, titre="Légende"):
+    """La légende du générateur, sur deux colonnes : même cadre, mêmes symboles.
+
+    `legende.dessiner_legende` n'en dessine qu'une. Celle-ci reprend sa géométrie
+    — marges, pas, symbole, écart — et partage les entrées en deux, la première
+    colonne la plus longue.
+    """
+    x, y = position
+    par_colonne = math.ceil(len(entrees) / 2)
+    hauteur = hauteur_bloc(par_colonne, titre is not None)
+    planche.ajouter_rectangle(
+        x, y, 2 * largeur_colonne, hauteur,
+        Style(trait=NOIR, epaisseur_mm=0.25, remplissage="#ffffff", opacite_remplissage=0.92))
+    curseur = y + module_legende.MARGE_MM
+    if titre:
+        planche.ajouter_texte(x + module_legende.MARGE_MM, curseur + 3.2, titre,
+                              taille=TAILLE_CARTOUCHE, gras=True)
+        curseur += module_legende.HAUTEUR_TITRE_MM
+    for k, entree in enumerate(entrees):
+        colonne, rang = divmod(k, par_colonne)
+        x0 = x + colonne * largeur_colonne
+        haut = curseur + rang * module_legende.PAS_ENTREE_MM + (
+            module_legende.PAS_ENTREE_MM - module_legende.HAUTEUR_SYMBOLE_MM) / 2.0
+        module_legende._dessiner_symbole(planche, entree, x0 + module_legende.MARGE_MM, haut,
+                                         module_legende.LARGEUR_SYMBOLE_MM, module_legende.HAUTEUR_SYMBOLE_MM)
+        planche.ajouter_texte(x0 + module_legende.MARGE_MM + module_legende.LARGEUR_SYMBOLE_MM
+                              + module_legende.ECART_LIBELLE_MM,
+                              haut + module_legende.HAUTEUR_SYMBOLE_MM - 1.1, entree.libelle,
+                              taille=TAILLE_COURANTE)
+    return (x, y, 2 * largeur_colonne, hauteur)
+
+
 def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=False):
     def legende(*args, **kwargs):
         libelles = dict(kwargs.get("libelles") or {})
@@ -1166,9 +1284,26 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
             axe = EntreeLegende("Axe de voie (BD TOPO, IGN)", STYLE_AXE)
             axe.symbole = "ligne"
             entrees.append(axe)
+        etat["nb_entrees"] = len(entrees)
         return entrees
 
-    etat = {}
+    etat = {"etiquettes": []}
+    ajouter_etiquettes_d_origine = Planche.ajouter_etiquettes
+
+    def ajouter_etiquettes_relevees(planche, points, textes, style=None):
+        """Les numéros de parcelle, et la place qu'ils occupent sur le papier.
+
+        Aucune valeur de cote ne doit les recouvrir (relecture du 08/11/2026 :
+        « 0495 » sous une cote à Saint-Cyr). Ils sont posés avant les cotes.
+        """
+        taille = (style or {}).get("taille_mm", 2.5)
+        t = planche.transformation
+        for point, texte in zip(points, textes):
+            x, y = t.point(*((point.x, point.y) if hasattr(point, "x") else point))
+            largeur = planche.mesurer_texte(str(texte), taille)
+            etat["etiquettes"].append((x - largeur / 2 - 0.3, y - taille * 0.75 - 0.3,
+                                       x + largeur / 2 + 0.3, y + taille * 0.25 + 0.3))
+        return ajouter_etiquettes_d_origine(planche, points, textes, style)
 
     def coupe_puis_cotes(planche, contrat_):
         trace = coupe_d_origine(planche, contrat_)
@@ -1177,7 +1312,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
                 planche.ajouter_geometrie(axe, STYLE_AXE)
         # Ce qui est déjà écrit réserve sa place avant que les cotes cherchent la leur.
         lignes, renvois = apres(planche) if apres else ([], [])
-        occupees = []
+        occupees = list(etat["etiquettes"])
         z = planche.zone_dessin()
         # Les lignes s'empilent vers le haut depuis la source : la dernière écrite
         # est la plus haute. On les prend à rebours pour qu'elles se lisent dans
@@ -1209,41 +1344,62 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
         """
         t = planche.transformation
         x, y, largeur_zone, hauteur_zone = zone
-        coins = ((x + 3.0, y + 3.0), (x + largeur_zone - largeur_mm - 3.0, y + 3.0),
-                 (x + 3.0, y + hauteur_zone - hauteur_mm - 3.0 - etat["pied_mm"]),
-                 (x + largeur_zone - largeur_mm - 3.0, y + hauteur_zone - hauteur_mm - 3.0))
-
-        def boite_du_coin(c):
-            return boite_l93(t, (c[0], c[1], c[0] + largeur_mm, c[1] + hauteur_mm))
-
         # Le cadre d'un détail compte comme une cote : sous la légende, il perd
         # son renvoi et une partie de ce qu'il désigne (Auzainvilliers, DP 2,
         # 07/11/2026 ; déjà vrai en partie le 04/11).
         traits = [LineString(p) for p, _, _ in cotes] + list(etat["lignes"])
-        libres = [c for c in coins if not any(boite_du_coin(c).intersects(tr) for tr in traits)]
         dessin = [g for _, geoms in objets for g in geoms] + list(etat["lignes"])
         couvert = unary_union(dessin).buffer(dp2_plan_masse.EPAISSEUR_MESURE_LEGENDE_M)
 
-        def part(c):
-            b = boite_du_coin(c)
-            return b.intersection(couvert).area / b.area
+        def coins_de(largeur, hauteur):
+            return ((x + 3.0, y + 3.0), (x + largeur_zone - largeur - 3.0, y + 3.0),
+                    (x + 3.0, y + hauteur_zone - hauteur - 3.0 - etat["pied_mm"]),
+                    (x + largeur_zone - largeur - 3.0, y + hauteur_zone - hauteur - 3.0))
 
-        if not libres:
-            # Les quatre coins couvrent une cote ou un cadre (Auzainvilliers, DP 2,
-            # 07/11/2026) : la maquette ne sait que le dire, la construction
-            # devra mieux faire.
-            rapport.append("!! légende : aucun coin libre de cote et de cadre, posée au coin le moins dessiné")
-        candidats = libres or list(coins)
-        for c in candidats:
-            if part(c) <= dp2_plan_masse.RECOUVREMENT_LEGENDE_TOLERE:
-                return c
-        return min(candidats, key=part)
+        def boite_du_coin(c, largeur, hauteur):
+            return boite_l93(t, (c[0], c[1], c[0] + largeur, c[1] + hauteur))
+
+        def choisir(largeur, hauteur):
+            coins = coins_de(largeur, hauteur)
+            libres = [c for c in coins
+                      if not any(boite_du_coin(c, largeur, hauteur).intersects(tr) for tr in traits)]
+
+            def part(c):
+                b = boite_du_coin(c, largeur, hauteur)
+                return b.intersection(couvert).area / b.area
+
+            for c in libres:
+                if part(c) <= dp2_plan_masse.RECOUVREMENT_LEGENDE_TOLERE:
+                    return c, libres, coins, part
+            return (min(libres, key=part) if libres else None), libres, coins, part
+
+        # Une colonne d'abord ; deux, quand aucun coin ne reçoit la légende sans
+        # couvrir une cote ou un cadre (Auzainvilliers, DP 2, 08/11/2026).
+        coin, _, coins_1, part_1 = choisir(largeur_mm, hauteur_mm)
+        if coin is not None:
+            etat["colonnes"] = 1
+            return coin
+        nb = etat.get("nb_entrees", 0)
+        coin, _, _, _ = choisir(2 * largeur_mm, hauteur_bloc(math.ceil(nb / 2)))
+        if coin is not None:
+            etat["colonnes"] = 2
+            rapport.append(f"légende sur deux colonnes ({nb} entrées) : aucun coin libre en une")
+            return coin
+        etat["colonnes"] = 1
+        rapport.append("!! légende : aucun coin libre de cote et de cadre, ni en une colonne ni en deux, "
+                       "posée au coin le moins dessiné")
+        return min(coins_1, key=part_1)
 
     def legende_puis_cotes(planche, entrees, position, largeur_mm=70.0, titre="Légende"):
-        resultat = dessiner_legende_d_origine(planche, entrees, position=position,
-                                              largeur_mm=largeur_mm, titre=titre)
-        boite_legende = (position[0], position[1], position[0] + largeur_mm,
-                         position[1] + hauteur_bloc(len(entrees), titre is not None))
+        if etat.get("colonnes") == 2:
+            resultat = legende_en_deux_colonnes(planche, entrees, position, largeur_mm, titre)
+            boite_legende = (position[0], position[1], position[0] + 2 * largeur_mm,
+                             position[1] + hauteur_bloc(math.ceil(len(entrees) / 2), titre is not None))
+        else:
+            resultat = dessiner_legende_d_origine(planche, entrees, position=position,
+                                                  largeur_mm=largeur_mm, titre=titre)
+            boite_legende = (position[0], position[1], position[0] + largeur_mm,
+                             position[1] + hauteur_bloc(len(entrees), titre is not None))
         occupees = etat["occupees"] + [boite_legende]
         problemes = []
         # Le renvoi de chaque cadre, une fois la légende posée : écrit avant
@@ -1266,6 +1422,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
         return resultat
 
     dp2_plan_masse._tracer_ligne_coupe = coupe_puis_cotes
+    Planche.ajouter_etiquettes = ajouter_etiquettes_relevees
     dp2_plan_masse.LARGEUR_LEGENDE_MM = LARGEUR_LEGENDE_V4
     dp2_plan_masse.construire_legende = legende
     dp2_plan_masse.objets_a_dessiner = objets_avec_conteneurs
@@ -1277,6 +1434,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
         return sortie_planche, etat["problemes"]
     finally:
         dp2_plan_masse._tracer_ligne_coupe = coupe_d_origine
+        Planche.ajouter_etiquettes = ajouter_etiquettes_d_origine
         dp2_plan_masse.LARGEUR_LEGENDE_MM = LARGEUR_LEGENDE_D_ORIGINE
         dp2_plan_masse.construire_legende = legende_d_origine
         dp2_plan_masse.objets_a_dessiner = objets_d_origine
@@ -1286,7 +1444,8 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
 
 # Une ligne de pied par idée : d'un seul tenant, la phrase dépassait 200 mm.
 PIED_DP2 = ["Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain d'assiette "
-            "(parcellaire IGN). Voie publique et habitation la plus proche selon la BD TOPO (IGN).",
+            "(parcellaire IGN). Voie publique (axe, ou extrémité quand elle s'arrête avant le site) et habitation "
+            "la plus proche selon la BD TOPO (IGN).",
             "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; tables : "
             "hauteur maximale du tableau bilan)."]
 PIED_C3 = ["Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ; "

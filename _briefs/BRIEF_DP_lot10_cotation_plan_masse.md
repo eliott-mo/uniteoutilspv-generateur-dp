@@ -17,7 +17,7 @@
 > dit ce que la maquette a montré quand c'est la mesure qui a tranché.
 >
 > La maquette est versée à côté de ce brief, dans
-> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 08/11/2026 (v4). C'est une
+> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 08/11/2026 (v5). C'est une
 > référence, pas du code à reprendre : elle remplace à l'exécution des fonctions
 > du socle pour poser ses cotes sur la DP 2 du lot 4, et rien ne la teste. On y
 > lit le détail de ce que les décisions résument — le placement des valeurs
@@ -143,14 +143,26 @@ des constructions, panneaux compris, « par rapport aux voies et emprises
 publiques ». Une cote part de la construction la plus proche — table ou
 ouvrage permanent — jusqu'à l'axe de la voie publique la plus proche, à toute
 distance ; hors du cadre, elle s'arrête au bord et le dit, comme celle de
-l'habitation. Une voie est publique au sens de C8. À Saint-Cyr : 23,3 m de
-l'axe d'une route empierrée hors parcelles, à l'angle nord-ouest. Quand la voie
-longe le terrain, elle est parallèle à la limite, et la cote vers son axe part
-du même point, dans la même direction, que la cote de la même construction à
-la limite : les deux se superposeraient. Elles n'en font alors qu'une, et
-l'axe se lit dans le libellé : « 5,5 m (limite parcellaire ; axe de la D18 à
-11,0 m) », la citerne incendie d'Auzainvilliers. L'axe se dessine sur 25 m de
-part et d'autre du pied de la cote.
+l'habitation. Une voie est publique au sens de C8. L'axe se dessine sur 25 m de
+part et d'autre du pied de la cote. Règles de la seconde relecture du 08/11 :
+
+- **La cote est perpendiculaire à l'axe, et ses flèches le touchent.** Elle part
+  de la face de la construction tournée vers la voie. La BD TOPO coupe une
+  route à chaque carrefour : les tronçons publics se fondent en un réseau avant
+  la mesure, sans quoi le bout d'un tronçon passerait pour le bout de la route.
+- **Elle ne se superpose à aucune autre cote.** Une voie qui longe le terrain
+  est parallèle à sa limite : sa cote partait du même point, dans la même
+  direction, que la cote de la même construction à la limite. Elle se décale
+  donc le long de la face, jusqu'à 4 mm de papier de toute cote parallèle, et
+  le rapport dit la distance perdue. À Auzainvilliers : 11,6 m depuis la
+  citerne incendie, au lieu de 11,0 m à son angle. La v4 réunissait les deux
+  cotes en un libellé, « 5,5 m (limite parcellaire ; axe de la D18 à 11,0 m) »,
+  mais ses flèches s'arrêtaient au bord de la route.
+- **Une voie publique qui s'arrête avant le site n'a pas de perpendiculaire.**
+  La cote va alors à son extrémité, et le dit : « 23,3 m (extrémité de la
+  route) » à Saint-Cyr. La route empierrée publique y finit à l'angle
+  nord-ouest du site. Les chemins qui longent le côté ouest passent sur des
+  parcelles, sur toute une bande de ±6 m autour de leur axe (relevé le 08/11).
 
 **C3.** Les **voisins directs** d'un ouvrage (04/11) sont ceux du graphe de
 voisinage relatif. La paire i–j ne se cote pas quand un troisième ouvrage k est
@@ -209,9 +221,8 @@ Mesuré le 07/11 :
   sur des parcelles (6,3 et 7,5 m). La première voie publique est à 108 m. Pas
   de cote, et le rapport nomme ce qu'il a écarté ;
 - à Auzainvilliers, la D18 passe à 12,2 m, entièrement hors des parcelles.
-  Comme pour C2, la cote vers l'axe se superposait à celle du poste à la
-  limite : elle se lit dans son libellé, « 4,7 m (limite parcellaire ; axe de
-  la D18 à 12,2 m) » (08/11).
+  Elle se mesure comme C2, perpendiculairement à l'axe, et ne se superpose pas
+  à la cote du poste à la limite (4,7 m) : « 12,2 m (axe de la D18) » (08/11).
 
 L'axe se dessine sur 25 m de part et d'autre du pied de la cote. L'étiquette
 donne le numéro de la voie (`cpx_numero`) quand elle en a un, sa nature sinon.
@@ -374,6 +385,16 @@ le moins, et un renvoi compte pour une gêne de plus. Les cotes les plus courtes
 se placent d'abord : elles ont le moins de choix. Faute de toute place, la
 valeur est posée au mieux, et le rapport le dit.
 
+La seconde relecture du 08/11 y ajoute trois règles, pour qu'une valeur ne
+recouvre rien d'important :
+- la valeur d'une cote vers la limite parcellaire (C1, et C3 vers la limite)
+  se pose de préférence au-delà de la limite, hors de la centrale : toute
+  autre place compte une gêne de plus ;
+- un numéro de parcelle est interdit, comme une autre valeur : les numéros sont
+  posés avant les cotes, et leur place se relève à ce moment ;
+- les tables sont à éviter, mais une valeur posée dessus reste lisible, et ne
+  fait pas partir une zone en détail (D7).
+
 La maquette passe ses points en Lambert 93 à `Planche.ajouter_geometrie`, qui
 les projette. La première cote se mesure dans le PDF avant qu'on en pose une
 autre.
@@ -396,8 +417,11 @@ d'un seul tenant, la phrase dépassait 200 mm) :
   proche ; poste de livraison coté jusqu'à l'axe de la voie publique la plus
   proche, en deçà de 30 m. »
 
-La légende ne recouvre ni le pied, ni une cote, ni un cadre de détail, tant
-qu'un coin le permet. Une absence se dit en légende (D5). Une cote qui ne trouve
+La légende ne recouvre ni le pied, ni une cote, ni un cadre de détail. Quand
+aucun coin ne la reçoit sur une colonne, elle passe sur deux, deux fois moins
+haute (08/11) : sur la DP 2 d'Auzainvilliers, ses vingt entrées couvraient le
+haut du cadre du détail. Faute de coin même en deux colonnes, elle va au coin le
+moins dessiné, et le rapport le dit. Une absence se dit en légende (D5). Une cote qui ne trouve
 pas sa place, ou qu'une règle écarte, est nommée au rapport avec sa raison. Elle
 n'est jamais retirée en silence.
 
@@ -463,7 +487,8 @@ Panneaux photovoltaïques (hauteur maximale 4 m)
 - Un module de calcul des cotes, séparé du dessin pour se tester sans PDF :
   côtés, cotes tables → limite et clôture → limite, corps des ouvrages,
   voisinage relatif, inter-rangée, largeur de piste, table la plus proche, voie
-  publique, réunion d'une cote d'axe avec la cote à la limite, dimensions et
+  publique et cote perpendiculaire à son axe ou à son extrémité, décalage le
+  long d'une face pour ne pas superposer deux cotes, dimensions et
   hauteurs de la légende.
 - `dp_socle/planches/dp2_plan_masse.py` : la pose de C1, C2, C4, C5 et C6, celle
   des zones qui restent sur la DP 2, les cadres de détail et leurs renvois, la
@@ -533,15 +558,15 @@ comme l'application le fait, sans ligne de coupe.
 | Clôture → limite, sur la clôture réelle | 0,00 m tout autour, sauf un point à 1,03 m | de 0 m (côté nord, le long de la D18) à 16,5 m |
 | C1, tables → limite parcellaire | 4 côtés : 15,7, 6,6, 5,7 et 6,8 m | 6 côtés : de 11,4 à 25,2 m |
 | C1, clôture → limite parcellaire | aucune : la clôture est sur la limite | 3 cotes, 6,0, 6,4 et 12,8 m ; deux côtés trop courts n'en reçoivent pas |
-| C2 | 23,3 m de l'axe d'une route empierrée hors parcelles, depuis l'angle nord-ouest | « 5,5 m (limite parcellaire ; axe de la D18 à 11,0 m) », depuis la citerne incendie |
+| C2 | « 23,3 m (extrémité de la route) » : la route empierrée publique s'arrête à l'angle nord-ouest du site | « 11,6 m (axe de la D18) », perpendiculaire, depuis la citerne incendie, décalée de sa cote à la limite (11,0 m à l'angle) |
 | C4 | 119 m ; deux bâtiments `Indifférencié` plus proches, le premier à 85 m | 948 m, hors cadre |
 | C5 | 4,5 m au tableau, 4,51 m au plan (IND06 : 4,9 et 4,91 m) | 3,5 m |
 | C6 | piste lourde existante 4,4 m ; piste légère 3,5 m | 3,5 m, piste existante et piste à créer |
 | Ouvrages (D2) | 3 : PDL/PTR, local technique, citerne incendie | 10 : PDL/PTR, deux PTR, deux BESS, local technique, deux citernes, bac de rétention, zone de remise |
 | C3 | 2 paires gardées sur 3 ; 3 cotes à la limite | 9 paires gardées sur 19 ; 8 cotes à la limite ; PTR des batteries ↔ bac de rétention 4,8 m |
 | C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m ; BESS sud 8,3 m ; BESS nord 28,3 m ; citerne incendie 6,5 m |
-| C8 | non cotée : voie publique à 108 m ; plus près, un chemin dans la clôture (5,2 m), puis des voies posées sur des parcelles (6,3 et 7,5 m) | « 4,7 m (limite parcellaire ; axe de la D18 à 12,2 m) » |
-| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m | 9 entrées dimensionnées ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende |
+| C8 | non cotée : voie publique à 108 m ; plus près, un chemin dans la clôture (5,2 m), puis des voies posées sur des parcelles (6,3 et 7,5 m) | « 12,2 m (axe de la D18) », perpendiculaire, à part de « 4,7 m (limite parcellaire) » |
+| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m | 9 entrées dimensionnées ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende ; sur la DP 2, deux colonnes |
 | Planche de détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; la zone ouest (4 cotes) reste sur la DP 2 |
 
 Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
@@ -590,14 +615,15 @@ Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
 - Les pistes de La Bruère-sur-Loir (deux pistes et une aire de retournement de
   189 m², relevé du 15/10/2026) et de Chaumont-sur-Aire (voirie lourde et voirie
   légère).
-- **La place de la légende quand les quatre coins sont pris.** Sur la DP 2
-  d'Auzainvilliers, chaque coin couvre une cote ou le cadre du détail ; la
-  légende, qui a gagné deux lignes, recouvre le haut du cadre, comme elle le
-  faisait déjà de 3 mm le 04/11. Le rapport le dit, mais la construction doit
-  mieux faire.
+- **La légende sur deux colonnes**, éprouvée sur la seule DP 2 d'Auzainvilliers
+  (08/11) : elle y libère le cadre du détail. À voir sur un site où même deux
+  colonnes ne trouvent pas de coin.
+- **L'angle nord-ouest de la DP 2 d'Auzainvilliers**, où se serrent sept cotes
+  sur 40 m : citerne incendie, local de stockage, voie publique, tables et
+  clôture. Il se lit sur l'épreuve, mais c'est la zone la plus chargée des deux
+  sites.
 - La lisibilité sur l'épreuve A3, face à la trame des tables et aux numéros de
-  parcelle. Le libellé le plus long de la v4, « 5,5 m (limite parcellaire ; axe
-  de la D18 à 11,0 m) », passe au-dessus de la limite, entre elle et l'axe.
+  parcelle.
 
 ## Ordre de construction
 
@@ -672,6 +698,10 @@ la suite réseau.
   annonçait à Saint-Cyr des écarts clôture → limite de 0,9 et 1,0 m, quand la
   clôture réelle est sur la limite (0,00 m, relevé le 08/11). Le côté donne une
   direction ; les distances se prennent sur la clôture réelle.
+- **La BD TOPO coupe les routes à chaque carrefour.** Le bout d'un tronçon n'est
+  pas le bout de la route : les tronçons publics se fondent en un réseau avant
+  toute mesure perpendiculaire (C2, C8). Une voie publique qui s'arrête vraiment
+  avant le site — Saint-Cyr — n'a pas de perpendiculaire, et la cote le dit.
 - **La BD TOPO porte aussi les chemins du site.** Un chemin dans la clôture est
   un `troncon_de_route` comme un autre : à Saint-Cyr, c'est la « voie » la plus
   proche du PDL/PTR, à 5,2 m et à 89 % dans la clôture (C8).
