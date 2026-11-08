@@ -440,7 +440,7 @@ def _cotes_au_catalogue(contrat, categorie: str, surface_m2: float):
 
 
 def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
-    """Le poste dessiné au plan, et ce que le calque porte autour de lui.
+    """Les postes dessinés au plan, et ce que le calque porte autour d'eux.
 
     Un calque de poste ne porte pas que le poste. Mesuré le 05/09/2026 sur les
     trois dossiers d'essai :
@@ -461,6 +461,11 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
     Le poste est donc **reconnu** à ses cotes plutôt que reconstruit : il est
     déjà là, au centimètre. Ce qui l'entoure est rendu à part, pour être dessiné
     comme du sol remanié.
+
+    **Chaque** objet aux cotes du catalogue est un poste, et non le seul plus
+    grand : un calque peut en porter plusieurs. La reconnaissance est celle de
+    `separer_les_corps`, qui ne compte qu'une fois un poste que le bureau
+    d'études a dessiné plusieurs fois.
 
     Faute d'objet aux cotes du catalogue — le calque de Sarnois indice A porte un
     seul rectangle de 10 x 3 m là où le tableau déclare un PDL/PTR de 12 x 3 —
@@ -485,26 +490,13 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
                 "montre ce que le plan porte."
             )
 
-    catalogue = _cotes_au_catalogue(contrat, categorie, union.area)
-    if catalogue is not None:
-        retenus = [g for g in parties if _est_le_poste(g, *catalogue)]
-        if retenus:
-            poste = max(retenus, key=lambda g: g.area)
-            abords = [g for g in parties if g is not poste]
-            if abords:
-                # Les cotes se lisent du plus grand côté au plus petit : le
-                # catalogue les porte tantôt « longueur x largeur », tantôt
-                # l'inverse, et « 3,00 x 10,00 m » se lit mal.
-                grand, petit = sorted(catalogue, reverse=True)
-                avertissements.append(
-                    f"« {categorie} » : le poste est l'objet de "
-                    f"{grand:.2f} x {petit:.2f} m du calque, aux "
-                    f"cotes du catalogue. Les {len(abords)} autre(s) objet(s) du "
-                    f"calque, {sum(g.area for g in abords):.1f} m² au total, sont "
-                    "la terre remise autour de lui : ils sont dessinés comme du "
-                    "sol et non comme du poste."
-                )
-            return [poste], abords
+    postes, autour, copies = separer_les_corps(contrat, categorie, parties)
+    if postes:
+        if autour or copies:
+            avertissements.append(
+                _dire_les_postes(categorie, postes, autour, copies)
+            )
+        return postes, autour
 
     dessinee = parties
     rectangle = union.minimum_rotated_rectangle
@@ -522,6 +514,137 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
             )
 
     return dessinee, []
+
+
+def separer_les_corps(contrat, categorie: str, parties) -> tuple[list, list, dict]:
+    """Les ouvrages d'un calque, reconnus à leurs cotes de catalogue, et le reste.
+
+    Le corps d'un ouvrage est l'objet du calque qui a ses dimensions au
+    catalogue : le poste, jamais sa plateforme ni la terre remise autour de
+    lui. **Chaque** objet à ces cotes est un corps. La règle n'en gardait
+    qu'un par catégorie, le plus grand — à aire égale, le premier venu — et
+    rendait les autres au sol. Mesuré le 07/11/2026 à Auzainvilliers, le
+    calque 0 apparié au PTR : le calque des PTR y porte le poste principal et
+    celui des batteries, deux 10 x 3 m, et l'un des deux passait en gris sur
+    la DP 2, les plans de repérage de la DP 4 et le volet photographique.
+
+    Un corps que le bureau d'études a dessiné plusieurs fois ne compte qu'une
+    fois. Ses copies, à `TOLERANCE_DOUBLON_M2` près, ne se dessinent ni en
+    ouvrage ni en sol — c'est l'ouvrage, déjà dessiné —, et l'appelant les
+    compte au rapport.
+
+    La variante du catalogue se cherche sur la surface de chaque objet, et non
+    sur celle du calque entier : un calque qui porte un ouvrage et ce qui
+    l'entoure n'a la surface d'aucune variante, quand l'ouvrage a la sienne.
+
+    Rend `(corps, autour, copies)` : les corps dans l'ordre du calque, ce qui
+    n'en est pas, et le nombre de copies écartées par rang de corps.
+    """
+    corps, autour = [], []
+    copies: dict[int, int] = {}
+    for geometrie in parties:
+        # Un trait n'est pas un corps, même à ses cotes : c'est un contour ou
+        # un détail, et il n'a pas d'aire à recouper avec le catalogue.
+        cotes = (
+            _cotes_au_catalogue(contrat, categorie, geometrie.area)
+            if geometrie.area > 0
+            else None
+        )
+        if cotes is None or not _est_le_poste(geometrie, *cotes):
+            autour.append(geometrie)
+            continue
+        rang = next(
+            (
+                rang
+                for rang, deja in enumerate(corps)
+                if geometrie.symmetric_difference(deja).area < TOLERANCE_DOUBLON_M2
+            ),
+            None,
+        )
+        if rang is None:
+            corps.append(geometrie)
+        else:
+            copies[rang] = copies.get(rang, 0) + 1
+    return corps, autour, copies
+
+
+def _dire_les_postes(categorie: str, postes: list, autour: list, copies: dict) -> str:
+    """Ce que porte le calque d'un poste : les postes, leurs copies, la terre remise."""
+    phrases = [f"« {categorie} » : {_phrase_des_corps('poste', postes)}"]
+    if copies:
+        phrases.append(_phrase_des_copies(len(postes), copies))
+    if autour:
+        qui = "de lui" if len(postes) == 1 else "d'eux"
+        phrases.append(
+            f"Les {len(autour)} autre(s) objet(s) du calque, "
+            f"{sum(g.area for g in autour):.1f} m² au total, sont la terre "
+            f"remise autour {qui} : ils sont dessinés comme du sol et non "
+            "comme du poste."
+        )
+    return " ".join(phrases)
+
+
+def _formats(geometries) -> str:
+    """Les cotes au sol de quelques objets, sans redite.
+
+    Du plus grand côté au plus petit : le catalogue les porte tantôt
+    « longueur x largeur », tantôt l'inverse, et « 3,00 x 10,00 m » se lit
+    mal. Ce sont les cotes du plan, celles que la planche dessine.
+    """
+    vus = []
+    for geometrie in geometries:
+        mesure = dimensions_au_sol(geometrie)
+        if mesure is None:
+            continue
+        texte = f"{mesure[0]:.2f} x {mesure[1]:.2f} m"
+        if texte not in vus:
+            vus.append(texte)
+    return " et ".join(vus)
+
+
+def _phrase_des_corps(nom: str, corps: list) -> str:
+    """« le poste est l'objet de 10.00 x 3.00 m du calque », ou son pluriel."""
+    if len(corps) == 1:
+        return (
+            f"le {nom} est l'objet de {_formats(corps)} du calque, aux cotes "
+            "du catalogue."
+        )
+    return (
+        f"les {len(corps)} {nom}s sont les {len(corps)} objets de "
+        f"{_formats(corps)} du calque, aux cotes du catalogue : chacun se "
+        f"dessine comme un {nom}."
+    )
+
+
+def _phrase_des_copies(nombre: int, copies: dict) -> str:
+    """Ce que le bureau d'études a dessiné plusieurs fois, et qui compte une fois."""
+    total = sum(copies.values())
+    if nombre == 1:
+        return (
+            f"Le bureau d'études l'a dessiné {_fois(1 + total)} à l'identique : "
+            "il ne compte qu'une fois."
+        )
+    if len(copies) == nombre and len(set(copies.values())) == 1:
+        return (
+            "Le bureau d'études les a dessinés chacun "
+            f"{_fois(1 + total // nombre)} à l'identique : chacun ne compte "
+            "qu'une fois."
+        )
+    if len(copies) == 1:
+        return (
+            f"Le bureau d'études a dessiné l'un d'eux {_fois(1 + total)} à "
+            "l'identique : il ne compte qu'une fois."
+        )
+    return (
+        f"Le bureau d'études en a dessiné {len(copies)} plusieurs fois à "
+        f"l'identique, {total} copie(s) en tout : chacun ne compte qu'une fois."
+    )
+
+
+def _fois(nombre: int) -> str:
+    return {2: "deux fois", 3: "trois fois", 4: "quatre fois"}.get(
+        nombre, f"{nombre} fois"
+    )
 
 
 #: Clés sous lesquelles les deux entrées qui ne viennent pas du contrat se
@@ -684,6 +807,15 @@ TOLERANCE_EMPRISE_POSTE = 0.08
 #: un PTR de 10 x 3. La tolérance n'a pas à être large ; elle absorbe un arrondi
 #: de tracé, pas un objet d'une autre nature.
 TOLERANCE_COTES_POSTE = 0.05
+
+#: Différence symétrique, en mètres carrés, en deçà de laquelle deux objets aux
+#: cotes du catalogue sont le même ouvrage dessiné deux fois.
+#:
+#: Mesuré le 07/11/2026 : à Auzainvilliers, le PTR principal est dessiné deux
+#: fois et le PDL/PTR trois fois, et les copies coïncident à 0,000 m² près ;
+#: deux postes distincts de 10 x 3 m en ont 60. Le seuil absorbe un arrondi de
+#: tracé, pas un second ouvrage.
+TOLERANCE_DOUBLON_M2 = 0.05
 
 #: Recollement admis entre deux bouts de contour, en mètres. La CAO ne referme
 #: pas ses polylignes au point près.

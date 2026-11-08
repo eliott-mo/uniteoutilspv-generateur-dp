@@ -4123,6 +4123,18 @@ Il garde le gris de plateforme, sans teinte ni entrée de légende propres
 (décidé le 05/09/2026) : c'est du sol, et une onzième entrée de légende pour un
 talus de quelques dizaines de centimètres coûterait plus qu'elle n'apprend.
 
+**Chaque** objet aux cotes du catalogue est un poste, et non le seul plus grand.
+Mesuré le 07/11/2026 à Auzainvilliers, le calque 0 apparié à la main au PTR :
+le calque `ptr` y porte le PTR principal et celui des batteries, deux 10 x 3 m,
+et n'en garder qu'un faisait passer l'autre au gris de la plateforme, sous le
+nom de terre remise, sur la DP 2, les plans de repérage des DP 4 et le volet
+photographique. Un poste que le bureau d'études a dessiné plusieurs fois ne
+compte qu'une fois : deux objets dont la différence symétrique fait moins de
+0,05 m² sont le même. Les copies relevées sont exactes — le PTR principal
+dessiné deux fois, le PDL/PTR trois fois, à 0,000 m² près — quand deux postes
+distincts de 10 x 3 m en ont 60. Le rapport sépare les postes de la terre
+remise, et compte les copies.
+
 Faute d'objet aux cotes du catalogue — Sarnois indice A porte un 10 x 3 là où le
 tableau déclare un PDL/PTR de 12 x 3 — rien n'est reconstruit : le plan se
 dessine tel quel. Le recoupement avec la surface déclarée porte, lui, sur le

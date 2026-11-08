@@ -40,7 +40,14 @@ from dp_socle.planches.standards import (
 from dp_socle.projet import Projet
 
 from . import contrat_synthetique as synthese
-from .mesure_pdf import longueur, segments, segments_obliques
+from .mesure_pdf import (
+    format_page,
+    longueur,
+    segments,
+    segments_obliques,
+    surfaces_remplies,
+    teinte_visible,
+)
 
 pytest.importorskip(
     "cairosvg", reason="CairoSVG et libcairo sont nécessaires pour produire le PDF"
@@ -1104,3 +1111,107 @@ def test_un_nombre_de_pieux_impair_contredit_le_bi_pieu(site):
         "nombre impair" in m
         for m in _constat_des_pieux(contrat, longrines=False, mono_pieu=True)
     )
+
+
+# ---------------------------------------------------------------------------
+# La zone technique, lue dans le PDF de la DP 2
+# ---------------------------------------------------------------------------
+#
+# Ce que rend `objets_a_dessiner` ne suffit pas : une planche peut dessiner
+# chaque ouvrage juste et en montrer un faux, recouvert par ce qui est tracé
+# après lui. On lit donc, dans le PDF, la teinte que la planche montre au
+# centre de chaque ouvrage.
+
+
+@pytest.fixture
+def dp2_sans_geoplateforme(monkeypatch):
+    """La DP 2 sans la Géoplateforme : une parcelle qui couvre ce qu'on demande.
+
+    Ce qu'on mesure ici est la zone technique, pas le foncier. La DP 2 écrit
+    `from ..ign import telecharger_parcelles` : c'est sa référence qu'on
+    remplace, le nom étant lié à l'import (voir `parcellaire_double`).
+    """
+    from dp_socle.ign import Parcelle
+    from dp_socle.planches import dp2_plan_masse
+
+    def parcelles(bbox, *args, **kwargs):
+        minx, miny, maxx, maxy = bbox
+        return [
+            Parcelle(
+                geometrie=box(minx, miny, maxx, maxy), idu="00000000ZZ0001",
+                section="ZZ", numero="0001",
+                contenance_m2=(maxx - minx) * (maxy - miny), commune="00000",
+            )
+        ]
+
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_parcelles", parcelles)
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments", lambda *a, **k: [])
+    return dp2_plan_masse
+
+
+def _ecrire_zone_technique(dossier, objets: dict) -> None:
+    """Réécrit le contrat du site avec une zone technique `{catégorie: géométries}`."""
+    from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
+
+    lot = synthese.entites() + [
+        EntiteBE(categorie=categorie, calque="SYNTHESE", geometrie=g, z_reel=False)
+        for categorie, geometries in objets.items()
+        for g in geometries
+    ]
+    ecrire_geopackage(lot, dossier, synthese.ligne_coupe())
+    ecrire_parametres(synthese.parametres(), dossier)
+
+
+def _dp2_de_la_zone_technique(site, tmp_path, dp2_plan_masse, objets: dict):
+    """La DP 2 du site synthétique et de sa zone technique, et sa lecture."""
+    from dp_socle.geometrie import charger_emprise
+
+    projet, dossier = site()
+    _ecrire_zone_technique(dossier, objets)
+    sortie = dp2_plan_masse.generer(
+        projet, charger_contrat(dossier), charger_emprise(projet.chemin_emprise),
+        tmp_path, numero="5",
+    )
+    transformation = sortie.planche.transformation
+    _, hauteur_pt = format_page(sortie.chemin)
+
+    def vers_la_page(x, y):
+        """Un point Lambert 93 sur la page du PDF, en points PostScript."""
+        x_mm, y_mm = transformation.point(x, y)
+        return (x_mm / MM_PAR_PT, hauteur_pt - y_mm / MM_PAR_PT)
+
+    return sortie, surfaces_remplies(sortie.chemin), vers_la_page
+
+
+def _rvb(couleur: str) -> tuple:
+    """`#rrggbb` en triplet RVB arrondi au millième, comme le lit `surfaces_remplies`."""
+    return tuple(round(int(couleur[i : i + 2], 16) / 255.0, 3) for i in (1, 3, 5))
+
+
+def test_la_dp2_montre_chaque_poste_en_poste(site, tmp_path, dp2_sans_geoplateforme):
+    """Deux PTR de 10 x 3 m dans la même catégorie : deux postes sur la planche.
+
+    Relevé le 07/11/2026 à Auzainvilliers, le calque 0 apparié au PTR : le PTR
+    principal, dessiné deux fois, et celui des batteries. La palette ne gardait
+    que le plus grand des objets aux cotes du catalogue, et la DP 2 montrait
+    l'autre au gris de la plateforme. Mesuré dans le PDF : au centre de chaque
+    poste, la planche montre la teinte du PTR ; sur la terre remise, celle de
+    la plateforme.
+    """
+    from dp_socle.planches.palette import STYLES
+
+    x0, y0 = synthese.ORIGINE_L93
+    principal = box(x0 + 20, y0 + 85, x0 + 30, y0 + 88)
+    batteries = box(x0 + 40, y0 + 85, x0 + 50, y0 + 88)
+    terre = box(x0 + 18, y0 + 83, x0 + 32, y0 + 90)
+    _, surfaces, vers_la_page = _dp2_de_la_zone_technique(
+        site, tmp_path, dp2_sans_geoplateforme,
+        {"ptr": [terre, principal, batteries, box(*principal.bounds)]},
+    )
+
+    poste = _rvb(STYLES["ptr"].style.remplissage)
+    for nom, objet in (("principal", principal), ("batteries", batteries)):
+        centre = objet.centroid
+        assert teinte_visible(surfaces, vers_la_page(centre.x, centre.y)) == poste, nom
+    sol = _rvb(STYLES["plateforme"].style.remplissage)
+    assert teinte_visible(surfaces, vers_la_page(x0 + 19, y0 + 89)) == sol

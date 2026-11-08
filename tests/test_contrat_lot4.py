@@ -493,6 +493,61 @@ def test_un_ecart_de_surface_avec_le_tableau_est_signale(tmp_path):
     assert any("déclarés au tableau bilan" in m for m in avertissements)
 
 
+def _contrat_avec_calque(dossier, categorie: str, objets, cotes=()):
+    """Le site synthétique, dont le calque `categorie` porte `objets`."""
+    from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
+
+    lot = [e for e in synthese.entites() if e.categorie != categorie] + [
+        EntiteBE(categorie=categorie, calque="SYNTHESE", geometrie=g, z_reel=False)
+        for g in objets
+    ]
+    ecrire_geopackage(lot, dossier, synthese.ligne_coupe())
+    donnees = synthese.parametres()
+    donnees["cotes_normalisees"] = synthese.COTES + list(cotes)
+    ecrire_parametres(donnees, dossier)
+    return charger_contrat(dossier)
+
+
+def test_chaque_objet_aux_cotes_du_catalogue_est_un_poste(tmp_path):
+    """Deux PTR de 10 x 3 m dans un calque : deux postes, et non un poste et du sol.
+
+    Mesuré le 07/11/2026 à Auzainvilliers, le calque 0 apparié au PTR : le
+    calque porte le PTR principal, dessiné deux fois à l'identique, et celui
+    des batteries. La palette ne gardait que le plus grand des objets aux cotes
+    du catalogue — à aire égale, le premier venu — et rendait les autres au
+    sol, sous le nom de terre remise : l'un des deux postes passait en gris.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.planches.palette import objets_a_dessiner
+
+    x0, y0 = synthese.ORIGINE_L93
+    principal = box(x0 + 20, y0 + 85, x0 + 30, y0 + 88)
+    batteries = box(x0 + 40, y0 + 85, x0 + 50, y0 + 88)
+    terre = box(x0 + 18, y0 + 83, x0 + 32, y0 + 90)
+    contrat = _contrat_avec_calque(
+        tmp_path, "ptr", [terre, principal, batteries, box(*principal.bounds)]
+    )
+
+    messages = []
+    objets = dict(objets_a_dessiner(contrat, messages))
+
+    postes = objets["ptr"]
+    assert len(postes) == 2
+    assert {round(g.centroid.x - x0) for g in postes} == {25, 45}
+    # La terre remise rejoint la plateforme. La copie du poste, elle, ne se
+    # dessine nulle part : c'est le poste, déjà dessiné.
+    sol = objets["plateforme"]
+    assert any(g.equals(terre) for g in sol)
+    assert not any(g.equals(principal) for g in sol)
+
+    # Le rapport sépare les postes de la terre remise, et compte la copie.
+    message = next(m for m in messages if m.startswith("« ptr » : les 2 postes"))
+    assert "10.00 x 3.00 m" in message
+    assert "l'un d'eux deux fois à l'identique" in message
+    assert "Les 1 autre(s) objet(s) du calque, 98.0 m² au total, sont la terre" in message
+
+
 # ---------------------------------------------------------------------------
 # L'archive du contrat, qui doit quitter le serveur et revenir entière
 # ---------------------------------------------------------------------------
