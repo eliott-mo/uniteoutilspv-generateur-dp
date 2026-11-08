@@ -209,8 +209,11 @@ Auzainvilliers, chaque conteneur BESS de
 6 × 3 m est posé sur un aplat plein de 6,0 × 8,1 m de la même couleur, qui le
 cachait : la cote prise sur le conteneur s'arrêtait au milieu de l'orange, et la
 DP 2 montrait un BESS de 48 m² quand la DP 4 le dessine à 18 m². L'aplat se
-dessine donc en plateforme, et le rapport demande au bureau d'études ce qu'il
-est, dalle ou aire dégagée (04/11).
+dessine donc en plateforme (04/11). C'est la plateforme des batteries que le
+tableau bilan déclare : « Surface plateforme batteries », 100 m² pour deux
+conteneurs à Auzainvilliers et 50 m² pour un à Sarnois, pour des aplats de
+48,3 m². La question posée au bureau d'études le 04/11, dalle ou aire dégagée,
+est retirée du rapport (08/11).
 
 Les corps d'une même catégorie qui se touchent, à 2,5 cm près, forment un seul
 ouvrage. Un corps que le bureau d'études a dessiné deux fois compte une fois.
