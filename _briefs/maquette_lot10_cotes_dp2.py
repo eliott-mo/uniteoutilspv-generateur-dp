@@ -1,11 +1,11 @@
 """Maquette du lot 10 : la DP 2 cotée, sans toucher au socle.
 
-Versée dans `_briefs/` le 07/11/2026, comme référence du brief
+Versée dans `_briefs/` le 07/11/2026, mise à jour le 08/11, comme référence du brief
 `BRIEF_DP_lot10_cotation_plan_masse.md`. Ce n'est pas du code du dépôt : rien
 ne l'importe, la suite ne la joue pas, et elle n'est pas maintenue. Elle
 remplace à l'exécution des fonctions du socle (`dp2_plan_masse`, `palette`,
 `commun`) pour poser ses cotes sur la DP 2 du lot 4 : elle ne vaut donc que pour
-l'état du code du 07/11/2026. La construction du lot en reprend les règles et
+l'état du code du 08/11/2026. La construction du lot en reprend les règles et
 les pièges mesurés, pas la forme.
 
 Mode d'emploi, avec un contrat déjà écrit (`geometries.gpkg` et `projet.json`,
@@ -67,6 +67,33 @@ Puis les retours des chefs de projet sur Saint-Cyr et Auzainvilliers (07/11/2026
   sur le calque 0 ; il est apparié à la main, comme l'écran le permet.
 Et la mise en page qui en découle : la légende ne recouvre plus ni le pied ni
 le cadre d'un détail, et le pied se lit de haut en bas.
+
+Puis les décisions du chef de projet du lot, le 08/11/2026, sur la relecture
+des deux demandes de compléments :
+- la chaîne tables | clôture | limite est coupée en deux cotes, posées à deux
+  endroits du côté : à 1:2 000, un écart de 1 m entre clôture et limite faisait
+  0,5 mm, et ses flèches se posaient sur celles de la grande cote. La première
+  va des tables à la limite parcellaire, à travers la clôture : c'est la
+  distance que les deux demandes réclament. La seconde va de la clôture à la
+  limite, ailleurs sur le côté, et seulement si l'écart dépasse 0,5 m ;
+- les libellés disent « limite parcellaire », sans orientation : le plan montre
+  où est la limite ;
+- C2 revient : la construction la plus proche de la voie publique la plus
+  proche, jusqu'à l'axe de celle-ci, à toute distance — Saint-Cyr demande les
+  distances « par rapport aux voies et emprises publiques » ;
+- les trois dimensions (Auzainvilliers, art. R. 431-36 b) : la légende donne
+  les cotes et la hauteur de chaque construction, au catalogue, et la hauteur
+  maximale des tables, celle de la coupe ;
+- la plateforme d'un poste n'est plus simulée : la palette sépare chaque corps
+  depuis le 08/11/2026, et la simulation de la v3 est retirée.
+Et ce que leur application a montré, le même jour :
+- le côté de clôture, simplifié à 1,5 m, ne donne plus que la direction de la
+  cote : la v3 mesurait depuis lui, et en tirait à Saint-Cyr des écarts
+  clôture → limite de 0,9 et 1,0 m là où la clôture réelle est sur la limite ;
+- la cote clôture → limite se pose, parmi les endroits du côté qui conviennent,
+  là où elle gêne le moins les autres cotes ;
+- la cote vers l'axe d'une voie qui longe le terrain se superposait à celle de
+  la même construction à la limite : l'axe se dit dans le libellé de celle-ci.
 """
 
 import math
@@ -116,6 +143,14 @@ SEUIL_VOIE_PDL_M = 30.0
 OUVRAGES_VERS_TABLES = ("bess", "citerne_refroidissement", "bache_incendie")
 POSTES_DE_LIVRAISON = ("pdl", "pdl_ptr")
 POINTS_CARDINAUX = ("est", "nord-est", "nord", "nord-ouest", "ouest", "sud-ouest", "sud", "sud-est")
+# En deçà, la clôture est tenue pour posée sur la limite : pas de seconde cote.
+ECART_CLOTURE_LIMITE_MIN_M = 0.5
+# Écart minimal, sur le papier de la DP 2, entre les deux cotes d'un même côté :
+# assez pour qu'elles ne se lisent pas comme une chaîne. Valeur de départ.
+SEPARATION_COTES_COTE_MM = 20.0
+# Fractions du côté où l'on essaie de poser la cote clôture → limite, dans
+# l'ordre : le milieu d'abord.
+FRACTIONS_COTE_CLOTURE = (0.5, 0.35, 0.65, 0.2, 0.8)
 # Les pistes existantes comptent : à Saint-Cyr elles sont « à renforcer si
 # nécessaire », donc des travaux du projet. L'aire de grutage n'est pas une piste.
 CATEGORIES_PISTES = tuple(
@@ -126,7 +161,7 @@ couches = {n for n, _ in list_layers(dossier_contrat / NOM_GEOPACKAGE)}
 contrat = charger_contrat(dossier_contrat, voirie="piste_legere" if "voirie" in couches else None)
 emprise = charger_emprise(chemin_emprise)
 projet = Projet(nom=nom, commune=commune, code_postal=code_postal,
-                date="2026-11-07", emprise=str(chemin_emprise), libelle=libelle)
+                date="2026-11-08", emprise=str(chemin_emprise), libelle=libelle)
 rapport = []
 
 
@@ -236,7 +271,28 @@ if troncons and virage(courant[-1], troncons[0][0]) < 25:
     troncons[0] = courant + troncons[0]
 else:
     troncons.append(courant)
+# L'échelle de la DP 2, dès maintenant : les deux cotes d'un même côté doivent
+# s'écarter sur le papier, et c'est l'échelle qui dit de combien sur le terrain.
+_planche_echelle = commun.nouvelle_planche(projet, "DP 2")
+_, _dimensions_cadre, _ = dp2_plan_masse._ce_que_la_planche_cadre(contrat, emprise)
+DENOMINATEUR_DP2 = dp2_plan_masse.echelle_adaptative(
+    *_dimensions_cadre, _planche_echelle.zone_dessin(), marge=dp2_plan_masse.MARGE,
+    valeurs=dp2_plan_masse.ECHELLES_PLAN_MASSE)
+SEPARATION_COTES_COTE_M = SEPARATION_COTES_COTE_MM * DENOMINATEUR_DP2 / 1000.0
+enclos_c1 = shapely.Polygon(anneau)
+
+
+def premier_croisement(depart, vers_x, vers_y, longueur, au_dela_de=0.05):
+    """Le premier point de la limite sur la demi-droite, au-delà de `au_dela_de`."""
+    rayon = LineString([depart, (depart[0] + vers_x * longueur, depart[1] + vers_y * longueur)])
+    croisement = rayon.intersection(limite)
+    points = [croisement] if croisement.geom_type == "Point" else list(getattr(croisement, "geoms", []))
+    points = [q for q in points if q.geom_type == "Point" and Point(depart).distance(q) > au_dela_de]
+    return min(points, key=lambda q: Point(depart).distance(q)) if points else None
+
+
 nb_c1 = 0
+cotes_cloture_a_poser, candidats_cloture = [], []
 for troncon in troncons:
     ligne = LineString([troncon[0][0]] + [s[1] for s in troncon])
     if ligne.length < 20:
@@ -245,37 +301,68 @@ for troncon in troncons:
     if p_t.distance(p_c) > SEUIL_TABLES_COTE_M:
         rapport.append(f"C1 : côté de {ligne.length:.0f} m non coté, tables à {p_t.distance(p_c):.1f} m")
         continue
-    if limite.distance(p_c) <= 0.5:
-        # Clôture posée sur la limite : la chaîne n'a qu'un maillon, et le dit.
-        # « (clôture en limite) » seul se lisait comme la distance de la clôture à
-        # la limite, nulle ici (Saint-Cyr, 07/11/2026) : la cote dit ses deux bouts.
-        cote_ = orientation((p_t.x, p_t.y), (p_c.x, p_c.y))
-        cotes_dp2.append(cote_simple((p_t.x, p_t.y), (p_c.x, p_c.y),
-                                     f"{nombre_fr(p_t.distance(p_c), 1)} m (tables – limite {cote_}, clôture en limite)"))
-        rapport.append(f"C1 : côté {cote_} de {ligne.length:.0f} m, clôture en limite")
-        nb_c1 += 1
-        continue
+    # 1. Tables → limite parcellaire, dans l'axe tables → clôture, à travers la
+    #    clôture : c'est la distance que les deux demandes réclament (08/11/2026).
+    # Le côté est un tracé simplifié à 1,5 m : il ne donne que la direction. Sa
+    # distance à la limite n'est pas celle de la clôture — la v3 en tirait des
+    # « 1,0 m (clôture – limite) » à Saint-Cyr, où la clôture réelle est sur la
+    # limite (relevé le 08/11/2026). Les tables sont dans le terrain : le
+    # premier croisement de la limite, en partant d'elles, est le bon.
     dx, dy = p_c.x - p_t.x, p_c.y - p_t.y
     norme = math.hypot(dx, dy)
-    rayon = LineString([(p_c.x, p_c.y), (p_c.x + dx / norme * 500, p_c.y + dy / norme * 500)])
-    croisement = rayon.intersection(limite)
-    points = [croisement] if croisement.geom_type == "Point" else list(getattr(croisement, "geoms", []))
-    points = [q for q in points if q.distance(p_c) > 0.05]
-    if not points:
-        rapport.append(f"C1 : côté de {ligne.length:.0f} m sans limite dans l'axe")
+    p_l = premier_croisement((p_t.x, p_t.y), dx / norme, dy / norme, 500)
+    if p_l is None:
+        rapport.append(f"C1 : côté de {ligne.length:.0f} m sans limite dans l'axe des tables")
         continue
-    p_l = min(points, key=lambda q: q.distance(p_c))
-    cote_ = orientation((p_t.x, p_t.y), (p_l.x, p_l.y))
-    cotes_dp2.append((
-        [(p_t.x, p_t.y), (p_c.x, p_c.y), (p_l.x, p_l.y)],
-        [f"{nombre_fr(p_t.distance(p_c), 1)} m (tables – clôture)",
-         f"{nombre_fr(p_c.distance(p_l), 1)} m (clôture – limite {cote_})"],
-        [1, -1],
-    ))
+    cote_tables = LineString([(p_t.x, p_t.y), (p_l.x, p_l.y)])
+    cotes_dp2.append(cote_simple((p_t.x, p_t.y), (p_l.x, p_l.y),
+                                 f"{nombre_fr(p_t.distance(p_l), 1)} m (tables – limite parcellaire)"))
     nb_c1 += 1
+    # 2. Clôture → limite parcellaire, ailleurs sur le même côté, si l'écart y
+    #    dépasse 0,5 m. Posée dans le prolongement de la première, ses flèches
+    #    tombaient sur les siennes (Saint-Cyr, 08/11/2026).
+    essais = []
+    for f in FRACTIONS_COTE_CLOTURE:
+        q = ligne.interpolate(f * ligne.length)
+        _, q_reel = nearest_points(q, anneau)
+        avant = ligne.interpolate(max(0.0, f * ligne.length - 1.0))
+        apres = ligne.interpolate(min(ligne.length, f * ligne.length + 1.0))
+        tx, ty = apres.x - avant.x, apres.y - avant.y
+        nt = math.hypot(tx, ty)
+        if nt < 1e-6:
+            continue
+        nx, ny = -ty / nt, tx / nt
+        if enclos_c1.contains(Point(q_reel.x + nx * 0.5, q_reel.y + ny * 0.5)):
+            nx, ny = -nx, -ny
+        # Clôture sur la limite à cet endroit : le rayon la croise au départ, et
+        # c'est un écart nul, pas une limite introuvable.
+        if q_reel.distance(limite) <= ECART_CLOTURE_LIMITE_MIN_M:
+            essais.append((f, q_reel.distance(limite), math.inf))
+            continue
+        r = premier_croisement((q_reel.x, q_reel.y), nx, ny, 60)
+        if r is None:
+            essais.append((f, math.nan, math.inf))
+            continue
+        ecart = q_reel.distance(r)
+        eloignement = cote_tables.distance(LineString([(q_reel.x, q_reel.y), (r.x, r.y)]))
+        essais.append((f, ecart, eloignement))
+        if ecart > ECART_CLOTURE_LIMITE_MIN_M and eloignement >= SEPARATION_COTES_COTE_M:
+            candidats_cloture.append((f, q_reel, r, ecart))
+    if candidats_cloture:
+        # Posée plus bas, une fois toutes les autres cotes connues : au milieu du
+        # côté, elle tombait à Auzainvilliers parmi celles de la citerne
+        # incendie et du local, et « 11,0 m (axe de la D18) » n'avait plus de
+        # place (08/11/2026).
+        cotes_cloture_a_poser.append((ligne.length, p_t.distance(p_l), list(candidats_cloture)))
+    else:
+        rapport.append(f"C1 : côté de {ligne.length:.0f} m, tables → limite {p_t.distance(p_l):.1f} m ; "
+                       "pas de cote clôture → limite (écarts essayés : "
+                       + ", ".join(f"{e:.1f} m à {f:.0%}" + (" trop près" if el < SEPARATION_COTES_COTE_M else "")
+                                   for f, e, el in essais) + ")")
+    candidats_cloture.clear()
 
-# --- C2 retirée (chef de projet, 03/11/2026) : aucune cote à l'axe d'une voie.
-# Le côté route est couvert par la chaîne tables | clôture | limite.
+# --- C2, retirée le 03/11/2026, revient le 08/11 : elle se calcule plus bas, une
+# fois les ouvrages connus, puisqu'elle part de la construction la plus proche.
 
 # --- C4 : clôture → habitation la plus proche ----------------------------------
 residentiels = sorted(((g.distance(anneau), g) for g, p in batiments
@@ -373,43 +460,11 @@ def separer_corps(categorie, geoms):
 objets_d_origine = dp2_plan_masse.objets_a_dessiner
 deja_dit = set()
 
-# --- SIMULATION : tous les postes d'une catégorie, et non le seul plus grand ----
+# La v3 simulait ici la reconnaissance de tous les postes d'une catégorie. La
+# palette le fait depuis le 08/11/2026 (`palette.separer_les_corps`) : la
+# simulation est retirée, et `objets_avec_conteneurs` ne trouve plus rien à
+# séparer qu'elle n'ait déjà séparé.
 from dp_socle.planches import palette  # noqa: E402
-
-emprise_de_poste_d_origine = palette.emprise_de_poste
-postes_deja_dits = set()
-
-
-def emprise_de_tous_les_postes(contrat_, categorie, avertissements):
-    """Ce que `palette.emprise_de_poste` devrait rendre : tous les postes du calque.
-
-    SIMULATION, pas une règle du lot 10. L'outil ne garde qu'un poste par
-    catégorie, le plus grand des objets aux cotes du catalogue, et dessine les
-    autres en plateforme sous le nom de « terre remise ». À Auzainvilliers, le
-    PTR des batteries, apparié à la main depuis le calque 0, prenait la place
-    du PTR principal, qui passait en gris (relevé le 07/11/2026).
-    """
-    postes, abords = emprise_de_poste_d_origine(contrat_, categorie, avertissements)
-    if len(postes) != 1 or not abords:
-        return postes, abords
-    modele = dimensions(postes[0])
-    autres, reste = [], []
-    for g in abords:
-        if (g.geom_type == "Polygon" and g.area >= 1
-                and all(abs(m - a) <= TOLERANCE_COTES_POSTE * a for m, a in zip(dimensions(g), modele))
-                and not any(g.symmetric_difference(p).area < 0.05 for p in list(postes) + autres)):
-            autres.append(g)
-        else:
-            reste.append(g)
-    if autres and categorie not in postes_deja_dits:
-        postes_deja_dits.add(categorie)
-        rapport.append(f"SIMULATION : « {categorie} », {len(autres)} poste(s) de plus aux cotes du catalogue, "
-                       "dessiné(s) en poste et non en plateforme — correction de "
-                       "`palette.emprise_de_poste` à faire à part")
-    return list(postes) + autres, reste
-
-
-palette.emprise_de_poste = emprise_de_tous_les_postes
 
 
 def objets_avec_conteneurs(contrat_, avertissements=None):
@@ -527,20 +582,76 @@ for i, (_, a) in enumerate(ouvrages):
     pa, pl = nearest_points(a, limite)
     sur_le_trajet = traverses(LineString([pa, pl]), {i})
     if ouvrages[i][0] in TOUJOURS_A_LA_LIMITE:
-        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y),
-                                     f"{nombre_fr(d, 1)} m (limite {orientation((pa.x, pa.y), (pl.x, pl.y))})", -1))
+        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", -1))
         liens_c3.append((i, i))
         if d >= SEUIL_VOISINS_M or sur_le_trajet:
             pourquoi = ([f"au-delà de {SEUIL_VOISINS_M:.0f} m"] if d >= SEUIL_VOISINS_M else []) + (
                 [f"par-dessus {', '.join(sur_le_trajet)}"] if sur_le_trajet else [])
             rapport.append(f"C3 : {ouvrages[i][0]} à {d:.1f} m de la limite, coté {' et '.join(pourquoi)}")
     elif d < SEUIL_VOISINS_M and not sur_le_trajet:
-        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y),
-                                     f"{nombre_fr(d, 1)} m (limite {orientation((pa.x, pa.y), (pl.x, pl.y))})", -1))
+        cotes_c3.append(cote_simple((pa.x, pa.y), (pl.x, pl.y), f"{nombre_fr(d, 1)} m (limite parcellaire)", -1))
         liens_c3.append((i, i))
 rapport.append(f"C3 : {len(ouvrages)} ouvrage(s) ; {paires_sous_seuil} paire(s) à moins de "
                f"{SEUIL_VOISINS_M:.0f} m, {sum(1 for i, j in liens_c3 if i != j)} gardée(s) "
                f"par le voisinage relatif ; {sum(1 for i, j in liens_c3 if i == j)} cote(s) à la limite")
+
+# --- C2 : la construction la plus proche → axe de la voie publique la plus proche (08/11/2026)
+# Saint-Cyr demande les distances des constructions « par rapport aux voies et
+# emprises publiques », panneaux compris : une cote, à toute distance, depuis
+# la construction la plus proche. Publique au sens de C8 : hors des parcelles
+# cadastrales et hors de la clôture, sur les 50 m qui entourent le point le
+# plus proche de la voie.
+enclos = shapely.Polygon(anneau)
+constructions = unary_union([tables] + [g for _, g in ouvrages])
+kx0, ky0, kx1, ky1 = constructions.bounds
+cadastre_site = unary_union([p.geometrie for p in ign.telecharger_parcelles(
+    (kx0 - RAYON_VOIE_M - 50, ky0 - RAYON_VOIE_M - 50, kx1 + RAYON_VOIE_M + 50, ky1 + RAYON_VOIE_M + 50))])
+publiques_site = []
+for v, p in voies:
+    a_c, a_v = nearest_points(constructions, v)
+    pres = v.intersection(a_v.buffer(50.0))
+    if pres.is_empty or pres.length == 0:
+        continue
+    if pres.intersection(enclos).length / pres.length < 0.5 and \
+            pres.difference(cadastre_site).length / pres.length >= 0.5:
+        publiques_site.append((a_c.distance(a_v), v, p, a_c, a_v))
+def fusionner_avec_l_axe(depart, arrivee, texte_axe):
+    """Dit l'axe dans la cote qui part déjà du même point, dans la même direction.
+
+    Une voie qui longe le terrain est parallèle à sa limite : la cote vers son
+    axe part alors du même point, dans la même direction, que la cote de la même
+    construction à la limite, et les deux se superposent — la chaîne que la
+    relecture du 08/11/2026 a retirée. Elles n'en font qu'une, et l'axe se lit
+    dans le libellé : « 5,5 m (limite parcellaire ; axe de la D18 à 11,0 m) »,
+    la citerne incendie d'Auzainvilliers. Rend le libellé fusionné, ou None.
+    """
+    direction = math.atan2(arrivee.y - depart.y, arrivee.x - depart.x)
+    for points_, textes_, _ in cotes_dp2 + cotes_c3:
+        if len(points_) != 2 or Point(points_[0]).distance(depart) > 1.0 or not textes_[0].endswith(")"):
+            continue
+        direction_ = math.atan2(points_[1][1] - points_[0][1], points_[1][0] - points_[0][0])
+        if abs((direction_ - direction + math.pi) % (2 * math.pi) - math.pi) <= math.radians(15):
+            textes_[0] = textes_[0][:-1] + f" ; {texte_axe})"
+            return textes_[0]
+    return None
+
+
+c2_segment = None
+if publiques_site:
+    d, v, p, a_c, a_v = min(publiques_site, key=lambda c: c[0])
+    valeur_c2 = nombre_fr(d, 0 if d >= 100 else 1)
+    fusion = fusionner_avec_l_axe(a_c, a_v, f"axe {nom_de_voie(p)} à {valeur_c2} m")
+    if fusion is not None:
+        rapport.append(f"C2 : construction la plus proche à {d:.1f} m de l'axe {nom_de_voie(p)} "
+                       f"({p.get('nature')}), dit dans la cote « {fusion} »")
+    else:
+        cotes_dp2.append(cote_simple((a_c.x, a_c.y), (a_v.x, a_v.y), f"{valeur_c2} m (axe {nom_de_voie(p)})"))
+        rapport.append(f"C2 : construction la plus proche à {d:.1f} m de l'axe {nom_de_voie(p)} ({p.get('nature')})")
+    s_ = v.project(a_v)
+    axes.append(substring(v, max(0.0, s_ - 25.0), min(v.length, s_ + 25.0)))
+    c2_segment = (a_c, a_v)
+else:
+    rapport.append(f"C2 : aucune voie publique à moins de {RAYON_VOIE_M:.0f} m des constructions")
 
 # --- C7 : batteries et citernes → la table la plus proche (Auzainvilliers, 07/11/2026)
 for i, (categorie, g) in enumerate(ouvrages):
@@ -568,13 +679,10 @@ for i, (categorie, g) in enumerate(ouvrages):
 # Une voie du domaine public n'est pas cadastrée : un tronçon BD TOPO posé sur
 # des parcelles est un chemin d'exploitation ou une voie privée, et la piste
 # existante que le projet reprend y figure aussi, à l'intérieur de la clôture.
-enclos = shapely.Polygon(anneau)
 for i, (categorie, g) in enumerate(ouvrages):
     if categorie not in POSTES_DE_LIVRAISON:
         continue
-    gx0, gy0, gx1, gy1 = g.bounds
-    autour = ign.telecharger_parcelles((gx0 - 400, gy0 - 400, gx1 + 400, gy1 + 400))
-    cadastre = unary_union([p.geometrie for p in autour])
+    cadastre = cadastre_site
     candidates = []
     for v, p in voies:
         d = v.distance(g)
@@ -593,8 +701,15 @@ for i, (categorie, g) in enumerate(ouvrages):
     if publiques and publiques[0][0] < SEUIL_VOIE_PDL_M:
         d, v, p, _, _ = publiques[0]
         pa, pv = nearest_points(g, v)
-        cotes_c3.append(cote_simple((pa.x, pa.y), (pv.x, pv.y), f"{nombre_fr(d, 1)} m (axe {nom_de_voie(p)})"))
-        liens_c3.append((i, i))
+        if c2_segment is not None and pa.distance(c2_segment[0]) < 0.5 and pv.distance(c2_segment[1]) < 0.5:
+            rapport.append(f"C8 : {categorie} à {d:.1f} m de l'axe {nom_de_voie(p)}, confondue avec C2")
+            continue
+        fusion = fusionner_avec_l_axe(pa, pv, f"axe {nom_de_voie(p)} à {nombre_fr(d, 1)} m")
+        if fusion is None:
+            cotes_c3.append(cote_simple((pa.x, pa.y), (pv.x, pv.y), f"{nombre_fr(d, 1)} m (axe {nom_de_voie(p)})"))
+            liens_c3.append((i, i))
+        else:
+            rapport.append(f"C8 : {categorie}, l'axe est dit dans la cote « {fusion} »")
         s_ = v.project(pv)
         axes.append(substring(v, max(0.0, s_ - 25.0), min(v.length, s_ + 25.0)))
         rapport.append(f"C8 : {categorie} à {d:.1f} m de l'axe {nom_de_voie(p)} ({p.get('nature')})"
@@ -604,6 +719,62 @@ for i, (categorie, g) in enumerate(ouvrages):
                 if publiques else "aucune à moins de 300 m")
         rapport.append(f"C8 : {categorie} non coté — aucune voie du domaine public à moins de "
                        f"{SEUIL_VOIE_PDL_M:.0f} m, {loin}" + (f" ; écartées : {ecartees}" if ecartees else ""))
+
+# --- Les trois dimensions : cotes et hauteur des constructions, en légende (08/11/2026)
+# Auzainvilliers demande un plan « coté dans les trois dimensions »
+# (art. R. 431-36 b) du code de l'urbanisme). Les hauteurs viennent du catalogue,
+# comme sur les élévations de la DP 4, et celle des tables de la coupe (D6) :
+# le maximum déclaré au tableau bilan, que la notice annonce.
+from dp_socle.planches.dp3_coupes import geometrie_table  # noqa: E402
+
+
+def metres(x):
+    texte = f"{x:.2f}".rstrip("0").rstrip(".")
+    return texte.replace(".", ",")
+
+
+libelles_dimensions = {}
+for categorie in CATEGORIES_OUVRAGES:
+    corps_cat = [g for c, g in ouvrages if c == categorie]
+    if not corps_cat:
+        continue
+    variantes = set()
+    for g in corps_cat:
+        try:
+            cote = contrat.cote_de_categorie(categorie, surface_m2=g.area)
+        except ErreurDP as exc:
+            rapport.append(f"dimensions : « {categorie} » sans cote au catalogue ({exc})")
+            continue
+        if not cote.a_hauteur:
+            rapport.append(f"dimensions : « {categorie} » sans hauteur au catalogue ({cote.dimensions})")
+            continue
+        grand, petit = sorted((cote.longueur_m, cote.largeur_m), reverse=True)
+        variantes.add(f"{metres(grand)} × {metres(petit)} m, h {metres(cote.hauteur_m)} m")
+    if len(variantes) == 1:
+        libelles_dimensions[categorie] = f"{palette.style(categorie).libelle} ({variantes.pop()})"
+    elif variantes:
+        rapport.append(f"!! dimensions : « {categorie} » en plusieurs variantes ({sorted(variantes)}), "
+                       "une seule entrée de légende")
+try:
+    table_type, _ = geometrie_table(contrat)
+    haut = table_type.point_haut_max_m if table_type.point_haut_max_m is not None else table_type.point_haut_m
+    libelles_dimensions["tables_pv"] = (f"{palette.style('tables_pv').libelle} "
+                                        f"(hauteur maximale {metres(haut)} m)")
+except ErreurDP as exc:
+    rapport.append(f"!! hauteur des tables : {exc}")
+rapport.append("légende : " + " ; ".join(libelles_dimensions.values()))
+
+# Des intitulés plus longs : la légende s'élargit plutôt que de les laisser
+# déborder de son cadre, qui a une largeur fixe.
+from dp_socle.planches import legende as module_legende  # noqa: E402
+from dp_socle.polices import chasse_cairo, famille_active  # noqa: E402
+
+LARGEUR_LEGENDE_D_ORIGINE = dp2_plan_masse.LARGEUR_LEGENDE_MM
+_besoin = max([0.0] + [
+    chasse_cairo(t, famille_active(), module_legende.TAILLE_COURANTE, False)
+    + 2 * module_legende.MARGE_MM + module_legende.LARGEUR_SYMBOLE_MM + module_legende.ECART_LIBELLE_MM
+    for t in libelles_dimensions.values()])
+LARGEUR_LEGENDE_V4 = max(LARGEUR_LEGENDE_D_ORIGINE, math.ceil(_besoin + 1.0))
 
 # --- C6 : largeur de chaque piste, en travers ----------------------------------
 ouvrages_union = unary_union(tout_ouvrage) if tout_ouvrage else None
@@ -687,6 +858,21 @@ for categorie in CATEGORIES_PISTES:
         cotes_dp2.append(cote_simple((x1, y1), (x2, y2), f"{nombre_fr(w, 1)} m (piste)"))
         rapport.append(f"C6 : {categorie} de {g.area:.0f} m², {w:.1f} m en travers — cotée")
         nb_c6 += 1
+
+# --- C1, seconde cote : clôture → limite, là où elle gêne le moins (08/11/2026)
+# Parmi les endroits du côté qui conviennent, celui qui reste le plus loin de
+# toutes les autres cotes, maintenant qu'elles sont connues.
+lignes_posees = [LineString(p) for p, _, _ in cotes_dp2 + cotes_c3]
+for longueur, d_tables, candidats in cotes_cloture_a_poser:
+    f, q_reel, r, ecart = max(
+        candidats,
+        key=lambda c: min((LineString([c[1], c[2]]).distance(ligne_) for ligne_ in lignes_posees),
+                          default=math.inf))
+    cotes_dp2.append(cote_simple((q_reel.x, q_reel.y), (r.x, r.y),
+                                 f"{nombre_fr(ecart, 1)} m (clôture – limite parcellaire)"))
+    lignes_posees.append(LineString([q_reel, r]))
+    rapport.append(f"C1 : côté de {longueur:.0f} m, tables → limite {d_tables:.1f} m ; "
+                   f"clôture → limite {ecart:.1f} m à {f:.0%} du côté")
 
 # --- Où vont les cotes d'ouvrages : DP 2, ou DP 2 bis --------------------------
 planche_essai = commun.nouvelle_planche(projet, "DP 2")
@@ -968,6 +1154,10 @@ SOURCE_DP2 = ("Parcellaire et bâtiments : IGN — Parcellaire Express (PCI), WF
 
 def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=False):
     def legende(*args, **kwargs):
+        libelles = dict(kwargs.get("libelles") or {})
+        for cle, texte in libelles_dimensions.items():
+            libelles.setdefault(cle, texte)
+        kwargs["libelles"] = libelles
         entrees = list(legende_d_origine(*args, **kwargs))
         entree = EntreeLegende("Cote, en mètres", TRAIT_COTE)
         entree.symbole = "ligne"
@@ -1076,6 +1266,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
         return resultat
 
     dp2_plan_masse._tracer_ligne_coupe = coupe_puis_cotes
+    dp2_plan_masse.LARGEUR_LEGENDE_MM = LARGEUR_LEGENDE_V4
     dp2_plan_masse.construire_legende = legende
     dp2_plan_masse.objets_a_dessiner = objets_avec_conteneurs
     dp2_plan_masse._coin_de_legende = coin_hors_des_cotes
@@ -1086,6 +1277,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
         return sortie_planche, etat["problemes"]
     finally:
         dp2_plan_masse._tracer_ligne_coupe = coupe_d_origine
+        dp2_plan_masse.LARGEUR_LEGENDE_MM = LARGEUR_LEGENDE_D_ORIGINE
         dp2_plan_masse.construire_legende = legende_d_origine
         dp2_plan_masse.objets_a_dessiner = objets_d_origine
         dp2_plan_masse._coin_de_legende = coin_de_legende_d_origine
@@ -1093,11 +1285,12 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
 
 
 # Une ligne de pied par idée : d'un seul tenant, la phrase dépassait 200 mm.
-PIED_DP2 = ["Cotes en mètres, mesurées en Lambert 93. Tables | clôture | limite : cotes en chaîne, une par côté. "
-            "Habitation la plus proche selon la BD TOPO (IGN).",
-            "Limite : limite parcellaire du terrain d'assiette (parcellaire IGN), nommée par son orientation."]
-PIED_C3 = ["Distances entre ouvrages permanents voisins, et à la limite, cotées en deçà de 30 m ; batteries et "
-           "locaux de stockage cotés à la limite à toute distance.",
+PIED_DP2 = ["Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain d'assiette "
+            "(parcellaire IGN). Voie publique et habitation la plus proche selon la BD TOPO (IGN).",
+            "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; tables : "
+            "hauteur maximale du tableau bilan)."]
+PIED_C3 = ["Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ; "
+           "batteries et locaux de stockage cotés à la limite parcellaire à toute distance.",
            "Batteries et citernes cotées jusqu'à la table la plus proche ; poste de livraison coté jusqu'à "
            "l'axe de la voie publique la plus proche, en deçà de 30 m."]
 
@@ -1280,7 +1473,7 @@ for k, cotes_zone in enumerate(zones):
     rendre(principal, f"{prefixe}_3_zone_{k + 1}", etendue_de(cotes_zone).bounds, 6.0,
            pleine_page=False, dpi=600)
 
-print(f"DP 2 : 1:{principal.echelle} après {essai} essai(s), {nb_c1} chaîne(s) C1, "
+print(f"DP 2 : 1:{principal.echelle} après {essai} essai(s), {nb_c1} côté(s) C1, "
       f"{len(cotes_dp2) - nb_c1 - nb_c6} cote(s) C4/C5, {nb_c6} largeur(s) de piste, "
       f"{len(sur_dp2)} cote(s) d'ouvrages")
 for detail, code, _, _ in planches_detail:
