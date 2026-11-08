@@ -4141,6 +4141,28 @@ dessine tel quel. Le recoupement avec la surface déclarée porte, lui, sur le
 calque entier dans tous les cas : c'est bien poste **et** abords que le tableau
 compte, et Saint-Cyr y déclare 66 m² pour 36 m² de poste.
 
+### Le conteneur aussi, et son aplat passe en plateforme
+
+La même règle vaut pour les conteneurs, `bess` et `local_technique` — la liste
+`CONTENEURS` de `dp4_ouvrages.py`, lue et non recopiée —, et elle est écrite une
+seule fois pour les deux familles : `palette.separer_les_corps`. Mesuré le
+07/11/2026 : à Auzainvilliers, chaque conteneur BESS de 6,06 x 3,00 m, dessiné
+deux fois, repose sur un aplat plein de 8,06 x 6,00 m, à 1 m de ses bords, dans
+le même calque que les 162 détails du bloc « BESS Skyray », tous sous le
+conteneur. Dessiné d'un bloc à la teinte du BESS, l'ensemble montrait 48 m² de
+batteries sur la DP 2 quand la DP 4 en dessine 18.
+
+Décidé le 04/11/2026 (décision D3 du brief du lot 10) : le conteneur aux cotes
+du catalogue garde sa teinte, l'aplat et les détails passent en plateforme, et
+le rapport demande au bureau d'études ce qu'est l'aplat, dalle ou aire
+dégagée. Faute de conteneur aux cotes du catalogue, le calque se dessine tel
+quel, comme avant. Il n'y a pas de recoupement avec le tableau bilan :
+`COMPTEES_AU_TABLEAU` ne porte que les postes.
+
+Sarnois porte le même bloc, sur ses deux indices : un aplat, et sur lui **un**
+conteneur dessiné deux fois à l'identique, et non deux conteneurs — son tableau
+bilan en déclare un.
+
 ### Un contour ouvert n'est pas un trait
 
 Mesuré le 05/09/2026 sur Sarnois : la citerne de refroidissement arrive au

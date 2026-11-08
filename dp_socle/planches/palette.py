@@ -416,7 +416,11 @@ def dimensions_au_sol(geometrie) -> tuple | None:
 
 
 def _est_le_poste(geometrie, longueur_m: float, largeur_m: float) -> bool:
-    """Vrai si cette géométrie a les cotes du poste au catalogue."""
+    """Vrai si cette géométrie a les cotes de l'ouvrage au catalogue.
+
+    L'ouvrage est un poste ou, depuis le 07/11/2026, un conteneur : la règle
+    est la même, voir `separer_les_corps`.
+    """
     mesure = dimensions_au_sol(geometrie)
     if mesure is None:
         return False
@@ -427,7 +431,7 @@ def _est_le_poste(geometrie, longueur_m: float, largeur_m: float) -> bool:
 
 
 def _cotes_au_catalogue(contrat, categorie: str, surface_m2: float):
-    """Cotes du poste au catalogue, ou `None` si le catalogue ne tranche pas."""
+    """Cotes de l'ouvrage au catalogue, ou `None` si le catalogue ne tranche pas."""
     from ..erreurs import ErreurCoteOuvrage
 
     try:
@@ -516,6 +520,35 @@ def emprise_de_poste(contrat, categorie: str, avertissements: list) -> tuple:
     return dessinee, []
 
 
+def emprise_de_conteneur(contrat, categorie: str, avertissements: list) -> tuple:
+    """Les conteneurs dessinés au plan, et ce que le calque porte autour d'eux.
+
+    Mesuré le 07/11/2026 sur le DXF d'Auzainvilliers : chaque conteneur BESS de
+    6,06 x 3,00 m est posé sur un aplat plein de 8,06 x 6,00 m, à 1 m de ses
+    bords, dans le même calque que les 162 détails du bloc « BESS Skyray », tous
+    sous le conteneur. Dessiné d'un bloc à la teinte du BESS, l'aplat cachait le
+    conteneur : la DP 2 montrait 48 m² de batteries là où la DP 4 en dessine 18.
+
+    Validé par le chef de projet le 04/11/2026 (décision D3 du brief du lot 10) :
+    le conteneur aux cotes du catalogue garde sa teinte, l'aplat et les détails
+    passent en plateforme, et le rapport demande au bureau d'études ce qu'est
+    l'aplat, dalle ou aire dégagée. C'est la reconnaissance des postes,
+    `separer_les_corps`, sans le recoupement avec le tableau bilan, que
+    `COMPTEES_AU_TABLEAU` réserve aux postes, et sans redressement : faute de
+    conteneur aux cotes du catalogue, le calque se dessine tel quel, comme
+    avant.
+    """
+    parties = contrat.geometries(categorie)
+    conteneurs, autour, copies = separer_les_corps(contrat, categorie, parties)
+    if not conteneurs:
+        return parties, []
+    if autour or copies:
+        avertissements.append(
+            _dire_les_conteneurs(categorie, conteneurs, autour, copies)
+        )
+    return conteneurs, autour
+
+
 def separer_les_corps(contrat, categorie: str, parties) -> tuple[list, list, dict]:
     """Les ouvrages d'un calque, reconnus à leurs cotes de catalogue, et le reste.
 
@@ -580,6 +613,55 @@ def _dire_les_postes(categorie: str, postes: list, autour: list, copies: dict) -
             f"{sum(g.area for g in autour):.1f} m² au total, sont la terre "
             f"remise autour {qui} : ils sont dessinés comme du sol et non "
             "comme du poste."
+        )
+    return " ".join(phrases)
+
+
+def _dire_les_conteneurs(
+    categorie: str, conteneurs: list, autour: list, copies: dict
+) -> str:
+    """Ce que porte le calque d'un conteneur : les conteneurs, leurs copies, l'aplat.
+
+    L'aplat est l'objet du calque qui porte un conteneur — qui le contient, à
+    `JEU_APLAT_M` près. Le reste, ce sont les détails du bloc. Les deux passent
+    en plateforme, mais l'aplat seul appelle une question au bureau d'études :
+    une dalle et une aire dégagée ne se décrivent pas pareil à l'instruction.
+    """
+    phrases = [f"« {categorie} » : {_phrase_des_corps('conteneur', conteneurs)}"]
+    if copies:
+        phrases.append(_phrase_des_copies(len(conteneurs), copies))
+    aplats = [
+        g
+        for g in autour
+        if g.area > 0 and any(g.buffer(JEU_APLAT_M).contains(c) for c in conteneurs)
+    ]
+    details = [g for g in autour if not any(g is aplat for aplat in aplats)]
+    seul = len(conteneurs) == 1
+    autres = (
+        f"les {len(details)} autre(s) objet(s) du calque, "
+        f"{sum(g.area for g in details):.1f} m² au total"
+    )
+    if aplats:
+        un = len(aplats) == 1
+        sujet = "Il est posé" if seul else "Ils sont posés"
+        support = "un aplat" if un else f"{len(aplats)} aplats"
+        dessine = "dessiné" if un else "dessinés"
+        question = (
+            "cet aplat est-il une dalle, ou une aire dégagée"
+            if un
+            else "ces aplats sont-ils des dalles, ou des aires dégagées"
+        )
+        autour_de = "du conteneur" if seul else "des conteneurs"
+        phrases.append(
+            f"{sujet} sur {support} de {_formats(aplats)}, {dessine} en "
+            f"plateforme{f' comme {autres}' if details else ''} — à demander "
+            f"au bureau d'études : {question} autour {autour_de} ?"
+        )
+    elif details:
+        phrases.append(
+            f"{autres[0].upper()}{autres[1:]}, ne sont pas "
+            f"{'le conteneur' if seul else 'les conteneurs'} : ils sont "
+            "dessinés comme du sol."
         )
     return " ".join(phrases)
 
@@ -817,6 +899,14 @@ TOLERANCE_COTES_POSTE = 0.05
 #: tracé, pas un second ouvrage.
 TOLERANCE_DOUBLON_M2 = 0.05
 
+#: Jeu admis, en mètres, pour dire qu'un objet du calque porte un conteneur :
+#: il le contient à ce jeu près, et c'est son aplat.
+#:
+#: Mesuré le 07/11/2026 : à Auzainvilliers, chaque conteneur BESS est à 1,00 m
+#: du bord de son aplat, comme à Sarnois le 03/11. Le jeu n'absorbe qu'un
+#: arrondi de tracé, pour un conteneur dessiné au ras de son aplat.
+JEU_APLAT_M = 0.05
+
 #: Recollement admis entre deux bouts de contour, en mètres. La CAO ne referme
 #: pas ses polylignes au point près.
 TOLERANCE_CONTOUR_M = 0.01
@@ -839,35 +929,53 @@ def objets_a_dessiner(contrat, avertissements=None) -> list:
       chef de projet a tranchée, et n'existent pas sous leur propre nom (D5).
 
     S'y ajoute la recomposition des contours ouverts, pour la même raison : une
-    règle appliquée à deux endroits finit par y différer.
+    règle appliquée à deux endroits finit par y différer. Et, pour la même
+    raison encore, la séparation de chaque poste et de chaque conteneur d'avec
+    ce qui l'entoure (`separer_les_corps`) : ce qui l'entoure rejoint la
+    plateforme, ici et nulle part ailleurs.
     """
     messages = [] if avertissements is None else avertissements
     resultat = []
-    abords_de_poste = []
+    autour_des_corps = []
+    conteneurs = _conteneurs()
     for categorie in categories_dessinables():
         if categorie in COMPTEES_AU_TABLEAU:
-            geometries, abords = emprise_de_poste(contrat, categorie, messages)
-            geometries = list(geometries)
-            abords_de_poste.extend(abords)
+            geometries, autour = emprise_de_poste(contrat, categorie, messages)
+        elif categorie in conteneurs:
+            geometries, autour = emprise_de_conteneur(contrat, categorie, messages)
         else:
-            geometries = list(contrat.geometries(categorie))
+            geometries, autour = contrat.geometries(categorie), []
+        geometries = list(geometries)
+        autour_des_corps.extend(autour)
         geometries.extend(contrat.voiries_de(categorie))
         geometries = fermer_les_contours(geometries, categorie, messages)
         if geometries:
             resultat.append((categorie, geometries))
 
-    # La plateforme est vue au rang 2, les postes aux rangs 18 à 20 : les abords
-    # ne sont connus qu'une fois la boucle finie, et c'est là qu'ils rejoignent
-    # le sol. Sans plateforme au plan, ils en ouvrent une — c'est bien du sol
-    # remanié, et il doit se voir.
-    if abords_de_poste:
+    # La plateforme est vue au rang 2, les postes et les conteneurs aux rangs
+    # 20 à 24 : ce qui les entoure n'est connu qu'une fois la boucle finie, et
+    # c'est là qu'il rejoint le sol. Sans plateforme au plan, il en ouvre une —
+    # c'est bien du sol remanié, ou un aplat, et il doit se voir.
+    if autour_des_corps:
         for rang, (categorie, geometries) in enumerate(resultat):
             if categorie == "plateforme":
-                resultat[rang] = (categorie, geometries + abords_de_poste)
+                resultat[rang] = (categorie, geometries + autour_des_corps)
                 break
         else:
-            resultat.insert(0, ("plateforme", abords_de_poste))
+            resultat.insert(0, ("plateforme", autour_des_corps))
     return resultat
+
+
+def _conteneurs() -> tuple:
+    """Les catégories de conteneurs, dont le corps se reconnaît comme un poste.
+
+    Lues dans `dp4_ouvrages`, qui les dessine en conteneurs maritimes, et non
+    recopiées : deux listes finiraient par différer. Importées dans la fonction,
+    `dp4_ouvrages` important ce module à son propre chargement.
+    """
+    from .dp4_ouvrages import CONTENEURS
+
+    return CONTENEURS
 
 
 def fermer_les_contours(geometries, categorie: str, messages: list) -> list:

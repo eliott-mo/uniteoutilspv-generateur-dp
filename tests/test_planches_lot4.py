@@ -1150,7 +1150,10 @@ def dp2_sans_geoplateforme(monkeypatch):
 
 
 def _ecrire_zone_technique(dossier, objets: dict) -> None:
-    """Réécrit le contrat du site avec une zone technique `{catégorie: géométries}`."""
+    """Réécrit le contrat du site avec une zone technique `{catégorie: géométries}`.
+
+    Le catalogue y gagne le conteneur BESS, que le site synthétique ne porte pas.
+    """
     from dp_socle.import_be import EntiteBE, ecrire_geopackage, ecrire_parametres
 
     lot = synthese.entites() + [
@@ -1159,7 +1162,9 @@ def _ecrire_zone_technique(dossier, objets: dict) -> None:
         for g in geometries
     ]
     ecrire_geopackage(lot, dossier, synthese.ligne_coupe())
-    ecrire_parametres(synthese.parametres(), dossier)
+    donnees = synthese.parametres()
+    donnees["cotes_normalisees"] = synthese.COTES + [synthese.COTE_CONTENEUR_BESS]
+    ecrire_parametres(donnees, dossier)
 
 
 def _dp2_de_la_zone_technique(site, tmp_path, dp2_plan_masse, objets: dict):
@@ -1215,3 +1220,57 @@ def test_la_dp2_montre_chaque_poste_en_poste(site, tmp_path, dp2_sans_geoplatefo
         assert teinte_visible(surfaces, vers_la_page(centre.x, centre.y)) == poste, nom
     sol = _rvb(STYLES["plateforme"].style.remplissage)
     assert teinte_visible(surfaces, vers_la_page(x0 + 19, y0 + 89)) == sol
+
+
+def test_la_dp2_montre_le_conteneur_et_son_aplat_en_plateforme(
+    site, tmp_path, dp2_sans_geoplateforme
+):
+    """Un conteneur BESS sur son aplat : le BESS au conteneur, la plateforme autour.
+
+    Relevé le 07/11/2026 à Auzainvilliers : chaque conteneur de 6,06 x 3,00 m,
+    dessiné deux fois, repose sur un aplat plein de 8,06 x 6,00 m du même
+    calque, avec les détails du bloc par-dessous. La DP 2 dessinait l'ensemble
+    à la teinte du BESS — 48 m² de batteries quand la DP 4 en dessine 18.
+    Mesuré dans le PDF : au centre du conteneur la planche montre le BESS, sur
+    l'aplat la plateforme, et le chemin BESS qui couvre le conteneur a la
+    surface du conteneur, à 0,5 % près.
+    """
+    from dp_socle.planches.palette import STYLES
+
+    x0, y0 = synthese.ORIGINE_L93
+    conteneur = box(x0 + 60, y0 + 85, x0 + 66.06, y0 + 88)
+    aplat = box(x0 + 59, y0 + 83.5, x0 + 67.06, y0 + 89.5)
+    details = [
+        box(x0 + 60.5, y0 + 85.5, x0 + 61.5, y0 + 86.5),
+        LineString([(x0 + 62, y0 + 86.5), (x0 + 65, y0 + 86.5)]),
+    ]
+    sortie, surfaces, vers_la_page = _dp2_de_la_zone_technique(
+        site, tmp_path, dp2_sans_geoplateforme,
+        {"bess": [aplat, conteneur, *details, box(*conteneur.bounds)]},
+    )
+
+    bess = _rvb(STYLES["bess"].style.remplissage)
+    centre = vers_la_page(conteneur.centroid.x, conteneur.centroid.y)
+    assert teinte_visible(surfaces, centre) == bess
+    # À un demi-mètre du conteneur, sur l'aplat : la plateforme.
+    sol = _rvb(STYLES["plateforme"].style.remplissage)
+    assert teinte_visible(surfaces, vers_la_page(x0 + 59.5, y0 + 84)) == sol
+
+    from shapely.geometry import Point, Polygon
+
+    m2_par_pt2 = (MM_PAR_PT * sortie.echelle / 1000.0) ** 2
+    aires = [
+        Polygon(anneau).area * m2_par_pt2
+        for teinte, anneaux in surfaces
+        if teinte == bess
+        for anneau in anneaux
+        if Polygon(anneau).covers(Point(centre))
+    ]
+    assert aires
+    for aire in aires:
+        assert abs(aire - conteneur.area) / conteneur.area < ECART_ADMIS, aires
+
+    assert any(
+        m.startswith("« bess »") and "à demander au bureau d'études" in m
+        for m in sortie.details["avertissements"]
+    )

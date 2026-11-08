@@ -548,6 +548,73 @@ def test_chaque_objet_aux_cotes_du_catalogue_est_un_poste(tmp_path):
     assert "Les 1 autre(s) objet(s) du calque, 98.0 m² au total, sont la terre" in message
 
 
+def test_un_conteneur_se_separe_de_son_aplat(tmp_path):
+    """Un conteneur BESS sur son aplat : le conteneur en BESS, l'aplat en plateforme.
+
+    Mesuré le 07/11/2026 à Auzainvilliers : chaque conteneur de 6,06 x 3,00 m,
+    dessiné deux fois, repose sur un aplat plein de 8,06 x 6,00 m du même
+    calque, avec les détails du bloc par-dessous. Tout sortait à la teinte du
+    BESS — 48 m² de batteries sur la DP 2, 18 sur la DP 4. Décidé le
+    04/11/2026 : le conteneur garde sa teinte, l'aplat et les détails passent en
+    plateforme, et le rapport demande au bureau d'études ce qu'est l'aplat.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.planches.palette import objets_a_dessiner
+
+    x0, y0 = synthese.ORIGINE_L93
+    conteneur = box(x0 + 60, y0 + 85, x0 + 66.06, y0 + 88)
+    aplat = box(x0 + 59, y0 + 83.5, x0 + 67.06, y0 + 89.5)
+    details = [
+        box(x0 + 60.5, y0 + 85.5, x0 + 61.5, y0 + 86.5),
+        LineString([(x0 + 62, y0 + 86.5), (x0 + 65, y0 + 86.5)]),
+    ]
+    contrat = _contrat_avec_calque(
+        tmp_path, "bess", [aplat, conteneur, *details, box(*conteneur.bounds)],
+        cotes=[synthese.COTE_CONTENEUR_BESS],
+    )
+
+    messages = []
+    objets = dict(objets_a_dessiner(contrat, messages))
+
+    assert len(objets["bess"]) == 1
+    assert objets["bess"][0].equals(conteneur)
+    sol = objets["plateforme"]
+    assert any(g.equals(aplat) for g in sol)
+    assert all(any(g.equals(detail) for g in sol) for detail in details)
+    assert not any(g.equals(conteneur) for g in sol)
+
+    message = next(m for m in messages if m.startswith("« bess »"))
+    assert "le conteneur est l'objet de 6.06 x 3.00 m du calque" in message
+    assert "l'a dessiné deux fois à l'identique" in message
+    assert "posé sur un aplat de 8.06 x 6.00 m, dessiné en plateforme" in message
+    assert "à demander au bureau d'études : cet aplat est-il une dalle" in message
+
+
+def test_un_conteneur_hors_catalogue_se_dessine_tel_quel(tmp_path):
+    """Sans objet aux cotes du catalogue, rien ne se sépare : le calque est dessiné.
+
+    C'est le comportement d'avant la règle, et il reste celui d'un conteneur que
+    le bureau d'études n'a pas dessiné à ses cotes : on ne reconstruit pas un
+    ouvrage qu'on ne reconnaît pas.
+    """
+    from shapely.geometry import box
+
+    from dp_socle.planches.palette import objets_a_dessiner
+
+    x0, y0 = synthese.ORIGINE_L93
+    bloc = [box(x0 + 60, y0 + 85, x0 + 65, y0 + 90), box(x0 + 61, y0 + 86, x0 + 62, y0 + 87)]
+    contrat = _contrat_avec_calque(
+        tmp_path, "bess", bloc, cotes=[synthese.COTE_CONTENEUR_BESS]
+    )
+
+    messages = []
+    objets = dict(objets_a_dessiner(contrat, messages))
+
+    assert len(objets["bess"]) == 2
+    assert not any(m.startswith("« bess »") for m in messages)
+
+
 # ---------------------------------------------------------------------------
 # L'archive du contrat, qui doit quitter le serveur et revenir entière
 # ---------------------------------------------------------------------------

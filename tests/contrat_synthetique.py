@@ -224,6 +224,17 @@ COTES = [
     },
 ]
 
+#: Le conteneur BESS du classeur des gabarits UNITe, pour les tests qui posent
+#: une aire de charge. Hors de `COTES` : le site synthétique n'en porte pas, et
+#: une cote sans ouvrage changerait ce que les autres tests lisent du contrat.
+COTE_CONTENEUR_BESS = {
+    "ouvrage": "Aire de charge (BESS) — Conteneurs",
+    "dimensions": "6 x 3 x 3m",
+    "ordre_cotes": "longueur x largeur x hauteur",
+    "surface_m2": 18.0,
+    "surface_plateforme_m2": None,
+}
+
 
 def parametres(
     origine: str = ORIGINE_IMPORT_BE,
