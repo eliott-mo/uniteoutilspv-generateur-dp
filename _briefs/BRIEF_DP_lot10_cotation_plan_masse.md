@@ -518,7 +518,7 @@ Une étape par commit, et la CI Linux lue après chaque poussée :
 0. Les préalables, hors de ce lot, tous deux faits : `_interroger_wfs` lève
    `ErreurPlafondWFS` au lieu de tronquer (03/11/2026, `8d9adca`) ; `palette`
    sépare chaque corps de ce qui l'entoure, et l'import dit ce que porte un
-   calque écarté (08/11/2026, `e633464`, `f4f26b7` et `3eed90c`).
+   calque écarté (08/11/2026, de `e633464` à `3807122`).
 1. Le module de calcul et ses tests, sur des cas construits et sur les mesures
    ci-dessus.
 2. C1, C5 et C6 sur la DP 2 : contrat et parcellaire seulement, sans BD TOPO.
@@ -556,15 +556,19 @@ interrogée pour de vrai dans la suite réseau.
   07/11 à Auzainvilliers, en appariant à la main le calque 0 au PTR. Les
   conteneurs n'étaient pas séparés de leur aplat (D3). `separer_les_corps`
   reconnaît maintenant chaque corps, pour toutes les planches qui lisent
-  `objets_a_dessiner`. Le contrôle de surface déclarée, lui, n'a pas changé, et
-  il se lit mal à Auzainvilliers : son tableau déclare le poste seul, et ne
-  compte qu'un PTR quand la planche en dessine deux.
+  `objets_a_dessiner`. Le contrôle de surface déclarée accepte depuis les deux
+  lectures du tableau, le poste seul (Auzainvilliers) ou le poste et ses abords
+  (Saint-Cyr), et compare le nombre de postes : à Auzainvilliers, il dit deux
+  PTR au plan pour un au tableau, en rappelant que le catalogue range celui des
+  batteries dans la section BESS.
 - **Un ouvrage dessiné sur le calque 0.** À Auzainvilliers, le corps du PTR des
   batteries, 10,00 × 3,00 m, est la seule entité du calque 0, que l'import écarte
   d'office ; le calque `UNI_BESS_PTR` est vide. Depuis le 08/11/2026, le message
   d'import dit ce que porte un calque écarté et l'ouvrage du catalogue qu'il
   rappelle, et l'écran de correspondance permet d'apparier le calque 0 au PTR.
-  Le message reste dans le groupe replié des messages de l'outil.
+  Un calque écarté qui porte un rectangle aux cotes d'un ouvrage sort du groupe
+  replié, sous forme de question. Sur les DXF complets de Sarnois, la vignette de
+  légende de l'aire d'aspiration en sort aussi : c'est un faux ami connu.
 - **La BD TOPO porte aussi les chemins du site.** Un chemin dans la clôture est
   un `troncon_de_route` comme un autre : à Saint-Cyr, c'est la « voie » la plus
   proche du PDL/PTR, à 5,2 m et à 89 % dans la clôture (C8).
