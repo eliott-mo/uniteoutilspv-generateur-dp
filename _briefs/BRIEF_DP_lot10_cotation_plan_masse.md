@@ -198,10 +198,14 @@ d'aspiration et la plateforme, qui sont des sols.
 
 ### D3 — Un ouvrage se mesure sur son corps, aux cotes du catalogue (03/11)
 
-Le corps est l'objet du calque qui a les dimensions du catalogue, à 15 % près :
-le poste, jamais sa plateforme ni le contour qui l'entoure. Ce qui entoure le
-corps se dessine en plateforme, comme la terre remise autour d'un poste
-(`palette.emprise_de_poste`). À Auzainvilliers, chaque conteneur BESS de
+Le corps est l'objet du calque qui a les dimensions du catalogue : le poste,
+jamais sa plateforme ni le contour qui l'entoure. Depuis le 08/11/2026, c'est
+`palette.separer_les_corps` qui le reconnaît, à 5 % près, pour les postes comme
+pour les conteneurs ; le lot 10 prend les corps que `objets_a_dessiner` lui
+rend, et ne refait pas cette reconnaissance. La maquette tolérait 15 %, mais les
+corps mesurés sont à moins de 1 % du catalogue. Ce qui entoure le corps se
+dessine en plateforme, comme la terre remise autour d'un poste. À
+Auzainvilliers, chaque conteneur BESS de
 6 × 3 m est posé sur un aplat plein de 6,0 × 8,1 m de la même couleur, qui le
 cachait : la cote prise sur le conteneur s'arrêtait au milieu de l'orange, et la
 DP 2 montrait un BESS de 48 m² quand la DP 4 le dessine à 18 m². L'aplat se
@@ -402,8 +406,8 @@ déjà les dimensions des ouvrages. Le dépôt `photomontage`.
 
 `palette.objets_a_dessiner` non plus : séparer chaque corps de ce qui l'entoure,
 pour plusieurs postes et pour les conteneurs (D3), change aussi les plans de
-repérage de la DP 4 et le volet photographique. C'est un préalable, traité à
-part (« Pièges connus »).
+repérage de la DP 4 et le volet photographique. C'était un préalable, traité à
+part le 08/11/2026 (« Pièges connus »).
 
 Hors périmètre, à rouvrir si une demande les cite : la largeur des portails, la
 distance aux boisements, les cotes NGF.
@@ -508,9 +512,10 @@ Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
 
 Une étape par commit, et la CI Linux lue après chaque poussée :
 
-0. Les préalables, hors de ce lot : `_interroger_wfs` lève `ErreurPlafondWFS`
-   au lieu de tronquer (fait le 03/11/2026, `8d9adca`) ; `palette` sépare
-   chaque corps de ce qui l'entoure (« Pièges connus »).
+0. Les préalables, hors de ce lot, tous deux faits : `_interroger_wfs` lève
+   `ErreurPlafondWFS` au lieu de tronquer (03/11/2026, `8d9adca`) ; `palette`
+   sépare chaque corps de ce qui l'entoure, et l'import dit ce que porte un
+   calque écarté (08/11/2026, `e633464`, `f4f26b7` et `3eed90c`).
 1. Le module de calcul et ses tests, sur des cas construits et sur les mesures
    ci-dessus.
 2. C1, C5 et C6 sur la DP 2 : contrat et parcellaire seulement, sans BD TOPO.
@@ -541,18 +546,22 @@ interrogée pour de vrai dans la suite réseau.
 
 ## Pièges connus
 
-- **Un poste par catégorie.** `palette.emprise_de_poste` garde le plus grand des
-  objets aux cotes du catalogue, et dessine les autres en plateforme sous le nom
-  de « terre remise ». Avec deux PTR, le principal et celui des batteries, l'un
-  des deux passe en gris : mesuré le 07/11 à Auzainvilliers, en appariant à la
-  main le calque 0 au PTR. Les conteneurs, eux, ne sont pas séparés de leur
-  aplat (D3). À corriger avant ce lot, dans `palette`, pour toutes les planches
-  qui s'en servent ; la maquette l'a simulé.
+- **Un poste par catégorie** — corrigé le 08/11/2026. `palette.emprise_de_poste`
+  gardait le plus grand des objets aux cotes du catalogue, et dessinait les
+  autres en plateforme sous le nom de « terre remise ». Avec deux PTR, le
+  principal et celui des batteries, l'un des deux passait en gris : mesuré le
+  07/11 à Auzainvilliers, en appariant à la main le calque 0 au PTR. Les
+  conteneurs n'étaient pas séparés de leur aplat (D3). `separer_les_corps`
+  reconnaît maintenant chaque corps, pour toutes les planches qui lisent
+  `objets_a_dessiner`. Le contrôle de surface déclarée, lui, n'a pas changé, et
+  il se lit mal à Auzainvilliers : son tableau déclare le poste seul, et ne
+  compte qu'un PTR quand la planche en dessine deux.
 - **Un ouvrage dessiné sur le calque 0.** À Auzainvilliers, le corps du PTR des
   batteries, 10,00 × 3,00 m, est la seule entité du calque 0, que l'import écarte
-  d'office ; le calque `UNI_BESS_PTR` est vide. L'écran de correspondance permet
-  d'apparier le calque 0 au PTR, mais le message d'import ne dit pas ce que le
-  calque porte, et le résultat bute sur le piège précédent.
+  d'office ; le calque `UNI_BESS_PTR` est vide. Depuis le 08/11/2026, le message
+  d'import dit ce que porte un calque écarté et l'ouvrage du catalogue qu'il
+  rappelle, et l'écran de correspondance permet d'apparier le calque 0 au PTR.
+  Le message reste dans le groupe replié des messages de l'outil.
 - **La BD TOPO porte aussi les chemins du site.** Un chemin dans la clôture est
   un `troncon_de_route` comme un autre : à Saint-Cyr, c'est la « voie » la plus
   proche du PDL/PTR, à 5,2 m et à 89 % dans la clôture (C8).
