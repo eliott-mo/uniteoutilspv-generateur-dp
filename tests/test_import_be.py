@@ -1235,6 +1235,12 @@ def test_un_calque_ecarte_dit_ce_qu_il_porte(tmp_path):
     ouvrir le DXF pour savoir qu'un ouvrage s'y trouvait. Il dit maintenant ce
     que le calque porte : ses entités, ses rectangles fermés et leurs cotes, et
     l'ouvrage du catalogue qu'ils rappellent.
+
+    Et un calque qui porte un rectangle aux cotes d'un ouvrage sort du
+    regroupement, que l'application replie : son message, à part, est une
+    question, sans la formule des demandes au bureau d'études — le chef de
+    projet apparie lui-même (08/11/2026). Les autres calques écartés restent
+    regroupés.
     """
     document = ezdxf.new(setup=True)
     espace = document.modelspace()
@@ -1247,21 +1253,33 @@ def test_un_calque_ecarte_dit_ce_qu_il_porte(tmp_path):
         close=True,
         dxfattribs={"layer": "0"},
     )
+    espace.add_lwpolyline(
+        [(622_960, 6_750_700), (622_970, 6_750_700), (622_960, 6_750_705)],
+        close=True,
+        dxfattribs={"layer": "UNI_Legende"},
+    )
     chemin = tmp_path / "ptr_egare.dxf"
     document.saveas(str(chemin))
 
-    message = next(
-        m for m in lire_plan_be(chemin).avertissements if "calque de travail" in m
+    avertissements = lire_plan_be(chemin).avertissements
+    (message,) = [m for m in avertissements if m.startswith("Calque « 0 »")]
+    assert message.startswith(
+        "Calque « 0 », écarté d'office (calque de travail du BE, censé être vide "
+        "à l'export) : un ouvrage dessiné sur le mauvais calque ? Il porte "
+        "1 entité : un rectangle fermé de 10.00 x 3.00 m, aux cotes du catalogue "
+        "UNITe pour « Poste de transformation - PTR » ou « Aire de charge (BESS) "
+        "— PTR »."
     )
-    attendu = (
-        "censé être vide à l'export : 0 (1 entité : un rectangle fermé de "
-        "10.00 x 3.00 m, aux cotes du catalogue UNITe pour "
-        "« Poste de transformation - PTR » ou « Aire de charge (BESS) — PTR »)"
-    )
-    assert attendu in message
-    # Il reste le message d'un calque écarté, qu'on apparie à la main.
-    assert message.startswith("1 calque(s) écarté(s) — ")
-    assert "Appariez-en un à l'écran de correspondance" in message
+    assert "appariez le calque à sa catégorie à l'écran de correspondance" in message
+    # Ni la formule du regroupement replié, ni celle des demandes au BE.
+    assert "calque(s) écarté(s) —" not in message
+    assert "à demander au bureau d'études" not in message
+    # La légende, dont rien ne rappelle un ouvrage, reste dans son regroupement.
+    assert [m for m in avertissements if "calque(s) écarté(s) —" in m] == [
+        "1 calque(s) écarté(s) — mobilier de dessin : UNI_Legende (1 entité). "
+        "Appariez-en un à l'écran de correspondance si son contenu doit figurer "
+        "sur les planches."
+    ]
 
 
 def test_un_calque_ecarte_compte_ses_rectangles_sans_inventer_d_ouvrage(tmp_path):

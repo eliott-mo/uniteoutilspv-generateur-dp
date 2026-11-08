@@ -1077,13 +1077,16 @@ TOLERANCE_COTES_CATALOGUE = 0.05
 FORMATS_DECRITS_MAX = 6
 
 
-def _ce_que_porte(entites, remplissages, facteur, nom_fichier, lire_catalogue) -> str:
-    """Ce qu'un calque écarté porte, à dire entre parenthèses après son nom.
+def _ce_que_porte(
+    entites, remplissages, facteur, nom_fichier, lire_catalogue
+) -> tuple[str, bool]:
+    """Ce qu'un calque écarté porte, et s'il rappelle un ouvrage du catalogue.
 
-    Ses entités, ses rectangles fermés et leurs cotes, et l'ouvrage du
-    catalogue qu'ils rappellent quand c'est le cas. `lire_catalogue` rend les
-    ouvrages du catalogue et la panne qui empêche de les lire ; il n'est appelé
-    que si un rectangle est à nommer.
+    Le texte dit ses entités, ses rectangles fermés et leurs cotes, et l'ouvrage
+    du catalogue qu'ils rappellent quand c'est le cas ; le booléen dit si l'un
+    au moins en rappelle un. `lire_catalogue` rend les ouvrages du catalogue et
+    la panne qui empêche de les lire ; il n'est appelé que si un rectangle est
+    à nommer.
     """
     # Les remplissages d'abord : « dont » se rapporte ainsi aux entités, parmi
     # lesquelles se comptent les rectangles.
@@ -1093,6 +1096,7 @@ def _ce_que_porte(entites, remplissages, facteur, nom_fichier, lire_catalogue) -
     if entites:
         morceaux.append(_compter(len(entites), "entité"))
     texte = " et ".join(morceaux)
+    rappelle = False
 
     rectangles, illisibles = _rectangles_fermes(entites, facteur, nom_fichier)
     if rectangles:
@@ -1103,6 +1107,7 @@ def _ce_que_porte(entites, remplissages, facteur, nom_fichier, lire_catalogue) -
             if cle not in formats:
                 formats[cle] = [0, _ouvrages_rappeles(grand, petit, aire, ouvrages)]
             formats[cle][0] += 1
+        rappelle = any(rappels for _, rappels in formats.values())
         ordre = sorted(
             formats.items(),
             key=lambda item: (not item[1][1], -item[1][0], -item[0][0]),
@@ -1132,7 +1137,7 @@ def _ce_que_porte(entites, remplissages, facteur, nom_fichier, lire_catalogue) -
             f", {_compter(illisibles, 'polyligne')} "
             + ("illisible" if illisibles == 1 else "illisibles")
         )
-    return texte
+    return texte, rappelle
 
 
 def _compter(nombre: int, mot: str) -> str:
@@ -1388,23 +1393,38 @@ def lire_plan_be(
         return catalogue[0]
 
     for motif, calques in sorted(ecartes.items()):
-        details = ", ".join(
-            f"{calque} ("
-            + _ce_que_porte(
+        regroupes = []
+        for calque in sorted(calques):
+            texte, rappelle = _ce_que_porte(
                 entites_par_calque.get(calque, []),
                 hatch_par_calque.get(calque, []),
                 facteur,
                 chemin.name,
                 lire_catalogue,
             )
-            + ")"
-            for calque in sorted(calques)
-        )
-        avertissements.append(
-            f"{len(calques)} calque(s) écarté(s) — {motif} : {details}. "
-            "Appariez-en un à l'écran de correspondance si son contenu doit "
-            "figurer sur les planches."
-        )
+            if not rappelle:
+                regroupes.append(f"{calque} ({texte})")
+                continue
+            # Un rectangle aux cotes d'un ouvrage : le calque sort du
+            # regroupement, que l'application replie parmi « ce que l'outil a
+            # fait de lui-même », et se lit parmi les remarques à corriger. Il ne
+            # porte ni la formule du regroupement ni celle des demandes au bureau
+            # d'études : le chef de projet apparie lui-même. Et c'est une
+            # question, pas un constat — sur les DXF complets de Sarnois, la
+            # vignette de légende de l'aire d'aspiration et des traits de
+            # construction aux cotes d'une citerne en ont aussi l'air.
+            avertissements.append(
+                f"Calque « {calque} », écarté d'office ({motif}) : un ouvrage "
+                f"dessiné sur le mauvais calque ? Il porte {texte}. Si c'en est "
+                "un, appariez le calque à sa catégorie à l'écran de "
+                "correspondance ; tout ce qu'il porte la rejoint alors."
+            )
+        if regroupes:
+            avertissements.append(
+                f"{len(regroupes)} calque(s) écarté(s) — {motif} : "
+                f"{', '.join(regroupes)}. Appariez-en un à l'écran de "
+                "correspondance si son contenu doit figurer sur les planches."
+            )
 
     entites: list[EntiteBE] = []
     sommets_perdus: dict[str, int] = {}

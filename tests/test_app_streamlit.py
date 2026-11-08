@@ -699,6 +699,72 @@ def test_les_remarques_de_l_import_tiennent_sous_un_seul_bandeau(tmp_path, monke
     )
 
 
+def _tri_des_remarques():
+    """`_trier_les_avertissements` et ses constantes, extraits de `app.py`.
+
+    Le script ne s'importe pas — il dessine l'écran en se chargeant. On n'en
+    exécute que les définitions dont le tri dépend, comme pour
+    `_tout_en_une_archive`, et c'est bien le tri de l'application qu'on éprouve.
+    """
+    import ast
+
+    noms = {
+        "MOTIFS_DE_ROUTINE",
+        "MARQUEUR_BLOQUANT",
+        "MARQUEUR_BUREAU_ETUDES",
+        "_trier_les_avertissements",
+    }
+    retenus = [
+        noeud
+        for noeud in ast.parse(APP.read_text(encoding="utf-8")).body
+        if (
+            isinstance(noeud, ast.Assign)
+            and any(getattr(cible, "id", None) in noms for cible in noeud.targets)
+        )
+        or (isinstance(noeud, ast.FunctionDef) and noeud.name in noms)
+    ]
+    espace: dict = {}
+    exec(  # noqa: S102 — les définitions sont extraites du script, qui ne s'importe pas
+        compile(ast.Module(body=retenus, type_ignores=[]), str(APP), "exec"), espace
+    )
+    return espace["_trier_les_avertissements"]
+
+
+def test_un_calque_ecarte_qui_porte_un_ouvrage_se_lit_parmi_les_remarques(tmp_path):
+    """Le PTR égaré sur le calque 0 se lisait dans le groupe replié de l'écran.
+
+    L'application replie tout message « calque(s) écarté(s) — » parmi ce que
+    l'outil a fait de lui-même, sous la mention « rien ici n'appelle d'action ».
+    À Auzainvilliers, le calque 0 porte pourtant le corps du PTR des batteries
+    (relevé le 07/11/2026). Un calque écarté dont un rectangle a les cotes d'un
+    ouvrage du catalogue se range maintenant parmi les remarques à corriger, et
+    non parmi les demandes au bureau d'études : le chef de projet apparie
+    lui-même (08/11/2026). Les autres calques écartés restent repliés.
+    """
+    import ezdxf
+
+    from dp_socle.import_be import lire_plan_be
+
+    x, y = 622_900.0, 6_750_700.0
+    document = ezdxf.new(setup=True)
+    espace = document.modelspace()
+    for calque, sommets in (
+        ("PVcase PV Modules (optimised)", [(x, y), (x + 20, y), (x + 20, y + 4), (x, y + 4)]),
+        ("0", [(x + 40, y), (x + 43, y), (x + 43, y + 10), (x + 40, y + 10)]),
+        ("UNI_Legende", [(x + 60, y), (x + 70, y), (x + 60, y + 5)]),
+    ):
+        espace.add_lwpolyline(sommets, close=True, dxfattribs={"layer": calque})
+    chemin = tmp_path / "ptr_egare.dxf"
+    document.saveas(str(chemin))
+
+    bloquants, au_be, a_corriger, information = _tri_des_remarques()(
+        lire_plan_be(chemin).avertissements
+    )
+    assert any(m.startswith("Calque « 0 »") for m in a_corriger), a_corriger
+    assert not any("« 0 »" in m or ": 0 (" in m for m in bloquants + au_be + information)
+    assert any(m.startswith("1 calque(s) écarté(s) — mobilier de dessin") for m in information)
+
+
 @pytest.mark.skipif(not DXF.exists(), reason="jeu de référence absent")
 def test_le_plan_importe_ne_s_affiche_qu_une_fois(tmp_path, monkeypatch):
     """La coupe se trace sur le plan lui-même, et non à côté d'un aperçu.

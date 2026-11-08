@@ -1602,11 +1602,25 @@ calque 0 ne porte qu'une polyligne fermée de 10,00 x 3,00 m, le corps du PTR
 des batteries, quand le calque prévu, `UNI_BESS_PTR`, est vide. Le message le
 dit maintenant, et nomme les deux ouvrages du catalogue à ces cotes, le PTR et
 le PTR de l'aire de charge BESS ; on apparie le calque, entier, à l'écran de
-correspondance. Le message nomme ce qu'il trouve, il ne tranche pas : sur les
-DXF complets de Sarnois, la légende du BE porte un rectangle de 8,00 x 4,00 m
-que le message rapproche de l'aire d'aspiration — c'en est la vignette — et le
-calque 0 de l'indice A, à côté d'une zone de contention de 10,00 x 7,00 m, un
-rectangle aux cotes de la citerne de 120 m³.
+correspondance.
+
+Un calque écarté dont un rectangle a les cotes d'un ouvrage du catalogue **sort
+du groupe** (08/11/2026). L'application replie tout message « calque(s)
+écarté(s) — » parmi ce que l'outil a fait de lui-même, sous la mention « rien
+ici n'appelle d'action », et le PTR d'Auzainvilliers s'y perdait. Son message
+est donc à part, sans la formule du groupe ni celle des demandes au bureau
+d'études — le chef de projet apparie lui-même —, et il se lit parmi les
+remarques à corriger. C'est `import_be` qui le formule ainsi : le tri de
+l'application, qui se fait sur le texte, n'a pas changé. Et c'est une
+question : « Calque « 0 », écarté d'office (…) : un ouvrage dessiné sur le
+mauvais calque ? ». Le message nomme ce qu'il trouve, il ne tranche pas : sur
+les DXF complets de Sarnois, deux calques sortent ainsi, sur chaque indice. La
+légende du BE, `UNI_Legende`, pour un rectangle de 8,00 x 4,00 m qu'elle
+rapproche de l'aire d'aspiration — c'en est la vignette. Et le calque 0, pour
+un rectangle aux cotes de la citerne de 120 m³ et un autre aux cotes de l'aire
+d'aspiration, à côté, sur l'indice A, d'une zone de contention de
+10,00 x 7,00 m : 35 entités en tout, qu'un appariement ferait toutes passer
+dans la même catégorie.
 
 Deux détails du tri méritent d'être dits. « cosntruction » est la faute de
 frappe du fichier réel, reprise telle quelle : la normalisation efface les
