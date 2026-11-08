@@ -1270,7 +1270,7 @@ def test_la_dp2_montre_le_conteneur_et_son_aplat_en_plateforme(
     for aire in aires:
         assert abs(aire - conteneur.area) / conteneur.area < ECART_ADMIS, aires
 
-    assert any(
-        m.startswith("« bess »") and "à demander au bureau d'études" in m
-        for m in sortie.details["avertissements"]
-    )
+    # Le rapport de la planche dit ce que l'aplat est, sans rien demander.
+    (message,) = [m for m in sortie.details["avertissements"] if m.startswith("« bess »")]
+    assert "un aplat de 8.06 x 6.00 m, la plateforme des batteries," in message
+    assert "à demander au bureau d'études" not in message

@@ -705,8 +705,19 @@ def test_un_conteneur_se_separe_de_son_aplat(tmp_path):
     message = next(m for m in messages if m.startswith("« bess »"))
     assert "le conteneur est l'objet de 6.06 x 3.00 m du calque" in message
     assert "l'a dessiné deux fois à l'identique" in message
-    assert "posé sur un aplat de 8.06 x 6.00 m, dessiné en plateforme" in message
-    assert "à demander au bureau d'études : cet aplat est-il une dalle" in message
+    # L'aplat est la plateforme des batteries que le tableau déclare : le
+    # message le dit, sans plus le demander au bureau d'études (08/11/2026).
+    assert (
+        "Il est posé sur un aplat de 8.06 x 6.00 m, la plateforme des batteries, "
+        "dessiné en plateforme comme les 2 autre(s) objet(s) du calque"
+    ) in message
+    assert "à demander au bureau d'études" not in message
+    assert "?" not in message
+    # Une information, rangée parmi les points à savoir du dossier : elle n'est
+    # pas lue comme une pièce absente, qui s'affiche à part en rouge.
+    from dp_socle.sortie_pptx import annonce_une_piece_absente
+
+    assert not annonce_une_piece_absente(message)
 
 
 def test_un_conteneur_hors_catalogue_se_dessine_tel_quel(tmp_path):

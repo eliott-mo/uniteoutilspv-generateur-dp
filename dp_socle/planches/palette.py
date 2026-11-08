@@ -639,12 +639,14 @@ def emprise_de_conteneur(contrat, categorie: str, avertissements: list) -> tuple
 
     Validé par le chef de projet le 04/11/2026 (décision D3 du brief du lot 10) :
     le conteneur aux cotes du catalogue garde sa teinte, l'aplat et les détails
-    passent en plateforme, et le rapport demande au bureau d'études ce qu'est
-    l'aplat, dalle ou aire dégagée. C'est la reconnaissance des postes,
-    `separer_les_corps`, sans le recoupement avec le tableau bilan, que
-    `COMPTEES_AU_TABLEAU` réserve aux postes, et sans redressement : faute de
-    conteneur aux cotes du catalogue, le calque se dessine tel quel, comme
-    avant.
+    passent en plateforme. L'aplat est la plateforme des batteries : le tableau
+    la déclare (« Surface plateforme batteries (m²) », 100 pour deux
+    conteneurs à Auzainvilliers, 50 pour un à Sarnois), et le rapport le dit
+    sans plus le demander au bureau d'études (décidé le 08/11/2026). C'est la
+    reconnaissance des postes, `separer_les_corps`, sans le recoupement avec le
+    tableau bilan, que `COMPTEES_AU_TABLEAU` réserve aux postes, et sans
+    redressement : faute de conteneur aux cotes du catalogue, le calque se
+    dessine tel quel, comme avant.
     """
     parties = contrat.geometries(categorie)
     conteneurs, autour, copies = separer_les_corps(contrat, categorie, parties)
@@ -732,8 +734,15 @@ def _dire_les_conteneurs(
 
     L'aplat est l'objet du calque qui porte un conteneur — qui le contient, à
     `JEU_APLAT_M` près. Le reste, ce sont les détails du bloc. Les deux passent
-    en plateforme, mais l'aplat seul appelle une question au bureau d'études :
-    une dalle et une aire dégagée ne se décrivent pas pareil à l'instruction.
+    en plateforme, et le message le dit sans rien demander : c'est une
+    information, que l'application range parmi les points à savoir du dossier.
+
+    Jusqu'au 08/11/2026, il demandait au bureau d'études si l'aplat était une
+    dalle ou une aire dégagée. Le tableau bilan répond : il déclare une
+    « Surface plateforme batteries (m²) » de 50 m² par conteneur — 100 à
+    Auzainvilliers pour deux, 50 à Sarnois pour un —, et l'aplat en mesure
+    48,3. Pour un BESS, l'aplat se nomme donc la plateforme des batteries ; pour
+    un local technique, rien ne le dit, et il reste un aplat.
     """
     phrases = [f"« {categorie} » : {_phrase_des_corps('conteneur', conteneurs)}"]
     if copies:
@@ -754,16 +763,16 @@ def _dire_les_conteneurs(
         sujet = "Il est posé" if seul else "Ils sont posés"
         support = "un aplat" if un else f"{len(aplats)} aplats"
         dessine = "dessiné" if un else "dessinés"
-        question = (
-            "cet aplat est-il une dalle, ou une aire dégagée"
-            if un
-            else "ces aplats sont-ils des dalles, ou des aires dégagées"
-        )
-        autour_de = "du conteneur" if seul else "des conteneurs"
+        nom = ""
+        if categorie == "bess":
+            nom = (
+                ", la plateforme des batteries,"
+                if un
+                else ", les plateformes des batteries,"
+            )
         phrases.append(
-            f"{sujet} sur {support} de {_formats(aplats)}, {dessine} en "
-            f"plateforme{f' comme {autres}' if details else ''} — à demander "
-            f"au bureau d'études : {question} autour {autour_de} ?"
+            f"{sujet} sur {support} de {_formats(aplats)}{nom} {dessine} en "
+            f"plateforme{f' comme {autres}' if details else ''}."
         )
     elif details:
         phrases.append(

@@ -4186,11 +4186,16 @@ conteneur. Dessiné d'un bloc à la teinte du BESS, l'ensemble montrait 48 m² d
 batteries sur la DP 2 quand la DP 4 en dessine 18.
 
 Décidé le 04/11/2026 (décision D3 du brief du lot 10) : le conteneur aux cotes
-du catalogue garde sa teinte, l'aplat et les détails passent en plateforme, et
-le rapport demande au bureau d'études ce qu'est l'aplat, dalle ou aire
-dégagée. Faute de conteneur aux cotes du catalogue, le calque se dessine tel
-quel, comme avant. Il n'y a pas de recoupement avec le tableau bilan :
-`COMPTEES_AU_TABLEAU` ne porte que les postes.
+du catalogue garde sa teinte, l'aplat et les détails passent en plateforme.
+L'aplat est la plateforme des batteries : le tableau bilan la déclare,
+« Surface plateforme batteries (m²) », 100 m² pour les deux conteneurs
+d'Auzainvilliers et 50 pour celui de Sarnois, quand l'aplat en mesure 48,3. Le
+rapport le dit — « Il est posé sur un aplat de 8.06 x 6.00 m, la plateforme des
+batteries, dessiné en plateforme » — sans plus le demander au bureau d'études
+(décidé le 08/11/2026) ; c'est une information, qui se lit parmi les points à
+savoir du dossier. Faute de conteneur aux cotes du catalogue, le calque se
+dessine tel quel, comme avant. Il n'y a pas de recoupement avec le tableau
+bilan : `COMPTEES_AU_TABLEAU` ne porte que les postes.
 
 Sarnois porte le même bloc, sur ses deux indices : un aplat, et sur lui **un**
 conteneur dessiné deux fois à l'identique, et non deux conteneurs — son tableau
