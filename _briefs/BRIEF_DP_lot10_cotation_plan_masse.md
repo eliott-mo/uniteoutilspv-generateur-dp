@@ -216,10 +216,10 @@ arrivée en collection de géométries, un contour resté ouvert — se dit au
 rapport. Il ne sort jamais des cotes en silence : la citerne de refroidissement
 d'Auzainvilliers l'a fait dans une version de la maquette.
 
-Le brief du 03/11 comptait l'aire BESS de Sarnois pour un seul ouvrage, parce
-que ses deux conteneurs sont dessinés dans son contour. Mesurés sur leur corps,
-ce sont deux ouvrages, et leur écart deviendrait une cote C3 : à remesurer sur
-Sarnois avant la construction.
+Le brief du 03/11 voyait à Sarnois deux conteneurs BESS dans une même aire.
+C'est un seul conteneur, dessiné deux fois à l'identique — différence
+symétrique nulle, vérifié le 08/11/2026 —, et le tableau bilan en déclare un :
+un seul ouvrage, mesuré sur son corps.
 
 ### D4 — La limite est celle du parcellaire IGN
 
@@ -416,8 +416,9 @@ distance aux boisements, les cotes NGF.
 
 Mesuré sur `sortie/PV-Sarnois-IND10B` et son emprise
 (`exemples/sarnois-2-DXF/jma_60_sarnois-geoperso-2-15_09_2026_10_53.zip`), avec
-une sonde jetable restée hors du dépôt. Les lignes « Ouvrages » et
-« Regroupement » sont antérieures aux décisions D2 et D3 du 04/11 : à remesurer.
+une sonde jetable restée hors du dépôt. La ligne « Ouvrages » est antérieure
+aux décisions D2 et D3 du 04/11 : à remesurer. La ligne « Regroupement » a été
+relue le 08/11.
 
 | Grandeur | Sarnois IND10B |
 |---|---|
@@ -428,7 +429,7 @@ une sonde jetable restée hors du dépôt. Les lignes « Ouvrages » et
 | Ouvrages | 8 en tout, dont 3 que D2 écarte (base vie, stockage de chantier, bac d'équarrissage) ; avec eux, 7 paires à moins de 30 m, 5 à moins de 20 m et 11 à moins de 50 m |
 | Emprise de la zone technique | 83 × 50 m pour les ouvrages permanents ; 162 × 308 m avec les trois autres |
 | Ouvrage → limite | PDL/PTR 0,4 m, local technique 11,1 m, BESS 15,5 m |
-| Regroupement (D3) | BESS : 84 objets, dont 80 sans surface ; deux conteneurs de 18,2 m² (6 × 3 m au catalogue), dans un contour de 48,3 m², à 1 m de son bord. PTR : 6 objets, dont un de 30,0 m² (10 × 3 m au catalogue) dans un contour de 82,9 m² |
+| Regroupement (D3) | BESS : 84 objets, dont 80 sans surface ; un conteneur de 18,2 m² (6 × 3 m au catalogue), dessiné deux fois à l'identique (relu le 08/11), dans un contour de 48,3 m², à 1 m de son bord. PTR : 6 objets, dont un de 30,0 m² (10 × 3 m au catalogue) dans un contour de 82,9 m² |
 | Voies (BD TOPO) | `Chemin` à 11,8 m des tables et à 3,0 m des ouvrages ; `Route à 1 chaussée` de 4 m de large, à 15,1 m des tables ; « Rue des Bouleaux » à 205 m |
 | Bâtiments | au cadastre, le plus proche est à 103 m : une construction légère de 782 m². La BD TOPO donne le même bâtiment, d'usage `Agricole`. Première habitation à 166 m ; 144 bâtiments `Indifférencié` sur 347 |
 | Cadre de la DP 2 | au 1:2 000, 820 × 536 m ; 307 m de marge à l'est et à l'ouest, 129 m au nord et au sud : l'habitation y tient |
@@ -470,8 +471,8 @@ Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
 
 ## Ce qui reste à mesurer
 
-- **Sarnois sous les règles du 04 et du 07/11** : ses deux conteneurs BESS
-  dans une seule aire (D3), et les cotes C7.
+- **Sarnois sous les règles du 04 et du 07/11** : les paires d'ouvrages avec
+  le bac de rétention et la zone de remise (D2), et les cotes C7.
 - **La citerne de refroidissement d'Auzainvilliers** : 5,66 m à la table la plus
   proche, au sud, quand la relecture annonçait 8,9 m, la distance à la table au
   nord-ouest. Si c'est une table précise que le SDIS regarde, la règle n'est
