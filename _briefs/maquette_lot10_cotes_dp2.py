@@ -115,6 +115,10 @@ Puis le 09/11/2026 (v6) :
   contrat n'en porte aucune ;
 - une seule cote C7 par famille, la plus courte : le BESS nord d'Auzainvilliers,
   à 28,3 m des tables quand le BESS sud en est à 8,3 m, n'était « pas utile ».
+
+Puis, le même jour (v7) :
+- le portail porte lui aussi sa hauteur en légende, 2 m : la constante UNITe
+  que son élévation à la DP 4 cote (`standards.HAUTEUR_PORTAIL_M`).
 """
 
 import math
@@ -865,9 +869,13 @@ except ErreurDP as exc:
 # n'en porte aucune : c'est la constante UNITe, celle que l'élévation de la DP 4
 # cote et que la légende du plan du bureau d'études écrit (« clôture à créer
 # (2m) », Saint-Cyr). L'entrée ne paraît que si la planche dessine une clôture.
-from dp_socle.planches.standards import HAUTEUR_CLOTURE_M  # noqa: E402
+from dp_socle.planches.standards import HAUTEUR_CLOTURE_M, HAUTEUR_PORTAIL_M  # noqa: E402
 
 libelles_dimensions["cloture"] = f"{palette.style('cloture').libelle} (h {metres(HAUTEUR_CLOTURE_M)} m)"
+# Le portail aussi (09/11/2026, v7) : la même constante d'atelier, celle que son
+# élévation à la DP 4 cote. Son entrée ne paraît, elle aussi, que si la planche
+# dessine un portail.
+libelles_dimensions["portail"] = f"{palette.style('portail').libelle} (h {metres(HAUTEUR_PORTAIL_M)} m)"
 rapport.append("légende : " + " ; ".join(libelles_dimensions.values()))
 
 # Des intitulés plus longs : la légende s'élargit plutôt que de les laisser
@@ -1473,7 +1481,7 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
 PIED_DP2 = ["Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain d'assiette "
             "(parcellaire IGN). Voie publique (axe, ou extrémité quand elle s'arrête avant le site) et habitation "
             "la plus proche selon la BD TOPO (IGN).",
-            "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; clôture : "
+            "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; clôture et portail : "
             "standard UNITe ; tables : hauteur maximale du tableau bilan)."]
 PIED_C3 = ["Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ; "
            "batteries et locaux de stockage cotés à la limite parcellaire à toute distance.",

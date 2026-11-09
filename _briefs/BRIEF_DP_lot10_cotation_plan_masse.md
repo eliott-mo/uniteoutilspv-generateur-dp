@@ -17,7 +17,7 @@
 > dit ce que la maquette a montré quand c'est la mesure qui a tranché.
 >
 > La maquette est versée à côté de ce brief, dans
-> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 09/11/2026 (v6). C'est une
+> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 09/11/2026 (v7). C'est une
 > référence, pas du code à reprendre : elle remplace à l'exécution des fonctions
 > du socle pour poser ses cotes sur la DP 2 du lot 4, et rien ne la teste. On y
 > lit le détail de ce que les décisions résument — le placement des valeurs
@@ -412,8 +412,8 @@ d'un seul tenant, la phrase dépassait 200 mm) :
   parcellaire : celle du terrain d'assiette (parcellaire IGN). Voie publique
   (axe, ou extrémité quand elle s'arrête avant le site) et habitation la plus
   proche selon la BD TOPO (IGN). » puis « Constructions en légende : longueur ×
-  largeur, h : hauteur (catalogue UNITe ; clôture : standard UNITe ; tables :
-  hauteur maximale du tableau bilan). » (08 et 09/11) ;
+  largeur, h : hauteur (catalogue UNITe ; clôture et portail : standard UNITe ;
+  tables : hauteur maximale du tableau bilan). » (08 et 09/11) ;
 - sur la planche qui porte des cotes d'ouvrages : « Distances entre ouvrages
   permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ;
   batteries et locaux de stockage cotés à la limite parcellaire à toute
@@ -455,13 +455,14 @@ Auzainvilliers demande un plan « coté dans les trois dimensions » : c'est
 l'article R. 431-36 b) du code de l'urbanisme, et la troisième dimension est la
 hauteur. Elle n'est pas cotée sur le plan, où elle chargerait des zones déjà
 serrées : chaque construction la porte dans son entrée de légende, avec son
-emprise, et la clôture aussi.
+emprise ; la clôture et le portail aussi.
 
 ```
 Poste de livraison / transformation (12 × 3 m, h 3 m)
 Bac de rétention (17,5 × 3 m, h 2,3 m)
 Panneaux photovoltaïques (hauteur maximale 4 m)
 Clôture du projet solaire (h 2 m)
+Portail (h 2 m)
 ```
 
 - **Ouvrages permanents** (D2) : longueur, largeur et hauteur du catalogue,
@@ -472,12 +473,13 @@ Clôture du projet solaire (h 2 m)
 - **Tables** : la hauteur maximale de la coupe, `point_haut_max_m` de
   `geometrie_table` — le maximum déclaré au tableau bilan, que la notice
   annonce (D6) —, et la hauteur dessinée à défaut.
-- **Clôture** (09/11) : 2 m, `standards.HAUTEUR_CLOTURE_M`, la hauteur que
-  l'élévation de la DP 4 cote. Le contrat n'en porte aucune ; c'est une
-  constante UNITe, que la légende du plan du bureau d'études écrit aussi
-  (« clôture à créer (2m) », Saint-Cyr), et non une substitution. Le portail,
-  de la même hauteur (`HAUTEUR_PORTAIL_M`), ne la porte pas encore : pas
-  tranché.
+- **Clôture et portail** (09/11) : 2 m chacun, `standards.HAUTEUR_CLOTURE_M`
+  et `standards.HAUTEUR_PORTAIL_M`, les hauteurs que leurs élévations de la
+  DP 4 cotent. Le contrat n'en porte aucune ; ce sont des constantes UNITe, que
+  la légende du plan du bureau d'études écrit aussi pour la clôture (« clôture à
+  créer (2m) », Saint-Cyr), et non une substitution. Le portail a rejoint la
+  clôture le même jour (v7). Chaque entrée ne paraît que si la planche dessine
+  l'ouvrage.
 - **Un intitulé renommé garde ses dimensions.** La maquette ne les pose que sur
   l'intitulé par défaut (`setdefault` sur `projet.legendes`) : un intitulé que
   le chef de projet aurait renommé les perdrait sans le dire. La construction
@@ -562,7 +564,7 @@ relue le 08/11.
 
 ### Saint-Cyr-en-Val et Auzainvilliers, les 07 et 08/11/2026
 
-Mesuré avec `maquette_lot10_cotes_dp2.py` dans son état versé (v6, 09/11), sur
+Mesuré avec `maquette_lot10_cotes_dp2.py` dans son état versé (v7, 09/11), sur
 des contrats refaits par `importer_be` à partir des fichiers du bureau d'études,
 comme l'application le fait, sans ligne de coupe.
 
@@ -581,7 +583,7 @@ comme l'application le fait, sans ligne de coupe.
 | C3 | 2 paires gardées sur 3 ; 3 cotes à la limite | 9 paires gardées sur 19 ; 8 cotes à la limite ; PTR des batteries ↔ bac de rétention 4,8 m |
 | C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m ; BESS sud 8,3 m ; citerne incendie 6,5 m ; BESS nord non coté (28,3 m) |
 | C8 | non cotée : voie publique à 108 m ; plus près, un chemin dans la clôture (5,2 m), puis des voies posées sur des parcelles (6,3 et 7,5 m) | « 12,2 m (axe de la D18) », perpendiculaire, à part de « 4,7 m (limite parcellaire) » |
-| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m ; clôture h 2 m | 10 entrées dimensionnées, clôture comprise (h 2 m) ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende ; sur la DP 2, deux colonnes |
+| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m ; clôture et portail h 2 m | 11 entrées dimensionnées, clôture et portail compris (h 2 m) ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende ; sur la DP 2, deux colonnes |
 | Planche de détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; la zone ouest (4 cotes) reste sur la DP 2 |
 
 Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
@@ -682,8 +684,8 @@ Le module de calcul se teste sur des cas construits :
 - une zone qui part en détail par sa cote de 2 mm, et une autre par sa valeur
   posée sur un ouvrage ;
 - une famille à variantes dans la légende ;
-- la clôture en légende, avec sa hauteur, sous l'intitulé par défaut et sous
-  un intitulé renommé.
+- la clôture et le portail en légende, chacun avec sa hauteur, sous
+  l'intitulé par défaut et sous un intitulé renommé.
 
 La BD TOPO est simulée dans la suite courante, et interrogée pour de vrai dans
 la suite réseau.
