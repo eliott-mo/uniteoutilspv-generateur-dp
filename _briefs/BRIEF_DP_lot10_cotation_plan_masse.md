@@ -206,9 +206,10 @@ est coté. Comme pour une paire d'ouvrages, la cote ne se pose pas quand un
 autre ouvrage est sur le segment : il porte déjà la distance qui compte, et le
 rapport le dit. Mesuré à Auzainvilliers : citerne de refroidissement 5,66 m,
 BESS sud 8,26 m (le nord, à 28,29 m, non coté), citerne incendie 6,55 m. La
-relecture annonçait 8,9 m pour la citerne de refroidissement. C'est la distance
-à la table au nord-ouest (8,89 m), quand la plus proche est au sud (5,66 m) :
-voir « Ce qui reste à mesurer ».
+relecture annonçait 8,9 m pour la citerne de refroidissement : la distance à la
+table au nord-ouest (8,89 m), quand la plus proche est au sud (5,66 m). Une
+erreur d'appréciation, confirmée par la relecture d'Auzainvilliers le 09/11 : la
+règle reste « la plus proche ».
 
 **C8** (07/11). Le poste de livraison (`pdl`, `pdl_ptr`) se cote jusqu'à l'axe
 de la voie **publique** la plus proche, en deçà de 30 m. C'est la relecture de
@@ -611,10 +612,6 @@ Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
   5,6 à 16,5 m.
 - **C2 sur un site sans voie publique à 300 m**, et sur un site où la voie la
   plus proche n'est pas parallèle à la limite.
-- **La citerne de refroidissement d'Auzainvilliers** : 5,66 m à la table la plus
-  proche, au sud, quand la relecture annonçait 8,9 m, la distance à la table au
-  nord-ouest. Si c'est une table précise que le SDIS regarde, la règle n'est
-  pas « la plus proche ». À trancher avec le chef de projet.
 - **Le critère du domaine public (C2, C8)**, la moitié du tracé hors des
   parcelles sur 50 m, et le seuil de 30 m de C8, sur d'autres sites.
 - Les réglages des côtés (1,5 m, 25°, 20 m), sur Bray-Saint-Aignan IND10B,
