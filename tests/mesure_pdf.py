@@ -216,6 +216,71 @@ def surfaces_remplies(chemin, page: int = 0) -> list[tuple]:
     return resultat
 
 
+def pointes_de_fleche(chemin, page: int = 0, longueur_mm=(1.4, 1.8)) -> list:
+    """Les flèches pleines de la page : leur pointe, et la direction où elles pointent.
+
+    Une flèche de cote est un triangle plein, étroit (lot 10, D8) : sa pointe
+    est le sommet de plus petit angle, et sa longueur va de la pointe au milieu
+    de sa base. Rend des couples `(pointe, direction)`, la pointe en points
+    PostScript dans le repère de la page, la direction un vecteur unitaire de
+    la base vers la pointe. `longueur_mm` écarte les triangles qui ne sont pas
+    des flèches de cote — les repères de coupe, la flèche du nord.
+    """
+    mm_par_pt = 25.4 / 72.0
+    fleches = []
+    for _, anneaux in surfaces_remplies(chemin, page):
+        for anneau in anneaux:
+            sommets = []
+            for point in anneau:
+                if not sommets or math.dist(point, sommets[-1]) > 1e-6:
+                    sommets.append(point)
+            if len(sommets) == 4 and math.dist(sommets[0], sommets[-1]) <= 1e-6:
+                sommets.pop()
+            if len(sommets) != 3:
+                continue
+
+            def angle(k):
+                a, b, c = sommets[k], sommets[k - 1], sommets[(k + 1) % 3]
+                u = (b[0] - a[0], b[1] - a[1])
+                v = (c[0] - a[0], c[1] - a[1])
+                produit = (u[0] * v[0] + u[1] * v[1]) / (math.hypot(*u) * math.hypot(*v))
+                return math.acos(max(-1.0, min(1.0, produit)))
+
+            rang = min(range(3), key=angle)
+            pointe = sommets[rang]
+            b, c = sommets[rang - 1], sommets[(rang + 1) % 3]
+            base = ((b[0] + c[0]) / 2.0, (b[1] + c[1]) / 2.0)
+            longueur = math.dist(pointe, base)
+            if not longueur_mm[0] <= longueur * mm_par_pt <= longueur_mm[1]:
+                continue
+            fleches.append(
+                (pointe, ((pointe[0] - base[0]) / longueur, (pointe[1] - base[1]) / longueur))
+            )
+    return fleches
+
+
+def textes(chemin, page: int = 0) -> list:
+    """Les textes de la page : (x, y de la ligne de base, corps, texte), en points.
+
+    Le repère est celui de la page, comme pour les segments : origine en bas à
+    gauche. La matrice de texte et la matrice courante sont composées, comme
+    dans `test_notice_lot5`. `x` est le début du texte, quel que soit l'ancrage
+    demandé au SVG : le PDF n'en a pas.
+    """
+    releve = []
+
+    def visiteur(texte, cm, tm, police, corps):
+        if not texte.strip():
+            return
+        x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+        y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+        echelle = abs(tm[3] * cm[3]) or 1.0
+        releve.append((x, y, corps * echelle, texte.strip()))
+
+    PdfReader(str(chemin)).pages[page].extract_text(visitor_text=visiteur)
+    return releve
+
+
 def teinte_visible(surfaces, point) -> tuple | None:
     """La teinte que la page montre en `point`, ou `None` si rien n'y est rempli.
 

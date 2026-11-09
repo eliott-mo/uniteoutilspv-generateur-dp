@@ -37,7 +37,7 @@ from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
 from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
 from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
-from .primitives import TRAIT_AXE, repere_coupe, union_valide
+from .primitives import COTE_REPERE_MM, TRAIT_AXE, repere_coupe, union_valide
 
 NUMERO = "DP 2"
 TITRE = piece("DP 2").titre
@@ -53,6 +53,13 @@ MARGE = 0.10
 RECUL_REPERE_MM = 4.0
 
 LARGEUR_LEGENDE_MM = 82.0
+
+#: La ligne de source, en pied du dessin, et son corps en millimètres.
+SOURCE = (
+    "Parcellaire et bâtiments : IGN — Parcellaire Express (PCI), WFS "
+    "Géoplateforme. Ouvrages : plan du bureau d'études."
+)
+TAILLE_SOURCE = 1.9
 
 
 #: Part du bloc de légende que le dessin peut occuper sans qu'on le déplace.
@@ -243,11 +250,13 @@ def generer(
         )
 
     # 4. Étiquettes de parcelle, là où la parcelle est assez grande sur le
-    #    papier pour en porter une — même mécanique que DP 1-3.
-    _etiqueter_parcelles(planche, parcelles, cadre_planche)
+    #    papier pour en porter une — même mécanique que DP 1-3. Leur place se
+    #    relève : aucune valeur de cote ne doit les recouvrir (lot 10, D8 ;
+    #    « 0495 » sous une cote à Saint-Cyr, relecture du 08/11/2026).
+    occupees = _etiqueter_parcelles(planche, parcelles, cadre_planche)
 
     # 5. La ligne de coupe, en trait d'axe, et ses repères A / A'.
-    trace = _tracer_ligne_coupe(planche, contrat)
+    trace = _tracer_ligne_coupe(planche, contrat, occupees)
     if trace is None:
         avertissements.append(
             "Aucune ligne de coupe au contrat : le plan de masse ne porte pas "
@@ -255,6 +264,8 @@ def generer(
         )
 
     # 6. La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
+    #    Sa place est connue avant les cotes, qui ne doivent pas y poser leurs
+    #    valeurs ; elle se dessine après elles.
     categories_tracees = [c for c, _ in objets]
     entrees = construire_legende(
         categories_tracees,
@@ -265,22 +276,26 @@ def generer(
         # retouche donc pas après coup.
         libelles=projet.legendes,
     )
-    dessiner_legende(
-        planche,
-        entrees,
-        position=_coin_de_legende(
-            planche, zone, objets, LARGEUR_LEGENDE_MM, hauteur_bloc(len(entrees))
-        ),
-        largeur_mm=LARGEUR_LEGENDE_MM,
+    hauteur_legende = hauteur_bloc(len(entrees))
+    position = _coin_de_legende(
+        planche, zone, objets, LARGEUR_LEGENDE_MM, hauteur_legende
     )
+    boite_legende = (
+        position[0], position[1],
+        position[0] + LARGEUR_LEGENDE_MM, position[1] + hauteur_legende,
+    )
+    x_source, y_source = zone[0] + 3.0, zone[1] + zone[3] - 2.5
+    occupees.append(boite_legende)
+    occupees.append(_boite_de_ligne(planche, x_source, y_source, SOURCE, TAILLE_SOURCE))
+
+    # 7. Les cotes (lot 10).
+    avertissements.extend(
+        _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, boite_legende)
+    )
+
+    dessiner_legende(planche, entrees, position=position, largeur_mm=LARGEUR_LEGENDE_MM)
     planche.ajouter_texte(
-        zone[0] + 3.0,
-        zone[1] + zone[3] - 2.5,
-        "Parcellaire et bâtiments : IGN — Parcellaire Express (PCI), WFS "
-        "Géoplateforme. Ouvrages : plan du bureau d'études.",
-        taille=1.9,
-        couleur=GRIS,
-        halo=True,
+        x_source, y_source, SOURCE, taille=TAILLE_SOURCE, couleur=GRIS, halo=True,
     )
 
     chemin = planche.rendre_pdf(Path(dossier) / "DP_2_plan_de_masse.pdf")
@@ -298,6 +313,87 @@ def generer(
             "avertissements": avertissements,
         },
     )
+
+
+def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legende) -> list:
+    """Les cotes du plan de masse (lot 10) : calculées, posées, et dites.
+
+    Le calcul est dans `cotation_plan_masse`, qui ne dessine rien ; la pose,
+    dans `pose_des_cotes`. Les cotes se prennent sur ce que la planche
+    dessine, `objets` : une clôture refermée par `objets_a_dessiner` l'est
+    aussi pour ses cotes. Rend le rapport : chaque cote qu'une règle écarte,
+    ou qui se lit mal sur la planche, y est nommée avec sa raison — aucune
+    n'est retirée en silence (D9).
+
+    `occupees` : ce que les valeurs ne recouvrent pas — numéros de parcelle,
+    repères de coupe, légende, ligne de source. `legende` : la boîte de la
+    légende, sous laquelle une ligne ne se lit plus jusqu'à sa flèche.
+    """
+    from shapely.ops import unary_union
+
+    from . import cotation_plan_masse as cotation
+    from .pose_des_cotes import AEviter, poser_les_cotes
+
+    rapport = []
+    dessines = dict(objets)
+    clotures = list(dessines.get("cloture", []))
+    tables = cotation.polygones_de(dessines.get("tables_pv", []))
+
+    # C1 — tables → limite parcellaire, à travers la clôture. La limite est
+    # celle du terrain d'assiette, retenu par la règle de la DP 1-3 (D4).
+    terrain = cotation.terrain_d_assiette(parcelles, emprise.geometrie)
+    enclos = cotation.enclos_de_la_cloture(clotures, rapport)
+    pans = cotation.pans_de_la_cloture(enclos)
+    cotes_des_pans = cotation.cotes_tables_cloture_limite(
+        pans, tables, terrain, planche.echelle, rapport
+    )
+    cotes = [cotes_du_pan.tables_limite for cotes_du_pan in cotes_des_pans]
+
+    # C5 — l'écartement entre deux rangées, une fois, à la valeur de la coupe :
+    # celle de `geometrie_table`, la fonction même de la DP 3 (D6).
+    table = cotation.table_de_la_coupe(contrat, rapport)
+    if table is not None:
+        inter_rangee = cotation.cote_inter_rangee(tables, table.inter_table_m, rapport)
+        if inter_rangee is not None:
+            cotes.append(inter_rangee)
+
+    # Les ouvrages permanents, mesurés sur leur corps (D2, D3). À ce point du
+    # lot, ils écartent de C6 la plateforme d'un ouvrage, et gardent leurs
+    # corps des valeurs de cote. Leurs propres cotes (C3, C7, C8), et ce que le
+    # rapport dit de leur mesure, viennent avec elles : il dirait d'un ouvrage
+    # qu'il est « coté sur son corps » quand rien ne le cote encore.
+    ouvrages = cotation.ouvrages_permanents(contrat, objets, [])
+
+    # C6 — la largeur de chaque piste, prise en travers.
+    cotes += cotation.cotes_de_largeur_de_piste(objets, ouvrages, rapport)
+
+    # C1 — clôture → limite parcellaire, ailleurs sur le côté. Sa place se
+    # choisit en dernier, là où elle gêne le moins les autres cotes, et loin
+    # de la ligne de coupe, qu'aucune valeur ne doit couper.
+    traits = [trace] if trace is not None else []
+    cotes += cotation.choisir_les_places_cloture_limite(cotes_des_pans, cotes, traits)
+
+    a_eviter = []
+    if clotures:
+        trait = unary_union([
+            g.boundary if g.geom_type in ("Polygon", "MultiPolygon") else g
+            for g in clotures
+        ])
+        a_eviter.append(AEviter("la clôture", trait))
+    if tables:
+        a_eviter.append(AEviter("les tables", unary_union(tables), gene=False))
+    for ouvrage in ouvrages:
+        libelle = getattr(STYLES.get(ouvrage.categorie), "libelle", ouvrage.categorie)
+        a_eviter.append(
+            AEviter(f"« {libelle} »", ouvrage.geometrie, infranchissable=True)
+        )
+
+    genes = poser_les_cotes(
+        planche, cotes, occupees, traits=traits,
+        a_eviter=a_eviter, masques=[legende], rapport=rapport,
+    )
+    rapport.extend(gene.message for gene in genes)
+    return rapport
 
 
 def _tramer_les_tables(planche: Planche, contrat: Contrat, tables) -> list:
@@ -341,12 +437,15 @@ def _tramer_les_tables(planche: Planche, contrat: Contrat, tables) -> list:
     return messages
 
 
-def _etiqueter_parcelles(planche: Planche, parcelles, cadre) -> None:
+def _etiqueter_parcelles(planche: Planche, parcelles, cadre) -> list:
     """Numéros de parcelle, sous le seuil de lisibilité près.
 
     Reprise de la mécanique de DP 1-3 : en dessous de quelques millimètres
     carrés sur le papier, l'étiquette déborde de sa parcelle et se lit comme
     celle de la voisine.
+
+    Rend la boîte de chaque numéro sur le papier, en millimètres : les cotes
+    se posent après eux, et aucune valeur ne doit en recouvrir un (lot 10, D8).
     """
     facteur = planche.transformation.mm_par_metre ** 2
     points, textes = [], []
@@ -359,14 +458,58 @@ def _etiqueter_parcelles(planche: Planche, parcelles, cadre) -> None:
     planche.ajouter_etiquettes(
         points, textes, {"taille_mm": TAILLE_ETIQUETTE, "couleur": "#5a3800"}
     )
+    # `ajouter_etiquettes` centre le texte sur le point, sa ligne de base au
+    # point même.
+    boites = []
+    for point, texte in zip(points, textes):
+        x, y = planche.transformation.point(point.x, point.y)
+        largeur = planche.mesurer_texte(str(texte), TAILLE_ETIQUETTE)
+        boites.append((
+            x - largeur / 2.0 - 0.3, y - 0.75 * TAILLE_ETIQUETTE - 0.3,
+            x + largeur / 2.0 + 0.3, y + 0.25 * TAILLE_ETIQUETTE + 0.3,
+        ))
+    return boites
 
 
-def _tracer_ligne_coupe(planche: Planche, contrat: Contrat):
+def _boite_de_ligne(planche: Planche, x_mm: float, y_mm: float, texte: str,
+                    taille: float) -> tuple:
+    """La boîte d'une ligne de texte écrite depuis (x, y), sa ligne de base en y."""
+    largeur = planche.mesurer_texte(texte, taille)
+    return (x_mm - 0.3, y_mm - taille, x_mm + largeur + 0.3, y_mm + 0.6)
+
+
+def _boite_de_repere(x_mm: float, y_mm: float, direction: tuple) -> tuple:
+    """La boîte d'un repère de coupe posé par `repere_coupe` : triangle et lettre.
+
+    Le triangle part du point dans la direction de la coupe, sur
+    `COTE_REPERE_MM` ; la lettre, de 11 points, se centre 3,4 mm en arrière.
+    """
+    dx, dy = direction
+    nx, ny = -dy, dx
+    demi = COTE_REPERE_MM / 2.0
+    lettre = (x_mm - dx * 3.4, y_mm - dy * 3.4)
+    points = [
+        (x_mm + dx * COTE_REPERE_MM, y_mm + dy * COTE_REPERE_MM),
+        (x_mm + nx * demi, y_mm + ny * demi),
+        (x_mm - nx * demi, y_mm - ny * demi),
+        (lettre[0] - 2.4, lettre[1] - 2.2),
+        (lettre[0] + 2.4, lettre[1] + 1.6),
+    ]
+    return (
+        min(p[0] for p in points) - 0.3, min(p[1] for p in points) - 0.3,
+        max(p[0] for p in points) + 0.3, max(p[1] for p in points) + 0.3,
+    )
+
+
+def _tracer_ligne_coupe(planche: Planche, contrat: Contrat, occupees: list | None = None):
     """Ligne de coupe en trait d'axe, repères A et A' aux extrémités.
 
     Les triangles pointent l'un vers l'autre, dans le sens de lecture de la
     coupe : c'est ce que porte le plan de masse du dossier de référence, et ce
     que l'instructeur cherche pour savoir de quel côté la coupe regarde.
+
+    `occupees`, s'il est donné, reçoit la boîte des deux repères : aucune
+    valeur de cote ne s'y pose (lot 10, D8).
     """
     couche = contrat.couches.get("ligne_coupe")
     if couche is None or couche.empty:
@@ -387,18 +530,14 @@ def _tracer_ligne_coupe(planche: Planche, contrat: Contrat):
         return None
     ux, uy = dx / norme, dy / norme
 
-    repere_coupe(
-        planche,
-        depart_mm[0] - ux * RECUL_REPERE_MM,
-        depart_mm[1] - uy * RECUL_REPERE_MM,
-        "A",
-        (ux, uy),
+    reperes = (
+        (depart_mm[0] - ux * RECUL_REPERE_MM, depart_mm[1] - uy * RECUL_REPERE_MM,
+         "A", (ux, uy)),
+        (arrivee_mm[0] + ux * RECUL_REPERE_MM, arrivee_mm[1] + uy * RECUL_REPERE_MM,
+         "A'", (-ux, -uy)),
     )
-    repere_coupe(
-        planche,
-        arrivee_mm[0] + ux * RECUL_REPERE_MM,
-        arrivee_mm[1] + uy * RECUL_REPERE_MM,
-        "A'",
-        (-ux, -uy),
-    )
+    for x_mm, y_mm, lettre, direction in reperes:
+        repere_coupe(planche, x_mm, y_mm, lettre, direction)
+        if occupees is not None:
+            occupees.append(_boite_de_repere(x_mm, y_mm, direction))
     return ligne

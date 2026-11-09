@@ -217,12 +217,43 @@ def test_la_cote_de_la_cloture_se_pose_la_ou_elle_gene_le_moins():
     assert choisie.ligne.distance(sud.tables_limite.ligne) > 84.0
 
 
+def test_la_cote_de_la_cloture_s_ecarte_aussi_de_la_ligne_de_coupe():
+    """Confondue avec la ligne de coupe, sa valeur n'avait plus de place (09/11/2026).
+
+    Sur le site synthétique de la DP 2, la coupe nord-sud passe au milieu du
+    côté sud, là où la cote clôture → limite s'essaie d'abord : sa ligne se
+    confondait avec le trait d'axe, et sa valeur, qui ne doit pas couper la
+    ligne de coupe (D8), a été posée au mieux. Pour le choix de la place, la
+    ligne de coupe compte comme une autre cote.
+    """
+    resultats, _ = _cotes_c1(*_site_c1())
+    sud = min(resultats, key=lambda r: r.tables_limite.valeur_m)
+    seule = cotation.choisir_la_place_cloture_limite(sud.places_cloture, [sud.tables_limite])
+    # La coupe passe là où la cote se serait posée sans elle.
+    x = seule.depart[0]
+    coupe = LineString([(x, Y0 - 50.0), (x, Y0 + 250.0)])
+
+    choisie = cotation.choisir_la_place_cloture_limite(
+        sud.places_cloture, [sud.tables_limite], traits=[coupe]
+    )
+
+    def eloignement(place):
+        return min(place.ligne.distance(sud.tables_limite.ligne), place.ligne.distance(coupe))
+
+    assert choisie.ligne.distance(coupe) > 0.0
+    assert eloignement(choisie) == max(eloignement(p) for p in sud.places_cloture)
+    assert cotation.choisir_les_places_cloture_limite(
+        [sud], [sud.tables_limite], traits=[coupe]
+    ) == [choisie]
+
+
 def test_les_cotes_de_cloture_deja_choisies_comptent_pour_les_suivantes():
     """Choisie la première, la cote d'un côté écarte celle du côté voisin.
 
-    À Auzainvilliers, la cote clôture → limite du côté de 159 m éloignait de
-    l'angle celle du côté de 58 m : 6,4 m, et non 5,2 m au pied de la première
-    (relevé le 09/11/2026 en rejouant la maquette).
+    C'est le choix de la maquette (v7, 09/11/2026) : chaque cote choisie
+    rejoint les cotes posées avant le choix suivant. Choisies chacune pour soi,
+    deux cotes de part et d'autre d'un angle peuvent tomber au pied l'une de
+    l'autre.
     """
     # Deux tables, l'une au sud-est, l'autre au nord-ouest : la cote des
     # tables de chaque côté tombe à un bout, et la place la plus libre de

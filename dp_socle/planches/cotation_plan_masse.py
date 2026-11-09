@@ -563,17 +563,23 @@ def _dire_les_essais(pan, cote_tables, essais, separation_m) -> str:
     return f"{entete} (essais : {' ; '.join(details)})."
 
 
-def choisir_la_place_cloture_limite(places, autres) -> CoteAPoser:
+def choisir_la_place_cloture_limite(places, autres, traits=()) -> CoteAPoser:
     """La place de la cote clôture → limite qui gêne le moins les autres cotes.
 
     Parmi les endroits du côté qui conviennent, celui qui reste le plus loin de
     toutes les autres cotes, une fois qu'elles sont connues : au milieu du côté,
     elle tombait à Auzainvilliers parmi celles de la citerne incendie et du
     local, et la cote de la voie n'avait plus de place (08/11/2026).
+
+    `traits` : les lignes de la planche qu'aucune valeur ne coupe, comme la
+    ligne de coupe, en Lambert 93. Elles comptent ici comme d'autres cotes. Sur
+    le site synthétique de la DP 2, la coupe passe au milieu du côté sud : la
+    cote s'y confondait avec le trait d'axe, et sa valeur n'avait plus de place
+    (09/11/2026).
     """
     if not places:
         return None
-    lignes = [autre.ligne for autre in autres]
+    lignes = [autre.ligne for autre in autres] + list(traits)
 
     def eloignement(place):
         return min((place.ligne.distance(ligne) for ligne in lignes), default=math.inf)
@@ -581,22 +587,22 @@ def choisir_la_place_cloture_limite(places, autres) -> CoteAPoser:
     return max(places, key=eloignement)
 
 
-def choisir_les_places_cloture_limite(cotes_des_pans, autres) -> list:
+def choisir_les_places_cloture_limite(cotes_des_pans, autres, traits=()) -> list:
     """La cote clôture → limite de chaque côté qui en a une, côté après côté.
 
-    Chaque cote choisie rejoint `autres` avant le choix suivant : de part et
-    d'autre d'un angle, deux cotes choisies chacune pour soi tombaient au pied
-    l'une de l'autre. À Auzainvilliers, la cote du côté de 159 m, choisie la
-    première, éloigne de l'angle celle du côté de 58 m : 6,4 m, et non 5,2 m à
-    7,5 m de la première (relevé le 09/11/2026 en rejouant la maquette, qui le
-    faisait).
+    Chaque cote choisie rejoint `autres` avant le choix suivant, comme dans la
+    maquette (v7, 09/11/2026) : de part et d'autre d'un angle, deux cotes
+    choisies chacune pour soi peuvent tomber au pied l'une de l'autre. À
+    Auzainvilliers, ce choix donne 12,8, 6,0 et 5,2 m, comme la maquette v7 ;
+    le 6,4 m du brief vient d'un état antérieur de la maquette (rejoué le
+    09/11/2026). `traits` : voir `choisir_la_place_cloture_limite`.
     """
     deja = list(autres)
     choisies = []
     for cotes_du_pan in cotes_des_pans:
         if not cotes_du_pan.places_cloture:
             continue
-        choisie = choisir_la_place_cloture_limite(cotes_du_pan.places_cloture, deja)
+        choisie = choisir_la_place_cloture_limite(cotes_du_pan.places_cloture, deja, traits)
         choisies.append(choisie)
         deja.append(choisie)
     return choisies
