@@ -17,7 +17,7 @@
 > dit ce que la maquette a montré quand c'est la mesure qui a tranché.
 >
 > La maquette est versée à côté de ce brief, dans
-> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 08/11/2026 (v5). C'est une
+> `_briefs/maquette_lot10_cotes_dp2.py`, sous son état du 09/11/2026 (v6). C'est une
 > référence, pas du code à reprendre : elle remplace à l'exécution des fonctions
 > du socle pour poser ses cotes sur la DP 2 du lot 4, et rien ne la teste. On y
 > lit le détail de ce que les décisions résument — le placement des valeurs
@@ -96,7 +96,7 @@ Huit familles, et rien d'autre :
 | C4 | clôture → habitation la plus proche | une | DP 2 |
 | C5 | écartement entre deux rangées | une, à la valeur de la coupe | DP 2 |
 | C6 | largeur de piste, prise en travers | une par largeur et par type de piste | DP 2 |
-| C7 | batteries et citernes → table la plus proche | une par conteneur BESS et par citerne | avec sa zone (D7) |
+| C7 | batteries et citernes → table la plus proche | une par famille — batteries, citerne de refroidissement, citerne incendie —, la plus courte | avec sa zone (D7) |
 | C8 | poste de livraison → axe de la voie publique la plus proche | une, en deçà de 30 m | avec sa zone (D7) |
 
 Les hauteurs ne sont pas des cotes : elles sont dans la légende (D12).
@@ -195,17 +195,20 @@ une aire ; l'aire de grutage. Aucune cote ne relie une piste à la clôture
 (03/11). Le libellé dit « (piste) » : sans lui, la largeur d'une piste qui
 longe la clôture se lisait comme leur écart.
 
-**C7** (07/11). Les conteneurs BESS, la citerne de refroidissement et la citerne
-incendie se cotent jusqu'à la table la plus proche : c'est ce que regarde le
-SDIS, le risque d'un côté, la défense de l'autre. La relecture d'Auzainvilliers
-le demandait pour le BESS sud et les deux citernes ; la règle prend tous les
-conteneurs. Comme pour une paire d'ouvrages, la cote ne se pose pas quand un
+**C7** (07/11, 09/11). Les batteries, la citerne de refroidissement et la
+citerne incendie se cotent jusqu'à la table la plus proche : c'est ce que
+regarde le SDIS, le risque d'un côté, la défense de l'autre. **Une cote par
+famille, la plus courte.** La relecture d'Auzainvilliers la demandait pour le
+BESS sud et les deux citernes. La cote du BESS nord, à 28,3 m des tables quand
+le BESS sud en est à 8,3 m, a été jugée « pas utile » (09/11) : les autres
+conteneurs d'une famille sont nommés au rapport, avec la distance de celui qui
+est coté. Comme pour une paire d'ouvrages, la cote ne se pose pas quand un
 autre ouvrage est sur le segment : il porte déjà la distance qui compte, et le
 rapport le dit. Mesuré à Auzainvilliers : citerne de refroidissement 5,66 m,
-BESS sud 8,26 m, BESS nord 28,29 m, citerne incendie 6,55 m. La relecture
-annonçait 8,9 m pour la citerne de refroidissement. C'est la distance à la table
-au nord-ouest (8,89 m), quand la plus proche est au sud (5,66 m) : voir « Ce qui
-reste à mesurer ».
+BESS sud 8,26 m (le nord, à 28,29 m, non coté), citerne incendie 6,55 m. La
+relecture annonçait 8,9 m pour la citerne de refroidissement. C'est la distance
+à la table au nord-ouest (8,89 m), quand la plus proche est au sud (5,66 m) :
+voir « Ce qui reste à mesurer ».
 
 **C8** (07/11). Le poste de livraison (`pdl`, `pdl_ptr`) se cote jusqu'à l'axe
 de la voie **publique** la plus proche, en deçà de 30 m. C'est la relecture de
@@ -406,16 +409,17 @@ C2 ou C8 en dessine un. Le pied énonce les règles, une ligne par idée (07/11 
 d'un seul tenant, la phrase dépassait 200 mm) :
 
 - sur la DP 2 : « Cotes en mètres, mesurées en Lambert 93. Limite
-  parcellaire : celle du terrain d'assiette (parcellaire IGN). Voie publique et
-  habitation la plus proche selon la BD TOPO (IGN). » puis « Constructions en
-  légende : longueur × largeur, h : hauteur (catalogue UNITe ; tables : hauteur
-  maximale du tableau bilan). » (08/11) ;
+  parcellaire : celle du terrain d'assiette (parcellaire IGN). Voie publique
+  (axe, ou extrémité quand elle s'arrête avant le site) et habitation la plus
+  proche selon la BD TOPO (IGN). » puis « Constructions en légende : longueur ×
+  largeur, h : hauteur (catalogue UNITe ; clôture : standard UNITe ; tables :
+  hauteur maximale du tableau bilan). » (08 et 09/11) ;
 - sur la planche qui porte des cotes d'ouvrages : « Distances entre ouvrages
   permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ;
   batteries et locaux de stockage cotés à la limite parcellaire à toute
-  distance. » puis « Batteries et citernes cotées jusqu'à la table la plus
-  proche ; poste de livraison coté jusqu'à l'axe de la voie publique la plus
-  proche, en deçà de 30 m. »
+  distance. » puis « Batteries et citernes : distance la plus courte jusqu'aux
+  panneaux ; poste de livraison coté jusqu'à l'axe de la voie publique la plus
+  proche, en deçà de 30 m. » (09/11)
 
 La légende ne recouvre ni le pied, ni une cote, ni un cadre de détail. Quand
 aucun coin ne la reçoit sur une colonne, elle passe sur deux, deux fois moins
@@ -445,18 +449,19 @@ comportement actuel : sans lui, rien ne se dessine. Le parcellaire autour des
 constructions, qui ne sert qu'à C2 et C8, se traite comme la BD TOPO. La BD TOPO
 rejoint la liste « Ce qui deviendra bloquant ».
 
-### D12 — Les trois dimensions, en légende (08/11)
+### D12 — Les trois dimensions, en légende (08 et 09/11)
 
 Auzainvilliers demande un plan « coté dans les trois dimensions » : c'est
 l'article R. 431-36 b) du code de l'urbanisme, et la troisième dimension est la
 hauteur. Elle n'est pas cotée sur le plan, où elle chargerait des zones déjà
 serrées : chaque construction la porte dans son entrée de légende, avec son
-emprise.
+emprise, et la clôture aussi.
 
 ```
 Poste de livraison / transformation (12 × 3 m, h 3 m)
 Bac de rétention (17,5 × 3 m, h 2,3 m)
 Panneaux photovoltaïques (hauteur maximale 4 m)
+Clôture du projet solaire (h 2 m)
 ```
 
 - **Ouvrages permanents** (D2) : longueur, largeur et hauteur du catalogue,
@@ -467,6 +472,16 @@ Panneaux photovoltaïques (hauteur maximale 4 m)
 - **Tables** : la hauteur maximale de la coupe, `point_haut_max_m` de
   `geometrie_table` — le maximum déclaré au tableau bilan, que la notice
   annonce (D6) —, et la hauteur dessinée à défaut.
+- **Clôture** (09/11) : 2 m, `standards.HAUTEUR_CLOTURE_M`, la hauteur que
+  l'élévation de la DP 4 cote. Le contrat n'en porte aucune ; c'est une
+  constante UNITe, que la légende du plan du bureau d'études écrit aussi
+  (« clôture à créer (2m) », Saint-Cyr), et non une substitution. Le portail,
+  de la même hauteur (`HAUTEUR_PORTAIL_M`), ne la porte pas encore : pas
+  tranché.
+- **Un intitulé renommé garde ses dimensions.** La maquette ne les pose que sur
+  l'intitulé par défaut (`setdefault` sur `projet.legendes`) : un intitulé que
+  le chef de projet aurait renommé les perdrait sans le dire. La construction
+  les ajoute à l'intitulé, quel qu'il soit.
 - La légende n'a pas de retour à la ligne, et sa largeur est fixe
   (`LARGEUR_LEGENDE_MM`, 82 mm) : elle s'élargit à l'intitulé le plus long
   plutôt que de le laisser déborder.
@@ -547,7 +562,7 @@ relue le 08/11.
 
 ### Saint-Cyr-en-Val et Auzainvilliers, les 07 et 08/11/2026
 
-Mesuré avec `maquette_lot10_cotes_dp2.py` dans son état versé (v4, 08/11), sur
+Mesuré avec `maquette_lot10_cotes_dp2.py` dans son état versé (v6, 09/11), sur
 des contrats refaits par `importer_be` à partir des fichiers du bureau d'études,
 comme l'application le fait, sans ligne de coupe.
 
@@ -564,9 +579,9 @@ comme l'application le fait, sans ligne de coupe.
 | C6 | piste lourde existante 4,4 m ; piste légère 3,5 m | 3,5 m, piste existante et piste à créer |
 | Ouvrages (D2) | 3 : PDL/PTR, local technique, citerne incendie | 10 : PDL/PTR, deux PTR, deux BESS, local technique, deux citernes, bac de rétention, zone de remise |
 | C3 | 2 paires gardées sur 3 ; 3 cotes à la limite | 9 paires gardées sur 19 ; 8 cotes à la limite ; PTR des batteries ↔ bac de rétention 4,8 m |
-| C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m ; BESS sud 8,3 m ; BESS nord 28,3 m ; citerne incendie 6,5 m |
+| C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m ; BESS sud 8,3 m ; citerne incendie 6,5 m ; BESS nord non coté (28,3 m) |
 | C8 | non cotée : voie publique à 108 m ; plus près, un chemin dans la clôture (5,2 m), puis des voies posées sur des parcelles (6,3 et 7,5 m) | « 12,2 m (axe de la D18) », perpendiculaire, à part de « 4,7 m (limite parcellaire) » |
-| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m | 9 entrées dimensionnées ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende ; sur la DP 2, deux colonnes |
+| Légende (D12) | PDL/PTR 12 × 3 m, h 3 m ; local technique 6 × 3 m, h 3 m ; citerne incendie 8,1 × 7,4 m, h 1,5 m ; tables, hauteur maximale 4 m ; clôture h 2 m | 10 entrées dimensionnées, clôture comprise (h 2 m) ; tables, hauteur maximale 3 m ; l'intitulé le plus long, celui du PDL/PTR, tient en 79 mm des 82 de la légende ; sur la DP 2, deux colonnes |
 | Planche de détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; la zone ouest (4 cotes) reste sur la DP 2 |
 
 Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
@@ -598,8 +613,6 @@ Attributs vérifiés sur le WFS de la Géoplateforme le 03/11/2026 :
   proche, au sud, quand la relecture annonçait 8,9 m, la distance à la table au
   nord-ouest. Si c'est une table précise que le SDIS regarde, la règle n'est
   pas « la plus proche ». À trancher avec le chef de projet.
-- **Le BESS nord d'Auzainvilliers** reçoit sa cote C7 (28,3 m), alors que la
-  relecture ne la demandait que pour le BESS sud.
 - **Le critère du domaine public (C2, C8)**, la moitié du tracé hors des
   parcelles sur 50 m, et le seuil de 30 m de C8, sur d'autres sites.
 - Les réglages des côtés (1,5 m, 25°, 20 m), sur Bray-Saint-Aignan IND10B,
@@ -660,12 +673,17 @@ Le module de calcul se teste sur des cas construits :
 - trois conteneurs alignés ;
 - un hangar plus proche qu'une maison ;
 - un BESS dont la table la plus proche est derrière un autre ouvrage ;
+- deux BESS : seul le plus proche des tables est coté, l'autre est nommé au
+  rapport ;
 - un poste de livraison près d'un chemin dans la clôture, d'un chemin sur une
   parcelle et d'une route hors parcelles ;
-- une voie parallèle à la limite, dont l'axe se dit dans la cote à la limite ;
+- une voie parallèle à la limite : la cote à l'axe, perpendiculaire, se décale
+  le long de la face pour ne pas se superposer à la cote à la limite ;
 - une zone qui part en détail par sa cote de 2 mm, et une autre par sa valeur
   posée sur un ouvrage ;
-- une famille à variantes dans la légende.
+- une famille à variantes dans la légende ;
+- la clôture en légende, avec sa hauteur, sous l'intitulé par défaut et sous
+  un intitulé renommé.
 
 La BD TOPO est simulée dans la suite courante, et interrogée pour de vrai dans
 la suite réseau.

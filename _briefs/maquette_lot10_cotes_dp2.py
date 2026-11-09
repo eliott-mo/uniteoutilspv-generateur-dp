@@ -1,6 +1,6 @@
 """Maquette du lot 10 : la DP 2 cotée, sans toucher au socle.
 
-Versée dans `_briefs/` le 07/11/2026, mise à jour le 08/11, comme référence du brief
+Versée dans `_briefs/` le 07/11/2026, mise à jour le 09/11, comme référence du brief
 `BRIEF_DP_lot10_cotation_plan_masse.md`. Ce n'est pas du code du dépôt : rien
 ne l'importe, la suite ne la joue pas, et elle n'est pas maintenue. Elle
 remplace à l'exécution des fonctions du socle (`dp2_plan_masse`, `palette`,
@@ -108,6 +108,13 @@ Puis la seconde relecture du chef de projet, le 08/11/2026 (v5) :
   limite, hors de la centrale ; aucune valeur ne recouvre un numéro de parcelle,
   et les tables sont à éviter ;
 - la légende passe sur deux colonnes quand aucun coin ne la reçoit en une.
+
+Puis le 09/11/2026 (v6) :
+- la clôture porte sa hauteur en légende, 2 m : la constante UNITe que
+  l'élévation de la DP 4 cote déjà (`standards.HAUTEUR_CLOTURE_M`), puisque le
+  contrat n'en porte aucune ;
+- une seule cote C7 par famille, la plus courte : le BESS nord d'Auzainvilliers,
+  à 28,3 m des tables quand le BESS sud en est à 8,3 m, n'était « pas utile ».
 """
 
 import math
@@ -738,8 +745,21 @@ else:
     rapport.append(f"C2 : aucune voie publique à moins de {RAYON_VOIE_M:.0f} m des constructions")
 
 # --- C7 : batteries et citernes → la table la plus proche (Auzainvilliers, 07/11/2026)
+# Une cote par famille, la plus courte : c'est elle que le SDIS lit. Le BESS nord
+# d'Auzainvilliers, à 28,3 m des tables quand le BESS sud en est à 8,3 m, a été
+# jugé « pas utile » à la relecture du 09/11/2026.
+plus_pres_par_famille = {}
+for i, (categorie, g) in enumerate(ouvrages):
+    if categorie in OUVRAGES_VERS_TABLES:
+        d = g.distance(tables)
+        if categorie not in plus_pres_par_famille or d < plus_pres_par_famille[categorie][1]:
+            plus_pres_par_famille[categorie] = (i, d)
 for i, (categorie, g) in enumerate(ouvrages):
     if categorie not in OUVRAGES_VERS_TABLES:
+        continue
+    if plus_pres_par_famille[categorie][0] != i:
+        rapport.append(f"C7 : {categorie} à {g.distance(tables):.2f} m de la table la plus proche, non coté : "
+                       f"un autre {categorie} en est à {plus_pres_par_famille[categorie][1]:.2f} m")
         continue
     pa, pt = nearest_points(g, tables)
     d = pa.distance(pt)
@@ -841,6 +861,13 @@ try:
                                         f"(hauteur maximale {metres(haut)} m)")
 except ErreurDP as exc:
     rapport.append(f"!! hauteur des tables : {exc}")
+# La clôture a une hauteur, et elle manquait à la légende (09/11/2026). Le contrat
+# n'en porte aucune : c'est la constante UNITe, celle que l'élévation de la DP 4
+# cote et que la légende du plan du bureau d'études écrit (« clôture à créer
+# (2m) », Saint-Cyr). L'entrée ne paraît que si la planche dessine une clôture.
+from dp_socle.planches.standards import HAUTEUR_CLOTURE_M  # noqa: E402
+
+libelles_dimensions["cloture"] = f"{palette.style('cloture').libelle} (h {metres(HAUTEUR_CLOTURE_M)} m)"
 rapport.append("légende : " + " ; ".join(libelles_dimensions.values()))
 
 # Des intitulés plus longs : la légende s'élargit plutôt que de les laisser
@@ -1446,11 +1473,11 @@ def generer(cotes, dossier, pied, axes_=(), apres=None, numero="5", avec_axe=Fal
 PIED_DP2 = ["Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain d'assiette "
             "(parcellaire IGN). Voie publique (axe, ou extrémité quand elle s'arrête avant le site) et habitation "
             "la plus proche selon la BD TOPO (IGN).",
-            "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; tables : "
-            "hauteur maximale du tableau bilan)."]
+            "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; clôture : "
+            "standard UNITe ; tables : hauteur maximale du tableau bilan)."]
 PIED_C3 = ["Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en deçà de 30 m ; "
            "batteries et locaux de stockage cotés à la limite parcellaire à toute distance.",
-           "Batteries et citernes cotées jusqu'à la table la plus proche ; poste de livraison coté jusqu'à "
+           "Batteries et citernes : distance la plus courte jusqu'aux panneaux ; poste de livraison coté jusqu'à "
            "l'axe de la voie publique la plus proche, en deçà de 30 m."]
 
 SUFFIXES = ("bis", "ter", "quater", "quinquies", "sexies")
