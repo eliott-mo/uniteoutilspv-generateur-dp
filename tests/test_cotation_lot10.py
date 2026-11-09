@@ -1406,3 +1406,71 @@ def test_un_ouvrage_sans_cote_au_catalogue_le_dit_sans_accuser_le_dessin(tmp_pat
 
 def test_choisir_parmi_aucune_place_ne_choisit_rien():
     assert cotation.choisir_la_place_cloture_limite([], []) is None
+
+
+# ---------------------------------------------------------------------------
+# D7 — les zones techniques, et ce qui les envoie sur une planche de détail
+# ---------------------------------------------------------------------------
+
+
+def _cote(famille, a, b, ouvrages=(), texte=None):
+    longueur = math.dist(point(*a), point(*b))
+    return cotation.CoteAPoser(
+        famille=famille, depart=point(*a), arrivee=point(*b),
+        texte=texte or f"{longueur:.1f} m", valeur_m=longueur, ouvrages=ouvrages,
+    )
+
+
+def test_une_zone_reunit_les_ouvrages_que_des_cotes_c3_relient():
+    """Les cotes C3 entre ouvrages font les zones ; C3 à la limite, C7 et C8 les suivent (D7).
+
+    Trois ouvrages reliés deux à deux font une zone ; un poste qui n'a que sa
+    cote vers la voie en fait une à lui seul ; un ouvrage sans cote n'en fait
+    pas. Les cotes qui ne partent d'aucun ouvrage — C1, C2, C4, C5, C6 —
+    n'appartiennent à aucune zone : elles restent sur la DP 2.
+    """
+    ab = _cote("C3", (0, 0), (10, 0), (0, 1))
+    bc = _cote("C3", (10, 0), (20, 0), (1, 2))
+    a_limite = _cote("C3", (0, 0), (0, -8), (0,))
+    c_tables = _cote("C7", (20, 0), (20, 15), (2,))
+    poste_voie = _cote("C8", (60, 0), (60, -12), (4,))
+    c1 = _cote("C1", (30, 20), (30, -10))
+    c2 = _cote("C2", (20, 0), (20, -30))
+
+    zones = cotation.zones_techniques([ab, c1, bc, a_limite, c_tables, poste_voie, c2])
+
+    assert [zone.ouvrages for zone in zones] == [(0, 1, 2), (4,)]
+    assert zones[0].cotes == (ab, bc, a_limite, c_tables)
+    assert zones[1].cotes == (poste_voie,)
+
+
+class _Gene:
+    """Ce que la pose rend d'une cote qui se lit mal, réduit à ce qu'on en lit."""
+
+    def __init__(self, cote, raison):
+        self.cote, self.texte, self.raison = cote, cote.texte, raison
+
+
+def test_une_zone_part_en_detail_par_sa_cote_de_deux_millimetres():
+    """2 m entre deux conteneurs : 2 mm au 1:1 000, sous les 3 mm lisibles (D7, 04/11).
+
+    Au 1:500, la même cote fait 4 mm : la zone reste sur la DP 2.
+    """
+    courte = _cote("C3", (0, 0), (2, 0), (0, 1), texte="2,0 m")
+    zone = cotation.zones_techniques([courte])[0]
+
+    raisons = cotation.raisons_du_detail(zone, 1000, [])
+    assert len(raisons) == 1 and "« 2,0 m »" in raisons[0] and "2,0 mm" in raisons[0]
+    assert cotation.raisons_du_detail(zone, 500, []) == []
+
+
+def test_une_zone_part_en_detail_par_sa_valeur_posee_sur_un_ouvrage():
+    """Une valeur posée sur un ouvrage le cache : sa zone part (D7) ; une autre zone reste."""
+    genee = _cote("C3", (0, 0), (12, 0), (0, 1), texte="12,0 m")
+    voisine = _cote("C3", (100, 0), (112, 0), (2, 3), texte="12,0 m")
+    zones = cotation.zones_techniques([genee, voisine])
+    genes = [_Gene(genee, "valeur posée sur « Conteneurs BESS »")]
+
+    raisons = cotation.raisons_du_detail(zones[0], 1000, genes)
+    assert raisons == ["« 12,0 m » : valeur posée sur « Conteneurs BESS »"]
+    assert cotation.raisons_du_detail(zones[1], 1000, genes) == []

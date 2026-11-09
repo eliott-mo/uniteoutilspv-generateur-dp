@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from shapely.geometry import LineString, Point, Polygon, box
+from shapely.geometry import LineString, MultiLineString, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
 
@@ -381,6 +381,11 @@ def poser_les_cotes(
             genes.append(Gene(ligne.cote, ligne.texte, "aucune place libre, valeur posée au mieux"))
         ligne.boite = boite_de_texte(ligne.place[1], largeur, hauteur)
         occupees.append(ligne.boite)
+        # Prolongée jusqu'à sa valeur, ou tirée jusqu'à elle par un renvoi, la
+        # ligne est encore sa ligne : aucune valeur posée après elle ne doit la
+        # couper (D8). Avant sa place, les autres ne voyaient que son tracé
+        # entre ses flèches — la maquette avait le même angle mort.
+        ligne.trace = _trace_posee(ligne)
 
     # Une ligne que la légende recouvre, même en partie, ne se lit plus jusqu'à
     # sa flèche (« 13,4 m (limite) », Auzainvilliers, 03/11/2026).
@@ -399,6 +404,23 @@ def poser_les_cotes(
             ancre="middle", halo=True, habillage=False,
         )
     return genes
+
+
+def _trace_posee(ligne: _Ligne) -> BaseGeometry:
+    """La ligne telle qu'elle se dessinera, en millimètres : prolongée, et son renvoi."""
+    genre, _, extra = ligne.place
+    ux, uy = ligne.u
+    avant = extra if genre == "debut" else ligne.rallonge
+    apres = extra if genre == "fin" else ligne.rallonge
+    trace = LineString([
+        (ligne.am[0] - ux * avant, ligne.am[1] - uy * avant),
+        (ligne.bm[0] + ux * apres, ligne.bm[1] + uy * apres),
+    ])
+    if genre != "renvoi":
+        return trace
+    rayon, dx, dy = extra
+    mx, my = ligne.milieu
+    return MultiLineString([trace, LineString([(mx, my), (mx + dx * rayon, my + dy * rayon)])])
 
 
 def _dessiner_la_ligne(planche: Planche, ligne: _Ligne) -> None:

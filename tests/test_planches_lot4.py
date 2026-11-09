@@ -500,7 +500,19 @@ def test_dossier_complet_numerote_et_sous_la_cible(site):
     # La page de garde est dans `planches` sous un code à elle : le sommaire
     # la compte à part, et elle n'a pas de code de pièce.
     numeros = [s.numero for s in rapport.planches if s.numero.startswith("DP ")]
-    assert numeros == ["DP 1-1", "DP 1-2", "DP 1-3", "DP 2", "DP 3", "DP 4-1", "DP 4-2"]
+    # Les planches de détail de la zone technique (lot 10, D7) suivent la DP 2
+    # quand une zone s'y lit mal. Sur ce site, avec les voies et les bâtiments
+    # réels de la BD TOPO, la zone du poste peut partir : c'est la place des
+    # valeurs qui en décide. Elles se rangent derrière la DP 2, dans l'ordre.
+    from dp_socle.dossier import SUFFIXES_DETAIL_PLAN_DE_MASSE
+
+    details = [n for n in numeros if n.startswith("DP 2 ")]
+    assert numeros[4:4 + len(details)] == [
+        f"DP 2 {suffixe}" for suffixe in SUFFIXES_DETAIL_PLAN_DE_MASSE[:len(details)]
+    ]
+    assert [n for n in numeros if n not in details] == [
+        "DP 1-1", "DP 1-2", "DP 1-3", "DP 2", "DP 3", "DP 4-1", "DP 4-2"
+    ]
 
     produites = codes_produits(numeros)
     for entree in rapport.sommaire:

@@ -130,10 +130,13 @@ def test_une_piece_facultative_ne_se_liste_au_sommaire_que_produite():
     coupe, DP 11 sans notice. C'est précisément leur absence qu'il faut voir
     avant le dépôt, et la distinction tient à ce seul champ.
     """
-    from dp_socle.dossier import PIECES, PAR_CODE
+    from dp_socle.dossier import PAR_CODE, PIECES, SUFFIXES_DETAIL_PLAN_DE_MASSE
 
     facultatives = {p.code for p in PIECES if p.facultative}
-    assert facultatives == {"DP 1-3 bis", "DP 4-3"}
+    # Les planches de détail de la zone technique (lot 10, D7) le sont aussi :
+    # elles n'existent que si une zone se lit mal sur la DP 2.
+    details = {f"DP 2 {suffixe}" for suffixe in SUFFIXES_DETAIL_PLAN_DE_MASSE}
+    assert facultatives == {"DP 1-3 bis", "DP 4-3"} | details
     # Celles qu'on veut voir manquer ne le sont pas.
     assert not PAR_CODE["DP 3"].facultative
     assert not PAR_CODE["DP 11"].facultative

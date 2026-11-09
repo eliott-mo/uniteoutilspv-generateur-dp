@@ -334,11 +334,19 @@ def _planches_lot4(projet, contrat: Contrat, emprise, dossier, avertissements,
     # compte les planches déjà produites plutôt que de figer un 5.
     rang = rang_depart
 
-    sorties.append(
-        dp2_plan_masse.generer(projet, contrat, emprise, dossier, numero=str(rang))
+    plan_de_masse = dp2_plan_masse.generer(
+        projet, contrat, emprise, dossier, numero=str(rang)
     )
-    avertissements.extend(sorties[-1].details.get("avertissements", []))
+    sorties.append(plan_de_masse)
+    avertissements.extend(plan_de_masse.details.get("avertissements", []))
     rang += 1
+    # Les planches de détail de la zone technique (lot 10, D7) : produites avec
+    # la DP 2, puisque c'est en l'essayant qu'on sait quelle zone s'y lit mal,
+    # et numérotées à sa suite.
+    for detail in plan_de_masse.details.get("planches_de_detail", []):
+        sorties.append(detail)
+        avertissements.extend(detail.details.get("avertissements", []))
+        rang += 1
 
     if contrat.profil and (contrat.profil.get("points") or []):
         sorties.append(

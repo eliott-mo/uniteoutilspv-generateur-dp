@@ -12,14 +12,15 @@ aérienne.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from shapely.geometry import box
 
 from ..contrat import Contrat
-from ..dossier import piece
-from ..echelle import echelle_adaptative
-from ..erreurs import ErreurComposition, ErreurDP, ErreurService
+from ..dossier import SUFFIXES_DETAIL_PLAN_DE_MASSE, piece
+from ..echelle import echelle_adaptative, mm_vers_metres
+from ..erreurs import ErreurComposition, ErreurDP, ErreurEchelle, ErreurService
 from ..geometrie import Emprise
 from ..ign import (
     telecharger_batiments,
@@ -70,6 +71,25 @@ TAILLE_SOURCE = 1.9
 #: L'axe d'une voie publique jusqu'où une cote est prise (C2, C8) : en gris,
 #: pour ne pas se lire comme la ligne de coupe, qui est noire.
 STYLE_AXE_DE_VOIE = Style(trait="#6b6b6b", epaisseur_mm=0.25, tirets="4 1 0.6 1")
+
+#: Les planches de détail de la zone technique, dans l'ordre (lot 10, D7) :
+#: DP 2 bis, ter… Ce sont les pièces facultatives que `dossier.PIECES` connaît,
+#: et la liste vient de lui.
+SUFFIXES_DETAIL = SUFFIXES_DETAIL_PLAN_DE_MASSE
+
+#: L'échelle d'une planche de détail : la plus grande de celles-ci où tiennent
+#: les ouvrages de la zone et le bout de leurs cotes, avec cette marge (D7).
+ECHELLES_DETAIL = (200, 500, 1000)
+MARGE_DETAIL = 0.25
+
+#: Sur la DP 2, le cadre d'une zone partie en détail entoure ses ouvrages à
+#: cela près, en bleu tireté, et son renvoi s'écrit de la même couleur.
+MARGE_CADRE_DETAIL_MM = 3.0
+STYLE_CADRE_DETAIL = Style(
+    trait="#1f4e79", epaisseur_mm=0.35, remplissage="none", tirets="2.5 1.2"
+)
+COULEUR_RENVOI = "#1f4e79"
+TAILLE_RENVOI = 2.2
 
 
 #: Part du bloc de légende que le dessin peut occuper sans qu'on le déplace.
@@ -169,6 +189,8 @@ def generer(
     dossier: str | Path,
     numero: str | None = None,
 ) -> Sortie:
+    from .cotation_plan_masse import raisons_du_detail
+
     planche = nouvelle_planche(projet, NUMERO, numero=numero)
     zone = planche.zone_dessin()
 
@@ -199,24 +221,8 @@ def generer(
             "Aucune parcelle cadastrale sur l'emprise du plan de masse. "
             "Le plan de masse porte le parcellaire : il n'est pas produit sans."
         )
-    for parcelle in parcelles:
-        planche.ajouter_geometrie(parcelle.geometrie, STYLE_PARCELLE)
-
     # 2. Bâtiments, hachurés à 45° comme sur DP 1-3.
-    #
-    #    Seuls ceux qui tombent dans le cadre comptent pour la légende. La
-    #    requête WFS déborde du cadre d'un tampon, pour que les limites soient
-    #    tracées jusqu'au bord ; en tirer une entrée « Bâtiment » ferait
-    #    annoncer à la légende un objet que la planche ne montre pas.
-    cadre_planche = box(minx, miny, maxx, maxy)
     batiments = telecharger_batiments(cadre_requete)
-    batiments_visibles = [
-        b for b in batiments if cadre_planche.intersects(b.geometrie)
-    ]
-    if batiments_visibles:
-        planche.ajouter_definition(MOTIF_BATIMENT)
-        for batiment in batiments_visibles:
-            planche.ajouter_geometrie(batiment.geometrie, STYLE_BATIMENT)
 
     # 3. Les catégories du GeoPackage, dans l'ordre de dessin du contrat.
     objets = objets_a_dessiner(contrat, avertissements)
@@ -225,8 +231,129 @@ def generer(
             "Le contrat ne porte aucun objet à dessiner : le plan de masse "
             "serait vide. Vérifiez l'appariement des calques à l'import."
         )
+    lectures = (parcelles, batiments, objets)
+
+    # 4. Les cotes (lot 10), calculées une fois pour la DP 2 et ses planches de
+    #    détail : la place d'une valeur change d'un essai à l'autre, pas la cote.
+    calcul = _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, avertissements)
+
+    # 5. Une zone technique part sur sa planche de détail quand la DP 2 la lit
+    #    mal (D7, 04/11/2026) : une cote de moins de 3 mm se voit avant tout
+    #    dessin ; une valeur sans place nette, ou une ligne sous la légende, ne
+    #    se voient qu'en essayant la DP 2. Elle s'essaie donc, les zones fautives
+    #    partent, et elle se refait sans elles : retirer une zone libère de la
+    #    place, mais y pose un cadre, et la légende peut changer de coin. On
+    #    recommence jusqu'à ce que plus aucune zone ne bouge.
+    zones = calcul.zones
+    partantes = {}
+    for rang, zone_technique in enumerate(zones):
+        raisons = raisons_du_detail(zone_technique, denominateur, [])
+        if raisons:
+            partantes[rang] = raisons
+    for essai in range(1, len(zones) + 2):
+        codes, refus = _codes_des_details(partantes, zones, calcul)
+        cadres = [
+            (codes[rang], _cadre_du_detail(zones[rang], calcul, denominateur))
+            for rang in sorted(codes)
+        ]
+        a_poser = list(calcul.hors_zones) + [
+            cote for rang, zone_technique in enumerate(zones)
+            if rang not in codes for cote in zone_technique.cotes
+        ]
+        planche = nouvelle_planche(projet, NUMERO, numero=numero)
+        planche.definir_echelle(denominateur)
+        planche.centrer_sur(centre)
+        genes, messages, details = _composer(
+            planche, projet, contrat, lectures, a_poser, calcul, cadres=cadres
+        )
+        nouvelles = {}
+        for rang, zone_technique in enumerate(zones):
+            if rang in partantes:
+                continue
+            raisons = raisons_du_detail(zone_technique, denominateur, genes)
+            if raisons:
+                nouvelles[rang] = raisons
+        if not nouvelles:
+            break
+        if essai > len(zones):
+            messages.append(
+                f"DP 2 : des zones techniques se lisent encore mal après {essai} "
+                "essais ; elles restent sur la planche."
+            )
+            break
+        partantes.update(nouvelles)
+    avertissements.extend(refus)
+    avertissements.extend(messages)
+    avertissements.extend(gene.message for gene in genes)
+
+    # 6. Les planches de détail, une par zone partie, à la suite de la DP 2.
+    sorties_detail = []
+    for rang_detail, rang in enumerate(sorted(codes)):
+        code = codes[rang]
+        avertissements.append(
+            f"Zone technique ({_noms_des_ouvrages(zones[rang], calcul)}) : sur la "
+            f"planche {code} — {' ; '.join(partantes[rang])}."
+        )
+        sorties_detail.append(_planche_de_detail(
+            projet, contrat, code,
+            None if numero is None else str(int(numero) + rang_detail + 1),
+            zones[rang], lectures, calcul, dossier,
+        ))
+
+    chemin = planche.rendre_pdf(Path(dossier) / "DP_2_plan_de_masse.pdf")
+    return Sortie(
+        numero=NUMERO,
+        titre=TITRE,
+        chemin=chemin,
+        echelle=denominateur,
+        planche=planche,
+        details={
+            **details,
+            "avertissements": avertissements,
+            "planches_de_detail": sorties_detail,
+        },
+    )
+
+
+def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
+              detail: bool = False):
+    """Une planche du plan de masse : son fond, sa légende, et les cotes posées dessus.
+
+    Sert à la DP 2, essai après essai, et à ses planches de détail (D7), sur les
+    mêmes lectures. `a_poser` : les cotes de cette planche. `cadres` : sur la
+    DP 2, le cadre de chaque zone partie en détail, avec son code. `detail` :
+    une planche de détail ne montre qu'une partie du site, et ne dit pas des
+    objets ou de la coupe qui tombent hors de son cadre qu'ils manquent.
+
+    Rend (gênes, messages, détails) : ce que la pose rend des cotes qui se
+    lisent mal, ce que la planche a à dire, et de quoi remplir sa `Sortie`.
+    """
+    from .pose_des_cotes import AEviter, en_mm, poser_les_cotes
+
+    messages = []
+    parcelles, batiments, objets = lectures
+    zone = planche.zone_dessin()
+    minx, miny, maxx, maxy = planche.emprise_terrain()
+    cadre_planche = box(minx, miny, maxx, maxy)
+
+    for parcelle in parcelles:
+        planche.ajouter_geometrie(parcelle.geometrie, STYLE_PARCELLE)
+
+    #    Seuls les bâtiments qui tombent dans le cadre comptent pour la légende.
+    #    La requête WFS déborde du cadre d'un tampon, pour que les limites soient
+    #    tracées jusqu'au bord ; en tirer une entrée « Bâtiment » ferait
+    #    annoncer à la légende un objet que la planche ne montre pas.
+    batiments_visibles = [
+        b for b in batiments if cadre_planche.intersects(b.geometrie)
+    ]
+    if batiments_visibles:
+        planche.ajouter_definition(MOTIF_BATIMENT)
+        for batiment in batiments_visibles:
+            planche.ajouter_geometrie(batiment.geometrie, STYLE_BATIMENT)
+
     hors_cadre = []
     tables_visibles = []
+    visibles = []
     for categorie, geometries in objets:
         # Une catégorie qui dessine aussi une surface ici : ses traits y sont
         # des détails posés dessus, et se tracent au filet.
@@ -240,43 +367,52 @@ def generer(
             planche.ajouter_geometrie(
                 geometrie, style_de(categorie, geometrie, avec_surface)
             )
+            if categorie not in visibles:
+                visibles.append(categorie)
             if categorie == "tables_pv":
                 tables_visibles.append(geometrie)
 
     # La trame des modules, par-dessus le contour des rangées : c'est elle qui
     # fait lire une table comme un panneau plutôt que comme une dalle, et c'est
     # ce que porte le plan de masse du dossier de référence.
-    avertissements.extend(
-        _tramer_les_tables(planche, contrat, tables_visibles)
-    )
-    if hors_cadre:
+    messages.extend(_tramer_les_tables(planche, contrat, tables_visibles))
+    if hors_cadre and not detail:
         # Le contenu cartographique est découpé sur la zone de dessin : un objet
         # hors cadre disparaîtrait sans rien dire, et c'est exactement le genre
         # d'absence que personne ne remarque à la relecture.
-        avertissements.append(
+        messages.append(
             f"{len(hors_cadre)} objet(s) du plan tombent hors du cadre de DP 2 "
             f"({', '.join(sorted(set(hors_cadre)))}) : ils ne sont pas dessinés. "
             "L'emprise cadastrale ne couvre pas tout le projet."
         )
 
-    # 4. Étiquettes de parcelle, là où la parcelle est assez grande sur le
-    #    papier pour en porter une — même mécanique que DP 1-3. Leur place se
-    #    relève : aucune valeur de cote ne doit les recouvrir (lot 10, D8 ;
-    #    « 0495 » sous une cote à Saint-Cyr, relecture du 08/11/2026).
+    # Étiquettes de parcelle, là où la parcelle est assez grande sur le papier
+    # pour en porter une — même mécanique que DP 1-3. Leur place se relève :
+    # aucune valeur de cote ne doit les recouvrir (lot 10, D8 ; « 0495 » sous
+    # une cote à Saint-Cyr, relecture du 08/11/2026).
     occupees = _etiqueter_parcelles(planche, parcelles, cadre_planche)
 
-    # 5. La ligne de coupe, en trait d'axe, et ses repères A / A'.
+    # La ligne de coupe, en trait d'axe, et ses repères A / A'.
     trace = _tracer_ligne_coupe(planche, contrat, occupees)
-    if trace is None:
-        avertissements.append(
+    if trace is None and not detail:
+        messages.append(
             "Aucune ligne de coupe au contrat : le plan de masse ne porte pas "
             "les repères A et A', et DP 3 n'est pas produite."
         )
 
-    # 6. La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
-    #    Sa place est connue avant les cotes, qui ne doivent pas y poser leurs
-    #    valeurs ; elle se dessine après elles.
-    categories_tracees = [c for c, _ in objets]
+    # L'axe de chaque voie jusqu'où une cote posée ici est prise (C2, C8), et
+    # le cadre de chaque zone partie en détail.
+    for cote, axe in calcul.axes:
+        if any(cote is posee for posee in a_poser):
+            planche.ajouter_geometrie(axe, STYLE_AXE_DE_VOIE)
+    for _, cadre in cadres:
+        planche.ajouter_geometrie(cadre, STYLE_CADRE_DETAIL)
+
+    # La légende, bâtie sur ce qui vient d'être dessiné, et sur rien d'autre.
+    # Sa place est connue avant les cotes, qui ne doivent pas y poser leurs
+    # valeurs ; elle se dessine après elles. Une planche de détail ne montre
+    # qu'une partie du site : sa légende ne nomme que ce qu'elle montre.
+    categories_tracees = visibles if detail else [c for c, _ in objets]
     entrees = construire_legende(
         categories_tracees,
         avec_parcelles=True,
@@ -298,53 +434,74 @@ def generer(
     occupees.append(boite_legende)
     occupees.append(_boite_de_ligne(planche, x_source, y_source, SOURCE, TAILLE_SOURCE))
 
-    # 7. Les cotes (lot 10).
-    avertissements.extend(
-        _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, boite_legende)
+    # Le renvoi de chaque cadre, une fois la légende placée : écrit avant elle,
+    # il tombait dessous (04/11/2026).
+    lignes = [en_mm(planche, cote.ligne) for cote in a_poser]
+    genants = [en_mm(planche, e.geometrie) for e in calcul.a_eviter if e.gene]
+    for code, cadre in cadres:
+        place = _poser_le_renvoi(planche, code, cadre, occupees, lignes, genants)
+        if place is None:
+            messages.append(
+                f"Renvoi au {code} : aucune place libre autour de son cadre, "
+                "posé au mieux."
+            )
+        else:
+            occupees.append(place)
+
+    # Les cotes. Le cadre d'un détail est à éviter, pas interdit : le traverser
+    # ne cache rien (D8).
+    a_eviter = list(calcul.a_eviter) + [
+        AEviter("le cadre d'un détail", cadre.exterior, gene=False) for _, cadre in cadres
+    ]
+    genes = poser_les_cotes(
+        planche, a_poser, occupees,
+        traits=[trace] if trace is not None else [],
+        a_eviter=a_eviter, masques=[boite_legende], rapport=messages,
     )
 
     dessiner_legende(planche, entrees, position=position, largeur_mm=LARGEUR_LEGENDE_MM)
     planche.ajouter_texte(
         x_source, y_source, SOURCE, taille=TAILLE_SOURCE, couleur=GRIS, halo=True,
     )
-
-    chemin = planche.rendre_pdf(Path(dossier) / "DP_2_plan_de_masse.pdf")
-    return Sortie(
-        numero=NUMERO,
-        titre=TITRE,
-        chemin=chemin,
-        echelle=denominateur,
-        planche=planche,
-        details={
-            "categories_dessinees": categories_tracees,
-            "nb_parcelles": len(parcelles),
-            "nb_batiments": len(batiments_visibles),
-            "coupe_tracee": trace is not None,
-            "avertissements": avertissements,
-        },
-    )
+    return genes, messages, {
+        "categories_dessinees": categories_tracees,
+        "nb_parcelles": len(parcelles),
+        "nb_batiments": len(batiments_visibles),
+        "coupe_tracee": trace is not None,
+    }
 
 
-def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legende) -> list:
-    """Les cotes du plan de masse (lot 10) : calculées, posées, et dites.
+@dataclass
+class _Calcul:
+    """Les cotes du plan de masse, calculées une fois pour la DP 2 et ses détails.
+
+    `hors_zones` : celles qui restent sur la DP 2 (C1, C2, C4, C5, C6).
+    `zones` : les zones techniques, avec leurs cotes C3, C7 et C8 (D7).
+    `axes` : (cote, axe) de chaque cote vers une voie, l'axe se dessinant là où
+    sa cote est posée. `a_eviter` : ce que les valeurs évitent (D8).
+    """
+
+    hors_zones: list
+    zones: list
+    axes: list
+    a_eviter: list
+    ouvrages: list
+
+
+def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rapport) -> _Calcul:
+    """Les cotes du plan de masse (lot 10), calculées, et ce que le calcul écarte.
 
     Le calcul est dans `cotation_plan_masse`, qui ne dessine rien ; la pose,
     dans `pose_des_cotes`. Les cotes se prennent sur ce que la planche
     dessine, `objets` : une clôture refermée par `objets_a_dessiner` l'est
-    aussi pour ses cotes. Rend le rapport : chaque cote qu'une règle écarte,
-    ou qui se lit mal sur la planche, y est nommée avec sa raison — aucune
-    n'est retirée en silence (D9).
-
-    `occupees` : ce que les valeurs ne recouvrent pas — numéros de parcelle,
-    repères de coupe, légende, ligne de source. `legende` : la boîte de la
-    légende, sous laquelle une ligne ne se lit plus jusqu'à sa flèche.
+    aussi pour ses cotes. Chaque cote qu'une règle écarte est nommée au
+    `rapport` avec sa raison — aucune n'est retirée en silence (D9).
     """
     from shapely.ops import unary_union
 
     from . import cotation_plan_masse as cotation
-    from .pose_des_cotes import AEviter, poser_les_cotes
+    from .pose_des_cotes import AEviter
 
-    rapport = []
     dessines = dict(objets)
     clotures = list(dessines.get("cloture", []))
     tables = cotation.polygones_de(dessines.get("tables_pv", []))
@@ -355,7 +512,7 @@ def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legend
     enclos = cotation.enclos_de_la_cloture(clotures, rapport)
     pans = cotation.pans_de_la_cloture(enclos)
     cotes_des_pans = cotation.cotes_tables_cloture_limite(
-        pans, tables, terrain, planche.echelle, rapport
+        pans, tables, terrain, denominateur, rapport
     )
     cotes = [cotes_du_pan.tables_limite for cotes_du_pan in cotes_des_pans]
 
@@ -367,33 +524,35 @@ def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legend
         if inter_rangee is not None:
             cotes.append(inter_rangee)
 
-    # Les ouvrages permanents, mesurés sur leur corps (D2, D3). À ce point du
-    # lot, ils écartent de C6 la plateforme d'un ouvrage, et gardent leurs
-    # corps des valeurs de cote. Leurs propres cotes (C3, C7, C8), et ce que le
-    # rapport dit de leur mesure, viennent avec elles : il dirait d'un ouvrage
-    # qu'il est « coté sur son corps » quand rien ne le cote encore.
-    ouvrages = cotation.ouvrages_permanents(contrat, objets, [])
+    # Les ouvrages permanents, mesurés sur leur corps (D2, D3).
+    ouvrages = cotation.ouvrages_permanents(contrat, objets, rapport)
 
     # C6 — la largeur de chaque piste, prise en travers.
     cotes += cotation.cotes_de_largeur_de_piste(objets, ouvrages, rapport)
+
+    # C3 — chaque ouvrage → ses voisins directs, et → la limite parcellaire ;
+    # C7 — batteries et citernes → la table la plus proche.
+    limite = terrain.boundary if terrain is not None and not terrain.is_empty else None
+    cotes += cotation.cotes_entre_ouvrages(ouvrages, limite, rapport)
+    cotes += cotation.cotes_vers_les_tables(ouvrages, tables, rapport)
 
     # C4 — clôture → habitation la plus proche, selon la BD TOPO (D5).
     habitation = _cote_habitation(clotures, rapport)
     if habitation is not None:
         cotes.append(habitation)
 
-    # C2 et C8 — vers l'axe de la voie publique la plus proche, axe dessiné.
+    # C2 et C8 — vers l'axe de la voie publique la plus proche. Elles ne se
+    # superposent à aucune des cotes déjà calculées.
     vers_les_voies = _cotes_vers_les_voies(
-        tables, ouvrages, clotures, enclos, cotes, planche.echelle, rapport
+        tables, ouvrages, clotures, enclos, cotes, denominateur, rapport
     )
     cotes += [resultat.cote for resultat in vers_les_voies]
-    for resultat in vers_les_voies:
-        planche.ajouter_geometrie(resultat.axe, STYLE_AXE_DE_VOIE)
 
     # C1 — clôture → limite parcellaire, ailleurs sur le côté. Sa place se
     # choisit en dernier, là où elle gêne le moins les autres cotes, et loin
     # de la ligne de coupe, qu'aucune valeur ne doit couper.
-    traits = [trace] if trace is not None else []
+    ligne_de_coupe = _ligne_de_coupe(contrat)
+    traits = [ligne_de_coupe] if ligne_de_coupe is not None else []
     cotes += cotation.choisir_les_places_cloture_limite(cotes_des_pans, cotes, traits)
 
     a_eviter = []
@@ -406,17 +565,181 @@ def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legend
     if tables:
         a_eviter.append(AEviter("les tables", unary_union(tables), gene=False))
     for ouvrage in ouvrages:
-        libelle = getattr(STYLES.get(ouvrage.categorie), "libelle", ouvrage.categorie)
         a_eviter.append(
-            AEviter(f"« {libelle} »", ouvrage.geometrie, infranchissable=True)
+            AEviter(f"« {_libelle(ouvrage.categorie)} »", ouvrage.geometrie, infranchissable=True)
         )
 
-    genes = poser_les_cotes(
-        planche, cotes, occupees, traits=traits,
-        a_eviter=a_eviter, masques=[legende], rapport=rapport,
+    zones = cotation.zones_techniques(cotes)
+    dans_les_zones = {id(cote) for zone_technique in zones for cote in zone_technique.cotes}
+    return _Calcul(
+        hors_zones=[cote for cote in cotes if id(cote) not in dans_les_zones],
+        zones=zones,
+        axes=[(resultat.cote, resultat.axe) for resultat in vers_les_voies],
+        a_eviter=a_eviter,
+        ouvrages=ouvrages,
     )
-    rapport.extend(gene.message for gene in genes)
-    return rapport
+
+
+def _libelle(categorie: str) -> str:
+    """L'intitulé de légende d'une catégorie, pour la nommer au rapport."""
+    return getattr(STYLES.get(categorie), "libelle", categorie)
+
+
+def _noms_des_ouvrages(zone_technique, calcul) -> str:
+    noms = []
+    for rang in zone_technique.ouvrages:
+        nom = _libelle(calcul.ouvrages[rang].categorie)
+        if nom not in noms:
+            noms.append(nom)
+    return ", ".join(noms)
+
+
+def _codes_des_details(partantes, zones, calcul):
+    """Le code de la planche de chaque zone partie : DP 2 bis, ter… dans l'ordre des zones.
+
+    Au-delà de la dernière pièce que le dossier connaît, une zone reste sur la
+    DP 2. Une zone dont aucune échelle de détail ne loge les ouvrages et le
+    bout des cotes y reste aussi. Rend (codes, refus) : les refus sont ce que
+    le rapport doit en dire.
+    """
+    codes, rapport = {}, []
+    for rang in sorted(partantes):
+        if len(codes) >= len(SUFFIXES_DETAIL):
+            rapport.append(
+                f"Zone technique ({_noms_des_ouvrages(zones[rang], calcul)}) : elle se "
+                f"lit mal sur la DP 2, mais le dossier ne compte que "
+                f"{len(SUFFIXES_DETAIL)} planches de détail ; elle y reste."
+            )
+            continue
+        try:
+            _echelle_du_detail(zones[rang], calcul)
+        except ErreurEchelle as erreur:
+            rapport.append(
+                f"Zone technique ({_noms_des_ouvrages(zones[rang], calcul)}) : elle se "
+                f"lit mal sur la DP 2, et ne tient sur aucune planche de détail "
+                f"({erreur}) ; elle y reste."
+            )
+            continue
+        codes[rang] = f"{NUMERO} {SUFFIXES_DETAIL[len(codes)]}"
+    return codes, rapport
+
+
+def _etendue_du_detail(zone_technique, calcul):
+    """Ce que la planche de détail doit montrer : les ouvrages de la zone et le bout de leurs cotes."""
+    from shapely.ops import unary_union
+
+    return unary_union(
+        [calcul.ouvrages[rang].geometrie for rang in zone_technique.ouvrages]
+        + [cote.ligne for cote in zone_technique.cotes]
+    )
+
+
+def _echelle_du_detail(zone_technique, calcul) -> int:
+    """La plus grande des échelles de détail où la zone tient sur la planche (D7)."""
+    # La zone de dessin d'une planche du dossier, cartouche compris : celle que
+    # la planche de détail aura.
+    zone = Planche(titre="", numero="", projet="", date="").zone_dessin()
+    x0, y0, x1, y1 = _etendue_du_detail(zone_technique, calcul).bounds
+    return echelle_adaptative(
+        max(x1 - x0, 1.0), max(y1 - y0, 1.0), zone,
+        marge=MARGE_DETAIL, valeurs=ECHELLES_DETAIL,
+    )
+
+
+def _cadre_du_detail(zone_technique, calcul, denominateur):
+    """Sur la DP 2, le cadre d'une zone partie : ses ouvrages, à 3 mm de papier près.
+
+    Et non toute la planche de détail : au 1:500, celle-ci couvrait la moitié
+    est d'Auzainvilliers sur la DP 2 au 1:1 000, passait sous la légende et
+    sortait du cadre (04/11/2026). Les cotes de la zone n'y entrent pas : elles
+    sont sur la planche de détail.
+    """
+    from shapely.ops import unary_union
+
+    ouvrages = unary_union(
+        [calcul.ouvrages[rang].geometrie for rang in zone_technique.ouvrages]
+    )
+    x0, y0, x1, y1 = ouvrages.bounds
+    marge = mm_vers_metres(MARGE_CADRE_DETAIL_MM, denominateur)
+    return box(x0 - marge, y0 - marge, x1 + marge, y1 + marge)
+
+
+def _poser_le_renvoi(planche, code, cadre, occupees, lignes, genants):
+    """Le renvoi au-dessus du cadre, sinon dessous, sinon à côté.
+
+    Ni sur la légende, ni sur une autre étiquette, ni sur une cote, ni en
+    travers de la clôture ou d'un ouvrage : posé dessous à Auzainvilliers, la
+    clôture le barrait (04/11/2026). Rend la boîte occupée, ou `None` si
+    aucune place n'est libre : il est alors écrit à la première, et l'appelant
+    le dit.
+    """
+    texte = f"Détail de la zone technique : {code}"
+    largeur = planche.mesurer_texte(texte, TAILLE_RENVOI)
+    x_zone, y_zone, largeur_zone, hauteur_zone = planche.zone_dessin()
+    gauche, haut = planche.transformation.point(cadre.bounds[0], cadre.bounds[3])
+    droite, bas = planche.transformation.point(cadre.bounds[2], cadre.bounds[1])
+    places = [
+        (gauche, haut - 1.2), (droite - largeur, haut - 1.2),
+        (gauche, bas + 3.0), (droite - largeur, bas + 3.0),
+        (gauche - largeur - 1.5, haut + 2.2), (droite + 1.5, haut + 2.2),
+        (gauche - largeur - 1.5, bas - 0.8), (droite + 1.5, bas - 0.8),
+    ]
+    for x, y in places:
+        boite = (x - 0.4, y - 2.6, x + largeur + 0.4, y + 0.8)
+        if (
+            boite[0] < x_zone + 3.0 or boite[2] > x_zone + largeur_zone - 3.0
+            or boite[1] < y_zone + 3.0 or boite[3] > y_zone + hauteur_zone - 3.0
+        ):
+            continue
+        if any(not (boite[2] < o[0] or o[2] < boite[0] or boite[3] < o[1] or o[3] < boite[1])
+               for o in occupees):
+            continue
+        rectangle = box(*boite)
+        if any(rectangle.intersects(ligne) for ligne in lignes):
+            continue
+        if any(rectangle.intersects(genant) for genant in genants):
+            continue
+        planche.ajouter_texte(
+            x, y, texte, taille=TAILLE_RENVOI, couleur=COULEUR_RENVOI, halo=True
+        )
+        return boite
+    planche.ajouter_texte(
+        *places[0], texte, taille=TAILLE_RENVOI, couleur=COULEUR_RENVOI, halo=True
+    )
+    return None
+
+
+def _planche_de_detail(projet, contrat, code, numero, zone_technique, lectures, calcul,
+                       dossier) -> Sortie:
+    """DP 2 bis, ter… : la zone technique à sa plus grande échelle de détail (D7).
+
+    Cadrée sur les ouvrages de la zone et le bout de leurs cotes, au 1:200, au
+    1:500 ou au 1:1 000. Elle porte les cotes de la zone, et seulement elles ;
+    le fond est celui de la DP 2, lu une fois.
+    """
+    etendue = _etendue_du_detail(zone_technique, calcul)
+    x0, y0, x1, y1 = etendue.bounds
+    denominateur = _echelle_du_detail(zone_technique, calcul)
+    planche = nouvelle_planche(projet, code, numero=numero)
+    planche.definir_echelle(denominateur)
+    planche.centrer_sur(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+    genes, messages, details = _composer(
+        planche, projet, contrat, lectures, list(zone_technique.cotes), calcul,
+        detail=True,
+    )
+    messages.extend(gene.message for gene in genes)
+    suffixe = code.split()[-1]
+    chemin = planche.rendre_pdf(
+        Path(dossier) / f"DP_2_{suffixe}_detail_zone_technique.pdf"
+    )
+    return Sortie(
+        numero=code,
+        titre=piece(code).titre,
+        chemin=chemin,
+        echelle=denominateur,
+        planche=planche,
+        details={**details, "avertissements": [f"{code} — {m}" for m in messages]},
+    )
 
 
 #: Ce qui ne répond pas n'arrête pas la DP 2 (lot 10, D11) : c'est la règle de
@@ -614,6 +937,17 @@ def _boite_de_repere(x_mm: float, y_mm: float, direction: tuple) -> tuple:
     )
 
 
+def _ligne_de_coupe(contrat: Contrat):
+    """La ligne de coupe du contrat, ou `None` s'il n'en porte pas."""
+    couche = contrat.couches.get("ligne_coupe")
+    if couche is None or couche.empty:
+        return None
+    ligne = couche.geometry.iloc[0]
+    if ligne is None or ligne.is_empty:
+        return None
+    return ligne
+
+
 def _tracer_ligne_coupe(planche: Planche, contrat: Contrat, occupees: list | None = None):
     """Ligne de coupe en trait d'axe, repères A et A' aux extrémités.
 
@@ -624,11 +958,8 @@ def _tracer_ligne_coupe(planche: Planche, contrat: Contrat, occupees: list | Non
     `occupees`, s'il est donné, reçoit la boîte des deux repères : aucune
     valeur de cote ne s'y pose (lot 10, D8).
     """
-    couche = contrat.couches.get("ligne_coupe")
-    if couche is None or couche.empty:
-        return None
-    ligne = couche.geometry.iloc[0]
-    if ligne is None or ligne.is_empty:
+    ligne = _ligne_de_coupe(contrat)
+    if ligne is None:
         return None
 
     planche.ajouter_geometrie(ligne, TRAIT_AXE)

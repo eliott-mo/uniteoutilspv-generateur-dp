@@ -43,6 +43,10 @@ class Piece:
         return self.intitule.upper()
 
 
+#: Les planches de détail de la zone technique du plan de masse, dans l'ordre :
+#: DP 2 bis, ter… (lot 10, D7). Une par zone que la DP 2 lit mal.
+SUFFIXES_DETAIL_PLAN_DE_MASSE = ("bis", "ter", "quater", "quinquies", "sexies")
+
 #: Ordre et intitulés du dossier. Les libellés reprennent ceux du sommaire des
 #: dossiers HOCH (relevés sur le dossier Les Islettes du 25/04/2024) : les
 #: services instructeurs sont habitués à cette formulation, et la reprendre évite
@@ -67,6 +71,20 @@ PIECES = (
         facultative=True,
     ),
     Piece("DP 2", "Plan de masse", produite=True),
+    # Planches annexes du lot 10, produites **seulement** quand une zone
+    # technique se lit mal sur le plan de masse : une cote de moins de 3 mm,
+    # une valeur sans place nette, une ligne sous la légende (brief du lot 10,
+    # D7). La zone y passe à sa plus grande échelle de détail, une planche par
+    # zone, et un cadre la repère sur la DP 2.
+    *(
+        Piece(
+            f"DP 2 {suffixe}",
+            "Plan de masse — détail de la zone technique",
+            produite=True,
+            facultative=True,
+        )
+        for suffixe in SUFFIXES_DETAIL_PLAN_DE_MASSE
+    ),
     Piece("DP 3", "Coupe des tables photovoltaïques et du terrain", produite=True),
     Piece("DP 4-1", "Poste de livraison/transformation", produite=True),
     Piece("DP 4-2", "Citerne, portail et clôture", produite=True),

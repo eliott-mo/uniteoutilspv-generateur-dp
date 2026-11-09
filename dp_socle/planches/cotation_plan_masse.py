@@ -35,6 +35,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
 
+from ..echelle import metres_vers_mm
 from ..planche import nombre_fr
 from .dp1_3_cadastre import PART_MIN_ASSIETTE
 from .dp4_ouvrages import CITERNES, CONTENEURS, POSTES
@@ -948,6 +949,85 @@ def cotes_vers_les_tables(ouvrages, tables, rapport: list) -> list:
             ouvrages=(rang,),
         ))
     return cotes
+
+
+# ---------------------------------------------------------------------------
+# D7 — les zones techniques, et ce qui les envoie sur une planche de détail
+# ---------------------------------------------------------------------------
+
+#: Une cote plus courte que cela sur la DP 2 envoie sa zone sur une planche de
+#: détail (04/11/2026 ; 10 mm dans le brief du 03/11/2026).
+SEUIL_LISIBLE_MM = 3.0
+
+
+@dataclass(frozen=True)
+class ZoneTechnique:
+    """Des ouvrages que des cotes C3 relient, et toutes leurs cotes (D7).
+
+    `ouvrages` : leurs rangs dans la liste des ouvrages permanents. `cotes` :
+    leurs cotes C3, entre eux et à la limite, et les cotes C7 et C8 qui
+    partent d'eux, dans l'ordre où elles ont été calculées.
+    """
+
+    ouvrages: tuple
+    cotes: tuple
+
+
+def zones_techniques(cotes) -> list:
+    """Les zones des cotes d'ouvrages, dans l'ordre de leur premier ouvrage.
+
+    Une zone est un ensemble d'ouvrages que des cotes C3 relient ; leurs cotes
+    C7 et C8 la suivent (D7, 04/11/2026). Une cote qui ne part d'aucun ouvrage
+    — C1, C2, C4, C5, C6 — n'est d'aucune zone : elle reste sur la DP 2. Un
+    ouvrage sans cote ne fait pas de zone : il n'y a rien à y lire.
+    """
+    parent = {}
+
+    def racine(k):
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    for cote in cotes:
+        for k in cote.ouvrages:
+            parent.setdefault(k, k)
+        if len(cote.ouvrages) == 2:
+            parent[racine(cote.ouvrages[0])] = racine(cote.ouvrages[1])
+    membres, propres = {}, {}
+    for k in parent:
+        membres.setdefault(racine(k), []).append(k)
+    for cote in cotes:
+        if cote.ouvrages:
+            propres.setdefault(racine(cote.ouvrages[0]), []).append(cote)
+    zones = [
+        ZoneTechnique(ouvrages=tuple(sorted(rangs)), cotes=tuple(propres.get(r, ())))
+        for r, rangs in membres.items()
+    ]
+    return sorted(zones, key=lambda zone: zone.ouvrages[0])
+
+
+def raisons_du_detail(zone, denominateur: int, genes) -> list:
+    """Pourquoi la zone part sur une planche de détail, ou rien si la DP 2 la lit (D7).
+
+    - une de ses cotes fait moins de 3 mm de papier à l'échelle de la DP 2 ;
+    - une de ses valeurs n'a pas de place nette, ou une de ses lignes passe sous
+      la légende : ce que la pose rend en gêne (`pose_des_cotes.Gene`). Ces
+      deux-là ne se voient qu'en dessinant. Une valeur posée sur les tables, ou
+      en travers d'un cadre de détail, n'en est pas une : elle se lit.
+    """
+    raisons = []
+    courte = min(zone.cotes, key=lambda cote: cote.longueur_m)
+    longueur = metres_vers_mm(courte.longueur_m, denominateur)
+    if longueur < SEUIL_LISIBLE_MM:
+        raisons.append(
+            f"« {courte.texte} » ne fait que {nombre_fr(longueur, 1)} mm sur la DP 2, "
+            f"sous les {nombre_fr(SEUIL_LISIBLE_MM, 0)} mm lisibles"
+        )
+    for gene in genes:
+        if any(gene.cote is cote for cote in zone.cotes):
+            raisons.append(f"« {gene.texte} » : {gene.raison}")
+    return raisons
 
 
 # ---------------------------------------------------------------------------

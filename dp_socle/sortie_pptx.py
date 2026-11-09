@@ -406,6 +406,9 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
     # nombre de parcelles d'assiette vient du WFS. Elle s'insère alors derrière
     # lui, et `codes_produits` renumérote ce qui suit.
     details_cadastre = {}
+    # Les planches que la composition d'une autre a déjà produites : celles de
+    # détail de la zone technique, qui naissent des essais de la DP 2 (lot 10).
+    deja_produites = {}
     index = 0
     # Combien de planches de ce code ont déjà été rendues : DP 6 en a plusieurs,
     # et chacune a son repère — « Vue A », « Vue B » — et son cadrage.
@@ -423,7 +426,7 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
             groupe = _groupe_de_la_piece(
                 projet, code, numero, contrat, emprise, emprise_cloturee,
                 dossier, avertissements, dpi, fond_ign, details_cadastre,
-                rang=rangs[code],
+                rang=rangs[code], deja_produites=deja_produites,
             )
         except ErreurDP as exc:
             avertissements.append(f"{code} n'est pas produite : {exc}")
@@ -434,12 +437,22 @@ def _composer_les_planches(projet, contrat, emprise, dossier, avertissements, dp
             if groupe.details.get("tableau_reporte"):
                 codes.insert(index, NUMERO_TABLEAU)
                 produits = codes_produits(codes)
+        if code == "DP 2":
+            # Les zones techniques que la DP 2 lit mal partent sur leurs
+            # planches de détail, produites avec elle (lot 10, D7). Elles
+            # s'insèrent derrière elle, et `codes_produits` renumérote la suite.
+            details = groupe.details.get("planches_de_detail", [])
+            for decalage, detail in enumerate(details):
+                codes.insert(index + decalage, detail.numero)
+                deja_produites[detail.numero] = detail
+            if details:
+                produits = codes_produits(codes)
     return groupes
 
 
 def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee,
                         dossier, avertissements, dpi, fond_ign=True,
-                        details_cadastre=None, rang: int = 1):
+                        details_cadastre=None, rang: int = 1, deja_produites=None):
     """Les planches d'une pièce : une seule, ou plusieurs alternatives."""
     if code in PHOTO_PAR_CODE:
         emplacements, vues, alternatives, marge = PHOTO_PAR_CODE[code]
@@ -453,7 +466,8 @@ def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee
         return Groupe(code, numero, piece(code).titre, planches=planches)
 
     sortie = _planche_cartographique(
-        projet, code, numero, contrat, emprise, dossier, dpi, details_cadastre
+        projet, code, numero, contrat, emprise, dossier, dpi, details_cadastre,
+        deja_produites,
     )
     avertissements.extend(sortie.details.get("avertissements", []) if sortie.details else [])
     return Groupe(
@@ -464,7 +478,7 @@ def _groupe_de_la_piece(projet, code, numero, contrat, emprise, emprise_cloturee
 
 
 def _planche_cartographique(projet, code, numero, contrat, emprise, dossier, dpi,
-                            details_cadastre=None):
+                            details_cadastre=None, deja_produites=None):
     """Une planche que les lots 1 à 4 dessinent déjà, produite telle quelle.
 
     Le module de la pièce écrit toujours un PDF ; celui-ci part dans le dossier de
@@ -475,7 +489,13 @@ def _planche_cartographique(projet, code, numero, contrat, emprise, dossier, dpi
 
     DP 1-1, DP 1-2 et DP 1-3 n'ont pas de `numero` à recevoir : elles ouvrent
     toujours le dossier, aux pages 2, 3 et 4, et leur module le sait.
+
+    Une planche que la composition d'une autre a déjà produite — une planche
+    de détail de la zone technique, née des essais de la DP 2 — est rendue
+    telle quelle : la refaire, ce serait refaire les essais.
     """
+    if deja_produites and code in deja_produites:
+        return deja_produites[code]
     if code == "DP 1-1":
         return dp1_1_situation.generer(projet, emprise, dossier, dpi=dpi)
     if code == "DP 1-2":

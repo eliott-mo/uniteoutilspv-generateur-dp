@@ -64,6 +64,20 @@ def _terrain(ouest=LIMITE_OUEST, sud=LIMITE_SUD, est=LIMITE_EST, nord=LIMITE_NOR
     return box(ouest, sud, est, nord)
 
 
+def _site_sans_ouvrages():
+    """Le site synthétique sans son poste, sa plateforme ni sa citerne.
+
+    Ce sont les cotes de C1 qu'on éprouve. Au sud, les cotes des ouvrages à la
+    limite (C3) prennent la place au-delà d'elle, et la valeur de la cote des
+    tables se pose alors sur sa ligne, comme la règle le permet (D8) : le côté
+    sud n'éprouverait plus la préférence pour l'au-delà de la limite.
+    """
+    return [
+        e for e in synthese.entites()
+        if e.categorie not in ("pdl_ptr", "plateforme", "bache_incendie")
+    ]
+
+
 @pytest.fixture
 def dp2(tmp_path, monkeypatch):
     """La DP 2 du site synthétique, sur un parcellaire simulé : le terrain seul.
@@ -244,7 +258,8 @@ def test_la_cote_tables_limite_se_mesure_dans_le_pdf(dp2, attendue):
     De la table la plus proche du côté jusqu'à la limite du terrain, à travers
     la clôture : 30 m à l'ouest (20 + 10), 28 m au sud (20 + 8), 32 m à l'est
     (20 + 12). La valeur se lit dans l'axe de sa ligne, au-delà de la limite,
-    hors de la centrale (D8, 08/11/2026).
+    hors de la centrale (D8, 08/11/2026). Le site est pris sans ses ouvrages
+    (`_site_sans_ouvrages`).
 
     Le côté sud est celui qui éprouve cette dernière règle : sa ligne est
     verticale, et la valeur, horizontale, y tiendrait entre les deux flèches
@@ -252,7 +267,7 @@ def test_la_cote_tables_limite_se_mesure_dans_le_pdf(dp2, attendue):
     écarte. À l'ouest et à l'est, la ligne, horizontale et longue de 30 à
     32 mm, ne loge pas sa valeur : elle irait au-delà de toute façon.
     """
-    sortie, vers_la_page = dp2()
+    sortie, vers_la_page = dp2(entites=_site_sans_ouvrages())
 
     pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
     assert pointes is not None, (
@@ -323,7 +338,7 @@ def test_la_cote_cloture_limite_se_mesure_dans_le_pdf(dp2, attendue, des_tables)
     0,5 mm pour un écart de 1 m, et l'on ne savait plus quelle valeur allait où
     (relecture du 08/11/2026).
     """
-    sortie, vers_la_page = dp2()
+    sortie, vers_la_page = dp2(entites=_site_sans_ouvrages())
 
     pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
     assert pointes is not None, (
@@ -359,7 +374,7 @@ def test_la_cloture_sur_la_limite_n_a_pas_de_seconde_cote(dp2):
     Le terrain épouse ici la clôture à l'ouest : la cote des tables y vaut 20 m,
     et la seule cote clôture → limite de la planche est celle des autres côtés.
     """
-    sortie, vers_la_page = dp2(terrain=_terrain(ouest=X0))
+    sortie, vers_la_page = dp2(entites=_site_sans_ouvrages(), terrain=_terrain(ouest=X0))
     sur_la_limite = CoteAttendue(
         "ouest", TABLES_OUEST, X0, (TABLES_SUD, TABLES_NORD), True, LIBELLE_TABLES
     )
@@ -620,6 +635,11 @@ def test_les_cotes_vers_la_voie_publique_se_mesurent_dans_le_pdf(dp2):
     des 30 m de C8. Chaque cote est perpendiculaire à l'axe, ses flèches le
     touchent, et l'axe se dessine sur 25 m de part et d'autre de son pied
     (seconde relecture du 08/11/2026).
+
+    C2 ne part d'aucun ouvrage : elle est sur la DP 2. C8 suit la zone du
+    poste (D7), sur la DP 2 ou sur sa planche de détail : entre la clôture et
+    la route, la place manque à ses valeurs, et c'est la place des valeurs,
+    donc les métriques de la police, qui en décide.
     """
     from .mesure_pdf import longueur, segments
 
@@ -630,12 +650,14 @@ def test_les_cotes_vers_la_voie_publique_se_mesurent_dans_le_pdf(dp2):
         ("C8", Y0 + 8.0, (X0 + 170.0, X0 + 182.0), "23,0 m (axe de la D18)"),
     ):
         attendue = CoteAttendue(nom, depart, Y0 - 15.0, plage, False, "")
-        pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
+        porteuse, pointes = _planche_qui_porte(sortie, attendue)
         assert pointes is not None, f"{nom} : pas de cote jusqu'à l'axe de la D18"
+        if nom == "C2":
+            assert porteuse is sortie, "C2 n'est d'aucune zone : elle est sur la DP 2"
         mesure_mm = math.dist(*pointes) * MM_PAR_PT
-        attendu_mm = abs(depart - (Y0 - 15.0)) * 1000.0 / sortie.echelle
+        attendu_mm = abs(depart - (Y0 - 15.0)) * 1000.0 / porteuse.echelle
         assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
-        assert _texte_de(sortie.chemin, texte), f"« {texte} » n'est pas écrit"
+        assert _texte_de(porteuse.chemin, texte), f"« {texte} » n'est pas écrit"
 
     y_axe = vers_la_page(X0, Y0 - 15.0)[1]
     axes_mm = [
@@ -693,3 +715,235 @@ def test_un_parcellaire_qui_ne_repond_pas_autour_des_constructions_n_arrete_pas_
         m.startswith("Cotes vers la voie publique") and "parcellaire" in m
         for m in sortie.details["avertissements"]
     ), sortie.details["avertissements"]
+
+
+# ---------------------------------------------------------------------------
+# C3 et C7 — les ouvrages permanents : entre eux, à la limite, vers les tables
+# ---------------------------------------------------------------------------
+
+
+def _vers_la_page_de(sortie):
+    """Le passage du Lambert 93 à la page du PDF d'une planche produite."""
+    transformation = sortie.planche.transformation
+    _, hauteur_pt = format_page(sortie.chemin)
+
+    def vers_la_page(x, y):
+        x_mm, y_mm = transformation.point(x, y)
+        return (x_mm / MM_PAR_PT, hauteur_pt - y_mm / MM_PAR_PT)
+
+    return vers_la_page
+
+
+def _planche_qui_porte(sortie, attendue):
+    """La planche qui porte la cote attendue, et ses deux pointes ; ou (None, None).
+
+    La DP 2 d'abord, puis ses planches de détail : une cote d'ouvrage suit sa
+    zone (D7), et une zone part quand ses valeurs n'ont pas de place nette.
+    Cette place dépend des métriques de la police, que Windows et Linux ne
+    mesurent pas de la même façon : un test ne doit pas en dépendre.
+    """
+    for planche in [sortie, *sortie.details["planches_de_detail"]]:
+        pointes = _pointes_aux_bouts(planche.chemin, attendue, _vers_la_page_de(planche))
+        if pointes is not None:
+            return planche, pointes
+    return None, None
+
+
+#: La citerne incendie du site (11,7 x 9,3 m) et son poste (12 x 3 m), au sud.
+COTES_D_OUVRAGES = [
+    (CoteAttendue("citerne – poste", X0 + 151.7, X0 + 170.0, (Y0 + 8.0, Y0 + 11.0), True, ""),
+     "18,3 m"),
+    (CoteAttendue("citerne – limite", Y0 + 4.0, LIMITE_SUD, (X0 + 140.0, X0 + 151.7), False, ""),
+     "12,0 m (limite parcellaire)"),
+    (CoteAttendue("poste – limite", Y0 + 8.0, LIMITE_SUD, (X0 + 170.0, X0 + 182.0), False, ""),
+     "16,0 m (limite parcellaire)"),
+    (CoteAttendue("citerne – tables", Y0 + 13.3, TABLES_SUD, (X0 + 140.0, X0 + 151.7), False, ""),
+     "6,7 m (table la plus proche)"),
+]
+
+
+@pytest.mark.parametrize(
+    "attendue, texte", COTES_D_OUVRAGES, ids=lambda c: getattr(c, "nom", "")
+)
+def test_les_cotes_des_ouvrages_se_mesurent_dans_le_pdf(dp2, attendue, texte):
+    """C3 entre la citerne et le poste, et de chacun à la limite ; C7 de la citerne aux tables.
+
+    18,3 m entre les deux ouvrages ; 12 et 16 m jusqu'à la limite sud, 8 m
+    sous la clôture ; 6,7 m de la citerne à la première rangée. Chaque cote se
+    mesure sur la planche qui porte sa zone (D7) : la DP 2, ou sa planche de
+    détail si la zone s'y lit mal.
+    """
+    sortie, _ = dp2()
+
+    porteuse, pointes = _planche_qui_porte(sortie, attendue)
+    assert pointes is not None, f"{attendue.nom} : pas de cote dont les flèches tombent à ses bouts"
+    mesure_mm = math.dist(*pointes) * MM_PAR_PT
+    attendu_mm = attendue.distance_m * 1000.0 / porteuse.echelle
+    assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
+    assert _texte_de(porteuse.chemin, texte), f"« {texte} » n'est pas écrit"
+
+
+# ---------------------------------------------------------------------------
+# D7 — la zone technique part sur sa planche de détail
+# ---------------------------------------------------------------------------
+
+
+def _site_aux_citernes_serrees():
+    """Le site synthétique, et une seconde citerne incendie à 2 m à l'est de la première."""
+    from dp_socle.import_be import EntiteBE
+
+    seconde = box(X0 + 153.7, Y0 + 4.0, X0 + 165.4, Y0 + 13.3)
+    return synthese.entites() + [
+        EntiteBE(categorie="bache_incendie", calque="SYNTHESE", geometrie=seconde, z_reel=False)
+    ]
+
+
+def test_une_zone_dont_une_cote_fait_deux_millimetres_part_sur_sa_planche_de_detail(dp2):
+    """2 m entre deux citernes : 2 mm au 1:1 000, sous les 3 mm lisibles (D7).
+
+    Leur zone réunit les deux citernes et le poste, que des cotes C3 relient.
+    Elle part sur la DP 2 bis, au 1:200 : la plus grande échelle où la zone et
+    le bout de ses cotes tiennent sur la planche. La cote de 2 m s'y mesure à
+    10 mm. Sur la DP 2, un cadre entoure la zone et son renvoi la nomme ; ses
+    cotes n'y sont plus.
+    """
+    sortie, _ = dp2(entites=_site_aux_citernes_serrees())
+
+    details = sortie.details["planches_de_detail"]
+    assert [detail.numero for detail in details] == ["DP 2 bis"]
+    detail = details[0]
+    assert detail.echelle == 200
+
+    ecrits = [t for *_, t in textes(sortie.chemin)]
+    assert "Détail de la zone technique : DP 2 bis" in ecrits
+    assert not any("(table la plus proche)" in t or t == "2,0 m" for t in ecrits), ecrits
+    assert any(
+        "sur la planche DP 2 bis" in m and "2,0 mm" in m
+        for m in sortie.details["avertissements"]
+    ), sortie.details["avertissements"]
+
+    serree = CoteAttendue("citernes", X0 + 151.7, X0 + 153.7, (Y0 + 4.0, Y0 + 13.3), True, "")
+    pointes = _pointes_aux_bouts(detail.chemin, serree, _vers_la_page_de(detail))
+    assert pointes is not None, "la cote de 2 m n'est pas sur la planche de détail"
+    mesure_mm = math.dist(*pointes) * MM_PAR_PT
+    assert abs(mesure_mm - 10.0) / 10.0 < ECART_ADMIS
+    assert _texte_de(detail.chemin, "2,0 m")
+
+
+def test_la_planche_de_detail_suit_la_dp2_dans_le_dossier(dp2, monkeypatch, tmp_path):
+    """Dans le dossier, la DP 2 bis suit la DP 2, et ce qui suit est renuméroté.
+
+    `_planches_lot4` reçoit la DP 2 au rang 5 : la DP 2 bis prend le 6, la
+    DP 3 le 7. Le cartouche de chaque planche annonce son rang.
+    """
+    from dp_socle import assemblage
+    from dp_socle.planches import dp4_ouvrages
+
+    monkeypatch.setattr(dp4_ouvrages, "telecharger_parcelles", lambda *a, **k: [])
+    dp2(entites=_site_aux_citernes_serrees())
+    projet, dossier = dp2.dernier["projet"], dp2.dernier["dossier"]
+    sortie_dossier = tmp_path / "dossier"
+    sortie_dossier.mkdir()
+
+    sorties = assemblage._planches_lot4(
+        projet, charger_contrat(dossier), charger_emprise(projet.chemin_emprise),
+        sortie_dossier, [], rang_depart=5,
+    )
+
+    assert [s.numero for s in sorties[:3]] == ["DP 2", "DP 2 bis", "DP 3"]
+    assert [s.planche.numero for s in sorties[:3]] == ["5", "6", "7"]
+
+
+def test_la_sortie_powerpoint_insere_les_planches_de_detail_apres_la_dp2(dp2, monkeypatch):
+    """Comme la DP 1-3 bis : produites avec la DP 2, insérées à sa suite, la suite renumérotée.
+
+    La composition de chaque pièce est simulée : ce qu'on vérifie ici, c'est
+    l'ordre et le numéro des pièces, et que la planche de détail n'est pas
+    refaite — la refaire, ce serait refaire les essais de la DP 2.
+    """
+    from dp_socle import sortie_pptx
+    from dp_socle.planches.commun import Sortie
+
+    dp2()
+    projet, dossier = dp2.dernier["projet"], dp2.dernier["dossier"]
+    detail = Sortie(numero="DP 2 bis", titre="détail", chemin=None, details={})
+    vues = []
+
+    def groupe(projet, code, numero, *args, deja_produites=None, **kwargs):
+        vues.append((code, dict(deja_produites or {})))
+        details = {"planches_de_detail": [detail]} if code == "DP 2" else {}
+        return sortie_pptx.Groupe(code, numero, code, planches=[], details=details)
+
+    monkeypatch.setattr(sortie_pptx, "_groupe_de_la_piece", groupe)
+    groupes = sortie_pptx._composer_les_planches(
+        projet, charger_contrat(dossier), charger_emprise(projet.chemin_emprise),
+        dossier, [], 72, fond_ign=False,
+    )
+
+    numeros = {g.code: g.numero for g in groupes}
+    codes = [g.code for g in groupes]
+    assert codes[codes.index("DP 2"):codes.index("DP 2") + 3] == ["DP 2", "DP 2 bis", "DP 3"]
+    assert (numeros["DP 2"], numeros["DP 2 bis"], numeros["DP 3"]) == (5, 6, 7)
+    assert dict(vues)["DP 2 bis"] == {"DP 2 bis": detail}
+    assert sortie_pptx._planche_cartographique(
+        projet, "DP 2 bis", 6, None, None, dossier, 72, deja_produites={"DP 2 bis": detail}
+    ) is detail
+
+
+# ---------------------------------------------------------------------------
+# D8 — le prolongement d'une ligne jusqu'à sa valeur fait partie de la ligne
+# ---------------------------------------------------------------------------
+
+
+def test_une_valeur_ne_se_pose_pas_sur_le_prolongement_d_une_autre_cote(tmp_path):
+    """Une ligne prolongée jusqu'à sa valeur est encore sa ligne : aucune autre valeur ne la coupe (D8).
+
+    Sur une planche nue au 1:1 000, la cote A, de 3 mm, porte ses flèches
+    dehors ; à sa gauche tout est pris, et à droite la cote B et un trait
+    interdit écartent sa valeur jusqu'à 12 mm au-delà de son bout. La cote B,
+    longue et verticale, croise ce prolongement : posée au milieu de sa ligne,
+    sa valeur, réduite à une lettre, ne couperait que lui. Elle doit se poser
+    ailleurs sur sa ligne. Les valeurs posées avant elle voyaient la ligne de
+    l'autre, pas le prolongement qu'elle avait pris.
+    """
+    from shapely.geometry import LineString as Ligne
+
+    from dp_socle.planche import Planche
+    from dp_socle.planches.cotation_plan_masse import CoteAPoser
+    from dp_socle.planches.pose_des_cotes import poser_les_cotes
+
+    planche = Planche(
+        titre="TÉMOIN", numero="T", projet="Contrôle", date="09/11/2026",
+        echelle=1000, avec_cartouche=False,
+    )
+    planche.centrer_sur((1000.0, 1000.0))
+    px, py = planche.transformation.point(1000.0, 1000.0)
+
+    def terrain(x_mm, y_mm):
+        """Le point Lambert 93 qui tombe en (x_mm, y_mm) sur le papier, au 1:1 000."""
+        return (1000.0 + (x_mm - px), 1000.0 - (y_mm - py))
+
+    a = CoteAPoser(famille="T", depart=terrain(px, py), arrivee=terrain(px + 3.0, py),
+                   texte="3,0 m", valeur_m=3.0)
+    b = CoteAPoser(famille="T", depart=terrain(px + 9.6, py - 30.0),
+                   arrivee=terrain(px + 9.6, py + 30.0), texte="X", valeur_m=60.0)
+    trait = Ligne([terrain(px + 13.5, py - 2.5), terrain(px + 13.5, py + 2.5)])
+    occupees = [(px - 30.0, py - 1.5, px - 1.0, py + 1.5)]
+
+    genes = poser_les_cotes(planche, [a, b], occupees, traits=[trait])
+    assert genes == []
+    chemin = planche.rendre_pdf(tmp_path / "prolongement.pdf")
+    _, hauteur_pt = format_page(chemin)
+
+    def sur_le_papier(x_pt, y_pt):
+        return (x_pt * MM_PAR_PT, (hauteur_pt - y_pt) * MM_PAR_PT)
+
+    valeurs = {t: sur_le_papier(x, y) for x, y, _, t in textes(chemin)}
+    # La valeur de A est bien loin sur son prolongement, au-delà de B…
+    assert valeurs["3,0 m"][0] > px + 12.0, valeurs
+    # … et celle de B ne coupe pas ce prolongement, qui court à y = py.
+    _, y_base_b = valeurs["X"]
+    centre_b = y_base_b - 0.35 * TAILLE_COTE
+    assert abs(centre_b - py) > 2.0, (
+        f"« X » posée à {centre_b - py:+.1f} mm du prolongement de la cote A"
+    )
