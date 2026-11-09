@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import box
+from shapely.geometry import LineString, box
 
 from dp_socle.contrat import charger_contrat
 from dp_socle.geometrie import charger_emprise
@@ -78,14 +78,25 @@ def dp2(tmp_path, monkeypatch):
     paramètres du site synthétique, ou ceux donnés. `produire.dernier` garde le
     projet et le dossier du contrat, pour produire une autre planche du même
     contrat.
+
+    La BD TOPO est simulée, comme le brief le veut pour la suite courante :
+    `troncons` et `batiments` sont les entités qu'elle rend, ou l'erreur
+    qu'elle lève ; vides par défaut. `cadastre_injoignable` fait échouer toute
+    lecture du parcellaire après la première, celle du terrain : la seconde
+    est celle des parcelles autour des constructions (C2, C8).
     """
+    from dp_socle.erreurs import ErreurService
     from dp_socle.ign import Parcelle
     from dp_socle.import_be import ecrire_geopackage, ecrire_parametres
     from dp_socle.planches import dp2_plan_masse, dp3_coupes
 
-    courant = {"terrain": _terrain()}
+    courant = {"terrain": _terrain(), "troncons": [], "batiments": [],
+               "cadastre_injoignable": False, "lectures_du_parcellaire": 0}
 
     def parcelles(bbox, *args, **kwargs):
+        courant["lectures_du_parcellaire"] += 1
+        if courant["cadastre_injoignable"] and courant["lectures_du_parcellaire"] > 1:
+            raise ErreurService("Service WFS (cadastre) injoignable : refus de connexion.")
         terrain = courant["terrain"]
         return [
             Parcelle(
@@ -94,13 +105,26 @@ def dp2(tmp_path, monkeypatch):
             )
         ]
 
+    def bd_topo(cle):
+        def lire(bbox, *args, **kwargs):
+            reponse = courant[cle]
+            if isinstance(reponse, Exception):
+                raise reponse
+            return list(reponse)
+        return lire
+
     monkeypatch.setattr(dp2_plan_masse, "telecharger_parcelles", parcelles)
     monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments", lambda *a, **k: [])
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_troncons_de_route", bd_topo("troncons"))
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments_bd_topo", bd_topo("batiments"))
     # La DP 3, qu'on produit du même contrat pour comparer l'inter-rangée, lit
     # aussi le parcellaire, pour le bandeau sous la coupe.
     monkeypatch.setattr(dp3_coupes, "telecharger_parcelles", parcelles)
 
-    def produire(entites=None, terrain=None, parametres=None):
+    def produire(entites=None, terrain=None, parametres=None, troncons=(), batiments=(),
+                 cadastre_injoignable=False):
+        courant.update(troncons=troncons, batiments=batiments,
+                       cadastre_injoignable=cadastre_injoignable, lectures_du_parcellaire=0)
         terrain = courant["terrain"] = terrain or _terrain()
         dossier = tmp_path / "sortie" / "Essai"
         if entites is None and parametres is None:
@@ -518,3 +542,154 @@ def test_une_cote_hors_du_cadre_s_arrete_au_bord_sans_fleche_et_le_dit(dp2):
     assert any(min(s[0][0], s[1][0]) <= bord + TOLERANCE_PT for s in horizontaux), (
         "la ligne ne va pas jusqu'au bord du dessin"
     )
+
+
+# ---------------------------------------------------------------------------
+# C4 — clôture → habitation la plus proche, selon la BD TOPO
+# ---------------------------------------------------------------------------
+
+
+def _bati(geometrie, usage):
+    """Un bâtiment de la BD TOPO, tel que `ign.telecharger_batiments_bd_topo` le rend."""
+    from dp_socle.ign import EntiteBDTOPO
+
+    return EntiteBDTOPO(geometrie, {"usage_1": usage})
+
+
+#: Au nord de la clôture (Y0 + 120) : une habitation à 50 m, et plus près
+#: qu'elle, un hangar agricole à 15 m et un bâtiment d'usage indifférencié à 30 m.
+HABITATION = box(X0 + 90.0, Y0 + 170.0, X0 + 110.0, Y0 + 180.0)
+HANGAR = box(X0 + 60.0, Y0 + 135.0, X0 + 80.0, Y0 + 145.0)
+INDIFFERENCIE = box(X0 + 120.0, Y0 + 150.0, X0 + 130.0, Y0 + 160.0)
+
+
+def test_la_cote_de_l_habitation_se_mesure_dans_le_pdf(dp2):
+    """De la clôture à l'habitation la plus proche selon la BD TOPO : 50 m au nord.
+
+    Le cadastre ne dit pas l'usage : sur Sarnois, son bâtiment le plus proche
+    est un hangar agricole (D5). Ici, le hangar est à 15 m et n'a pas de cote ;
+    le bâtiment d'usage indifférencié, à 30 m, est dit au rapport avec sa
+    distance, et ne remplace pas l'habitation sur le plan.
+    """
+    sortie, vers_la_page = dp2(batiments=[
+        _bati(HANGAR, "Agricole"), _bati(INDIFFERENCIE, "Indifférencié"),
+        _bati(HABITATION, "Résidentiel"),
+    ])
+    attendue = CoteAttendue(
+        "habitation", CLOTURE_NORD, Y0 + 170.0, (X0 + 90.0, X0 + 110.0), False, ""
+    )
+    pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
+    assert pointes is not None, "pas de cote de la clôture à l'habitation"
+    mesure_mm = math.dist(*pointes) * MM_PAR_PT
+    attendu_mm = 50.0 * 1000.0 / sortie.echelle
+    assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
+    assert _texte_de(sortie.chemin, "50 m (habitation la plus proche)")
+
+    vers_le_hangar = CoteAttendue(
+        "hangar", CLOTURE_NORD, Y0 + 135.0, (X0 + 60.0, X0 + 80.0), False, ""
+    )
+    assert _pointes_aux_bouts(sortie.chemin, vers_le_hangar, vers_la_page) is None
+    assert any(
+        "1 bâtiment(s) d'usage indifférencié plus proche(s), le premier à 30 m" in m
+        for m in sortie.details["avertissements"]
+    ), sortie.details["avertissements"]
+
+
+# ---------------------------------------------------------------------------
+# C2 et C8 — vers l'axe de la voie publique la plus proche
+# ---------------------------------------------------------------------------
+
+
+def _voie(geometrie, **proprietes):
+    """Un tronçon de la BD TOPO, tel que `ign.telecharger_troncons_de_route` le rend."""
+    from dp_socle.ign import EntiteBDTOPO
+
+    return EntiteBDTOPO(geometrie, {"nature": "Route à 1 chaussée", **proprietes})
+
+
+#: Une route départementale à 15 m au sud de la clôture, hors du terrain
+#: d'assiette, dont la limite sud est à 8 m : elle n'est sur aucune parcelle.
+D18 = LineString([(X0 - 200.0, Y0 - 15.0), (X0 + 400.0, Y0 - 15.0)])
+
+
+def test_les_cotes_vers_la_voie_publique_se_mesurent_dans_le_pdf(dp2):
+    """C2 depuis la construction la plus proche, C8 depuis le poste, à l'axe de la D18.
+
+    La citerne incendie est la construction la plus proche de la route : 19 m
+    de son bord sud à l'axe (C2). Le poste de livraison en est à 23 m, en deçà
+    des 30 m de C8. Chaque cote est perpendiculaire à l'axe, ses flèches le
+    touchent, et l'axe se dessine sur 25 m de part et d'autre de son pied
+    (seconde relecture du 08/11/2026).
+    """
+    from .mesure_pdf import longueur, segments
+
+    sortie, vers_la_page = dp2(troncons=[_voie(D18, cpx_numero="D18")])
+
+    for nom, depart, plage, texte in (
+        ("C2", Y0 + 4.0, (X0 + 140.0, X0 + 151.7), "19,0 m (axe de la D18)"),
+        ("C8", Y0 + 8.0, (X0 + 170.0, X0 + 182.0), "23,0 m (axe de la D18)"),
+    ):
+        attendue = CoteAttendue(nom, depart, Y0 - 15.0, plage, False, "")
+        pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
+        assert pointes is not None, f"{nom} : pas de cote jusqu'à l'axe de la D18"
+        mesure_mm = math.dist(*pointes) * MM_PAR_PT
+        attendu_mm = abs(depart - (Y0 - 15.0)) * 1000.0 / sortie.echelle
+        assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
+        assert _texte_de(sortie.chemin, texte), f"« {texte} » n'est pas écrit"
+
+    y_axe = vers_la_page(X0, Y0 - 15.0)[1]
+    axes_mm = [
+        longueur(s) * MM_PAR_PT for s in segments(sortie.chemin)
+        if abs(s[0][1] - y_axe) < TOLERANCE_PT and abs(s[1][1] - y_axe) < TOLERANCE_PT
+    ]
+    attendu_mm = 2 * 25.0 * 1000.0 / sortie.echelle
+    assert any(abs(a - attendu_mm) / attendu_mm < ECART_ADMIS for a in axes_mm), axes_mm
+
+
+# ---------------------------------------------------------------------------
+# D11 — une source injoignable n'arrête pas la DP 2
+# ---------------------------------------------------------------------------
+
+
+def _pannes():
+    from dp_socle.erreurs import ErreurPlafondWFS, ErreurService
+
+    return [
+        ErreurService("Service WFS (BD TOPO) injoignable : refus de connexion."),
+        ErreurPlafondWFS("Service WFS (BD TOPO) : plafond de 5000 entités atteint."),
+    ]
+
+
+@pytest.mark.parametrize("panne", _pannes(), ids=["injoignable", "plafond"])
+def test_une_bd_topo_qui_ne_repond_pas_n_arrete_pas_la_dp2(dp2, panne):
+    """La DP 2 sort sans C2, C4 ni C8, et le rapport le dit en clair (D11).
+
+    C'est la règle de la phase de mise au point (README, « Ce qui deviendra
+    bloquant »). Le plafond de lecture compte comme une panne : une liste
+    tronquée ferait manquer l'habitation ou la voie la plus proche.
+    """
+    sortie, _ = dp2(troncons=panne, batiments=panne)
+
+    ecrits = [t for *_, t in textes(sortie.chemin)]
+    assert not any("habitation" in t or "(axe" in t or "(extrémité" in t for t in ecrits)
+    assert any(LIBELLE_TABLES in t for t in ecrits), "les cotes du contrat ont disparu"
+    messages = sortie.details["avertissements"]
+    assert any(m.startswith("Habitation la plus proche") and "BD TOPO" in m for m in messages), messages
+    assert any(m.startswith("Cotes vers la voie publique") and "BD TOPO" in m for m in messages), messages
+
+
+def test_un_parcellaire_qui_ne_repond_pas_autour_des_constructions_n_arrete_pas_la_dp2(dp2):
+    """Sans lui, rien ne dit quelles voies sont publiques : ni C2 ni C8, et le rapport le dit.
+
+    Le parcellaire du terrain garde son comportement : sans lui, rien ne se
+    dessine. Celui qui entoure les constructions ne sert qu'à C2 et C8, et se
+    traite comme la BD TOPO (D11).
+    """
+    sortie, _ = dp2(troncons=[_voie(D18, cpx_numero="D18")], cadastre_injoignable=True)
+
+    ecrits = [t for *_, t in textes(sortie.chemin)]
+    assert not any("(axe" in t or "(extrémité" in t for t in ecrits)
+    assert any(
+        m.startswith("Cotes vers la voie publique") and "parcellaire" in m
+        for m in sortie.details["avertissements"]
+    ), sortie.details["avertissements"]

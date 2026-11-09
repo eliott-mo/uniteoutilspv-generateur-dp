@@ -160,10 +160,12 @@ class _WfsFeint:
     def __init__(self, nombre: int, entite):
         self.nombre, self.entite = nombre, entite
         self.debuts: list[int] = []
+        self.couches: list[str] = []
 
     def get(self, url, params=None, headers=None, timeout=None):
         debut = int(params["STARTINDEX"])
         self.debuts.append(debut)
+        self.couches.append(params["TYPENAMES"])
         fin = min(debut + int(params["COUNT"]), self.nombre)
         page = [self.entite(rang) for rang in range(debut, fin)]
         return _Reponse(
@@ -280,3 +282,108 @@ def test_au_plafond_la_lecture_leve_plutot_que_de_rendre_une_liste_tronquee(
     assert "5000" in message
     # Le plafond n'est pas relevé en cachette : rien n'est demandé au-delà.
     assert service.debuts == [0, 1000, 2000, 3000, 4000]
+
+
+# ---------------------------------------------------------------------------
+# BD TOPO — les voies et les bâtiments du lot 10 (C2, C4, C8)
+# ---------------------------------------------------------------------------
+
+
+def _troncon(rang: int) -> dict:
+    """Une entité de `BDTOPO_V3:troncon_de_route`, en 3D, comme le service la rend.
+
+    Attributs relevés sur le WFS de la Géoplateforme le 03/11/2026 (brief du
+    lot 10) : seuls ceux que les cotes lisent sont repris.
+    """
+    x, y = _coin(rang)
+    return {
+        "type": "Feature",
+        "id": f"troncon_de_route.{rang}",
+        "geometry": {"type": "LineString", "coordinates": [[x, y, 112.4], [x + 15.0, y, 112.9]]},
+        "geometry_name": "geometrie",
+        "properties": {
+            "nature": "Route à 1 chaussée", "importance": "4", "cpx_numero": "D18",
+            "largeur_de_chaussee": 5.5, "prive": False,
+        },
+    }
+
+
+def _batiment_bd_topo(rang: int) -> dict:
+    """Une entité de `BDTOPO_V3:batiment`, en 3D, comme le service la rend."""
+    x, y = _coin(rang)
+    anneau = [[x, y, 98.0], [x + 10.0, y, 98.0], [x + 10.0, y + 10.0, 98.0], [x, y + 10.0, 98.0], [x, y, 98.0]]
+    return {
+        "type": "Feature",
+        "id": f"batiment.{rang}",
+        "geometry": {"type": "MultiPolygon", "coordinates": [[anneau]]},
+        "geometry_name": "geometrie",
+        "properties": {"usage_1": "Résidentiel", "usage_2": None, "nature": "Indifférenciée",
+                       "nombre_de_logements": 1, "hauteur": 6.2},
+    }
+
+
+@pytest.mark.parametrize(
+    "telecharger, entite, couche",
+    [
+        ("telecharger_troncons_de_route", _troncon, "BDTOPO_V3:troncon_de_route"),
+        ("telecharger_batiments_bd_topo", _batiment_bd_topo, "BDTOPO_V3:batiment"),
+    ],
+    ids=["troncons", "batiments"],
+)
+def test_la_bd_topo_rend_des_geometries_planes_et_leurs_attributs(
+    monkeypatch, telecharger, entite, couche
+):
+    """La couche demandée est la bonne, et chaque entité garde ses attributs.
+
+    Les géométries de la BD TOPO sont en 3D : les cotes se prennent en plan,
+    et une distance mesurée entre un point plan et un point coté en Z ne serait
+    plus une distance en plan.
+    """
+    service = _WfsFeint(3, entite)
+    monkeypatch.setattr(ign, "_session", lambda: service)
+
+    entites = getattr(ign, telecharger)(_BBOX)
+
+    assert set(service.couches) == {couche}
+    assert len(entites) == 3
+    for rang, (geometrie, proprietes) in enumerate(entites):
+        assert not geometrie.has_z
+        assert geometrie.bounds[:2] == _coin(rang)
+        assert proprietes == entite(rang)["properties"]
+
+
+@pytest.mark.parametrize(
+    "telecharger, entite",
+    [
+        ("telecharger_troncons_de_route", _troncon),
+        ("telecharger_batiments_bd_topo", _batiment_bd_topo),
+    ],
+    ids=["troncons", "batiments"],
+)
+def test_la_bd_topo_au_plafond_leve_aussi(monkeypatch, telecharger, entite):
+    """Une liste tronquée ferait manquer l'habitation ou la voie la plus proche (D11)."""
+    service = _WfsFeint(7500, entite)
+    monkeypatch.setattr(ign, "_session", lambda: service)
+    with pytest.raises(ErreurPlafondWFS, match="BD TOPO"):
+        getattr(ign, telecharger)(_BBOX, taille_page=1000, maximum=5000)
+
+
+@pytest.mark.reseau
+def test_la_bd_topo_porte_les_attributs_que_lisent_les_cotes():
+    """Sur la Géoplateforme, autour du site synthétique de Bray-Saint-Aignan.
+
+    Les cotes lisent `nature` et `cpx_numero` sur les voies, `usage_1` sur les
+    bâtiments (D5). Un attribut renommé par l'IGN ferait passer toute voie pour
+    anonyme et tout bâtiment pour non habité, sans erreur : ce test le dirait,
+    le lundi, dans la suite réseau.
+    """
+    from . import contrat_synthetique as synthese
+
+    x0, y0 = synthese.ORIGINE_L93
+    bbox = (x0 - 300.0, y0 - 300.0, x0 + 500.0, y0 + 420.0)
+    troncons = ign.telecharger_troncons_de_route(bbox)
+    assert troncons, "aucune voie BD TOPO autour du site synthétique"
+    assert all("nature" in p and "cpx_numero" in p for _, p in troncons)
+    batiments = ign.telecharger_batiments_bd_topo(bbox)
+    assert batiments, "aucun bâtiment BD TOPO autour du site synthétique"
+    assert all("usage_1" in p for _, p in batiments)

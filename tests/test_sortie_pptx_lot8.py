@@ -117,10 +117,22 @@ def sans_geoplateforme():
         appels["telecharger_batiments"] += 1
         return []
 
+    # La BD TOPO, que la DP 2 lit depuis le lot 10 pour ses cotes vers
+    # l'habitation et vers la voie publique : aucune voie ni aucun bâtiment.
+    def troncons_de_route(*args, **kwargs):
+        appels["telecharger_troncons_de_route"] += 1
+        return []
+
+    def batiments_bd_topo(*args, **kwargs):
+        appels["telecharger_batiments_bd_topo"] += 1
+        return []
+
     doublures = {
         "telecharger_fond": fond,
         "telecharger_parcelles": parcelles,
         "telecharger_batiments": batiments,
+        "telecharger_troncons_de_route": troncons_de_route,
+        "telecharger_batiments_bd_topo": batiments_bd_topo,
     }
     originaux = {nom: getattr(ign, nom) for nom in doublures}
 
@@ -221,6 +233,12 @@ def test_les_doublures_ont_bien_remplace_la_geoplateforme(rapport, sans_geoplate
     """
     assert sans_geoplateforme["telecharger_fond"] >= 2, sans_geoplateforme
     assert sans_geoplateforme["telecharger_parcelles"] >= 1, sans_geoplateforme
+    # Le lot 10 a ajouté la BD TOPO aux lectures de la DP 2. La génération a
+    # lieu dans une fixture de portée module, avant la coupure du réseau, qui
+    # se pose test par test : sans ces deux doublures, elle interrogeait la
+    # vraie Géoplateforme sans que rien ne le dise (relevé le 09/11/2026).
+    assert sans_geoplateforme["telecharger_troncons_de_route"] >= 1, sans_geoplateforme
+    assert sans_geoplateforme["telecharger_batiments_bd_topo"] >= 1, sans_geoplateforme
 
 
 def test_le_fichier_se_nomme_pour_ce_qu_il_est(rapport):

@@ -1146,6 +1146,10 @@ def dp2_sans_geoplateforme(monkeypatch):
 
     monkeypatch.setattr(dp2_plan_masse, "telecharger_parcelles", parcelles)
     monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments", lambda *a, **k: [])
+    # La BD TOPO, que la DP 2 lit depuis le lot 10 pour ses cotes vers
+    # l'habitation et vers la voie publique : aucune voie ni aucun bâtiment.
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_troncons_de_route", lambda *a, **k: [])
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments_bd_topo", lambda *a, **k: [])
     return dp2_plan_masse
 
 

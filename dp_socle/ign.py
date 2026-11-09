@@ -22,6 +22,10 @@ signale. Rien n'est substitué.
                   code_insee, nom_com
     * CADASTRALPARCELS.PARCELLAIRE_EXPRESS:batiment
       attributs : type (« Bâtiment en dur », « Bâtiment léger »), code_insee
+    * BDTOPO_V3:troncon_de_route (lot 10, vérifié le 03/11/2026)
+      attributs lus : nature, cpx_numero
+    * BDTOPO_V3:batiment (lot 10, vérifié le 03/11/2026)
+      attributs lus : usage_1
 """
 
 from __future__ import annotations
@@ -33,12 +37,14 @@ import time
 import warnings
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import NamedTuple
 
 import requests
 from PIL import Image
 from pyproj import Transformer
 from requests.adapters import HTTPAdapter
 from requests.utils import DEFAULT_CA_BUNDLE_PATH
+from shapely import force_2d
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
@@ -298,7 +304,11 @@ def _interroger_wfs(
     maximum: int,
     libelle: str,
 ) -> list:
-    """GetFeature paginé, en EPSG:2154, sur une couche du Parcellaire Express.
+    """GetFeature paginé, en EPSG:2154, sur une couche du WFS de la Géoplateforme.
+
+    Le Parcellaire Express, et la BD TOPO depuis le lot 10 : la même requête
+    sert telle quelle sur `BDTOPO_V3:troncon_de_route` et `BDTOPO_V3:batiment`
+    (vérifié le 03/11/2026, et sur les trois sites d'épreuve le 09/11/2026).
 
     Les pages de `taille_page` se lisent jusqu'à la première incomplète. Une
     page pleine qui mènerait au plafond `maximum` lève `ErreurPlafondWFS`
@@ -327,10 +337,9 @@ def _interroger_wfs(
                 URL_WFS, params=parametres, headers=_ENTETES, timeout=timeout
             )
         except requests.RequestException as exc:
-            raise ErreurService(
-                f"Service WFS ({libelle}) injoignable : {exc}. "
-                "La planche n'est pas produite plutôt que d'être incomplète."
-            ) from exc
+            # Ce qu'il advient de la planche, l'appelant le dit : le parcellaire
+            # du terrain l'arrête, la BD TOPO non (lot 10, D11).
+            raise ErreurService(f"Service WFS ({libelle}) injoignable : {exc}.") from exc
 
         if reponse.status_code != 200:
             raise ErreurService(
@@ -442,6 +451,71 @@ def telecharger_batiments(
         for e in entites
         if e.get("geometry")
     ]
+
+
+# ---------------------------------------------------------------------------
+# BD TOPO — les voies et les bâtiments des cotes du plan de masse (lot 10)
+# ---------------------------------------------------------------------------
+
+#: Les voies, pour les cotes vers la voie publique (C2, C8), et les bâtiments
+#: avec leur usage, pour l'habitation la plus proche (C4). Le cadastre ne dit
+#: pas l'usage d'un bâtiment : sur Sarnois, son bâtiment le plus proche est un
+#: hangar agricole, quand l'habitation est à 166 m (brief du lot 10, D5).
+COUCHE_TRONCONS_DE_ROUTE = "BDTOPO_V3:troncon_de_route"
+COUCHE_BATIMENTS_BD_TOPO = "BDTOPO_V3:batiment"
+
+
+class EntiteBDTOPO(NamedTuple):
+    """Une entité de la BD TOPO : sa géométrie en plan, et ses attributs."""
+
+    geometrie: BaseGeometry
+    proprietes: dict
+
+
+def _entites_bd_topo(couche, bbox, timeout, taille_page, maximum, libelle) -> list:
+    """Les entités d'une couche BD TOPO, ramenées en plan.
+
+    La BD TOPO est en 3D. Les cotes se prennent en plan : une distance entre un
+    point plan et un point coté en Z ne serait plus une distance en plan.
+    """
+    entites = _interroger_wfs(couche, bbox, timeout, taille_page, maximum, libelle)
+    return [
+        EntiteBDTOPO(force_2d(shape(e["geometry"])), dict(e.get("properties") or {}))
+        for e in entites
+        if e.get("geometry")
+    ]
+
+
+def telecharger_troncons_de_route(
+    bbox: tuple[float, float, float, float],
+    timeout: int = 120,
+    taille_page: int = 1000,
+    maximum: int = 5000,
+) -> list[EntiteBDTOPO]:
+    """Les tronçons de route de la BD TOPO qui coupent la bbox.
+
+    Une liste vide est un résultat, un site loin de toute voie : c'est
+    l'appelant qui le dit.
+    """
+    return _entites_bd_topo(
+        COUCHE_TRONCONS_DE_ROUTE, bbox, timeout, taille_page, maximum, "voies, BD TOPO"
+    )
+
+
+def telecharger_batiments_bd_topo(
+    bbox: tuple[float, float, float, float],
+    timeout: int = 120,
+    taille_page: int = 1000,
+    maximum: int = 5000,
+) -> list[EntiteBDTOPO]:
+    """Les bâtiments de la BD TOPO qui coupent la bbox, avec leur usage.
+
+    Une liste vide est un résultat, en secteur agricole : c'est l'appelant qui
+    le dit.
+    """
+    return _entites_bd_topo(
+        COUCHE_BATIMENTS_BD_TOPO, bbox, timeout, taille_page, maximum, "bâtiments, BD TOPO"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,12 @@ from ..dossier import piece
 from ..echelle import echelle_adaptative
 from ..erreurs import ErreurComposition, ErreurDP, ErreurService
 from ..geometrie import Emprise
-from ..ign import telecharger_batiments, telecharger_parcelles
+from ..ign import (
+    telecharger_batiments,
+    telecharger_batiments_bd_topo,
+    telecharger_parcelles,
+    telecharger_troncons_de_route,
+)
 from ..planche import (
     GRIS,
     MOTIF_BATIMENT,
@@ -29,6 +34,7 @@ from ..planche import (
     STYLE_PARCELLE,
     TAILLE_ETIQUETTE,
     Planche,
+    Style,
     nombre_fr,
 )
 from ..projet import Projet
@@ -60,6 +66,10 @@ SOURCE = (
     "Géoplateforme. Ouvrages : plan du bureau d'études."
 )
 TAILLE_SOURCE = 1.9
+
+#: L'axe d'une voie publique jusqu'où une cote est prise (C2, C8) : en gris,
+#: pour ne pas se lire comme la ligne de coupe, qui est noire.
+STYLE_AXE_DE_VOIE = Style(trait="#6b6b6b", epaisseur_mm=0.25, tirets="4 1 0.6 1")
 
 
 #: Part du bloc de légende que le dessin peut occuper sans qu'on le déplace.
@@ -367,6 +377,19 @@ def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legend
     # C6 — la largeur de chaque piste, prise en travers.
     cotes += cotation.cotes_de_largeur_de_piste(objets, ouvrages, rapport)
 
+    # C4 — clôture → habitation la plus proche, selon la BD TOPO (D5).
+    habitation = _cote_habitation(clotures, rapport)
+    if habitation is not None:
+        cotes.append(habitation)
+
+    # C2 et C8 — vers l'axe de la voie publique la plus proche, axe dessiné.
+    vers_les_voies = _cotes_vers_les_voies(
+        tables, ouvrages, clotures, enclos, cotes, planche.echelle, rapport
+    )
+    cotes += [resultat.cote for resultat in vers_les_voies]
+    for resultat in vers_les_voies:
+        planche.ajouter_geometrie(resultat.axe, STYLE_AXE_DE_VOIE)
+
     # C1 — clôture → limite parcellaire, ailleurs sur le côté. Sa place se
     # choisit en dernier, là où elle gêne le moins les autres cotes, et loin
     # de la ligne de coupe, qu'aucune valeur ne doit couper.
@@ -394,6 +417,96 @@ def _coter(planche, contrat, emprise, parcelles, objets, occupees, trace, legend
     )
     rapport.extend(gene.message for gene in genes)
     return rapport
+
+
+#: Ce qui ne répond pas n'arrête pas la DP 2 (lot 10, D11) : c'est la règle de
+#: la phase de mise au point (README, « Ce qui deviendra bloquant »).
+SANS_ELLE = "La DP 2 est produite sans elle, le temps de la mise au point."
+SANS_ELLES = "La DP 2 est produite sans elles, le temps de la mise au point."
+
+
+def _elargie(bornes: tuple, marge_m: float) -> tuple:
+    minx, miny, maxx, maxy = bornes
+    return (minx - marge_m, miny - marge_m, maxx + marge_m, maxy + marge_m)
+
+
+def _detail(erreur: Exception) -> str:
+    """Le message d'une erreur de service, sans son point final, pour le citer."""
+    return str(erreur).strip().rstrip(".")
+
+
+def _cote_habitation(clotures, rapport: list):
+    """C4, et la lecture de la BD TOPO qu'elle demande, à 1 000 m de la clôture (D5).
+
+    Une BD TOPO qui ne répond pas, ou dont la réponse atteint le plafond de
+    lecture (`ErreurPlafondWFS`, qui dérive d'`ErreurService`), n'arrête pas la
+    DP 2 : la cote manque, et le rapport le dit (D11).
+    """
+    from shapely.ops import unary_union
+
+    from . import cotation_plan_masse as cotation
+
+    if not clotures:
+        return cotation.cote_habitation(clotures, [], rapport)
+    bbox = _elargie(unary_union(clotures).bounds, cotation.RAYON_HABITATION_M)
+    try:
+        batiments = telecharger_batiments_bd_topo(bbox)
+    except ErreurService as erreur:
+        rapport.append(
+            "Habitation la plus proche : pas de cote — la lecture de la BD TOPO a "
+            f"échoué ({_detail(erreur)}). {SANS_ELLE}"
+        )
+        return None
+    return cotation.cote_habitation(clotures, batiments, rapport)
+
+
+def _cotes_vers_les_voies(tables, ouvrages, clotures, enclos, posees, denominateur,
+                          rapport: list) -> list:
+    """C2 et C8, et les lectures qu'elles demandent : les voies, et le parcellaire autour.
+
+    Les voies de la BD TOPO à 300 m de la clôture (D5) ; le parcellaire à 350 m
+    autour d'elle, pour juger sur 50 m de part et d'autre de son point le plus
+    proche si une voie est publique (D10). Ni l'une ni l'autre n'arrête la
+    DP 2 : sans elles, C2 et C8 manquent, et le rapport le dit (D11).
+
+    Rend les `CoteVersVoie`, C2 d'abord : C8 la connaît, pour ne pas la doubler.
+    """
+    from shapely.ops import unary_union
+
+    from . import cotation_plan_masse as cotation
+
+    constructions = cotation.polygones_de(tables) + [o.geometrie for o in ouvrages]
+    if not constructions:
+        return []
+    autour = unary_union(clotures or constructions).bounds
+    try:
+        troncons = telecharger_troncons_de_route(_elargie(autour, cotation.RAYON_VOIE_M))
+    except ErreurService as erreur:
+        rapport.append(
+            "Cotes vers la voie publique : pas de cote — la lecture de la BD TOPO a "
+            f"échoué ({_detail(erreur)}). {SANS_ELLES}"
+        )
+        return []
+    marge = cotation.RAYON_VOIE_M + cotation.PORTEE_DOMAINE_PUBLIC_M
+    try:
+        parcelles = telecharger_parcelles(_elargie(autour, marge))
+    except ErreurService as erreur:
+        rapport.append(
+            "Cotes vers la voie publique : pas de cote — la lecture du parcellaire "
+            f"autour des constructions a échoué ({_detail(erreur)}), et rien ne dit "
+            f"quelles voies sont publiques. {SANS_ELLES}"
+        )
+        return []
+    cadastre = unary_union([parcelle.geometrie for parcelle in parcelles])
+
+    c2 = cotation.cote_vers_la_voie_publique(
+        tables, ouvrages, troncons, cadastre, enclos, posees, denominateur, rapport
+    )
+    c8 = cotation.cotes_poste_de_livraison(
+        ouvrages, troncons, cadastre, enclos, list(posees) + ([c2.cote] if c2 else []),
+        denominateur, c2, rapport,
+    )
+    return ([c2] if c2 else []) + c8
 
 
 def _tramer_les_tables(planche: Planche, contrat: Contrat, tables) -> list:
