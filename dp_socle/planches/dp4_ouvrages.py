@@ -19,6 +19,11 @@ occupent la place.
 Les cotes viennent de `cotes_normalisees`, jamais de la géométrie du plan : le
 GeoPackage donne une emprise au sol, pas une hauteur. Un ouvrage sans cote
 n'est pas dessiné, et son absence est portée au rapport.
+
+Depuis le 10/11/2026, le plan de repérage cote aussi la longueur et la largeur
+des ouvrages que la planche décrit, et l'ouverture du portail, aux mêmes cotes
+du catalogue que les élévations — jamais une distance, qui reste au plan de
+masse. Voir `cotes_du_reperage`.
 """
 
 from __future__ import annotations
@@ -1046,14 +1051,40 @@ def _plan_de_reperage(planche, contrat, panneau, categories, libelles=None):
     entrees = construire_legende(
         [c for c, _ in visibles], avec_parcelles=bool(parcelles), libelles=libelles
     )
+    haut_legende = interieur_y + interieur_h - hauteur_bloc(len(entrees))
+
+    # Les dimensions des ouvrages que la planche décrit, et l'ouverture du
+    # portail (10/11/2026) : voir `cotes_du_reperage`. Posées avant la légende,
+    # qui se dessine par-dessus, comme sur la DP 2. Importé ici et non en tête :
+    # `cotes_du_reperage` lit `cotation_plan_masse`, qui lit ce module.
+    from .cotes_du_reperage import coter_les_ouvrages
+
+    # Aucune valeur hors du plan : ni dans les marges du sous-cadre ou son
+    # titre, ni sous le plan — la légende finale peut être plus basse que celle
+    # sur laquelle l'échelle s'est calée —, ni à droite, sur les dessins
+    # d'ouvrages. Le plan, lui, est la fenêtre : c'est sur elle qu'il est découpé.
+    zone_x, zone_y, zone_l, zone_h = planche.zone_dessin()
+    sous_le_plan = (
+        interieur_x, interieur_y + hauteur_plan,
+        interieur_x + interieur_l, zone_y + zone_h,
+    )
+    cotes = coter_les_ouvrages(
+        planche, contrat, visibles,
+        decrits=[c for c in categories if c in POSTES + CONTENEURS + CITERNES],
+        avec_portail="portail" in categories,
+        fenetre=fenetre,
+        occupees=[
+            (zone_x, zone_y, interieur_x, zone_y + zone_h),
+            (interieur_x + interieur_l, zone_y, zone_x + zone_l, zone_y + zone_h),
+            (interieur_x, zone_y, interieur_x + interieur_l, interieur_y),
+            sous_le_plan,
+        ],
+        masques=[sous_le_plan],
+    )
+    avertissements.extend(cotes.messages)
+
     dessiner_legende(
-        planche,
-        entrees,
-        position=(
-            interieur_x,
-            interieur_y + interieur_h - hauteur_bloc(len(entrees)),
-        ),
-        largeur_mm=interieur_l,
+        planche, entrees, position=(interieur_x, haut_legende), largeur_mm=interieur_l,
     )
     return denominateur, avertissements
 

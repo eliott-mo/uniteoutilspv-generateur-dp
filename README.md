@@ -1033,6 +1033,7 @@ dp_socle/
     ├── dp2_plan_masse.py plan de masse
     ├── dp3_coupes.py     coupe de type des tables et coupe du terrain
     ├── dp4_ouvrages.py   postes, clôture, portail, citerne, équipements
+    ├── cotes_du_reperage.py  dimensions des ouvrages au plan de repérage des DP 4
     ├── photographies.py  colonne d'images et panneau de repérage, DP 6 à DP 8
     ├── reperage_vues.py  cadrage du repérage, repères et cônes de visée
     └── dp11_notice.py    habillage de la notice fournie en PDF
@@ -3930,6 +3931,69 @@ citerne ni poste — se cadrer sur les 327 m du site, au 1/5 000.
 | DP 4-2 | `cloture`, `portail`, `bache_incendie` |
 | DP 4-3 | `bess`, `local_technique`, `citerne_refroidissement` |
 
+#### Les dimensions des ouvrages sur le plan de repérage
+
+Depuis le 10/11/2026, le plan de repérage cote la **longueur et la largeur** de
+chaque ouvrage que la planche décrit, et la DP 4-2 l'**ouverture du portail**
+(`dp_socle/planches/cotes_du_reperage.py`). Décision prise sur la relecture des
+planches de façades des vingt dossiers HOCH de `exemples/_hoch-references/` :
+
+| Ce que porte le plan de repérage des façades | Dossiers HOCH |
+|---|---|
+| Longueur et largeur de l'ouvrage, ouverture du portail | 8 — des permis datés de décembre 2025 à juillet 2026 : Insming, Saint-Lubin, Crépand, Albestroff, Ruffec, Saint-Étienne-sous-Barbuise, Moulin-sous-Touvent, Épeigné |
+| Aucune cote | 12 — dont les trois dossiers en DP (Pontivy, Massay, Sougy), et des permis récents comme La-Ville-aux-Bois (février 2026) |
+| Une distance : à la limite, à la voie, à un autre ouvrage | aucun |
+
+Les distances restent donc au plan de masse, DP 2 et ses planches de détail : les
+répéter ici les poserait deux fois, à deux échelles, et un écart entre les deux
+se verrait à l'instruction.
+
+- **Les valeurs sont celles du catalogue**, celles des élévations de droite,
+  jamais mesurées sur le plan. Ne se cote que le **corps** d'un ouvrage, reconnu
+  comme au lot 10 (`palette.separer_les_corps`) : l'objet du calque aux cotes du
+  catalogue à 5 % près, compté une fois s'il est dessiné deux fois. Un ouvrage
+  dont aucun objet n'est aux cotes du catalogue n'est pas coté, et le rapport le
+  dit : y écrire le catalogue serait faux sur le plan, y écrire la mesure
+  contredirait l'élévation. Le portail se cote à la largeur des paramètres du
+  contrat, comme son élévation.
+- **Tous les exemplaires visibles** se cotent, comme HOCH à Épeigné.
+- **La précision du catalogue** : « 12,0 m », une décimale comme les cotes de la
+  DP 2 et comme HOCH, quand la valeur est ronde au dixième ; « 7,95 m » pour la
+  citerne de 30 m³, que l'élévation écrit ainsi — au dixième, la cote aurait écrit
+  8,0 m à côté d'elle.
+- **La ligne de cote** est parallèle aux côtés de l'ouvrage, à 3,5 mm de lui, avec
+  ses lignes d'attache, et **ne court jamais le long d'un bord du dessin** : un
+  bord parallèle qui passe à moins de 2 mm de sa place la repousse 3,5 mm
+  au-delà de lui, jusqu'à 12 mm de l'ouvrage au plus. À Saint-Cyr, la piste à
+  créer cerne le poste de 1 m, 3,3 mm au 1/300, et la cote tombait sur son
+  contour : la maquette s'en tirait en excluant les réseaux de ce qui borde
+  l'ouvrage, mais le chemin existant, 2 800 m², touche aussi ce poste. C'est le
+  bord le plus proche qui compte, pas l'étendue de ce qui touche l'ouvrage ; une
+  grande plateforme garde donc la cote près de lui. Le côté se choisit sur ce
+  que la ligne et sa valeur recouvriraient — ouvrages, clôture, portail, aire
+  d'aspiration, tables —, puis sur la proximité de l'ouvrage, puis le sud ou
+  l'est. Une valeur ne se pose ni hors du plan, ni sur une ligne d'attache.
+- **L'ouverture du portail** se cote hors de l'enclos, le long de la clôture —
+  qu'elle soit dessinée en surface ou en trait fermé. Faute de place dehors,
+  elle passe côté vantaux, et le rapport le dit.
+- **Ce qui ne se cote pas se dit au rapport** : un ouvrage coupé par le bord du
+  zoom ou trop près de lui, une dimension de moins de 3 mm sur le papier (le
+  seuil de la DP 2), une cote qui n'a pas de place dans le zoom, un ouvrage hors
+  des cotes du catalogue, un portail sans ouverture mesurable, un catalogue ou
+  une largeur de portail absents.
+- La légende ne gagne pas d'entrée « Cote » : la valeur porte son unité, ses
+  lignes d'attache désignent l'ouvrage, et une ligne de plus changerait l'échelle
+  de zooms déjà relus.
+
+`tests/test_cotes_reperage_dp4.py` mesure dans le PDF produit, entre leurs
+flèches et à l'échelle du repérage, les cotes du poste, de la citerne et du
+portail du site synthétique ; il vérifie que la planche ne cote que ce qu'elle
+décrit, et que ses valeurs restent dans le plan. Sans PDF s'y testent les cas qui
+ne se cotent pas, la précision du catalogue, l'ouvrage dessiné deux fois, en
+collection ou tourné, le choix du côté — contre une clôture en surface ou en
+trait —, la cote qui ne longe pas la piste cernant le poste de Saint-Cyr, le
+rejet au-delà de la terre remise, l'exemplaire coupé, et le portail à vantaux.
+
 #### Locaux techniques surélevés
 
 Un plan de prévention du risque inondation peut imposer que les locaux
@@ -5128,4 +5192,6 @@ projet les ajoutent dans la sortie PowerPoint. L'**accès au site**, que
 Saint-Cyr demande aussi, n'est pas tranché : le portail et les pistes sont
 dessinés, le chemin depuis la voie publique et une mention « Accès » restent à
 décider. Ni la largeur des portails, ni la distance aux boisements, ni les
-cotes NGF ne sont cotées ; elles se rouvriront si une demande les cite.
+cotes NGF ne sont cotées au plan de masse ; elles se rouvriront si une demande
+les cite. L'ouverture du portail l'est depuis le 10/11/2026 au plan de repérage
+de la DP 4-2, avec les dimensions des ouvrages (voir DP 4).
