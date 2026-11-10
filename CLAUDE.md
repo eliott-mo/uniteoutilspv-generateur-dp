@@ -19,6 +19,7 @@ fonctionnement, ce fichier pour les conventions de travail.
 | 7 | Ajout de la notice à un dossier déjà finalisé | livré |
 | 8 | Sortie PowerPoint à finaliser, pour le volet photographique | livré |
 | 9 | Locaux techniques surélevés au-dessus des plus hautes eaux (PPRI) | livré |
+| 10 | Cotation du plan de masse (DP 2), et planches de détail de la zone technique | livré |
 
 Le lot 2bis remplace les lots 2 et 3 pour les dossiers dont le BE interne
 fournit le plan final. Le lot 2 reste en réserve pour les projets sans plan BE,
