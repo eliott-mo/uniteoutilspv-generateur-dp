@@ -374,10 +374,7 @@ def generer(
             (codes[rang], _cadre_du_detail(zones[rang], calcul, denominateur))
             for rang in sorted(codes)
         ]
-        a_poser = list(calcul.hors_zones) + [
-            cote for rang, zone_technique in enumerate(zones)
-            if rang not in codes for cote in zone_technique.cotes
-        ]
+        a_poser = _a_poser_sur_la_dp2(calcul, codes)
         planche = nouvelle_planche(projet, NUMERO, numero=numero)
         planche.definir_echelle(denominateur)
         planche.centrer_sur(centre)
@@ -646,6 +643,9 @@ class _Calcul:
     dimensions: dict = field(default_factory=dict)
     #: Vrai quand la BD TOPO a répondu, sans habitation à 1 000 m (D5).
     sans_habitation: bool = False
+    #: (C2, C8) quand C2 part déjà du poste de livraison vers sa voie : la même
+    #: cote, hors zone et dans la zone du poste. Voir `_a_poser_sur_la_dp2`.
+    doubles: tuple = ()
 
 
 def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rapport) -> _Calcul:
@@ -739,7 +739,30 @@ def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rappo
         ouvrages=ouvrages,
         dimensions=cotation.dimensions_en_legende(contrat, ouvrages, table, rapport),
         sans_habitation=sans_habitation,
+        doubles=tuple(
+            (resultat.confondue_avec, resultat.cote) for resultat in vers_les_voies
+            if resultat.confondue_avec is not None
+        ),
     )
+
+
+def _a_poser_sur_la_dp2(calcul, codes) -> list:
+    """Les cotes de la DP 2, quand les zones de `codes` sont parties en détail.
+
+    Celles qui ne sont d'aucune zone, et celles des zones qui restent. La cote
+    vers la voie qui part du poste de livraison vaut C2 et C8 (Sarnois,
+    10/11/2026) : la DP 2 n'en pose qu'une. Tant que la zone du poste y reste,
+    c'est sa C8, et la zone répond de sa place (D7) ; partie, c'est la C2, et
+    la C8 va sur la planche de détail.
+    """
+    restent = [
+        cote for rang, zone_technique in enumerate(calcul.zones)
+        if rang not in codes for cote in zone_technique.cotes
+    ]
+    remplacees = {
+        id(c2) for c2, c8 in calcul.doubles if any(c8 is cote for cote in restent)
+    }
+    return [cote for cote in calcul.hors_zones if id(cote) not in remplacees] + restent
 
 
 def _libelle(categorie: str) -> str:

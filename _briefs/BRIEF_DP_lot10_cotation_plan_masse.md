@@ -230,7 +230,12 @@ Mesuré le 07/11 :
 
 L'axe se dessine sur 25 m de part et d'autre du pied de la cote. L'étiquette
 donne le numéro de la voie (`cpx_numero`) quand elle en a un, sa nature sinon.
-Quand C8 et C2 partent du même poste vers la même voie, seule C2 se pose.
+Quand C8 et C2 partent du même poste vers la même voie, c'est la même cote : la
+DP 2 ne la pose qu'une fois, et la planche de détail de la zone du poste la
+reprend quand la zone part (10/11). À Sarnois, le poste est la construction la
+plus proche du chemin, à 3,0 m : la DP 2 ne la portait qu'à 1,5 mm de papier
+au 1:2 000, et la DP 2 bis, où part la zone du poste, ne la reprenait pas : la
+relecture de l'épreuve A3 l'y a demandée.
 
 ### D2 — Les ouvrages permanents, et eux seuls (03/11)
 

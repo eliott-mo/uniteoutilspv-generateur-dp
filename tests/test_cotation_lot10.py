@@ -1027,18 +1027,31 @@ def test_sans_voie_publique_la_cote_vers_la_voie_ne_se_pose_pas():
     assert any("aucune voie publique" in m for m in rapport)
 
 
-def test_le_poste_le_plus_proche_de_la_voie_n_a_qu_une_cote_vers_elle():
-    """Quand C8 et C2 partent du même poste vers la même voie, seule C2 se pose."""
+def test_le_poste_le_plus_proche_de_la_voie_reprend_la_cote_de_c2_pour_sa_zone():
+    """Quand C2 part du poste vers la voie de C8, C8 est la même cote, et suit la zone du poste.
+
+    Sarnois : le poste de livraison est la construction la plus proche du
+    chemin, à 3,0 m, soit 1,5 mm sur la DP 2 au 1:2 000 ; sa zone partait sur
+    la DP 2 bis sans cette cote, que seule C2 portait. La planche de détail la
+    reprend (chef de projet, 10/11/2026). Sur une même planche, elle ne se pose
+    qu'une fois : c'est la DP 2 qui choisit laquelle.
+    """
     enclos, poste, cadastre, voies = _site_du_poste()
     rapport = []
     c2 = cotation.cote_vers_la_voie_publique(
         [], [poste], voies, cadastre, enclos, [], 1000, rapport
     )
 
-    assert cotation.cotes_poste_de_livraison(
+    (c8,) = cotation.cotes_poste_de_livraison(
         [poste], voies, cadastre, enclos, [c2.cote], 1000, c2, rapport
-    ) == []
-    assert any("confondue" in m for m in rapport)
+    )
+
+    assert c8.confondue_avec is c2.cote
+    assert c8.cote.ligne.equals(c2.cote.ligne) and c8.cote.texte == c2.cote.texte
+    assert c8.cote.famille == "C8" and c8.cote.ouvrages == (0,)
+    assert c8.axe.equals(c2.axe) and c8.genre == c2.genre
+    assert c2.confondue_avec is None
+    assert any("confondue" in m and "zone" in m for m in rapport), rapport
 
 
 # ---------------------------------------------------------------------------

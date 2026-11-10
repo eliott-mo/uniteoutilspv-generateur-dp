@@ -851,6 +851,67 @@ def test_une_zone_dont_une_cote_fait_deux_millimetres_part_sur_sa_planche_de_det
     assert _texte_de(detail.chemin, "2,0 m")
 
 
+#: Une route nord-sud à l'est du site, à 3 m au-delà d'un terrain resserré à
+#: 2 m de la clôture : le poste de livraison en est la construction la plus
+#: proche, 23 m de son bord est à l'axe, quand les tables en sont à 25 m.
+ROUTE_EST = LineString([(X0 + 205.0, Y0 - 100.0), (X0 + 205.0, Y0 + 300.0)])
+
+
+def test_la_cote_du_poste_vers_la_voie_suit_aussi_sa_zone_sur_le_detail(dp2):
+    """Quand C2 part du poste de livraison, elle vaut C8 : la planche de détail la reprend.
+
+    Sarnois : la DP 2 portait cette cote à 1,5 mm de papier, et la DP 2 bis, où
+    part la zone du poste, ne la reprenait pas (chef de projet, 10/11/2026).
+    Ici, les deux citernes à 2 m envoient la zone sur la DP 2 bis : la cote du
+    poste à l'axe s'y mesure, avec son axe en légende, et reste une fois sur la
+    DP 2.
+    """
+    sortie, _ = dp2(
+        entites=_site_aux_citernes_serrees(),
+        terrain=_terrain(est=X0 + 202.0),
+        troncons=[_voie(ROUTE_EST, cpx_numero="D18")],
+    )
+
+    (detail,) = sortie.details["planches_de_detail"]
+    texte = "23,0 m (axe de la D18)"
+    attendue = CoteAttendue("poste – voie", X0 + 182.0, X0 + 205.0, (Y0 + 8.0, Y0 + 11.0), True, "")
+    for planche in (sortie, detail):
+        assert _ecrits(planche.chemin).count(texte) == 1, f"{planche.numero} : « {texte} »"
+        pointes = _pointes_aux_bouts(planche.chemin, attendue, _vers_la_page_de(planche))
+        assert pointes is not None, f"{planche.numero} : pas de cote du poste à l'axe"
+        mesure_mm = math.dist(*pointes) * MM_PAR_PT
+        attendu_mm = 23.0 * 1000.0 / planche.echelle
+        assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
+    assert "Axe de voie (BD TOPO, IGN)" in _ecrits(detail.chemin)
+
+
+def test_sur_la_dp2_la_cote_du_poste_vers_la_voie_ne_se_pose_qu_une_fois():
+    """C2 sur la DP 2 quand la zone du poste est partie ; sa C8 tant qu'elle y reste.
+
+    Les deux sont la même cote. Tant que la zone reste, c'est la C8 qui se pose,
+    et la zone répond de sa place (D7) ; partie, c'est la C2, et la C8 va sur la
+    planche de détail.
+    """
+    from dp_socle.planches import dp2_plan_masse
+    from dp_socle.planches.cotation_plan_masse import CoteAPoser, ZoneTechnique
+
+    def cote(famille, ouvrages=()):
+        return CoteAPoser(famille=famille, depart=(0.0, 0.0), arrivee=(0.0, 23.0),
+                          texte="23,0 m (axe de la D18)", valeur_m=23.0, ouvrages=ouvrages)
+
+    c1, c2, c3, c8 = cote("C1"), cote("C2"), cote("C3", (0,)), cote("C8", (0,))
+    calcul = dp2_plan_masse._Calcul(
+        hors_zones=[c1, c2], zones=[ZoneTechnique(ouvrages=(0,), cotes=(c3, c8))],
+        axes=[], a_eviter=[], ouvrages=[], doubles=((c2, c8),),
+    )
+
+    def identites(cotes):
+        return [id(c) for c in cotes]
+
+    assert identites(dp2_plan_masse._a_poser_sur_la_dp2(calcul, {})) == identites([c1, c3, c8])
+    assert identites(dp2_plan_masse._a_poser_sur_la_dp2(calcul, {0: "DP 2 bis"})) == identites([c1, c2])
+
+
 def test_la_planche_de_detail_suit_la_dp2_dans_le_dossier(dp2, monkeypatch, tmp_path):
     """Dans le dossier, la DP 2 bis suit la DP 2, et ce qui suit est renuméroté.
 

@@ -29,7 +29,7 @@ comme une cote.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
@@ -764,10 +764,16 @@ def cotes_entre_ouvrages(ouvrages, limite, rapport: list) -> list:
     max(d(i, k), d(j, k)) < d(i, j). Les deux cotes qui passent par k situent
     déjà la paire ; chaque ouvrage garde son plus proche voisin, et une zone
     reste d'un seul tenant. À Auzainvilliers : 9 cotes au lieu de 24 paires à
-    moins de 30 m (10/11/2026 ; la maquette en comptait 19 le 04/11, pour 9
-    cotes aussi, sans que l'écart soit expliqué). Un ouvrage posé sur le
-    segment interdit aussi la cote, sans quoi trois conteneurs alignés
-    donneraient la cote du premier au troisième à travers le deuxième.
+    moins de 30 m (10/11/2026). Un ouvrage posé sur le segment interdit aussi
+    la cote, sans quoi trois conteneurs alignés donneraient la cote du premier
+    au troisième à travers le deuxième.
+
+    Le brief annonçait 19 paires à Auzainvilliers, pour les mêmes 9 cotes : la
+    maquette retirait de son compte, sans le dire, les paires qu'un ouvrage
+    sépare, et tenait pour séparée au moindre contact une paire dont le segment
+    frôle un conteneur sur 4 mm — bac de rétention et zone de remise, que le
+    module, à `CONTACT_M` près, dit située (rejouée le 10/11/2026). Ici, chaque
+    paire compte, et le rapport dit ce qu'elle devient.
 
     La cote **à la limite** se pose en deçà de 30 m, quand aucun ouvrage n'est
     sur le trajet, et toujours pour `TOUJOURS_A_LA_LIMITE` : le rapport dit
@@ -1518,12 +1524,17 @@ class CoteVersVoie:
     « extrémité » quand la voie s'arrête avant le site : aucune perpendiculaire
     n'existe alors, et la cote va au bout de la voie. `axe` est le tracé à
     dessiner, 25 m de part et d'autre du pied.
+
+    `confondue_avec` : la cote C2 que cette C8 répète, quand C2 part déjà du
+    poste vers la même voie. C'est la même cote ; elle suit la zone du poste
+    (D7), et une planche ne la pose qu'une fois (10/11/2026).
     """
 
     cote: CoteAPoser
     genre: str
     axe: LineString
     voie: VoieClassee
+    confondue_avec: CoteAPoser | None = None
 
 
 def classer_les_voies(troncons, pres_de, cadastre, enclos) -> list:
@@ -1835,7 +1846,11 @@ def cotes_poste_de_livraison(
     limite. Les voies plus proches et écartées se disent, avec leur raison.
 
     Quand la cote vers la voie publique, `c2`, part déjà de ce poste vers la
-    même voie, seule celle-là se pose : la seconde la doublerait.
+    même voie, C8 est cette cote-là, rendue avec le rang du poste : elle suit
+    sa zone sur la planche de détail, quand la zone part (D7). À Sarnois, la
+    DP 2 ne la portait qu'à 1,5 mm de papier, et la DP 2 bis ne la reprenait
+    pas (chef de projet, 10/11/2026). Sur une même planche, elle ne se pose
+    qu'une fois : c'est `dp2_plan_masse` qui choisit laquelle.
     """
     ecart_m = ECART_COTES_PARALLELES_MM * denominateur / 1000.0
     resultats = []
@@ -1875,8 +1890,13 @@ def cotes_poste_de_livraison(
         ):
             rapport.append(
                 f"{debut} : sa cote vers la voie publique est confondue avec celle de "
-                "la construction la plus proche, qui part déjà de lui — posée une fois."
+                "la construction la plus proche, qui part déjà de lui — posée une fois "
+                "sur la DP 2, et reprise sur la planche de détail de sa zone si elle part."
             )
+            resultats.append(CoteVersVoie(
+                cote=replace(c2.cote, famille="C8", ouvrages=(rang,)),
+                genre=c2.genre, axe=c2.axe, voie=c2.voie, confondue_avec=c2.cote,
+            ))
             continue
         resultat = _cote_perpendiculaire(
             [poste.geometrie], publiques, posees, ecart_m, rapport, "C8", (rang,)

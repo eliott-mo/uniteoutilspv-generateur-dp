@@ -4971,6 +4971,12 @@ posée au mieux, sur un ouvrage ou en travers de la clôture —, ou qu'une de s
 cotes passe sous la légende. Une valeur posée sur les tables, ou en travers du
 cadre d'un autre détail, se lit : elle ne fait pas partir sa zone.
 
+Quand la cote vers la voie publique part du poste de livraison, elle est à la
+fois C2 et C8 (10/11/2026). La DP 2 ne la pose qu'une fois : comme C8 tant que
+la zone du poste y reste, et la zone répond alors de sa place ; comme C2 quand
+la zone est partie, et la planche de détail la reprend comme C8
+(`_a_poser_sur_la_dp2`).
+
 Les deux derniers cas ne se voient qu'en dessinant. La DP 2 est essayée, les
 zones fautives partent, elle est refaite sans elles, jusqu'à ce que plus aucune
 ne bouge : retirer une zone libère de la place, mais pose un cadre, et la
@@ -5030,8 +5036,8 @@ tant que le plan et le tableau ne s'accordent pas.
 | C6 | 4,4 et 3,5 m | 3,5 m, piste existante et piste à créer | 4,0 m |
 | C3 | 2 paires cotées sur 3 à moins de 30 m ; 3 cotes à la limite | 9 sur 24 ; 8 à la limite | 7 sur 18 ; 7 à la limite |
 | C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m, batteries 8,3 m, citerne incendie 6,5 m | batteries 18,3 m, citerne de refroidissement 16,0 m, citerne incendie 28,5 m |
-| C8 | non cotée : la première voie publique est à 108 m | 12,2 m (axe de la D18) | confondue avec C2, posée une fois |
-| Détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; DP 2 ter au 1:200, 4 cotes | DP 2 bis au 1:500, 17 cotes |
+| C8 | non cotée : la première voie publique est à 108 m | 12,2 m (axe de la D18) | la cote de C2, qui part du poste : une fois sur la DP 2, reprise sur la DP 2 bis |
+| Détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; DP 2 ter au 1:200, 4 cotes | DP 2 bis au 1:500, 18 cotes |
 
 Ce qui s'écarte du brief :
 
@@ -5046,19 +5052,29 @@ Ce qui s'écarte du brief :
   écrit 6,0, 6,4 et 12,8 m. La maquette v7, rejouée sur le même contrat, donne
   5,2 m comme l'outil : le 6,4 m venait d'un état antérieur.
 - **Auzainvilliers, C3** : le rapport compte 24 paires à moins de 30 m, où le
-  brief en compte 19, pour 9 cotées dans les deux cas. L'écart n'est pas
-  expliqué.
+  brief en compte 19, pour les mêmes 9 cotes. Les deux voient les mêmes 10
+  ouvrages et les mêmes 24 paires (maquette v7 rejouée le 10/11/2026) ;
+  l'écart n'est que de compte. La maquette retirait du sien, sans le dire, les
+  paires qu'un ouvrage sépare : 5 pour elle, 4 pour le module, qui les compte
+  et les nomme. La cinquième, bac de rétention – zone de remise (27,3 m), a son
+  segment qui frôle un conteneur BESS sur 4 mm : la maquette la tenait pour
+  séparée au moindre contact, le module demande plus de 5 cm de traversée
+  (`CONTACT_M`) et la dit située par la citerne de refroidissement. Elle n'est
+  cotée ni par l'un ni par l'autre.
 - **Sarnois**, que le brief n'avait mesuré que sous les règles du 03/11 : quatre
   cotes clôture → limite, de 1,3 à 5,8 m, prises perpendiculairement au côté
   depuis la clôture réelle. Le 03/11, la maquette les prenait dans l'axe de la
   chaîne, de 0,4 à 13,4 m.
 
+La relecture de l'épreuve A3 a tranché un cas que le brief laissait ouvert
+(10/11/2026). À Sarnois, la construction la plus proche de la voie publique
+est le poste de livraison, si bien que C2 vaut aussi C8 : la DP 2 ne la portait
+qu'à 1,5 mm de papier au 1:2 000, et la DP 2 bis, où part la zone du poste, ne
+la reprenait pas. Elle l'y reprend désormais (voir la zone technique, plus
+haut).
+
 Reste à juger sur l'épreuve A3 : la lisibilité face à la trame des tables et
-aux numéros de parcelle, et l'angle nord-ouest de la DP 2 d'Auzainvilliers. Et
-un cas que le brief ne tranche pas : à Sarnois, la construction la plus proche
-de la voie publique est le poste de livraison, si bien que C2 vaut aussi C8 et
-n'est posée qu'une fois, sur la DP 2. Elle y fait 1,5 mm de papier au 1:2 000,
-et la DP 2 bis, où partent le poste et sa zone, ne la reprend pas.
+aux numéros de parcelle, et l'angle nord-ouest de la DP 2 d'Auzainvilliers.
 
 Sur d'autres sites, ce que le brief laisse à mesurer (« Ce qui reste à
 mesurer ») : une voie publique qui n'est pas parallèle à la limite, le critère
