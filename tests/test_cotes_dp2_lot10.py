@@ -99,6 +99,11 @@ def dp2(tmp_path, monkeypatch):
     qu'elle lève ; vides par défaut. `cadastre_injoignable` fait échouer toute
     lecture du parcellaire après la première, celle du terrain : la seconde
     est celle des parcelles autour des constructions (C2, C8).
+
+    `batiments_cadastre` : les bâtiments du cadastre que rend chaque lecture,
+    vides par défaut. Une erreur fait échouer celles qui suivent la première,
+    celle du dessin : la seconde est celle des bâtiments autour de la clôture,
+    que C4 compare à la BD TOPO.
     """
     from dp_socle.erreurs import ErreurService
     from dp_socle.ign import Parcelle
@@ -106,7 +111,8 @@ def dp2(tmp_path, monkeypatch):
     from dp_socle.planches import dp2_plan_masse, dp3_coupes
 
     courant = {"terrain": _terrain(), "troncons": [], "batiments": [],
-               "cadastre_injoignable": False, "lectures_du_parcellaire": 0}
+               "cadastre_injoignable": False, "lectures_du_parcellaire": 0,
+               "batiments_cadastre": [], "lectures_des_batiments": 0}
 
     def parcelles(bbox, *args, **kwargs):
         courant["lectures_du_parcellaire"] += 1
@@ -128,8 +134,17 @@ def dp2(tmp_path, monkeypatch):
             return list(reponse)
         return lire
 
+    def batiments_du_cadastre(bbox, *args, **kwargs):
+        courant["lectures_des_batiments"] += 1
+        reponse = courant["batiments_cadastre"]
+        if isinstance(reponse, Exception):
+            if courant["lectures_des_batiments"] > 1:
+                raise reponse
+            return []
+        return list(reponse)
+
     monkeypatch.setattr(dp2_plan_masse, "telecharger_parcelles", parcelles)
-    monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments", lambda *a, **k: [])
+    monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments", batiments_du_cadastre)
     monkeypatch.setattr(dp2_plan_masse, "telecharger_troncons_de_route", bd_topo("troncons"))
     monkeypatch.setattr(dp2_plan_masse, "telecharger_batiments_bd_topo", bd_topo("batiments"))
     # La DP 3, qu'on produit du même contrat pour comparer l'inter-rangée, lit
@@ -137,9 +152,10 @@ def dp2(tmp_path, monkeypatch):
     monkeypatch.setattr(dp3_coupes, "telecharger_parcelles", parcelles)
 
     def produire(entites=None, terrain=None, parametres=None, troncons=(), batiments=(),
-                 cadastre_injoignable=False, legendes=None):
+                 cadastre_injoignable=False, legendes=None, batiments_cadastre=()):
         courant.update(troncons=troncons, batiments=batiments,
-                       cadastre_injoignable=cadastre_injoignable, lectures_du_parcellaire=0)
+                       cadastre_injoignable=cadastre_injoignable, lectures_du_parcellaire=0,
+                       batiments_cadastre=batiments_cadastre, lectures_des_batiments=0)
         terrain = courant["terrain"] = terrain or _terrain()
         dossier = tmp_path / "sortie" / "Essai"
         if entites is None and parametres is None:
@@ -610,6 +626,52 @@ def test_la_cote_de_l_habitation_se_mesure_dans_le_pdf(dp2):
         "1 bâtiment(s) d'usage indifférencié plus proche(s), le premier à 30 m" in m
         for m in sortie.details["avertissements"]
     ), sortie.details["avertissements"]
+
+
+#: Un bâtiment du cadastre de 40 m², sur le terrain, à 1 m au nord de la
+#: clôture, que la BD TOPO ne connaît pas.
+INCONNU_DE_LA_BD_TOPO = box(X0 + 60.0, Y0 + 121.0, X0 + 68.0, Y0 + 126.0)
+
+
+def test_un_batiment_du_cadastre_que_la_bd_topo_ignore_se_dit_au_rapport_de_la_dp2(dp2):
+    """Saint-Cyr : deux bâtiments du cadastre plus proches que l'habitation, absents
+    de la BD TOPO, que rien ne signalait (10/11/2026).
+
+    La DP 2 lit le cadastre autour de la clôture comme la BD TOPO, les compare,
+    et nomme au rapport ce que la BD TOPO ignore, avec sa parcelle. La cote
+    reste sur l'habitation qu'elle donne.
+    """
+    from dp_socle.ign import Batiment
+
+    sortie, _ = dp2(
+        batiments=[_bati(HABITATION, "Résidentiel")],
+        batiments_cadastre=[Batiment(INCONNU_DE_LA_BD_TOPO, "Bâtiment en dur"),
+                            Batiment(HABITATION, "Bâtiment en dur")],
+    )
+
+    assert _texte_de(sortie.chemin, "50 m (habitation la plus proche)")
+    messages = sortie.details["avertissements"]
+    assert any(
+        "1 bâtiment(s) du cadastre plus proche(s)" in m and "40 m² à 1 m (ZZ 0001)" in m
+        for m in messages
+    ), messages
+
+
+def test_un_cadastre_qui_ne_repond_pas_autour_de_la_cloture_n_arrete_pas_la_dp2(dp2):
+    """La comparaison manque, la cote de l'habitation reste, et le rapport le dit (D11)."""
+    from dp_socle.erreurs import ErreurService
+
+    sortie, _ = dp2(
+        batiments=[_bati(HABITATION, "Résidentiel")],
+        batiments_cadastre=ErreurService("Service WFS (bâtiments) injoignable : refus de connexion."),
+    )
+
+    assert _texte_de(sortie.chemin, "50 m (habitation la plus proche)")
+    messages = sortie.details["avertissements"]
+    assert any(
+        m.startswith("Habitation la plus proche") and "cadastre" in m and "injoignable" in m
+        for m in messages
+    ), messages
 
 
 # ---------------------------------------------------------------------------

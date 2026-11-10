@@ -1058,7 +1058,9 @@ Identifiants confirmés par GetCapabilities le 2026-09-01 :
 
 Les cotes du plan de masse lisent de la BD TOPO `nature` et `cpx_numero` sur
 les voies, `usage_1` sur les bâtiments : le cadastre ne dit pas l'usage d'un
-bâtiment. Ses géométries sont en 3D, et ramenées en plan. Le test réseau de
+bâtiment. Ses géométries sont en 3D, et ramenées en plan. Les bâtiments du
+cadastre se lisent alors une seconde fois, sur la même étendue que ceux de la
+BD TOPO, pour dire ceux qu'elle ne connaît pas. Le test réseau de
 `tests/test_ign.py` vérifie, chaque lundi, que la vraie BD TOPO porte encore
 ces attributs : renommés, ils feraient passer toute voie pour anonyme et tout
 bâtiment pour inhabité, sans erreur — et la légende annoncerait qu'aucune
@@ -4436,8 +4438,10 @@ La **BD TOPO** a rejoint la liste avec le lot 10 (D11). Injoignable, ou dont
 la réponse atteint le plafond de lecture, elle n'arrête pas la DP 2 : la
 planche sort sans ses cotes vers l'habitation et vers la voie publique, et le
 rapport dit pourquoi. Le parcellaire autour des constructions, qui ne sert
-qu'à juger quelles voies sont publiques, se traite de même. Le parcellaire du
-terrain, lui, garde son refus : sans lui, rien ne se dessine.
+qu'à juger quelles voies sont publiques, se traite de même, comme les
+bâtiments du cadastre autour de la clôture, qui ne servent qu'à dire ceux que
+la BD TOPO ignore. Le parcellaire du terrain, lui, garde son refus : sans lui,
+rien ne se dessine.
 
 ### Le format déposé, en pratique
 
@@ -5012,6 +5016,18 @@ Une cote qu'une règle écarte, ou qui ne trouve pas de place nette, est nommée
 rapport avec sa raison : une paire d'ouvrages « située par un troisième », une
 cote clôture → limite essayée à cinq endroits du côté, une voie écartée parce
 qu'elle passe sur des parcelles cadastrées. Aucune n'est retirée en silence.
+
+L'habitation la plus proche (C4) est celle de la BD TOPO : le cadastre ne dit
+pas l'usage d'un bâtiment. Mais il ne connaît pas les mêmes bâtiments qu'elle.
+La DP 2 lit donc aussi les bâtiments du cadastre à 1 000 m de la clôture, et
+nomme au rapport, avec leur parcelle, ceux que la BD TOPO ne recouvre pas et
+qui sont plus proches que son habitation : « 2 bâtiment(s) du cadastre plus
+proche(s), que la BD TOPO ne connaît pas — 40 m² à 26 m (AB 0100), 935 m² à
+90 m (AB 0016) » à Saint-Cyr (10/11/2026). Rien ne dit s'ils sont habités ; la
+cote reste sur l'habitation de la BD TOPO, et c'est au chef de projet d'aller
+voir. Sur les trois sites d'épreuve, un bâtiment du cadastre est recouvert par
+ceux de la BD TOPO à 50 % ou plus, ou pas du tout : le seuil de 25 %
+(`PART_CONNUE_DE_LA_BD_TOPO`) tombe dans le vide entre les deux.
 Une BD TOPO qui ne répond pas n'arrête pas la DP 2 (D11) : voir « Ce qui
 deviendra bloquant ».
 

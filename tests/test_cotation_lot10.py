@@ -859,6 +859,82 @@ def test_sans_habitation_a_moins_de_1000_m_la_cote_ne_se_pose_pas():
     assert any("aucune habitation" in m for m in rapport)
 
 
+def _du_cadastre(geometrie, genre="Bâtiment en dur"):
+    """Un bâtiment du cadastre, tel que `ign.telecharger_batiments` le rend."""
+    from dp_socle.ign import Batiment
+
+    return Batiment(geometrie=geometrie, type=genre)
+
+
+def _parcelle(geometrie, section, numero):
+    from dp_socle.ign import Parcelle
+
+    return Parcelle(geometrie=geometrie, idu=f"00000000{section}{numero}", section=section,
+                    numero=numero, contenance_m2=geometrie.area, commune="00000")
+
+
+def test_un_batiment_du_cadastre_que_la_bd_topo_ignore_se_dit_au_rapport():
+    """Saint-Cyr : 40 m² à 26 m de la clôture et 935 m² à 90 m, au cadastre et
+    absents de la BD TOPO, quand l'habitation qu'elle donne est à 119 m (10/11/2026).
+
+    Rien ne dit s'ils sont habités : le rapport les nomme, avec leur parcelle,
+    pour qu'on aille voir. La cote reste sur l'habitation de la BD TOPO. Un
+    bâtiment que la BD TOPO recouvre, ou plus loin que l'habitation, ne se dit
+    pas.
+    """
+    serre = boite(250, 0, 260, 20)
+    maison = boite(320, 0, 330, 10)
+    inconnu = boite(230, 30, 238, 35)
+    lointain = boite(400, 0, 410, 10)
+    cadastre = [_du_cadastre(g) for g in (serre, maison, inconnu, lointain)]
+    parcelles = [_parcelle(boite(220, 20, 300, 60), "AB", "0100")]
+    rapport = []
+
+    cote = cotation.cote_habitation(
+        CLOTURE_C4,
+        [(serre, {"usage_1": "Agricole"}), (maison, {"usage_1": "Résidentiel"})],
+        rapport, cadastre=cadastre, parcelles=parcelles,
+    )
+
+    assert cote.texte == "120 m (habitation la plus proche)"
+    (message,) = [m for m in rapport if "cadastre" in m]
+    assert "1 bâtiment(s) du cadastre" in message, message
+    assert "40 m² à 30 m (AB 0100)" in message, message
+    assert "410" not in message and "200 m" not in message, message
+
+
+def test_sans_habitation_un_batiment_du_cadastre_que_la_bd_topo_ignore_se_dit():
+    """La légende dira « aucune habitation à moins de 1 000 m (BD TOPO) » : le
+    rapport dit ce que le cadastre connaît plus près, et que la BD TOPO ignore."""
+    rapport = []
+
+    assert cotation.cote_habitation(
+        CLOTURE_C4, [], rapport, cadastre=[_du_cadastre(boite(600, 0, 610, 10))]
+    ) is None
+
+    assert any("aucune habitation" in m for m in rapport)
+    assert any("1 bâtiment(s) du cadastre" in m and "100 m² à 400 m" in m for m in rapport), rapport
+
+
+def test_un_batiment_que_la_bd_topo_recouvre_en_partie_est_connu_d_elle():
+    """Les contours du cadastre et de la BD TOPO ne coïncident pas : à Saint-Cyr,
+    la maison est recouverte à 81 %, une remise à 58 %. Mesuré sur les trois
+    sites le 10/11/2026 : un bâtiment du cadastre l'est à 50 % ou plus, ou pas
+    du tout."""
+    maison = boite(320, 0, 330, 10)
+    remise = boite(290, 0, 300, 10)
+    cadastre = [_du_cadastre(boite(316, 0, 330, 10)), _du_cadastre(boite(290, 0, 300, 17))]
+    rapport = []
+
+    cotation.cote_habitation(
+        CLOTURE_C4,
+        [(maison, {"usage_1": "Résidentiel"}), (remise, {"usage_1": "Annexe"})],
+        rapport, cadastre=cadastre,
+    )
+
+    assert not any("cadastre" in m for m in rapport), rapport
+
+
 # ---------------------------------------------------------------------------
 # C2 et C8 — les voies publiques, cotées à leur axe ou à leur extrémité
 # ---------------------------------------------------------------------------

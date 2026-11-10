@@ -697,7 +697,7 @@ def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rappo
     cotes += cotation.cotes_vers_les_tables(ouvrages, tables, rapport)
 
     # C4 — clôture → habitation la plus proche, selon la BD TOPO (D5).
-    habitation, sans_habitation = _cote_habitation(clotures, rapport)
+    habitation, sans_habitation = _cote_habitation(clotures, rapport, parcelles)
     if habitation is not None:
         cotes.append(habitation)
 
@@ -943,12 +943,18 @@ def _detail(erreur: Exception) -> str:
     return str(erreur).strip().rstrip(".")
 
 
-def _cote_habitation(clotures, rapport: list):
-    """C4, et la lecture de la BD TOPO qu'elle demande, à 1 000 m de la clôture (D5).
+def _cote_habitation(clotures, rapport: list, parcelles=()):
+    """C4, et les lectures qu'elle demande, à 1 000 m de la clôture (D5).
 
     Une BD TOPO qui ne répond pas, ou dont la réponse atteint le plafond de
     lecture (`ErreurPlafondWFS`, qui dérive d'`ErreurService`), n'arrête pas la
     DP 2 : la cote manque, et le rapport le dit (D11).
+
+    Les bâtiments du cadastre se lisent sur la même étendue : ceux que la BD
+    TOPO ne connaît pas, plus proches que son habitation, se disent au rapport
+    avec leur parcelle parmi `parcelles` (Saint-Cyr, 10/11/2026). Un cadastre
+    qui ne répond pas n'arrête pas la DP 2 non plus : la comparaison manque, et
+    le rapport le dit.
 
     Rend (cote, absence) : `absence` est vraie quand la BD TOPO a répondu sans
     habitation à 1 000 m. C'est un résultat, que la légende dit (D5) ; une BD
@@ -969,7 +975,20 @@ def _cote_habitation(clotures, rapport: list):
             f"échoué ({_detail(erreur)}). {SANS_ELLE}"
         )
         return None, False
-    habitation = cotation.cote_habitation(clotures, batiments, rapport)
+    try:
+        cadastre = telecharger_batiments(bbox)
+    except ErreurService as erreur:
+        rapport.append(
+            "Habitation la plus proche : la lecture des bâtiments du cadastre autour "
+            f"de la clôture a échoué ({_detail(erreur)}) ; rien ne dit si des "
+            "bâtiments que la BD TOPO ne connaît pas sont plus proches que son "
+            "habitation. La DP 2 est produite sans cette comparaison, le temps de "
+            "la mise au point."
+        )
+        cadastre = None
+    habitation = cotation.cote_habitation(
+        clotures, batiments, rapport, cadastre=cadastre, parcelles=parcelles
+    )
     return habitation, habitation is None
 
 

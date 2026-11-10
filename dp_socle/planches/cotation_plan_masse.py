@@ -1365,6 +1365,17 @@ RAYON_HABITATION_M = 1000.0
 USAGE_HABITATION = "Résidentiel"
 USAGE_INDIFFERENCIE = "Indifférencié"
 
+#: Un bâtiment du cadastre est connu de la BD TOPO quand ses bâtiments en
+#: recouvrent au moins cette part. Leurs contours ne coïncident pas — à
+#: Saint-Cyr, la maison l'est à 81 %, une remise à 58 % —, mais sur les trois
+#: sites d'épreuve, un bâtiment du cadastre l'est à 50 % ou plus, ou pas du
+#: tout (mesuré le 10/11/2026) : le seuil tombe dans le vide entre les deux.
+PART_CONNUE_DE_LA_BD_TOPO = 0.25
+
+#: Les bâtiments que la BD TOPO ignore, nommés un à un au rapport ; les
+#: suivants se comptent.
+INCONNUS_NOMMES = 3
+
 
 def _traces_de_cloture(clotures):
     """Le trait de la clôture : le contour de ses enclos, et ses tronçons ouverts."""
@@ -1379,7 +1390,41 @@ def _traces_de_cloture(clotures):
     return unary_union(traits) if traits else None
 
 
-def cote_habitation(clotures, batiments, rapport: list):
+def _inconnus_de_la_bd_topo(trace, batiments, cadastre, distance_max, parcelles) -> list:
+    """Les bâtiments du cadastre plus près de la clôture que `distance_max`, que la BD TOPO ignore.
+
+    Rend des (distance, aire, parcelle) du plus proche au plus loin ; la
+    parcelle est la désignation de celle qui le porte, parmi `parcelles`, ou
+    `None` hors d'elles.
+    """
+    connus = unary_union([g for g, _ in batiments]) if batiments else None
+    inconnus = []
+    for batiment in cadastre:
+        geometrie = batiment.geometrie
+        if geometrie is None or geometrie.is_empty or geometrie.area <= 0:
+            continue
+        distance = geometrie.distance(trace)
+        if distance >= distance_max:
+            continue
+        recouverte = 0.0 if connus is None else geometrie.intersection(connus).area / geometrie.area
+        if recouverte >= PART_CONNUE_DE_LA_BD_TOPO:
+            continue
+        point = geometrie.representative_point()
+        parcelle = next((p.designation for p in parcelles if p.geometrie.covers(point)), None)
+        inconnus.append((distance, geometrie.area, parcelle))
+    return sorted(inconnus, key=lambda inconnu: inconnu[0])
+
+
+def _liste_des_inconnus(inconnus) -> str:
+    noms = [
+        f"{nombre_fr(aire, 0)} m² à {_metres(distance, 0)}" + (f" ({parcelle})" if parcelle else "")
+        for distance, aire, parcelle in inconnus[:INCONNUS_NOMMES]
+    ]
+    reste = len(inconnus) - INCONNUS_NOMMES
+    return ", ".join(noms) + (f", et {reste} autre(s)" if reste > 0 else "")
+
+
+def cote_habitation(clotures, batiments, rapport: list, cadastre=None, parcelles=()):
     """La clôture → le bâtiment d'habitation le plus proche, selon la BD TOPO (C4).
 
     `batiments` : des couples (géométrie, propriétés BD TOPO). Le cadastre ne
@@ -1387,6 +1432,13 @@ def cote_habitation(clotures, batiments, rapport: list):
     agricole, à 103 m, quand l'habitation est à 166 m (03/11/2026). Un bâtiment
     d'usage indifférencié plus proche que l'habitation se dit au rapport, avec
     sa distance ; il ne la remplace pas sur le plan.
+
+    `cadastre` : les bâtiments du cadastre autour de la clôture, s'ils ont été
+    lus. Ceux qui sont plus proches que l'habitation, et que la BD TOPO ne
+    connaît pas, se disent au rapport, avec leur parcelle parmi `parcelles` :
+    à Saint-Cyr, 40 m² à 26 m et 935 m² à 90 m, quand l'habitation de la BD TOPO
+    est à 119 m (10/11/2026). Rien ne dit s'ils sont habités ; ils ne la
+    remplacent pas sur le plan.
     """
     trace = _traces_de_cloture(clotures)
     if trace is None or trace.is_empty:
@@ -1409,6 +1461,17 @@ def cote_habitation(clotures, batiments, rapport: list):
             f"{_metres(RAYON_HABITATION_M, 0)} de la clôture selon la BD TOPO — "
             "la légende le dit."
         )
+        inconnus = _inconnus_de_la_bd_topo(
+            trace, batiments, cadastre or [], RAYON_HABITATION_M, parcelles
+        )
+        if inconnus:
+            rapport.append(
+                f"Habitation la plus proche : {len(inconnus)} bâtiment(s) du cadastre à "
+                f"moins de {_metres(RAYON_HABITATION_M, 0)} de la clôture, que la BD TOPO "
+                f"ne connaît pas — {_liste_des_inconnus(inconnus)}. Rien ne dit s'ils "
+                "sont habités : à vérifier sur place, la légende disant qu'aucune "
+                "habitation n'est si proche."
+            )
         return None
     distance, habitation = habitations[0]
     p_c, p_h = nearest_points(trace, habitation)
@@ -1426,6 +1489,14 @@ def cote_habitation(clotures, batiments, rapport: list):
             f"{len(plus_proches)} bâtiment(s) d'usage indifférencié plus proche(s), "
             f"le premier à {_metres(plus_proches[0], 0)}. La BD TOPO ne dit pas "
             "s'ils sont habités : la cote reste sur l'habitation."
+        )
+    inconnus = _inconnus_de_la_bd_topo(trace, batiments, cadastre or [], distance, parcelles)
+    if inconnus:
+        rapport.append(
+            f"Habitation la plus proche, à {_metres(distance, 0)} : {len(inconnus)} "
+            "bâtiment(s) du cadastre plus proche(s), que la BD TOPO ne connaît pas — "
+            f"{_liste_des_inconnus(inconnus)}. Rien ne dit s'ils sont habités : à "
+            "vérifier sur place ; la cote reste sur l'habitation de la BD TOPO."
         )
     return CoteAPoser(
         famille="C4", depart=(p_c.x, p_c.y), arrivee=(p_h.x, p_h.y),

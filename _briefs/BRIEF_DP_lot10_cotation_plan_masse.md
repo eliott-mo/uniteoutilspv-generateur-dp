@@ -308,6 +308,17 @@ où la limite est l'alignement ; « parcellaire » est celui de Saint-Cyr.
   la légende le dit : c'est un résultat, pas une anomalie. Hors du cadre de la
   DP 2, la cote s'arrête au bord du cadre et le dit : « 948 m (habitation la
   plus proche, hors cadre) » à Auzainvilliers.
+- Le cadastre et la BD TOPO ne connaissent pas les mêmes bâtiments (10/11). La
+  relecture de l'épreuve A3 a vu, à Saint-Cyr, des bâtiments cadastrés plus
+  proches que l'habitation retenue : la plupart sont des serres, mais deux sont
+  absents de la BD TOPO, 40 m² à 26 m et 935 m² à 90 m, et rien ne le disait.
+  Les bâtiments du cadastre se lisent donc aussi à 1 000 m de la clôture, et
+  ceux que la BD TOPO ne recouvre pas, plus proches que son habitation — ou à
+  moins de 1 000 m quand elle n'en a pas —, se disent au rapport avec leur
+  parcelle, pour qu'on aille voir. Ils ne remplacent pas l'habitation sur le
+  plan. Mesuré le 10/11 sur les trois sites d'épreuve : un bâtiment du cadastre
+  est recouvert par ceux de la BD TOPO à 50 % ou plus, ou pas du tout ; 2 sont
+  absents à Saint-Cyr, 6 à Auzainvilliers, dont 46 m² à 71 m, 2 à Sarnois.
 - Les voies servent à C2 et à C8 (08/11), avec le cadastre pour dire
   lesquelles sont publiques. La recherche va à 300 m de la clôture, et écarte
   d'office les `Sentier`, `Escalier` et `Piste cyclable`. S'il n'y a aucune
