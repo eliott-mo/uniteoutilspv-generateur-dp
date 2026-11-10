@@ -319,6 +319,18 @@ où la limite est l'alignement ; « parcellaire » est celui de Saint-Cyr.
   plan. Mesuré le 10/11 sur les trois sites d'épreuve : un bâtiment du cadastre
   est recouvert par ceux de la BD TOPO à 50 % ou plus, ou pas du tout ; 2 sont
   absents à Saint-Cyr, 6 à Auzainvilliers, dont 46 m² à 71 m, 2 à Sarnois.
+- La BD TOPO dit quel bâtiment est une habitation ; la cote va à son contour
+  au cadastre (10/11). C'est celui que la DP 2 hachure, et celui que mesure
+  l'instructeur : à Saint-Cyr, la maison est à 111,5 m par le cadastre, à
+  119,5 m par la BD TOPO. La plus proche se juge sur ce contour, comme les
+  bâtiments d'usage indifférencié qui la précèdent. Le contour est le bâtiment
+  du cadastre dont la partie commune avec l'habitation fait au moins 25 % du
+  plus petit des deux : une maison n'est parfois qu'une partie d'un grand
+  bâtiment cadastral. Sur les trois sites, les 176 habitations à 1 000 m en
+  ont toutes un, recouvert de 52 à 100 %. Une habitation que le cadastre n'a
+  pas se cote sur son contour de la BD TOPO, et le rapport le dit. Mesuré : C4
+  passe de 119 à 111 m à Saint-Cyr, de 948 à 946 m à Auzainvilliers, de 166 à
+  170 m à Sarnois.
 - Les voies servent à C2 et à C8 (08/11), avec le cadastre pour dire
   lesquelles sont publiques. La recherche va à 300 m de la clôture, et écarte
   d'office les `Sentier`, `Escalier` et `Piste cyclable`. S'il n'y a aucune

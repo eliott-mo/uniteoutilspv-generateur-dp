@@ -916,6 +916,72 @@ def test_sans_habitation_un_batiment_du_cadastre_que_la_bd_topo_ignore_se_dit():
     assert any("1 bâtiment(s) du cadastre" in m and "100 m² à 400 m" in m for m in rapport), rapport
 
 
+def test_la_cote_de_l_habitation_vise_son_contour_cadastral():
+    """La BD TOPO dit quel bâtiment est une habitation ; la cote va à son contour au cadastre.
+
+    C'est le contour que la DP 2 hachure, et celui que mesure l'instructeur :
+    à Saint-Cyr, la maison est à 111,5 m par le cadastre, à 119,5 m par la BD
+    TOPO (relecture de l'épreuve A3, 10/11/2026).
+    """
+    maison = boite(320, 0, 330, 10)
+    rapport = []
+
+    cote = cotation.cote_habitation(
+        CLOTURE_C4, [(maison, {"usage_1": "Résidentiel"})], rapport,
+        cadastre=[_du_cadastre(boite(312, 0, 330, 10))],
+    )
+
+    assert cote.texte == "112 m (habitation la plus proche)"
+    assert cote.arrivee[0] == pytest.approx(X0 + 312.0)
+    assert not any("contour de la BD TOPO" in m for m in rapport), rapport
+
+
+def test_la_plus_proche_des_habitations_se_juge_sur_leur_contour_cadastral():
+    """Une maison à 120 m par la BD TOPO, 110 m par le cadastre, passe devant une à 115 m."""
+    a, b = boite(320, 0, 330, 10), boite(315, 50, 325, 60)
+    cadastre = [_du_cadastre(boite(310, 0, 330, 10)), _du_cadastre(boite(315, 50, 325, 60))]
+
+    cote = cotation.cote_habitation(
+        CLOTURE_C4, [(a, {"usage_1": "Résidentiel"}), (b, {"usage_1": "Résidentiel"})], [],
+        cadastre=cadastre,
+    )
+
+    assert cote.texte == "110 m (habitation la plus proche)"
+    assert cote.arrivee[0] == pytest.approx(X0 + 310.0)
+
+
+def test_une_maison_dans_un_grand_batiment_du_cadastre_en_prend_le_contour():
+    """Une ferme : la maison n'est qu'un vingtième du bâtiment cadastral qui la contient.
+
+    Le recouvrement se mesure sur le plus petit des deux : sur les 176
+    habitations des trois sites d'épreuve, il va de 52 à 100 % (10/11/2026).
+    """
+    maison = boite(320, 0, 330, 10)
+
+    cote = cotation.cote_habitation(
+        CLOTURE_C4, [(maison, {"usage_1": "Résidentiel"})], [],
+        cadastre=[_du_cadastre(boite(300, 0, 360, 40))],
+    )
+
+    assert cote.texte == "100 m (habitation la plus proche)"
+
+
+def test_une_habitation_sans_contour_cadastral_se_cote_sur_la_bd_topo_et_le_dit():
+    """Aucun cas sur les trois sites d'épreuve ; une maison neuve, que le cadastre
+    n'a pas encore, en serait un. Le repli se dit : aucun repli silencieux."""
+    maison = boite(320, 0, 330, 10)
+    rapport = []
+
+    cote = cotation.cote_habitation(
+        CLOTURE_C4, [(maison, {"usage_1": "Résidentiel"})], rapport,
+        cadastre=[_du_cadastre(boite(500, 0, 510, 10))],
+    )
+
+    assert cote.texte == "120 m (habitation la plus proche)"
+    assert any("aucun bâtiment du cadastre ne la recouvre" in m
+               and "contour de la BD TOPO" in m for m in rapport), rapport
+
+
 def test_un_batiment_que_la_bd_topo_recouvre_en_partie_est_connu_d_elle():
     """Les contours du cadastre et de la BD TOPO ne coïncident pas : à Saint-Cyr,
     la maison est recouverte à 81 %, une remise à 58 %. Mesuré sur les trois

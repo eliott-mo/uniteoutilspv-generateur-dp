@@ -1060,7 +1060,8 @@ Les cotes du plan de masse lisent de la BD TOPO `nature` et `cpx_numero` sur
 les voies, `usage_1` sur les bâtiments : le cadastre ne dit pas l'usage d'un
 bâtiment. Ses géométries sont en 3D, et ramenées en plan. Les bâtiments du
 cadastre se lisent alors une seconde fois, sur la même étendue que ceux de la
-BD TOPO, pour dire ceux qu'elle ne connaît pas. Le test réseau de
+BD TOPO : la cote de l'habitation va à son contour cadastral, et le rapport
+dit ceux que la BD TOPO ne connaît pas. Le test réseau de
 `tests/test_ign.py` vérifie, chaque lundi, que la vraie BD TOPO porte encore
 ces attributs : renommés, ils feraient passer toute voie pour anonyme et tout
 bâtiment pour inhabité, sans erreur — et la légende annoncerait qu'aucune
@@ -5016,20 +5017,36 @@ Une cote qu'une règle écarte, ou qui ne trouve pas de place nette, est nommée
 rapport avec sa raison : une paire d'ouvrages « située par un troisième », une
 cote clôture → limite essayée à cinq endroits du côté, une voie écartée parce
 qu'elle passe sur des parcelles cadastrées. Aucune n'est retirée en silence.
-
-L'habitation la plus proche (C4) est celle de la BD TOPO : le cadastre ne dit
-pas l'usage d'un bâtiment. Mais il ne connaît pas les mêmes bâtiments qu'elle.
-La DP 2 lit donc aussi les bâtiments du cadastre à 1 000 m de la clôture, et
-nomme au rapport, avec leur parcelle, ceux que la BD TOPO ne recouvre pas et
-qui sont plus proches que son habitation : « 2 bâtiment(s) du cadastre plus
-proche(s), que la BD TOPO ne connaît pas — 40 m² à 26 m (AB 0100), 935 m² à
-90 m (AB 0016) » à Saint-Cyr (10/11/2026). Rien ne dit s'ils sont habités ; la
-cote reste sur l'habitation de la BD TOPO, et c'est au chef de projet d'aller
-voir. Sur les trois sites d'épreuve, un bâtiment du cadastre est recouvert par
-ceux de la BD TOPO à 50 % ou plus, ou pas du tout : le seuil de 25 %
-(`PART_CONNUE_DE_LA_BD_TOPO`) tombe dans le vide entre les deux.
 Une BD TOPO qui ne répond pas n'arrête pas la DP 2 (D11) : voir « Ce qui
 deviendra bloquant ».
+
+### L'habitation : la BD TOPO dit laquelle, le cadastre dit où (C4)
+
+Le cadastre ne dit pas l'usage d'un bâtiment : c'est la BD TOPO qui dit
+lesquels sont des habitations (`usage_1` à `Résidentiel`). Mais la cote va au
+contour de l'habitation **au cadastre** (10/11/2026) : c'est celui que la DP 2
+hachure, et celui que mesure l'instructeur. À Saint-Cyr, la maison est à
+111,5 m par le cadastre, à 119,5 m par la BD TOPO. La plus proche se juge sur
+ce contour, comme les bâtiments d'usage indifférencié qui la précèdent.
+
+Le contour est le bâtiment du cadastre dont la partie commune avec
+l'habitation fait au moins 25 % du plus petit des deux
+(`PART_COMMUNE_DU_CONTOUR`) : une maison n'est parfois qu'une partie d'un grand
+bâtiment cadastral, une ferme. Sur les trois sites d'épreuve, les 176
+habitations à 1 000 m en ont toutes un, recouvert de 52 à 100 %. Une habitation
+que le cadastre n'a pas se cote sur son contour de la BD TOPO, et le rapport le
+dit ; un cadastre qui ne répond pas aussi.
+
+Les deux sources ne connaissent pas non plus les mêmes bâtiments. La DP 2 lit
+les bâtiments du cadastre à 1 000 m de la clôture, et nomme au rapport, avec
+leur parcelle, ceux que la BD TOPO ne recouvre pas et qui sont plus proches que
+son habitation : « 2 bâtiment(s) du cadastre plus proche(s), que la BD TOPO ne
+connaît pas — 40 m² à 26 m (AB 0100), 935 m² à 90 m (AB 0016) » à Saint-Cyr.
+Rien ne dit s'ils sont habités ; la cote reste sur l'habitation que donne la
+BD TOPO, et c'est au chef de projet d'aller voir. Sur les trois sites, un
+bâtiment du cadastre est recouvert par ceux de la BD TOPO à 50 % ou plus, ou
+pas du tout : le seuil de 25 % (`PART_CONNUE_DE_LA_BD_TOPO`) tombe dans le vide
+entre les deux.
 
 ### Ce que l'épreuve a mesuré
 
@@ -5047,7 +5064,7 @@ tant que le plan et le tableau ne s'accordent pas.
 | C1, tables → limite | 4 côtés : 15,7, 6,6, 5,7 et 6,8 m | 6 côtés, de 11,4 à 25,2 m | 5 côtés, de 10,4 à 20,8 m ; le sixième est à 48,4 m |
 | C1, clôture → limite | aucune : la clôture est sur la limite | 12,8, 6,0 et 5,2 m ; deux côtés trop courts n'en reçoivent pas | 1,3, 1,5, 3,1 et 5,8 m ; un côté de 44 m n'en reçoit pas |
 | C2 | 23,3 m (extrémité de la route) | 11,6 m (axe de la D18) | 3,0 m (axe du chemin) |
-| C4 | 119 m, hors cadre | 948 m, hors cadre | 166 m |
+| C4, au contour cadastral | 111 m, hors cadre (119 m par la BD TOPO) | 946 m, hors cadre (948 m) | 170 m (166 m) |
 | C5 | 4,5 m | 3,5 m | 5,0 m |
 | C6 | 4,4 et 3,5 m | 3,5 m, piste existante et piste à créer | 4,0 m |
 | C3 | 2 paires cotées sur 3 à moins de 30 m ; 3 cotes à la limite | 9 sur 24 ; 8 à la limite | 7 sur 18 ; 7 à la limite |

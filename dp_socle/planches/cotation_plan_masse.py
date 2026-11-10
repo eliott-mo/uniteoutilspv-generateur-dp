@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
+from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
@@ -1376,6 +1377,41 @@ PART_CONNUE_DE_LA_BD_TOPO = 0.25
 #: suivants se comptent.
 INCONNUS_NOMMES = 3
 
+#: Un bâtiment du cadastre est le contour d'un bâtiment de la BD TOPO quand
+#: leur partie commune fait au moins cette part du plus petit des deux : une
+#: maison n'est parfois qu'une partie d'un grand bâtiment cadastral, une ferme.
+#: Mesuré le 10/11/2026 : les 176 habitations des trois sites d'épreuve ont
+#: toutes un bâtiment du cadastre qui les recouvre ainsi, de 52 à 100 %.
+PART_COMMUNE_DU_CONTOUR = 0.25
+
+
+def _contours_au_cadastre(cadastre):
+    """La fonction qui rend le contour au cadastre d'un bâtiment de la BD TOPO, ou `None`.
+
+    La cote de l'habitation va à ce contour : c'est celui que la DP 2 hachure,
+    et celui que mesure l'instructeur (relecture de l'épreuve A3, 10/11/2026).
+    """
+    geometries = [
+        b.geometrie for b in cadastre or ()
+        if b.geometrie is not None and not b.geometrie.is_empty and b.geometrie.area > 0
+    ]
+    if not geometries:
+        return lambda geometrie: None
+    arbre = STRtree(geometries)
+
+    def contour(geometrie):
+        if geometrie.area <= 0:
+            return None
+        siens = []
+        for rang in arbre.query(geometrie):
+            candidat = geometries[rang]
+            commune = candidat.intersection(geometrie).area
+            if commune >= PART_COMMUNE_DU_CONTOUR * min(candidat.area, geometrie.area):
+                siens.append(candidat)
+        return unary_union(siens) if siens else None
+
+    return contour
+
 
 def _traces_de_cloture(clotures):
     """Le trait de la clôture : le contour de ses enclos, et ses tronçons ouverts."""
@@ -1425,30 +1461,43 @@ def _liste_des_inconnus(inconnus) -> str:
 
 
 def cote_habitation(clotures, batiments, rapport: list, cadastre=None, parcelles=()):
-    """La clôture → le bâtiment d'habitation le plus proche, selon la BD TOPO (C4).
+    """La clôture → le bâtiment d'habitation le plus proche (C4).
 
-    `batiments` : des couples (géométrie, propriétés BD TOPO). Le cadastre ne
-    dit pas l'usage : sur Sarnois, son bâtiment le plus proche est un hangar
-    agricole, à 103 m, quand l'habitation est à 166 m (03/11/2026). Un bâtiment
-    d'usage indifférencié plus proche que l'habitation se dit au rapport, avec
-    sa distance ; il ne la remplace pas sur le plan.
+    `batiments` : des couples (géométrie, propriétés BD TOPO). C'est la BD TOPO
+    qui dit quel bâtiment est une habitation : le cadastre ne dit pas l'usage.
+    Sur Sarnois, son bâtiment le plus proche est un hangar agricole, à 103 m,
+    quand l'habitation est à 166 m (03/11/2026). Un bâtiment d'usage
+    indifférencié plus proche que l'habitation se dit au rapport, avec sa
+    distance ; il ne la remplace pas sur le plan.
 
     `cadastre` : les bâtiments du cadastre autour de la clôture, s'ils ont été
-    lus. Ceux qui sont plus proches que l'habitation, et que la BD TOPO ne
-    connaît pas, se disent au rapport, avec leur parcelle parmi `parcelles` :
-    à Saint-Cyr, 40 m² à 26 m et 935 m² à 90 m, quand l'habitation de la BD TOPO
-    est à 119 m (10/11/2026). Rien ne dit s'ils sont habités ; ils ne la
+    lus. La cote va au contour au cadastre de l'habitation, que la DP 2
+    hachure et que mesure l'instructeur, et la plus proche se juge sur lui :
+    à Saint-Cyr, 111,5 m par le cadastre, 119,5 m par la BD TOPO (relecture de
+    l'épreuve A3, 10/11/2026). Une habitation que le cadastre n'a pas se cote
+    sur son contour de la BD TOPO, et le rapport le dit. Les bâtiments du
+    cadastre plus proches que l'habitation, et que la BD TOPO ne connaît pas,
+    se disent au rapport avec leur parcelle parmi `parcelles` : à Saint-Cyr,
+    40 m² à 26 m et 935 m² à 90 m. Rien ne dit s'ils sont habités ; ils ne la
     remplacent pas sur le plan.
     """
     trace = _traces_de_cloture(clotures)
     if trace is None or trace.is_empty:
         rapport.append("Habitation la plus proche : pas de clôture au plan, rien à coter.")
         return None
+    contour_de = _contours_au_cadastre(cadastre)
+
+    def a_coter(geometrie):
+        """(distance, contour coté, vrai si ce contour est celui de la BD TOPO faute de cadastre)."""
+        contour = contour_de(geometrie)
+        cible = geometrie if contour is None else contour
+        return cible.distance(trace), cible, contour is None
+
     # Trié sur la seule distance : à égalité, deux maisons mitoyennes, le tri
     # comparait les bâtiments eux-mêmes, et levait (relecture du 09/11/2026).
     habitations = sorted(
         (
-            (g.distance(trace), g)
+            a_coter(g)
             for g, proprietes in batiments
             if (proprietes or {}).get("usage_1") == USAGE_HABITATION
         ),
@@ -1473,11 +1522,16 @@ def cote_habitation(clotures, batiments, rapport: list, cadastre=None, parcelles
                 "habitation n'est si proche."
             )
         return None
-    distance, habitation = habitations[0]
+    distance, habitation, sans_contour_cadastral = habitations[0]
+    if cadastre is not None and sans_contour_cadastral:
+        rapport.append(
+            f"Habitation la plus proche, à {_metres(distance, 0)} : aucun bâtiment du "
+            "cadastre ne la recouvre, la cote vise son contour de la BD TOPO."
+        )
     p_c, p_h = nearest_points(trace, habitation)
     plus_proches = sorted(
         d for d in (
-            g.distance(trace)
+            a_coter(g)[0]
             for g, proprietes in batiments
             if (proprietes or {}).get("usage_1") == USAGE_INDIFFERENCIE
         )
@@ -1496,7 +1550,7 @@ def cote_habitation(clotures, batiments, rapport: list, cadastre=None, parcelles
             f"Habitation la plus proche, à {_metres(distance, 0)} : {len(inconnus)} "
             "bâtiment(s) du cadastre plus proche(s), que la BD TOPO ne connaît pas — "
             f"{_liste_des_inconnus(inconnus)}. Rien ne dit s'ils sont habités : à "
-            "vérifier sur place ; la cote reste sur l'habitation de la BD TOPO."
+            "vérifier sur place ; la cote reste sur l'habitation que donne la BD TOPO."
         )
     return CoteAPoser(
         famille="C4", depart=(p_c.x, p_c.y), arrivee=(p_h.x, p_h.y),

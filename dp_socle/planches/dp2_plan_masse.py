@@ -950,11 +950,12 @@ def _cote_habitation(clotures, rapport: list, parcelles=()):
     lecture (`ErreurPlafondWFS`, qui dérive d'`ErreurService`), n'arrête pas la
     DP 2 : la cote manque, et le rapport le dit (D11).
 
-    Les bâtiments du cadastre se lisent sur la même étendue : ceux que la BD
-    TOPO ne connaît pas, plus proches que son habitation, se disent au rapport
-    avec leur parcelle parmi `parcelles` (Saint-Cyr, 10/11/2026). Un cadastre
-    qui ne répond pas n'arrête pas la DP 2 non plus : la comparaison manque, et
-    le rapport le dit.
+    Les bâtiments du cadastre se lisent sur la même étendue : la cote va au
+    contour cadastral de l'habitation, et ceux que la BD TOPO ne connaît pas,
+    plus proches qu'elle, se disent au rapport avec leur parcelle parmi
+    `parcelles` (Saint-Cyr, 10/11/2026). Un cadastre qui ne répond pas
+    n'arrête pas la DP 2 non plus : la cote vise alors le contour de la BD
+    TOPO, la comparaison manque, et le rapport le dit.
 
     Rend (cote, absence) : `absence` est vraie quand la BD TOPO a répondu sans
     habitation à 1 000 m. C'est un résultat, que la légende dit (D5) ; une BD
@@ -980,10 +981,10 @@ def _cote_habitation(clotures, rapport: list, parcelles=()):
     except ErreurService as erreur:
         rapport.append(
             "Habitation la plus proche : la lecture des bâtiments du cadastre autour "
-            f"de la clôture a échoué ({_detail(erreur)}) ; rien ne dit si des "
-            "bâtiments que la BD TOPO ne connaît pas sont plus proches que son "
-            "habitation. La DP 2 est produite sans cette comparaison, le temps de "
-            "la mise au point."
+            f"de la clôture a échoué ({_detail(erreur)}) : la cote vise le contour "
+            "de l'habitation dans la BD TOPO, et rien ne dit si des bâtiments qu'elle "
+            "ne connaît pas en sont plus proches. La DP 2 est produite sans le "
+            "cadastre, le temps de la mise au point."
         )
         cadastre = None
     habitation = cotation.cote_habitation(

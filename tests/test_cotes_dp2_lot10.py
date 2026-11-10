@@ -628,6 +628,33 @@ def test_la_cote_de_l_habitation_se_mesure_dans_le_pdf(dp2):
     ), sortie.details["avertissements"]
 
 
+def test_la_cote_de_l_habitation_vise_le_contour_que_le_cadastre_dessine(dp2):
+    """La DP 2 hachure les bâtiments du cadastre : la flèche s'arrête sur le leur.
+
+    L'habitation de la BD TOPO est à 50 m de la clôture ; son contour au
+    cadastre, qui la recouvre et déborde de 4 m vers le site, est à 46 m. À
+    Saint-Cyr : 111,5 m par le cadastre, 119,5 m par la BD TOPO (relecture de
+    l'épreuve A3, 10/11/2026).
+    """
+    from dp_socle.ign import Batiment
+
+    contour = box(X0 + 88.0, Y0 + 166.0, X0 + 110.0, Y0 + 180.0)
+    sortie, vers_la_page = dp2(
+        batiments=[_bati(HABITATION, "Résidentiel")],
+        batiments_cadastre=[Batiment(contour, "Bâtiment en dur")],
+    )
+
+    attendue = CoteAttendue(
+        "habitation", CLOTURE_NORD, Y0 + 166.0, (X0 + 88.0, X0 + 110.0), False, ""
+    )
+    pointes = _pointes_aux_bouts(sortie.chemin, attendue, vers_la_page)
+    assert pointes is not None, "pas de cote de la clôture au contour cadastral de l'habitation"
+    mesure_mm = math.dist(*pointes) * MM_PAR_PT
+    attendu_mm = 46.0 * 1000.0 / sortie.echelle
+    assert abs(mesure_mm - attendu_mm) / attendu_mm < ECART_ADMIS
+    assert _texte_de(sortie.chemin, "46 m (habitation la plus proche)")
+
+
 #: Un bâtiment du cadastre de 40 m², sur le terrain, à 1 m au nord de la
 #: clôture, que la BD TOPO ne connaît pas.
 INCONNU_DE_LA_BD_TOPO = box(X0 + 60.0, Y0 + 121.0, X0 + 68.0, Y0 + 126.0)
