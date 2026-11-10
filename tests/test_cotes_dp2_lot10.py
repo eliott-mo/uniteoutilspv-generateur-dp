@@ -17,6 +17,7 @@ cotes attendues se lisent sur le dessin du site, sans relire le code.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -136,7 +137,7 @@ def dp2(tmp_path, monkeypatch):
     monkeypatch.setattr(dp3_coupes, "telecharger_parcelles", parcelles)
 
     def produire(entites=None, terrain=None, parametres=None, troncons=(), batiments=(),
-                 cadastre_injoignable=False):
+                 cadastre_injoignable=False, legendes=None):
         courant.update(troncons=troncons, batiments=batiments,
                        cadastre_injoignable=cadastre_injoignable, lectures_du_parcellaire=0)
         terrain = courant["terrain"] = terrain or _terrain()
@@ -156,6 +157,7 @@ def dp2(tmp_path, monkeypatch):
         projet = Projet(
             nom="Essai", commune="Sarnois", code_postal="60210",
             date="2026-11-09", emprise=str(emprise), libelle="Essai lot 10",
+            legendes=legendes,
         )
         produire.dernier = {"projet": projet, "dossier": dossier}
         sortie = dp2_plan_masse.generer(
@@ -682,19 +684,36 @@ def _pannes():
     ]
 
 
+#: Une valeur de cote, telle que la page l'écrit : « 11,6 m (axe de la D18) »,
+#: « 9,6 m ». Le pied écrit aussi « Voie publique (axe, … » et « habitation la
+#: plus proche » sur toute DP 2 (D9) : ce n'est pas une cote, et chercher ces
+#: mots dans tous les textes de la page ne prouve plus rien depuis le pied.
+VALEUR_DE_COTE = re.compile(r"^\d[\d ]*(,\d+)? m\b")
+
+
+def _valeurs_de_cote(ecrits) -> list:
+    """Les textes de la page qui sont des valeurs de cote, et eux seuls."""
+    return [t for t in ecrits if VALEUR_DE_COTE.match(t)]
+
+
 @pytest.mark.parametrize("panne", _pannes(), ids=["injoignable", "plafond"])
 def test_une_bd_topo_qui_ne_repond_pas_n_arrete_pas_la_dp2(dp2, panne):
     """La DP 2 sort sans C2, C4 ni C8, et le rapport le dit en clair (D11).
 
     C'est la règle de la phase de mise au point (README, « Ce qui deviendra
     bloquant »). Le plafond de lecture compte comme une panne : une liste
-    tronquée ferait manquer l'habitation ou la voie la plus proche.
+    tronquée ferait manquer l'habitation ou la voie la plus proche. Une BD TOPO
+    qui n'a pas répondu ne dit rien non plus de l'absence d'habitation : la
+    légende ne l'annonce pas.
     """
     sortie, _ = dp2(troncons=panne, batiments=panne)
 
-    ecrits = [t for *_, t in textes(sortie.chemin)]
-    assert not any("habitation" in t or "(axe" in t or "(extrémité" in t for t in ecrits)
-    assert any(LIBELLE_TABLES in t for t in ecrits), "les cotes du contrat ont disparu"
+    ecrits = _ecrits(sortie.chemin)
+    cotes = _valeurs_de_cote(ecrits)
+    assert not any("habitation" in t or "(axe" in t or "(extrémité" in t for t in cotes), cotes
+    assert any(LIBELLE_TABLES in t for t in cotes), "les cotes du contrat ont disparu"
+    assert _absence() not in ecrits
+    assert "Axe de voie (BD TOPO, IGN)" not in ecrits
     messages = sortie.details["avertissements"]
     assert any(m.startswith("Habitation la plus proche") and "BD TOPO" in m for m in messages), messages
     assert any(m.startswith("Cotes vers la voie publique") and "BD TOPO" in m for m in messages), messages
@@ -709,8 +728,10 @@ def test_un_parcellaire_qui_ne_repond_pas_autour_des_constructions_n_arrete_pas_
     """
     sortie, _ = dp2(troncons=[_voie(D18, cpx_numero="D18")], cadastre_injoignable=True)
 
-    ecrits = [t for *_, t in textes(sortie.chemin)]
-    assert not any("(axe" in t or "(extrémité" in t for t in ecrits)
+    ecrits = _ecrits(sortie.chemin)
+    cotes = _valeurs_de_cote(ecrits)
+    assert not any("(axe" in t or "(extrémité" in t for t in cotes), cotes
+    assert "Axe de voie (BD TOPO, IGN)" not in ecrits
     assert any(
         m.startswith("Cotes vers la voie publique") and "parcellaire" in m
         for m in sortie.details["avertissements"]
@@ -947,3 +968,181 @@ def test_une_valeur_ne_se_pose_pas_sur_le_prolongement_d_une_autre_cote(tmp_path
     assert abs(centre_b - py) > 2.0, (
         f"« X » posée à {centre_b - py:+.1f} mm du prolongement de la cote A"
     )
+
+
+# ---------------------------------------------------------------------------
+# D12 — les trois dimensions, en légende
+# ---------------------------------------------------------------------------
+
+
+def _ecrits(chemin) -> list:
+    """Les textes de la page. L'espace insécable des milliers, « 1 000 », s'y lit
+    en espace simple : le PDF la rend ainsi, et c'est la même chose à l'œil."""
+    return [t.replace("\xa0", " ") for *_, t in textes(chemin)]
+
+
+def test_la_legende_porte_les_dimensions_de_chaque_construction(dp2):
+    """Emprise et hauteur du catalogue, hauteur maximale des tables, clôture et portail (D12).
+
+    Auzainvilliers demande un plan « coté dans les trois dimensions » : la
+    troisième est la hauteur, et elle est en légende plutôt que sur le plan,
+    où elle chargerait des zones déjà serrées.
+    """
+    sortie, _ = dp2()
+    ecrits = _ecrits(sortie.chemin)
+    for attendu in (
+        "Poste de livraison / transformation (12 × 3 m, h 3 m)",
+        "Citerne incendie (11,7 × 9,3 m, h 1 m)",
+        "Panneaux photovoltaïques (hauteur maximale 3,53 m)",
+        "Clôture du projet solaire (h 2 m)",
+        "Portail (h 2 m)",
+    ):
+        assert attendu in ecrits, (attendu, ecrits)
+
+
+def test_un_intitule_renomme_garde_ses_dimensions(dp2):
+    """La maquette ne les posait que sur l'intitulé par défaut : renommé, il les perdait (D12)."""
+    sortie, _ = dp2(legendes={"pdl_ptr": "Poste de livraison"})
+    assert "Poste de livraison (12 × 3 m, h 3 m)" in _ecrits(sortie.chemin)
+
+
+def test_la_legende_s_elargit_a_son_intitule_le_plus_long():
+    """Pas de retour à la ligne : la légende s'élargit plutôt que de laisser déborder (D12)."""
+    from dp_socle.planche import TAILLE_COURANTE, Planche, Style
+    from dp_socle.planches import dp2_plan_masse
+    from dp_socle.planches.legende import ECART_LIBELLE_MM, LARGEUR_SYMBOLE_MM, MARGE_MM
+    from dp_socle.planches.palette import EntreeDP
+
+    planche = Planche(titre="T", numero="T", projet="P", date="10/11/2026")
+    courte = EntreeDP("Portail (h 2 m)", Style())
+    longue = EntreeDP(
+        "Poste de livraison et de transformation du parc photovoltaïque (12 × 3 m, h 3 m)",
+        Style(),
+    )
+    assert dp2_plan_masse._largeur_de_legende(planche, [courte]) == dp2_plan_masse.LARGEUR_LEGENDE_MM
+    besoin = (
+        planche.mesurer_texte(longue.libelle, TAILLE_COURANTE)
+        + 2 * MARGE_MM + LARGEUR_SYMBOLE_MM + ECART_LIBELLE_MM
+    )
+    largeur = dp2_plan_masse._largeur_de_legende(planche, [courte, longue])
+    assert largeur > dp2_plan_masse.LARGEUR_LEGENDE_MM
+    assert besoin <= largeur <= besoin + 2.0
+
+
+# ---------------------------------------------------------------------------
+# D9 — ce que la légende et le pied disent
+# ---------------------------------------------------------------------------
+
+
+def _absence():
+    from dp_socle.planche import nombre_fr
+
+    texte = f"Aucune habitation à moins de {nombre_fr(1000, 0)} m de la clôture (BD TOPO, IGN)"
+    return texte.replace("\xa0", " ")
+
+
+def test_la_legende_annonce_les_cotes_et_l_axe_de_voie(dp2):
+    """« Cote, en mètres », et « Axe de voie (BD TOPO, IGN) » quand C2 ou C8 en dessine un (D9)."""
+    sortie, _ = dp2(troncons=[_voie(D18, cpx_numero="D18")])
+    ecrits = _ecrits(sortie.chemin)
+    assert "Cote, en mètres" in ecrits
+    assert "Axe de voie (BD TOPO, IGN)" in ecrits
+
+    sans_voie, _ = dp2()
+    assert "Axe de voie (BD TOPO, IGN)" not in _ecrits(sans_voie.chemin)
+
+
+def test_l_absence_d_habitation_se_dit_en_legende(dp2):
+    """Aucune habitation à 1 000 m : un résultat, pas une anomalie ; la légende le dit (D5).
+
+    Une BD TOPO qui n'a pas répondu ne dit rien de l'absence : le rapport dit
+    la panne, la légende se tait.
+    """
+    sortie, _ = dp2(batiments=[])
+    assert _absence() in _ecrits(sortie.chemin)
+
+    en_panne, _ = dp2(batiments=_pannes()[0])
+    assert _absence() not in _ecrits(en_panne.chemin)
+
+
+PIED_DP2 = (
+    "Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain "
+    "d'assiette (parcellaire IGN). Voie publique (axe, ou extrémité quand elle s'arrête "
+    "avant le site) et habitation la plus proche selon la BD TOPO (IGN).",
+    "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; "
+    "clôture et portail : standard UNITe ; tables : hauteur maximale du tableau bilan).",
+)
+PIED_OUVRAGES = (
+    "Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en "
+    "deçà de 30 m ; batteries et locaux de stockage cotés à la limite parcellaire à toute "
+    "distance.",
+    "Batteries et citernes : distance la plus courte jusqu'aux panneaux ; poste de "
+    "livraison coté jusqu'à l'axe de la voie publique la plus proche, en deçà de 30 m.",
+)
+
+
+def test_le_pied_enonce_les_regles_une_ligne_par_idee(dp2):
+    """Les règles des cotes et de la légende sur la DP 2 ; celles des ouvrages sur la planche
+    qui porte leurs cotes (D9). D'un seul tenant, la phrase dépassait 200 mm (07/11/2026).
+    """
+    sortie, _ = dp2(entites=_site_aux_citernes_serrees())
+    ecrits = _ecrits(sortie.chemin)
+    for ligne in PIED_DP2:
+        assert ligne in ecrits, ligne
+    # La zone technique est partie sur la DP 2 bis : ses règles l'y suivent.
+    detail = sortie.details["planches_de_detail"][0]
+    for ligne in PIED_OUVRAGES:
+        assert ligne in _ecrits(detail.chemin), ligne
+        assert ligne not in ecrits, ligne
+
+
+def test_la_legende_ne_recouvre_pas_une_cote(dp2):
+    """Posée sans connaître les cotes, la légende en cachait une (Auzainvilliers, 03/11) (D9).
+
+    Une habitation au nord-ouest tire la cote C4 sous le coin haut gauche, où
+    la légende se pose d'ordinaire : elle passe à un autre coin.
+    """
+    au_nord_ouest = box(X0 - 70.0, Y0 + 150.0, X0 - 60.0, Y0 + 160.0)
+    sortie, _ = dp2(batiments=[_bati(au_nord_ouest, "Résidentiel")])
+    titre = [(x, y) for x, y, _, t in textes(sortie.chemin) if t == "Légende"]
+    assert titre, "pas de légende sur la planche"
+    largeur_pt, _ = format_page(sortie.chemin)
+    assert titre[0][0] > largeur_pt / 2.0, "la légende est restée au coin haut gauche, sur la cote"
+
+
+def test_la_legende_passe_sur_deux_colonnes_faute_de_coin_en_une():
+    """Aucun coin ne la reçoit sur une colonne : elle passe sur deux, deux fois moins haute ;
+    faute de coin même ainsi, au coin le moins dessiné, et le rapport le dit (D9).
+    """
+    from dp_socle.planche import Planche
+    from dp_socle.planches import dp2_plan_masse
+    from dp_socle.planches.legende import hauteur_bloc
+
+    planche = Planche(titre="T", numero="T", projet="P", date="10/11/2026", echelle=1000)
+    planche.centrer_sur((1000.0, 1000.0))
+    x, y, largeur_zone, hauteur_zone = planche.zone_dessin()
+    px, py = planche.transformation.point(1000.0, 1000.0)
+    hauteur = hauteur_bloc(14)
+
+    def a_la_hauteur(y_mm):
+        """Une ligne Lambert 93 qui traverse la planche à la hauteur papier `y_mm`."""
+        y_l93 = 1000.0 - (y_mm - py)
+        return LineString([(700.0, y_l93), (1300.0, y_l93)])
+
+    # Deux traits sous les coins à une colonne, et pas sous ceux à deux.
+    traits = [
+        a_la_hauteur(y + 3.0 + 0.75 * hauteur),
+        a_la_hauteur(y + hauteur_zone - 3.0 - 0.75 * hauteur),
+    ]
+    position, colonnes, message = dp2_plan_masse._place_de_la_legende(
+        planche, [], dp2_plan_masse.LARGEUR_LEGENDE_MM, 14, traits, 0.0
+    )
+    assert colonnes == 2 and position == (x + 3.0, y + 3.0)
+    assert "deux colonnes" in message
+
+    # Des traits partout : au coin le moins dessiné, et le rapport le dit.
+    partout = [a_la_hauteur(y + 3.0 + 4.0 * k) for k in range(int(hauteur_zone // 4.0))]
+    position, colonnes, message = dp2_plan_masse._place_de_la_legende(
+        planche, [], dp2_plan_masse.LARGEUR_LEGENDE_MM, 14, partout, 0.0
+    )
+    assert colonnes == 1 and "aucun coin" in message

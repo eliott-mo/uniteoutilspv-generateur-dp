@@ -12,7 +12,8 @@ aérienne.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from shapely.geometry import box
@@ -33,6 +34,7 @@ from ..planche import (
     MOTIF_BATIMENT,
     STYLE_BATIMENT,
     STYLE_PARCELLE,
+    TAILLE_COURANTE,
     TAILLE_ETIQUETTE,
     Planche,
     Style,
@@ -43,8 +45,15 @@ from .commun import Sortie, nouvelle_planche
 from .dp1_3_cadastre import SURFACE_MIN_ETIQUETTE_MM2
 from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
-from .palette import STYLES, construire_legende, objets_a_dessiner, style_de
-from .primitives import COTE_REPERE_MM, TRAIT_AXE, repere_coupe, union_valide
+from .palette import (
+    STYLES,
+    EntreeDP,
+    construire_legende,
+    objets_a_dessiner,
+    style,
+    style_de,
+)
+from .primitives import COTE_REPERE_MM, TRAIT_AXE, TRAIT_COTE, repere_coupe, union_valide
 
 NUMERO = "DP 2"
 TITRE = piece("DP 2").titre
@@ -91,6 +100,31 @@ STYLE_CADRE_DETAIL = Style(
 COULEUR_RENVOI = "#1f4e79"
 TAILLE_RENVOI = 2.2
 
+#: Ce que la légende gagne avec les cotes (lot 10, D9).
+LIBELLE_COTE = "Cote, en mètres"
+LIBELLE_AXE_DE_VOIE = "Axe de voie (BD TOPO, IGN)"
+
+#: Le pied énonce les règles, une ligne par idée : d'un seul tenant, la phrase
+#: dépassait 200 mm (07/11/2026). Celles de la DP 2, puis celles de la planche
+#: qui porte des cotes d'ouvrages (D9, 08 et 09/11/2026).
+PIED_DP2 = (
+    "Cotes en mètres, mesurées en Lambert 93. Limite parcellaire : celle du terrain "
+    "d'assiette (parcellaire IGN). Voie publique (axe, ou extrémité quand elle s'arrête "
+    "avant le site) et habitation la plus proche selon la BD TOPO (IGN).",
+    "Constructions en légende : longueur × largeur, h : hauteur (catalogue UNITe ; "
+    "clôture et portail : standard UNITe ; tables : hauteur maximale du tableau bilan).",
+)
+PIED_OUVRAGES = (
+    "Distances entre ouvrages permanents voisins, et à la limite parcellaire, cotées en "
+    "deçà de 30 m ; batteries et locaux de stockage cotés à la limite parcellaire à toute "
+    "distance.",
+    "Batteries et citernes : distance la plus courte jusqu'aux panneaux ; poste de "
+    "livraison coté jusqu'à l'axe de la voie publique la plus proche, en deçà de 30 m.",
+)
+
+#: Les lignes du pied s'empilent au-dessus de la ligne de source, de ce pas.
+PAS_PIED_MM = 2.6
+
 
 #: Part du bloc de légende que le dessin peut occuper sans qu'on le déplace.
 #: Sous ce seuil, la légende garde le coin du dossier de référence : une
@@ -103,7 +137,8 @@ RECOUVREMENT_LEGENDE_TOLERE = 0.02
 EPAISSEUR_MESURE_LEGENDE_M = 2.0
 
 
-def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm) -> tuple:
+def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm, traits=(),
+                     pied_mm: float = 0.0):
     """Coin de la zone de dessin où la légende masque le moins le plan.
 
     Le bloc se posait toujours en haut à gauche. Relevé le 30/09/2026 sur
@@ -113,18 +148,28 @@ def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm) -> tuple:
 
     L'ordre des coins est celui du dossier de référence — haut-gauche d'abord —
     et la légende n'en bouge que si le dessin l'occupe vraiment.
+
+    Depuis le lot 10 (D9), elle ne couvre ni une cote ni le cadre d'un
+    détail : posée sans connaître les cotes, elle en cachait une (« 13,4 m
+    (limite) », Auzainvilliers, 03/11/2026). Un coin dont le bloc touche un
+    des `traits`, en Lambert 93, est écarté ; s'ils les touchent tous, rien
+    n'est rendu, et l'appelant cherche ailleurs. Les coins du bas se posent
+    au-dessus du pied, haut de `pied_mm` : la légende le recouvrait (Saint-Cyr,
+    DP 2 bis, 07/11/2026).
     """
     from shapely.geometry import box as _boite
     from shapely.ops import unary_union as _union
 
+    x, y, largeur_zone, hauteur_zone = zone
+    coins = (
+        (x + 3.0, y + 3.0),
+        (x + largeur_zone - largeur_mm - 3.0, y + 3.0),
+        (x + 3.0, y + hauteur_zone - hauteur_mm - 3.0 - pied_mm),
+        (x + largeur_zone - largeur_mm - 3.0, y + hauteur_zone - hauteur_mm - 3.0 - pied_mm),
+    )
     transformation = planche.transformation
     if transformation is None:
-        return (zone[0] + 3.0, zone[1] + 3.0)
-
-    dessin = [g for _, geometries in objets for g in geometries]
-    if not dessin:
-        return (zone[0] + 3.0, zone[1] + 3.0)
-    couvert = _union(dessin).buffer(EPAISSEUR_MESURE_LEGENDE_M)
+        return coins[0]
 
     def vers_l93(x_mm, y_mm):
         return (
@@ -134,26 +179,99 @@ def _coin_de_legende(planche, zone, objets, largeur_mm, hauteur_mm) -> tuple:
             - (y_mm - transformation._y_mm) / transformation.mm_par_metre,
         )
 
-    x, y, largeur_zone, hauteur_zone = zone
-    coins = (
-        (x + 3.0, y + 3.0),
-        (x + largeur_zone - largeur_mm - 3.0, y + 3.0),
-        (x + 3.0, y + hauteur_zone - hauteur_mm - 3.0),
-        (x + largeur_zone - largeur_mm - 3.0, y + hauteur_zone - hauteur_mm - 3.0),
-    )
-
-    parts = []
-    for coin in coins:
+    def boite_du_coin(coin):
         x0, y0 = vers_l93(coin[0], coin[1])
         x1, y1 = vers_l93(coin[0] + largeur_mm, coin[1] + hauteur_mm)
-        boite = _boite(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        return _boite(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+
+    libres = [
+        coin for coin in coins
+        if not any(boite_du_coin(coin).intersects(trait) for trait in traits)
+    ]
+    if not libres:
+        return None
+    dessin = [g for _, geometries in objets for g in geometries]
+    if not dessin:
+        return libres[0]
+    couvert = _union(dessin).buffer(EPAISSEUR_MESURE_LEGENDE_M)
+
+    parts = []
+    for coin in libres:
+        boite = boite_du_coin(coin)
         aire = boite.area
         parts.append(boite.intersection(couvert).area / aire if aire else 0.0)
 
-    for coin, part in zip(coins, parts):
+    for coin, part in zip(libres, parts):
         if part <= RECOUVREMENT_LEGENDE_TOLERE:
             return coin
-    return coins[parts.index(min(parts))]
+    return libres[parts.index(min(parts))]
+
+
+def _place_de_la_legende(planche, objets, largeur_mm, nb_entrees, traits, pied_mm):
+    """Le coin de la légende, et sur combien de colonnes : (position, colonnes, message).
+
+    Un coin qui ne couvre ni une cote ni le cadre d'un détail, d'abord sur une
+    colonne ; puis sur deux, deux fois moins haute : sur la DP 2
+    d'Auzainvilliers, ses vingt entrées couvraient le haut du cadre du détail
+    (08/11/2026). Faute de coin même ainsi, le coin le moins dessiné, et le
+    message le dit (D9).
+    """
+    zone = planche.zone_dessin()
+    hauteur = hauteur_bloc(nb_entrees)
+    coin = _coin_de_legende(planche, zone, objets, largeur_mm, hauteur, traits, pied_mm)
+    if coin is not None:
+        return coin, 1, None
+    demi = hauteur_bloc(math.ceil(nb_entrees / 2))
+    coin = _coin_de_legende(planche, zone, objets, 2 * largeur_mm, demi, traits, pied_mm)
+    if coin is not None:
+        return coin, 2, (
+            f"Légende sur deux colonnes ({nb_entrees} entrées) : aucun coin ne la "
+            "reçoit sur une seule sans couvrir une cote ou le cadre d'un détail."
+        )
+    coin = _coin_de_legende(planche, zone, objets, largeur_mm, hauteur, (), pied_mm)
+    return coin, 1, (
+        "Légende : aucun coin ne la reçoit sans couvrir une cote ou le cadre d'un "
+        "détail, ni sur une colonne ni sur deux ; elle est posée au coin le moins "
+        "dessiné."
+    )
+
+
+def _largeur_de_legende(planche, entrees) -> float:
+    """La largeur de la légende : 82 mm, ou ce que demande son intitulé le plus long (D12).
+
+    La légende n'a pas de retour à la ligne. Avec leurs dimensions, les
+    intitulés s'allongent — celui du PDL/PTR d'Auzainvilliers tenait en 79 mm
+    des 82 (08/11/2026) —, et un intitulé renommé peut aller au-delà : la
+    légende s'élargit plutôt que de le laisser déborder de son cadre.
+    """
+    from .legende import ECART_LIBELLE_MM, LARGEUR_SYMBOLE_MM, MARGE_MM
+
+    texte = max(
+        (planche.mesurer_texte(entree.libelle, TAILLE_COURANTE) for entree in entrees),
+        default=0.0,
+    )
+    besoin = texte + 2 * MARGE_MM + LARGEUR_SYMBOLE_MM + ECART_LIBELLE_MM
+    return max(LARGEUR_LEGENDE_MM, float(math.ceil(besoin + 1.0)))
+
+
+def _hauteur_du_pied(nb_lignes: int) -> float:
+    """Ce dont les coins du bas de la légende remontent pour laisser le pied lisible.
+
+    Le pied, c'est la ligne de source et les `nb_lignes` qui s'empilent
+    au-dessus d'elle ; la légende garde déjà 3 mm du bord.
+    """
+    haut = (5.6 + PAS_PIED_MM * (nb_lignes - 1)) if nb_lignes else 2.5
+    return haut + TAILLE_SOURCE + 0.5 - 3.0
+
+
+def _libelle_absence() -> str:
+    """L'absence d'habitation à 1 000 m, telle que la légende la dit (D5)."""
+    from .cotation_plan_masse import RAYON_HABITATION_M
+
+    return (
+        f"Aucune habitation à moins de {nombre_fr(RAYON_HABITATION_M, 0)} m de la "
+        "clôture (BD TOPO, IGN)"
+    )
 
 
 def _ce_que_la_planche_cadre(contrat: Contrat, emprise: Emprise):
@@ -263,8 +381,12 @@ def generer(
         planche = nouvelle_planche(projet, NUMERO, numero=numero)
         planche.definir_echelle(denominateur)
         planche.centrer_sur(centre)
+        # Le pied dit les règles de ce que la planche porte : celles des
+        # ouvrages, tant qu'une zone y reste.
+        pied = PIED_DP2 + (PIED_OUVRAGES if len(codes) < len(zones) else ())
         genes, messages, details = _composer(
-            planche, projet, contrat, lectures, a_poser, calcul, cadres=cadres
+            planche, projet, contrat, lectures, a_poser, calcul, cadres=cadres,
+            pied=pied,
         )
         nouvelles = {}
         for rang, zone_technique in enumerate(zones):
@@ -316,7 +438,7 @@ def generer(
 
 
 def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
-              detail: bool = False):
+              detail: bool = False, pied=()):
     """Une planche du plan de masse : son fond, sa légende, et les cotes posées dessus.
 
     Sert à la DP 2, essai après essai, et à ses planches de détail (D7), sur les
@@ -324,6 +446,8 @@ def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
     DP 2, le cadre de chaque zone partie en détail, avec son code. `detail` :
     une planche de détail ne montre qu'une partie du site, et ne dit pas des
     objets ou de la coupe qui tombent hors de son cadre qu'ils manquent.
+    `pied` : les règles que la planche énonce sous son dessin, une ligne par
+    idée (D9).
 
     Rend (gênes, messages, détails) : ce que la pose rend des cotes qui se
     lisent mal, ce que la planche a à dire, et de quoi remplir sa `Sortie`.
@@ -413,26 +537,56 @@ def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
     # valeurs ; elle se dessine après elles. Une planche de détail ne montre
     # qu'une partie du site : sa légende ne nomme que ce qu'elle montre.
     categories_tracees = visibles if detail else [c for c, _ in objets]
+    # Les intitulés que le chef de projet a corrigés à l'écran, s'il en a
+    # corrigé : la légende est dans l'image de la planche, elle ne se retouche
+    # donc pas après coup. Chaque construction y porte ses dimensions (D12),
+    # ajoutées à l'intitulé quel qu'il soit : la maquette ne les posait que sur
+    # l'intitulé par défaut, et un intitulé renommé les perdait sans le dire.
+    # Un intitulé vide le reste, pour que la légende le refuse.
+    libelles = dict(projet.legendes or {})
+    for categorie, complement in calcul.dimensions.items():
+        if categorie not in categories_tracees:
+            continue
+        intitule = libelles.get(categorie, style(categorie).libelle)
+        if str(intitule).strip():
+            libelles[categorie] = f"{intitule} {complement}"
     entrees = construire_legende(
         categories_tracees,
         avec_parcelles=True,
         avec_batiments=bool(batiments_visibles),
-        # Les intitulés que le chef de projet a corrigés à l'écran, s'il en a
-        # corrigé : la légende est dans l'image de la planche, elle ne se
-        # retouche donc pas après coup.
-        libelles=projet.legendes,
+        libelles=libelles,
     )
-    hauteur_legende = hauteur_bloc(len(entrees))
-    position = _coin_de_legende(
-        planche, zone, objets, LARGEUR_LEGENDE_MM, hauteur_legende
+    # Ce que la planche porte du lot 10 (D9), et l'absence d'habitation, qui
+    # est un résultat (D5).
+    if a_poser:
+        entrees.append(EntreeDP(LIBELLE_COTE, TRAIT_COTE, "ligne"))
+    if any(any(cote is posee for posee in a_poser) for cote, _ in calcul.axes):
+        entrees.append(EntreeDP(LIBELLE_AXE_DE_VOIE, STYLE_AXE_DE_VOIE, "ligne"))
+    if calcul.sans_habitation and not detail:
+        entrees.append(EntreeDP(_libelle_absence(), Style(), "aucun"))
+    largeur_legende = _largeur_de_legende(planche, entrees)
+
+    # Le pied, au-dessus de la ligne de source : une ligne par idée (D9).
+    x_source, y_source = zone[0] + 3.0, zone[1] + zone[3] - 2.5
+    occupees.append(_boite_de_ligne(planche, x_source, y_source, SOURCE, TAILLE_SOURCE))
+    for rang, ligne in enumerate(reversed(pied)):
+        y_ligne = zone[1] + zone[3] - 5.6 - PAS_PIED_MM * rang
+        planche.ajouter_texte(x_source, y_ligne, ligne, taille=TAILLE_SOURCE, halo=True)
+        occupees.append(_boite_de_ligne(planche, x_source, y_ligne, ligne, TAILLE_SOURCE))
+
+    # La légende, hors des cotes, des cadres de détail et du pied (D9).
+    traits = [cote.ligne for cote in a_poser] + [cadre.exterior for _, cadre in cadres]
+    position, colonnes, message = _place_de_la_legende(
+        planche, objets, largeur_legende, len(entrees), traits, _hauteur_du_pied(len(pied))
     )
+    if message:
+        messages.append(message)
+    hauteur_legende = hauteur_bloc(math.ceil(len(entrees) / colonnes))
     boite_legende = (
         position[0], position[1],
-        position[0] + LARGEUR_LEGENDE_MM, position[1] + hauteur_legende,
+        position[0] + colonnes * largeur_legende, position[1] + hauteur_legende,
     )
-    x_source, y_source = zone[0] + 3.0, zone[1] + zone[3] - 2.5
     occupees.append(boite_legende)
-    occupees.append(_boite_de_ligne(planche, x_source, y_source, SOURCE, TAILLE_SOURCE))
 
     # Le renvoi de chaque cadre, une fois la légende placée : écrit avant elle,
     # il tombait dessous (04/11/2026).
@@ -459,7 +613,9 @@ def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
         a_eviter=a_eviter, masques=[boite_legende], rapport=messages,
     )
 
-    dessiner_legende(planche, entrees, position=position, largeur_mm=LARGEUR_LEGENDE_MM)
+    dessiner_legende(
+        planche, entrees, position=position, largeur_mm=largeur_legende, colonnes=colonnes
+    )
     planche.ajouter_texte(
         x_source, y_source, SOURCE, taille=TAILLE_SOURCE, couleur=GRIS, halo=True,
     )
@@ -486,6 +642,10 @@ class _Calcul:
     axes: list
     a_eviter: list
     ouvrages: list
+    #: Ce que chaque construction ajoute à son intitulé de légende (D12).
+    dimensions: dict = field(default_factory=dict)
+    #: Vrai quand la BD TOPO a répondu, sans habitation à 1 000 m (D5).
+    sans_habitation: bool = False
 
 
 def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rapport) -> _Calcul:
@@ -537,7 +697,7 @@ def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rappo
     cotes += cotation.cotes_vers_les_tables(ouvrages, tables, rapport)
 
     # C4 — clôture → habitation la plus proche, selon la BD TOPO (D5).
-    habitation = _cote_habitation(clotures, rapport)
+    habitation, sans_habitation = _cote_habitation(clotures, rapport)
     if habitation is not None:
         cotes.append(habitation)
 
@@ -577,6 +737,8 @@ def _calculer_les_cotes(contrat, emprise, parcelles, objets, denominateur, rappo
         axes=[(resultat.cote, resultat.axe) for resultat in vers_les_voies],
         a_eviter=a_eviter,
         ouvrages=ouvrages,
+        dimensions=cotation.dimensions_en_legende(contrat, ouvrages, table, rapport),
+        sans_habitation=sans_habitation,
     )
 
 
@@ -725,7 +887,7 @@ def _planche_de_detail(projet, contrat, code, numero, zone_technique, lectures, 
     planche.centrer_sur(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
     genes, messages, details = _composer(
         planche, projet, contrat, lectures, list(zone_technique.cotes), calcul,
-        detail=True,
+        detail=True, pied=PIED_OUVRAGES,
     )
     messages.extend(gene.message for gene in genes)
     suffixe = code.split()[-1]
@@ -764,13 +926,17 @@ def _cote_habitation(clotures, rapport: list):
     Une BD TOPO qui ne répond pas, ou dont la réponse atteint le plafond de
     lecture (`ErreurPlafondWFS`, qui dérive d'`ErreurService`), n'arrête pas la
     DP 2 : la cote manque, et le rapport le dit (D11).
+
+    Rend (cote, absence) : `absence` est vraie quand la BD TOPO a répondu sans
+    habitation à 1 000 m. C'est un résultat, que la légende dit (D5) ; une BD
+    TOPO qui n'a pas répondu ne dit rien de l'absence.
     """
     from shapely.ops import unary_union
 
     from . import cotation_plan_masse as cotation
 
     if not clotures:
-        return cotation.cote_habitation(clotures, [], rapport)
+        return cotation.cote_habitation(clotures, [], rapport), False
     bbox = _elargie(unary_union(clotures).bounds, cotation.RAYON_HABITATION_M)
     try:
         batiments = telecharger_batiments_bd_topo(bbox)
@@ -779,8 +945,9 @@ def _cote_habitation(clotures, rapport: list):
             "Habitation la plus proche : pas de cote — la lecture de la BD TOPO a "
             f"échoué ({_detail(erreur)}). {SANS_ELLE}"
         )
-        return None
-    return cotation.cote_habitation(clotures, batiments, rapport)
+        return None, False
+    habitation = cotation.cote_habitation(clotures, batiments, rapport)
+    return habitation, habitation is None
 
 
 def _cotes_vers_les_voies(tables, ouvrages, clotures, enclos, posees, denominateur,

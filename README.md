@@ -1053,6 +1053,16 @@ Identifiants confirmés par GetCapabilities le 2026-09-01 :
 | WMS-R 1.3.0 | `https://data.geopf.fr/wms-r/wms` | `ORTHOIMAGERY.ORTHOPHOTOS` |
 | WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle` |
 | WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `CADASTRALPARCELS.PARCELLAIRE_EXPRESS:batiment` |
+| WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `BDTOPO_V3:troncon_de_route` (lot 10, vérifiée le 03/11/2026) |
+| WFS 2.0.0 | `https://data.geopf.fr/wfs/ows` | `BDTOPO_V3:batiment` (lot 10, vérifiée le 03/11/2026) |
+
+Les cotes du plan de masse lisent de la BD TOPO `nature` et `cpx_numero` sur
+les voies, `usage_1` sur les bâtiments : le cadastre ne dit pas l'usage d'un
+bâtiment. Ses géométries sont en 3D, et ramenées en plan. Le test réseau de
+`tests/test_ign.py` vérifie, chaque lundi, que la vraie BD TOPO porte encore
+ces attributs : renommés, ils feraient passer toute voie pour anonyme et tout
+bâtiment pour inhabité, sans erreur — et la légende annoncerait qu'aucune
+habitation n'est à 1 000 m.
 
 Le WMS-R limite les images à 5010 px de côté ; à 200 dpi, la zone de dessin A3
 fait 3228 × 2110 px. Mesuré sur Bray-Saint-Aignan, la photographie aérienne pèse
@@ -3682,6 +3692,10 @@ doublait des modules qui s'arrêtent à chaque table, les tables étant séparé
 de 0,5 m ; les deux grilles se décalaient d'une table à l'autre, et une table
 sur deux paraissait deux fois plus dense que sa voisine.
 
+Elle porte ses **cotes** depuis le lot 10, et, quand une zone technique s'y lit
+mal, une planche de détail la suit : voir « Cotation du plan de masse
+(lot 10) ».
+
 ### DP 3 — Deux coupes, deux échelles, deux sources de hauteur
 
 Une planche, deux dessins superposés. Le cartouche ne peut annoncer qu'une
@@ -4418,6 +4432,13 @@ sans lesquels rien ne peut être dessiné : l'emprise cadastrale absente, une
 voirie dont le type n'est pas tranché, deux photographies de même nom qui
 s'écraseraient.
 
+La **BD TOPO** a rejoint la liste avec le lot 10 (D11). Injoignable, ou dont
+la réponse atteint le plafond de lecture, elle n'arrête pas la DP 2 : la
+planche sort sans ses cotes vers l'habitation et vers la voie publique, et le
+rapport dit pourquoi. Le parcellaire autour des constructions, qui ne sert
+qu'à juger quelles voies sont publiques, se traite de même. Le parcellaire du
+terrain, lui, garde son refus : sans lui, rien ne se dessine.
+
 ### Le format déposé, en pratique
 
 La notice est fournie en **A4 paysage**. Elle est donc *agrandie* au facteur
@@ -4852,6 +4873,197 @@ Rien de cela ne prouve que PowerPoint l'ouvre correctement : c'est la liste de
 contrôles à l'écran que tient le brief, et qui se refait à chaque changement du
 montage.
 
+## Cotation du plan de masse (lot 10)
+
+Les demandes de pièces complémentaires reçues début novembre 2026 pour
+Saint-Cyr-en-Val et Auzainvilliers réclament une DP 2 cotée : distances aux
+limites parcellaires, à la voie publique, des locaux de stockage et des
+batteries, écartement entre rangées, et, à Auzainvilliers, un plan « coté dans
+les trois dimensions ». La DP 2 n'en portait aucune. Le lot 10 lui ajoute des
+cotes **peu nombreuses et choisies par règle**, et une planche de détail pour la
+zone technique quand elle ne se lit pas à l'échelle du plan.
+
+Le brief est `_briefs/BRIEF_DP_lot10_cotation_plan_masse.md` ; la maquette des
+relectures, `_briefs/maquette_lot10_cotes_dp2.py` (v7), reste à côté de lui,
+comme référence et non comme code. Le risque propre au lot n'est pas la cote
+absente : c'est la cote juste en apparence et fausse sur le fond — une distance
+à la clôture présentée comme un recul à la limite, un hangar pris pour une
+habitation, un inter-rangée qui contredit la coupe.
+
+### Huit familles, et rien d'autre
+
+| | Cote | Combien | Planche |
+|---|---|---|---|
+| C1 | tables → limite parcellaire, à travers la clôture ; ailleurs sur le côté, clôture → limite | par côté de clôture dont les tables sont à moins de 30 m ; la seconde si la clôture s'écarte de la limite de plus de 0,5 m | DP 2 |
+| C2 | construction la plus proche → axe de la voie publique la plus proche | une, à toute distance | DP 2 |
+| C3 | ouvrage permanent → ses voisins directs, et → la limite | voisins à moins de 30 m ; limite à moins de 30 m, et toujours pour les batteries et le local de stockage | sa zone |
+| C4 | clôture → habitation la plus proche | une, à 1 000 m au plus | DP 2 |
+| C5 | écartement entre deux rangées | une, à la valeur de la coupe | DP 2 |
+| C6 | largeur de piste | une par largeur et par type de piste | DP 2 |
+| C7 | batteries et citernes → table la plus proche | une par famille, la plus courte | sa zone |
+| C8 | poste de livraison → axe de la voie publique | une, en deçà de 30 m | sa zone |
+
+Les hauteurs ne sont pas des cotes. Chaque construction porte les siennes dans
+son entrée de légende, avec son emprise (D12) : « Poste de livraison /
+transformation (12 × 3 m, h 3 m) », « Panneaux photovoltaïques (hauteur
+maximale 3 m) », « Clôture du projet solaire (h 2 m) ». Un intitulé que le chef
+de projet a renommé garde ses dimensions, et la légende s'élargit à son
+intitulé le plus long plutôt que de le laisser déborder.
+
+Tout se calcule à la génération (D10). Le contrat ne gagne ni couche ni
+colonne — il a un lecteur hors du dépôt —, `Projet` aucun champ, et il n'y a
+rien à saisir. Les seuils sont des constantes commentées.
+
+### Où vit quoi
+
+- `dp_socle/planches/cotation_plan_masse.py` calcule sans rien dessiner : les
+  côtés de la clôture et les deux cotes de C1, le corps de chaque ouvrage aux
+  cotes du catalogue (D3), le voisinage des ouvrages, l'inter-rangée lu dans la
+  coupe (D6), les largeurs de piste, la table la plus proche, les voies
+  publiques, les zones techniques (D7), les dimensions de la légende.
+  `tests/test_cotation_lot10.py` le teste sans PDF.
+- `dp_socle/planches/pose_des_cotes.py` pose une cote sur une planche (D8).
+- `dp_socle/planches/dp2_plan_masse.py` lit le fond une fois et calcule les
+  cotes une fois, essaie la DP 2, compose les planches de détail, la légende et
+  le pied.
+- `tests/test_cotes_dp2_lot10.py` mesure dans le PDF produit, sur un site
+  synthétique dont chaque distance est connue : les deux pointes de flèche aux
+  bouts attendus, tournées vers l'extérieur, et la valeur écrite.
+
+### Une valeur se lit avec sa ligne (D8)
+
+La première relecture a signalé qu'avec beaucoup d'éléments, on ne savait plus
+à quelle flèche revenait une valeur posée à côté de sa ligne. La pose suit donc
+la méthode 2 de l'ISO 129, la cotation unidirectionnelle :
+
+- le texte reste horizontal, avec un halo : `Planche.ajouter_texte` n'a pas de
+  rotation, et le moteur ne change pas ;
+- la valeur interrompt sa propre ligne, de préférence en son milieu, et
+  n'appartient ainsi qu'à elle ; trop courte, la ligne la porte sur son
+  prolongement, au-delà d'une extrémité libre ; à défaut, un renvoi la relie au
+  milieu de sa ligne ;
+- les flèches sont pleines, de 1,6 mm ; sous 3,8 mm de ligne, elles passent
+  dehors, pointes vers l'intérieur ;
+- une cote qui sort du cadre s'arrête à son bord, sans flèche, et son libellé
+  le dit : « 948 m (habitation la plus proche, hors cadre) ».
+
+Sont interdits : sortir du cadre, chevaucher une autre étiquette, un numéro de
+parcelle ou le pied, couper la ligne d'une autre cote ou la ligne de coupe,
+prolonger une ligne ou tirer un renvoi à travers un ouvrage. Sont à éviter :
+poser la valeur sur un ouvrage ou sur les tables, en travers de la clôture ou
+d'un cadre de détail, et, pour une cote vers la limite, ailleurs qu'au-delà de
+la limite. Les plus courtes se posent d'abord, elles ont le moins de choix ;
+faute de toute place, la valeur est posée au mieux, et le rapport le dit.
+
+**Un prolongement est encore la ligne.** Le trait qui mène une valeur au-delà
+d'une extrémité, ou le renvoi qui l'y relie, est occupé comme la ligne
+elle-même : aucune valeur posée ensuite ne le coupe. La maquette ne le voyait
+pas, l'étape 2 non plus ; c'est fermé depuis l'étape 4, et c'est ce qui fait
+l'écart d'Auzainvilliers relevé plus bas.
+
+### La zone technique part sur sa planche (D7)
+
+Une zone est un ensemble d'ouvrages que des cotes C3 relient ; leurs cotes à
+la limite, C7 et C8 la suivent. Elle part sur une planche « DP 2 bis — Plan de
+masse : détail de la zone technique » dès qu'une de ses cotes fait moins de
+3 mm de papier sur la DP 2, qu'une de ses valeurs n'a pas de place nette —
+posée au mieux, sur un ouvrage ou en travers de la clôture —, ou qu'une de ses
+cotes passe sous la légende. Une valeur posée sur les tables, ou en travers du
+cadre d'un autre détail, se lit : elle ne fait pas partir sa zone.
+
+Les deux derniers cas ne se voient qu'en dessinant. La DP 2 est essayée, les
+zones fautives partent, elle est refaite sans elles, jusqu'à ce que plus aucune
+ne bouge : retirer une zone libère de la place, mais pose un cadre, et la
+légende peut changer de coin. Le détail prend la plus grande échelle, de
+1:200, 1:500 et 1:1 000, où ses ouvrages et le bout de leurs cotes tiennent ;
+il porte les cotes de sa zone et elles seules, sur le fond de la DP 2. Sur la
+DP 2, un cadre bleu tireté entoure les ouvrages de la zone à 3 mm près, et un
+renvoi, « Détail de la zone technique : DP 2 bis », s'écrit à côté, hors de la
+légende et des cotes, sans couper la clôture ni un ouvrage.
+
+Les planches de détail vont de DP 2 bis à DP 2 sexies, pièces facultatives de
+`dossier.py` (`SUFFIXES_DETAIL_PLAN_DE_MASSE`) ; au-delà, ou quand aucune
+échelle de détail ne la loge, une zone reste sur la DP 2, et le rapport le dit.
+L'assemblage les place derrière la DP 2, en décalant la numérotation des
+pièces suivantes, et la sortie PowerPoint les insère comme la DP 1-3 bis, sans
+les refaire.
+
+### Ce qui n'est pas coté se dit (D9)
+
+La légende gagne « Cote, en mètres », et « Axe de voie (BD TOPO, IGN) » quand C2
+ou C8 en dessine un. L'absence d'habitation à 1 000 m de la clôture est un
+résultat, et la légende le dit, sans symbole. Le pied énonce les règles, une
+ligne par idée, au-dessus de la ligne de source : celles de la DP 2, puis,
+sur la planche qui porte des cotes d'ouvrages, celles des ouvrages.
+
+La légende ne recouvre ni le pied, ni une cote, ni un cadre de détail : les
+coins du bas remontent au-dessus du pied, et un coin où elle toucherait une
+ligne de cote ou un cadre est écarté. Quand aucun ne la reçoit sur une
+colonne, elle passe sur deux, deux fois moins haute ; faute de coin même ainsi,
+elle va au coin le moins dessiné. Le rapport dit l'un et l'autre.
+
+Une cote qu'une règle écarte, ou qui ne trouve pas de place nette, est nommée au
+rapport avec sa raison : une paire d'ouvrages « située par un troisième », une
+cote clôture → limite essayée à cinq endroits du côté, une voie écartée parce
+qu'elle passe sur des parcelles cadastrées. Aucune n'est retirée en silence.
+Une BD TOPO qui ne répond pas n'arrête pas la DP 2 (D11) : voir « Ce qui
+deviendra bloquant ».
+
+### Ce que l'épreuve a mesuré
+
+Le 10/11/2026, sur les trois sites d'épreuve, avec le parcellaire et la
+BD TOPO en ligne. Les contrats ont été refaits le 09/11 par `importer_be` à
+partir des plans du bureau d'études et des tableaux bilan du partage, sans
+ligne de coupe. Celui d'Auzainvilliers ne passe pas le contrôle croisé de
+l'import : 79 tables au plan, 81 au tableau bilan du 09/10. Il a été écrit en
+contournant le refus, pour l'épreuve seulement ; l'application le refusera
+tant que le plan et le tableau ne s'accordent pas.
+
+| | Saint-Cyr-en-Val IND07 | Auzainvilliers IND03 | Sarnois IND10B |
+|---|---|---|---|
+| DP 2 | 1:2 000 | 1:1 000, légende sur deux colonnes | 1:2 000 |
+| C1, tables → limite | 4 côtés : 15,7, 6,6, 5,7 et 6,8 m | 6 côtés, de 11,4 à 25,2 m | 5 côtés, de 10,4 à 20,8 m ; le sixième est à 48,4 m |
+| C1, clôture → limite | aucune : la clôture est sur la limite | 12,8, 6,0 et 5,2 m ; deux côtés trop courts n'en reçoivent pas | 1,3, 1,5, 3,1 et 5,8 m ; un côté de 44 m n'en reçoit pas |
+| C2 | 23,3 m (extrémité de la route) | 11,6 m (axe de la D18) | 3,0 m (axe du chemin) |
+| C4 | 119 m, hors cadre | 948 m, hors cadre | 166 m |
+| C5 | 4,5 m | 3,5 m | 5,0 m |
+| C6 | 4,4 et 3,5 m | 3,5 m, piste existante et piste à créer | 4,0 m |
+| C3 | 2 paires cotées sur 3 à moins de 30 m ; 3 cotes à la limite | 9 sur 24 ; 8 à la limite | 7 sur 18 ; 7 à la limite |
+| C7 | citerne incendie 19,5 m | citerne de refroidissement 5,7 m, batteries 8,3 m, citerne incendie 6,5 m | batteries 18,3 m, citerne de refroidissement 16,0 m, citerne incendie 28,5 m |
+| C8 | non cotée : la première voie publique est à 108 m | 12,2 m (axe de la D18) | confondue avec C2, posée une fois |
+| Détail | DP 2 bis au 1:200, 6 cotes | DP 2 bis au 1:500, 17 cotes ; DP 2 ter au 1:200, 4 cotes | DP 2 bis au 1:500, 17 cotes |
+
+Ce qui s'écarte du brief :
+
+- **Auzainvilliers, la zone ouest** — citerne incendie et local technique —
+  part sur une DP 2 ter au 1:200, quand le brief la gardait sur la DP 2 avec
+  ses 4 cotes. Sa cote de 5,5 m à la limite n'a plus de place nette dans
+  l'angle nord-ouest, où se serraient sept cotes sur 40 m : elle s'y posait au
+  bout d'un renvoi qui coupait le prolongement d'une autre cote, ce que la
+  maquette ne voyait pas. L'angle ne porte plus, sur la DP 2, que C2, une
+  cote clôture → limite et une cote tables → limite.
+- **Auzainvilliers, clôture → limite** : 12,8, 6,0 et 5,2 m, quand le brief
+  écrit 6,0, 6,4 et 12,8 m. La maquette v7, rejouée sur le même contrat, donne
+  5,2 m comme l'outil : le 6,4 m venait d'un état antérieur.
+- **Auzainvilliers, C3** : le rapport compte 24 paires à moins de 30 m, où le
+  brief en compte 19, pour 9 cotées dans les deux cas. L'écart n'est pas
+  expliqué.
+- **Sarnois**, que le brief n'avait mesuré que sous les règles du 03/11 : quatre
+  cotes clôture → limite, de 1,3 à 5,8 m, prises perpendiculairement au côté
+  depuis la clôture réelle. Le 03/11, la maquette les prenait dans l'axe de la
+  chaîne, de 0,4 à 13,4 m.
+
+Reste à juger sur l'épreuve A3 : la lisibilité face à la trame des tables et
+aux numéros de parcelle, et l'angle nord-ouest de la DP 2 d'Auzainvilliers. Et
+un cas que le brief ne tranche pas : à Sarnois, la construction la plus proche
+de la voie publique est le poste de livraison, si bien que C2 vaut aussi C8 et
+n'est posée qu'une fois, sur la DP 2. Elle y fait 1,5 mm de papier au 1:2 000,
+et la DP 2 bis, où partent le poste et sa zone, ne la reprend pas.
+
+Sur d'autres sites, ce que le brief laisse à mesurer (« Ce qui reste à
+mesurer ») : une voie publique qui n'est pas parallèle à la limite, le critère
+du domaine public, les réglages des côtés, une limite hors du cadre.
+
 ## Hors périmètre de ces lots
 
 La **composition** de la notice DP 11 — l'écriture du texte par l'outil, la
@@ -4860,3 +5072,11 @@ n'intègre que le PDF fourni. Les insertions paysagères DP 6, DP 7 et DP 8 sont
 fournies en PDF et simplement assemblées. L'import HelioScope et le calage
 géographique (lot 2) restent en réserve pour les projets sans plan BE ; la saisie
 manuelle des éléments techniques (lot 3) est remplacée par le lot 2bis.
+
+Au lot 10, les **angles de prise de vue** des photographies, que Saint-Cyr
+demande sur le plan de masse comme sur le plan de situation : les chefs de
+projet les ajoutent dans la sortie PowerPoint. L'**accès au site**, que
+Saint-Cyr demande aussi, n'est pas tranché : le portail et les pistes sont
+dessinés, le chemin depuis la voie publique et une mention « Accès » restent à
+décider. Ni la largeur des portails, ni la distance aux boisements, ni les
+cotes NGF ne sont cotées ; elles se rouvriront si une demande les cite.

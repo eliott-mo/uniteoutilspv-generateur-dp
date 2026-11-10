@@ -583,7 +583,7 @@ def test_trois_conteneurs_alignes_ne_se_cotent_pas_du_premier_au_troisieme():
 
 
 def test_une_paire_qu_un_troisieme_ouvrage_situe_deja_ne_se_cote_pas():
-    """Le voisinage relatif : à Auzainvilliers, 9 cotes au lieu de 19 paires (04/11)."""
+    """Le voisinage relatif : à Auzainvilliers, 9 cotes au lieu de 24 paires (10/11)."""
     ouvrages = [
         ouvrage("ptr", boite(100, 100, 110, 103)),
         ouvrage("bess", boite(130, 100, 136.06, 103)),

@@ -763,10 +763,11 @@ def cotes_entre_ouvrages(ouvrages, limite, rapport: list) -> list:
     i–j ne se cote pas quand un troisième ouvrage k est plus proche des deux,
     max(d(i, k), d(j, k)) < d(i, j). Les deux cotes qui passent par k situent
     déjà la paire ; chaque ouvrage garde son plus proche voisin, et une zone
-    reste d'un seul tenant. À Auzainvilliers : 9 cotes au lieu de 19 paires à
-    moins de 30 m (04/11/2026). Un ouvrage posé sur le segment interdit aussi la
-    cote, sans quoi trois conteneurs alignés donneraient la cote du premier au
-    troisième à travers le deuxième.
+    reste d'un seul tenant. À Auzainvilliers : 9 cotes au lieu de 24 paires à
+    moins de 30 m (10/11/2026 ; la maquette en comptait 19 le 04/11, pour 9
+    cotes aussi, sans que l'écart soit expliqué). Un ouvrage posé sur le
+    segment interdit aussi la cote, sans quoi trois conteneurs alignés
+    donneraient la cote du premier au troisième à travers le deuxième.
 
     La cote **à la limite** se pose en deçà de 30 m, quand aucun ouvrage n'est
     sur le trajet, et toujours pour `TOUJOURS_A_LA_LIMITE` : le rapport dit

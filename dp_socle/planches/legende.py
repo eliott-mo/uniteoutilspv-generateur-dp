@@ -54,13 +54,21 @@ def dessiner_legende(
     position: tuple,
     largeur_mm: float = 70.0,
     titre: str | None = "Légende",
+    colonnes: int = 1,
 ) -> tuple:
-    """Bloc encadré à fond blanc, chaque entrée dessinant son symbole."""
+    """Bloc encadré à fond blanc, chaque entrée dessinant son symbole.
+
+    `colonnes` : la légende du plan de masse passe sur deux colonnes, chacune
+    de `largeur_mm` et la première la plus longue, quand aucun coin ne la
+    reçoit sur une seule sans couvrir une cote (lot 10, D9). Le bloc est alors
+    deux fois plus large et deux fois moins haut.
+    """
     x_mm, y_mm = position
-    hauteur = hauteur_bloc(len(entrees), titre is not None)
+    par_colonne = math.ceil(len(entrees) / colonnes) if entrees else 0
+    hauteur = hauteur_bloc(par_colonne, titre is not None)
 
     planche.ajouter_rectangle(
-        x_mm, y_mm, largeur_mm, hauteur,
+        x_mm, y_mm, largeur_mm * colonnes, hauteur,
         Style(trait=NOIR, epaisseur_mm=0.25, remplissage="#ffffff",
               opacite_remplissage=0.92),
     )
@@ -72,20 +80,21 @@ def dessiner_legende(
         )
         curseur += HAUTEUR_TITRE_MM
 
-    for entree in entrees:
-        haut = curseur + (PAS_ENTREE_MM - HAUTEUR_SYMBOLE_MM) / 2.0
+    for rang, entree in enumerate(entrees):
+        colonne, ligne = divmod(rang, par_colonne)
+        x_colonne = x_mm + colonne * largeur_mm
+        haut = curseur + ligne * PAS_ENTREE_MM + (PAS_ENTREE_MM - HAUTEUR_SYMBOLE_MM) / 2.0
         _dessiner_symbole(
-            planche, entree, x_mm + MARGE_MM, haut,
+            planche, entree, x_colonne + MARGE_MM, haut,
             LARGEUR_SYMBOLE_MM, HAUTEUR_SYMBOLE_MM,
         )
         planche.ajouter_texte(
-            x_mm + MARGE_MM + LARGEUR_SYMBOLE_MM + ECART_LIBELLE_MM,
+            x_colonne + MARGE_MM + LARGEUR_SYMBOLE_MM + ECART_LIBELLE_MM,
             haut + HAUTEUR_SYMBOLE_MM - 1.1,
             entree.libelle,
             taille=TAILLE_COURANTE,
         )
-        curseur += PAS_ENTREE_MM
-    return (x_mm, y_mm, largeur_mm, hauteur)
+    return (x_mm, y_mm, largeur_mm * colonnes, hauteur)
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +218,17 @@ def _tirete(planche, style, x, y, largeur, hauteur) -> None:
     planche.ajouter_rectangle(x, y + 0.4, largeur, hauteur - 0.8, style)
 
 
+def _aucun(planche, style, x, y, largeur, hauteur) -> None:
+    """Une mention sans symbole : ce qu'une absence dit en légende.
+
+    Aucune habitation à 1 000 m de la clôture est un résultat, et la légende
+    le dit (lot 10, D5) : rien n'est dessiné à côté.
+    """
+
+
 #: Symboles disponibles. Le nom est porté par la catégorie, dans `palette.py`.
 _SYMBOLES = {
+    "aucun": _aucun,
     "surface": _surface,
     "ligne": _ligne,
     "bande": _bande,
