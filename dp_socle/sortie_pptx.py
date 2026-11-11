@@ -52,8 +52,8 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Mm, Pt
 
-from . import ajout_notice, ooxml, rendu_pptx
-from .contrat import charger_contrat
+from . import ajout_notice, donnees_du_dossier, ooxml, rendu_pptx
+from .contrat import archiver_le_contrat, charger_contrat
 from .dossier import codes_produits, piece
 from .erreurs import ErreurContrat, ErreurDP, ErreurSortiePPTX
 from .geometrie import charger_emprise
@@ -269,6 +269,17 @@ def generer_pptx(
     contrat, message = _contrat_eventuel(dossier, projet)
     if message:
         avertissements.append(message)
+    # Le contrat tel qu'il vient d'être lu, mis de côté pour le fichier : relu à
+    # la fin, plusieurs minutes plus tard, il aurait pu être celui d'un import
+    # fait entre-temps dans un autre onglet (voir `donnees_du_dossier`).
+    archive_contrat = None
+    if contrat is not None:
+        archive_contrat = archiver_le_contrat(dossier, projet.nom)
+        if archive_contrat is None:
+            avertissements.append(
+                f"Le contrat lu pour dessiner les planches a quitté {dossier} avant "
+                "d'être rangé dans le fichier : le dossier n'emporte pas de contrat."
+            )
 
     # Les PDF intermédiaires vont dans un dossier de travail, pas dans celui du
     # projet. Les modules de pièce écrivent toujours un PDF, et ceux d'ici portent
@@ -286,7 +297,10 @@ def generer_pptx(
             projet, contrat, emprise, Path(travail), avertissements, dpi, fond_ign
         )
         notice = _notice_eventuelle(projet, groupes, Path(travail), avertissements)
-        fichier = _ecrire(projet, groupes, notice, dossier, Path(travail))
+        fichier = _ecrire(
+            projet, groupes, notice, dossier, Path(travail), archive_contrat,
+            avertissements,
+        )
     avertissements.extend(
         str(c.message) for c in captees if issubclass(c.category, RuntimeWarning)
     )
@@ -728,12 +742,14 @@ def _pages_du_sommaire(groupes) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _ecrire(projet, groupes, notice, dossier, travail) -> Path:
+def _ecrire(projet, groupes, notice, dossier, travail, archive_contrat,
+            avertissements) -> Path:
     """Monte le fichier, diapo par diapo, dans l'ordre du dossier.
 
     `dossier` reçoit le `.pptx`, `travail` les PDF intermédiaires — dont celui de
     la page de garde, composée ici parce que son sommaire a besoin de la
-    pagination complète.
+    pagination complète. `archive_contrat` est le contrat mis de côté à sa
+    lecture, que le fichier emporte avec la fiche et l'emprise.
     """
     presentation = Presentation()
     presentation.slide_width = Mm(LARGEUR_MM)
@@ -788,6 +804,12 @@ def _ecrire(projet, groupes, notice, dossier, travail) -> Path:
     # caractères, que PowerPoint conserve à l'enregistrement — mesuré le
     # 28/09/2026 sur un dossier revenu d'un chef de projet.
     ajout_notice.ecrire_identite(presentation, projet)
+    # Et tout ce qui l'a produit — la fiche, l'emprise, le contrat —, invisible :
+    # une reprise n'aura besoin que du fichier, sans rien ressaisir (11/11/2026,
+    # voir `donnees_du_dossier`).
+    avertissements.extend(
+        donnees_du_dossier.emporter_les_donnees(presentation, projet, archive_contrat)
+    )
 
     fichier = dossier / nom_sortie(projet)
     presentation.save(str(fichier))

@@ -1022,6 +1022,7 @@ dp_socle/
 ├── sortie_pptx.py    seconde sortie : le .pptx que le chef de projet finit (lot 8)
 ├── rendu_pptx.py     les deux voies de rendu d'une planche, et la mesure qui tranche
 ├── ooxml.py          ce que python-pptx ne sait pas écrire, relu dans le fichier
+├── donnees_du_dossier.py  fiche, emprise et contrat, rangés dans le .pptx
 ├── environnement.py  chemin des DLL cairo sous Windows
 ├── erreurs.py        exceptions nommées
 └── planches/
@@ -4729,6 +4730,12 @@ plan ne garantirait, c'est que le photomontage sera monté sur la géométrie qu
 produit ces planches-là — et non sur un plan réimporté depuis, peut-être recalé,
 peut-être d'un autre indice.
 
+Depuis le 11/11/2026, il voyage aussi dans le `.pptx` lui-même (voir « Le fichier
+emporte ce qui l'a produit », lot 8). Chaque dossier déposé garde donc le contrat
+de sa génération, à sa `version_contrat` : un changement de schéma devra
+continuer à lire les versions antérieures, ou le dire — `charger_contrat` refuse
+déjà une version plus récente que la sienne.
+
 ## La sortie PowerPoint à finaliser (lot 8)
 
 Le dossier sort aussi en un `.pptx` dont les planches sont déjà dessinées et dont
@@ -4941,6 +4948,84 @@ le cadrage retenu, et l'égalité des numéros de page des versions d'une même 
 Rien de cela ne prouve que PowerPoint l'ouvre correctement : c'est la liste de
 contrôles à l'écran que tient le brief, et qui se refait à chaque changement du
 montage.
+
+### Le fichier emporte ce qui l'a produit
+
+Depuis le 11/11/2026, chaque `.pptx` porte, invisibles, la fiche du projet, son
+emprise et son contrat (`dp_socle/donnees_du_dossier.py`). La raison est venue
+des premières demandes de compléments : ajouter les cotes du lot 10 à des
+dossiers déjà déposés demandait de reconstituer avec le chef de projet tout ce
+qui avait été saisi — intitulés de légende retouchés, voiries, hauteurs du PPRI,
+fondations — et de retrouver le plan du bon indice, parce que le serveur ne
+garde rien et qu'une archive s'égare. Le `.pptx` finalisé, lui, est gardé. Une
+reprise n'a plus besoin que de lui :
+
+```python
+lues = lire_les_donnees(Presentation("dossier.pptx"))
+deplie = deplier_les_donnees(lues, Path(tempfile.mkdtemp(prefix="reprise-")))
+generer_pptx(Projet.charger(deplie.fiche), dossier_sortie=deplie.sortie)
+```
+
+Le dossier de reprise est hors du dépôt, qui est public, et neuf : le dépliage
+refuse un dossier occupé, où les restes d'une reprise précédente — un contrat
+d'hier sous un dossier qui n'en a pas — se mêleraient aux données. `deplie.sortie`
+existe toujours : sans plan importé, la régénération y trouve « aucun plan »,
+comme la génération l'avait trouvé, et non le contrat qu'un autre passage du
+même projet aurait laissé dans le `sortie/` par défaut.
+
+L'application n'a pas de parcours de reprise : les reprises se font au cas par
+cas, et la régénération ne sert qu'à redessiner les planches à remplacer dans le
+fichier du chef de projet, comme le lot 7 y verse la notice. Ranger ensuite à
+nouveau les données dans ce fichier **remplace** les anciennes : les planches
+transplantées ne sont plus celles qu'elles décrivaient.
+
+- **Où.** Dans une partie « custom XML » du paquet, la place que le format
+  réserve aux données d'une application. L'identité du lot 7 reste dans
+  `core_properties`, qui plafonne à 255 caractères par champ quand la fiche
+  seule en fait 3 000.
+- **Sous quelle forme.** Un ZIP en base64 : un manifeste ; la fiche écrite par
+  `Projet.ecrire` et son emprise, avec ses compagnons quand c'est un
+  shapefile ; le contrat tel que l'archive du téléchargement le porte, octet
+  pour octet. 96 Ko sur Sarnois, pour un fichier de 10,5 Mo.
+- **Ce qui n'y est pas.** La notice, déjà dans le fichier en pages — tant que
+  la reprise ne change pas la pagination : ses pages portent leur numéro, et une
+  planche insérée devant elle obligerait à la redemander au chef de projet ;
+  c'est une raison de numéroter « bis » une planche ajoutée. L'image de
+  couverture, l'export HelioScope et les photographies, que l'application ne
+  dépose plus. Les fonds IGN, le cadastre et la BD TOPO, qu'une régénération
+  recharge et qui ont pu changer. Le manifeste nomme ce qui est resté derrière,
+  et garde la version du code chargé — ce qui dira, des mois après le dépôt, si
+  un dossier a déjà ses cotes.
+- **Le contrat est celui qui a dessiné.** Mis de côté au moment où la génération
+  le lit, et non relu à la fin, plusieurs minutes plus tard : un import fait
+  entre-temps dans un autre onglet aurait été emporté à sa place.
+- **Un échec se dit et ne bloque pas.** Le rapport l'écrit ; le dossier est
+  juste, il se reprendra seulement comme ceux d'avant.
+- **Une fiche déposée doit rester lisible.** `Projet.charger` refuse un champ
+  inconnu : retirer ou renommer un champ de `Projet` rendrait illisibles toutes
+  les fiches emportées depuis le 11/11/2026. Un champ s'ajoute, avec sa valeur
+  par défaut ; il ne se retire qu'en relisant l'ancien nom.
+
+`lire_les_donnees` rend `None` pour un fichier qui n'en porte pas : produit
+avant le 11/11/2026, ou passé par l'inspecteur de document de PowerPoint. Mesuré
+le 11/11/2026 : sa ligne « Données XML personnalisées » les trouve, et « Supprimer
+tout » les retire, avec celles de SharePoint. Une partie qui porte notre espace
+de noms mais ne se lit plus lève au contraire `ErreurReprise` : un fichier abîmé
+ne passe pas pour un fichier d'avant.
+
+Mesuré le 11/11/2026 sur le `.pptx` réel de Sarnois IND10B, ouvert par
+PowerPoint pour Microsoft 365 de bureau, une diapo supprimée, une forme ajoutée,
+puis enregistré et exporté en PDF : les fichiers reviennent identiques à
+l'octet ; PowerPoint renumérote la partie et récrit sa déclaration XML, d'où la
+recherche par espace de noms ; le fichier portait déjà quatre parties posées par
+SharePoint ; le PDF n'en garde rien. PowerPoint pour le web n'a pas été mesuré.
+`tests/test_donnees_du_dossier.py` relit les données d'un fichier enregistré, à
+côté d'une partie de SharePoint, et les recharge par `Projet.charger` et
+`charger_contrat` ; `tests/test_sortie_pptx_lot8.py` régénère le dossier à partir
+des seules données de son `.pptx`, et retrouve dans le fichier les mêmes mises en
+page, dans le même ordre, aux mêmes images de fond à l'octet — DP 11 à part, et au
+compteur près dont cairo numérote les images incluses dans ses SVG, propre au
+processus.
 
 ## Cotation du plan de masse (lot 10)
 

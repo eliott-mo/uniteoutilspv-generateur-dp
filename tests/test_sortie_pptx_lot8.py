@@ -788,3 +788,106 @@ def test_un_zoom_non_renseigne_retombe_sur_le_cadrage_d_origine(dossier_projet):
 
     assert marge == 50.0
     assert cadres == (2,)
+
+
+# ---------------------------------------------------------------------------
+# Le fichier emporte de quoi se régénérer (11/11/2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rapport_regenere(rapport, sans_geoplateforme, tmp_path_factory):
+    """Le dossier régénéré à partir des seules données que son `.pptx` emporte.
+
+    Rien du premier passage n'est relu — ni sa fiche, ni son emprise, ni son
+    contrat : c'est toute la promesse de `donnees_du_dossier`.
+    """
+    from pptx import Presentation
+
+    from dp_socle import donnees_du_dossier
+
+    lues = donnees_du_dossier.lire_les_donnees(Presentation(str(rapport.fichier)))
+    assert lues is not None, "le dossier n'emporte pas ses données"
+    deplie = donnees_du_dossier.deplier_les_donnees(
+        lues, tmp_path_factory.mktemp("reprise")
+    )
+    return sortie_pptx.generer_pptx(
+        Projet.charger(deplie.fiche), dossier_sortie=deplie.sortie
+    )
+
+
+def test_le_dossier_emporte_ses_donnees_sans_le_dire(rapport):
+    """Rien à en dire au chef de projet quand tout est rangé : seul un échec se
+    dit, et il n'y en a pas."""
+    assert not [m for m in rapport.avertissements if "n'emporte pas" in m]
+
+
+def _sans_compteur_de_cairo(octets: bytes) -> bytes:
+    """Le SVG, ses images incluses renumérotées dans leur ordre d'apparition.
+
+    cairo numérote les images qu'il inclut dans un SVG par un compteur propre au
+    processus : `source-15465` au premier passage, `source-32648` au second,
+    pour une image identique à l'octet. C'est le seul écart que la comparaison
+    des deux fichiers a montré (11/11/2026) ; les rasters de repli, eux, sont
+    identiques tels quels.
+    """
+    import re
+
+    vus: dict = {}
+    return re.sub(
+        rb"source-(\d+)",
+        lambda trouve: b"source-%d" % vus.setdefault(trouve.group(1), len(vus)),
+        octets,
+    )
+
+
+def _planches_du_fichier(fichier) -> list:
+    """Chaque diapo du fichier enregistré : le nom de sa mise en page — qui porte
+    le code, l'alternative et l'échelle — et l'empreinte des images de son fond.
+
+    Sans la page de garde ni DP 11 : le sommaire de l'une annonce les pages de
+    l'autre, et la notice n'est pas emportée.
+    """
+    import hashlib
+
+    from pptx import Presentation
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    from dp_socle.ajout_notice import code_de_la_mise_en_page
+
+    planches = []
+    for diapo in Presentation(str(fichier)).slides:
+        mise_en_page = diapo.slide_layout
+        if code_de_la_mise_en_page(mise_en_page.name) in ("", "DP 11"):
+            continue
+        images = sorted(
+            hashlib.sha256(
+                _sans_compteur_de_cairo(relation.target_part.blob)
+                if relation.target_part.content_type == "image/svg+xml"
+                else relation.target_part.blob
+            ).hexdigest()
+            for relation in mise_en_page.part.rels.values()
+            if relation.reltype == RT.IMAGE
+        )
+        planches.append((mise_en_page.name, images))
+    return planches
+
+
+def test_le_dossier_se_regenere_a_partir_de_ses_seules_donnees(
+    rapport, rapport_regenere
+):
+    """Les mêmes planches, dessinées à l'identique, aux mêmes places du fichier.
+
+    Mesuré dans les deux `.pptx` enregistrés : mêmes mises en page dans le même
+    ordre, mêmes images de fond à l'octet — au compteur de cairo près, voir
+    `_sans_compteur_de_cairo`. Sauf DP 11 : la notice n'est pas
+    emportée, elle est déjà dans le fichier, en pages. Une reprise redessine des
+    planches, elle ne refait pas la notice — et la régénération qui s'en passe
+    le dit au rapport.
+    """
+    attendues = _planches_du_fichier(rapport.fichier)
+
+    assert len(attendues) > 10
+    assert _planches_du_fichier(rapport_regenere.fichier) == attendues
+    assert rapport_regenere.origine_contrat == rapport.origine_contrat
+    assert any("Aucune notice DP 11" in m for m in rapport_regenere.avertissements)

@@ -137,6 +137,10 @@ class ErreurReprise(ErreurDP):
     Ce qui s'y refuse — un fichier qui n'est pas un dossier de l'outil, un
     dossier qui porte déjà sa notice, une notice illisible — se dit ici, parce
     qu'il a une action à faire et non un défaut à subir.
+
+    Et depuis le 11/11/2026, les données qu'un `.pptx` emporte pour se
+    régénérer (`donnees_du_dossier`) : abîmées, d'un format inconnu, en double,
+    ou à déplier dans un dossier déjà occupé.
     """
 
 

@@ -38,7 +38,11 @@ le lit depuis le 24/09/2026 (`photomontage/lecture_contrat.py`) et ne relit plus
 aucun plan. Le test ci-dessus protège l'amont, pas l'aval : une couche retirée ou
 renommée ici casse le photomontage sans que rien ne le dise. Le contrat
 redescend avec le dossier, en archive, pour que le chef de projet puisse le
-transmettre — voir `contrat.archiver_le_contrat`.
+transmettre — voir `contrat.archiver_le_contrat`. Il voyage aussi dans le
+`.pptx` depuis le 11/11/2026 (`donnees_du_dossier`) : chaque dossier déposé
+garde le contrat de sa version, qu'une reprise devra pouvoir relire, et sa
+fiche. `Projet.charger` refusant un champ inconnu, un champ de `Projet` ne se
+retire ni ne se renomme sans relire l'ancien nom.
 
 Les briefs sont dans `_briefs/`, versionnés : ce qui survit d'un lot terminé,
 ce sont les écarts documentés entre le brief et ce que la mesure a montré, et on
