@@ -1150,6 +1150,32 @@ def test_la_legende_porte_les_dimensions_de_chaque_construction(dp2):
         assert attendu in ecrits, (attendu, ecrits)
 
 
+def test_tables_et_modules_n_ont_qu_une_entree_de_legende(dp2):
+    """Une seule entrée « Panneaux photovoltaïques », hauteur comprise (D12).
+
+    Tables et modules décrivent le même ouvrage et partagent leur intitulé pour
+    ne faire qu'une entrée de légende (`palette`). La hauteur que D12 ajoute
+    aux tables ne passait pas aux modules : les deux intitulés différaient, et
+    la légende portait « Panneaux photovoltaïques (hauteur maximale …) » puis
+    « Panneaux photovoltaïques » (Montholon, 12/11/2026 ; Rai, 19/11/2026). Le
+    site synthétique n'a pas de modules : on lui en pose trois sur une table.
+    """
+    from dp_socle.import_be import EntiteBE
+
+    x0, y0 = synthese.ORIGINE_L93
+    modules = [
+        EntiteBE(
+            categorie="modules_pv", calque="PVcase PV Modules",
+            geometrie=box(x0 + 20.0 + 2.3 * k, y0 + 20.0, x0 + 22.2 + 2.3 * k, y0 + 24.0),
+            z_reel=False,
+        )
+        for k in range(3)
+    ]
+    sortie, _ = dp2(entites=synthese.entites() + modules)
+    panneaux = [t for t in _ecrits(sortie.chemin) if t.startswith("Panneaux photovoltaïques")]
+    assert panneaux == ["Panneaux photovoltaïques (hauteur maximale 3,53 m)"], panneaux
+
+
 def test_un_intitule_renomme_garde_ses_dimensions(dp2):
     """La maquette ne les posait que sur l'intitulé par défaut : renommé, il les perdait (D12)."""
     sortie, _ = dp2(legendes={"pdl_ptr": "Poste de livraison"})

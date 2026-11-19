@@ -2114,7 +2114,14 @@ def dimensions_en_legende(contrat, ouvrages, table, rapport: list) -> dict:
         )
     if table is not None:
         haut = table.point_haut_max_m if table.point_haut_max_m is not None else table.point_haut_m
-        dimensions["tables_pv"] = f"(hauteur maximale {_court(haut)} m)"
+        # Aux tables **et** aux modules : les deux décrivent le même ouvrage et
+        # ne font qu'une entrée de légende, que `construire_legende` réunit sur
+        # l'intitulé. Portée par les seules tables, la hauteur les séparait, et
+        # « Panneaux photovoltaïques » sortait deux fois — avec et sans elle
+        # (Montholon, 12/11/2026 ; Rai, 19/11/2026).
+        dimensions["tables_pv"] = dimensions["modules_pv"] = (
+            f"(hauteur maximale {_court(haut)} m)"
+        )
     dimensions["cloture"] = f"(h {_court(standards.HAUTEUR_CLOTURE_M)} m)"
     dimensions["portail"] = f"(h {_court(standards.HAUTEUR_PORTAIL_M)} m)"
     return dimensions
