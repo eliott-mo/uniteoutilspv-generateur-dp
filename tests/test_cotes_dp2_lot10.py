@@ -1176,6 +1176,43 @@ def test_tables_et_modules_n_ont_qu_une_entree_de_legende(dp2):
     assert panneaux == ["Panneaux photovoltaïques (hauteur maximale 3,53 m)"], panneaux
 
 
+def test_les_pistes_qui_se_chevauchent_se_tracent_d_un_seul_contour(dp2, monkeypatch):
+    """Une aire greffée sur l'anneau de piste : un seul aplat, un seul contour.
+
+    Chaque forme se traçait avec son contour, par-dessus l'autre : à la jonction
+    d'un embranchement et de son aire de retournement, la planche montrait un
+    empilement de dalles (Rai, DP 2 bis, 19/11/2026). La réunion ne vaut que pour
+    le dessin.
+    """
+    from itertools import combinations
+
+    from dp_socle.import_be import EntiteBE
+    from dp_socle.planche import Planche
+    from dp_socle.planches.palette import STYLES
+
+    x0, y0 = synthese.ORIGINE_L93
+    aire = EntiteBE(
+        categorie="piste_lourde", calque="SYNTHESE",
+        geometrie=box(x0 + 120.0, y0 + 4.0, x0 + 135.0, y0 + 16.0), z_reel=False,
+    )
+    tracees = []
+    d_origine = Planche.ajouter_geometrie
+
+    def espion(self, geom, *args, **kwargs):
+        tracees.append((geom, args[0] if args else kwargs.get("style")))
+        return d_origine(self, geom, *args, **kwargs)
+
+    monkeypatch.setattr(Planche, "ajouter_geometrie", espion)
+    dp2(entites=synthese.entites() + [aire])
+    piste = STYLES["piste_lourde"].style
+    surfaces = [g for g, s in tracees if s == piste and g.geom_type in ("Polygon", "MultiPolygon")]
+    assert surfaces, "aucune surface de piste tracée"
+    for a, b in combinations(surfaces, 2):
+        assert a.intersection(b).area < 1e-6, (
+            f"deux surfaces de piste se chevauchent au tracé ({a.intersection(b).area:.1f} m²)"
+        )
+
+
 def test_un_intitule_renomme_garde_ses_dimensions(dp2):
     """La maquette ne les posait que sur l'intitulé par défaut : renommé, il les perdait (D12)."""
     sortie, _ = dp2(legendes={"pdl_ptr": "Poste de livraison"})

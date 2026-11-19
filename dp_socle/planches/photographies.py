@@ -406,7 +406,7 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
     1/10 000, où ses traits se confondraient en un aplat tout en pesant leur
     poids dans le PDF. Le contour des rangées suffit à la lecture.
     """
-    from .palette import objets_a_dessiner, style_de
+    from .palette import a_tracer, objets_a_dessiner, style_de
 
     messages: list[str] = []
     if contrat is None:
@@ -421,7 +421,7 @@ def _poser_le_plan(planche: Planche, contrat, reperage, fenetre) -> list:
         avec_surface = any(
             g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
         )
-        for geometrie in geometries:
+        for geometrie in a_tracer(categorie, geometries):
             # Découpé, et non pas seulement écarté s'il est dehors : un objet à
             # cheval sur le bord du panneau était dessiné en entier et débordait
             # dans la colonne d'images. Le clip SVG de la planche ne protège que

@@ -579,3 +579,40 @@ def test_la_legende_dessinee_a_la_hauteur_quelle_annonce():
         planche, entrees, position=(10.0, 10.0), largeur_mm=70.0
     )
     assert hauteur == pytest.approx(hauteur_bloc(len(entrees)))
+
+
+# ---------------------------------------------------------------------------
+# Les surfaces d'une même piste, réunies au tracé (19/11/2026)
+# ---------------------------------------------------------------------------
+
+
+def test_les_surfaces_d_une_piste_qui_se_chevauchent_se_tracent_reunies():
+    """Un embranchement et son aire de retournement : une seule forme, un seul contour.
+
+    Tracées chacune avec son contour, elles se lisaient comme un empilement de
+    dalles (Rai, DP 2 bis, 19/11/2026). Une surface à l'écart reste à part, et
+    l'axe d'une piste reste un trait.
+    """
+    from shapely.geometry import LineString, box
+
+    from dp_socle.planches.palette import a_tracer
+
+    embranchement, aire, loin = box(0, 0, 10, 4), box(8, -3, 14, 7), box(30, 0, 35, 4)
+    axe = LineString([(0, 2), (35, 2)])
+    traces = a_tracer("piste_lourde_a_creer", [embranchement, aire, loin, axe])
+    surfaces = [g for g in traces if g.geom_type == "Polygon"]
+    assert len(surfaces) == 2
+    assert sum(s.area for s in surfaces) == pytest.approx(
+        embranchement.union(aire).area + loin.area
+    )
+    assert axe in traces
+
+
+def test_hors_des_pistes_rien_ne_se_reunit():
+    """Deux postes qui se touchent restent deux postes : la réunion ne vaut que pour les pistes."""
+    from shapely.geometry import box
+
+    from dp_socle.planches.palette import a_tracer
+
+    a, b = box(0, 0, 10, 4), box(8, 0, 14, 4)
+    assert a_tracer("pdl_ptr", [a, b]) == [a, b]

@@ -46,6 +46,7 @@ from .legende import dessiner_legende, hauteur_bloc
 from .modules import tracer_trame, trame_du_projet
 from .palette import (
     STYLES,
+    a_tracer,
     construire_legende,
     contour_de,
     objets_a_dessiner,
@@ -1041,7 +1042,7 @@ def _plan_de_reperage(planche, contrat, panneau, categories, libelles=None):
         avec_surface = any(
             g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
         )
-        for geometrie in geometries:
+        for geometrie in a_tracer(categorie, geometries):
             _tracer_decoupe(
                 planche, geometrie, style_de(categorie, geometrie, avec_surface), fenetre
             )

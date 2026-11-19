@@ -48,6 +48,7 @@ from .modules import tracer_trame, trame_du_projet
 from .palette import (
     STYLES,
     EntreeDP,
+    a_tracer,
     construire_legende,
     objets_a_dessiner,
     style,
@@ -481,7 +482,7 @@ def _composer(planche, projet, contrat, lectures, a_poser, calcul, cadres=(),
         avec_surface = any(
             g.geom_type in ("Polygon", "MultiPolygon") for g in geometries
         )
-        for geometrie in geometries:
+        for geometrie in a_tracer(categorie, geometries):
             if not cadre_planche.intersects(geometrie):
                 hors_cadre.append(categorie)
                 continue

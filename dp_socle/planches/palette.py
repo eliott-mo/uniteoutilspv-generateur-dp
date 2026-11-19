@@ -1207,6 +1207,46 @@ EPAISSEUR_TRACE_MM = 0.8
 _LINEAIRES = ("LineString", "LinearRing", "MultiLineString")
 
 
+_SURFACES = ("Polygon", "MultiPolygon")
+
+
+def _pistes() -> tuple:
+    """Les catégories de piste, lues dans `import_be` et non recopiées.
+
+    Importées dans la fonction, comme `cotation_plan_masse._categories_de_piste` :
+    la palette ne charge pas l'import du plan pour se charger elle-même.
+    """
+    from ..import_be import CATEGORIES_PISTE_LEGERE, CATEGORIES_VOIE_LOURDE
+
+    return CATEGORIES_VOIE_LOURDE + CATEGORIES_PISTE_LEGERE + ("chemin_existant",)
+
+
+def a_tracer(categorie: str, geometries) -> list:
+    """Les géométries d'une catégorie, telles qu'elles se tracent.
+
+    Les surfaces d'une même piste qui se chevauchent — un embranchement et son
+    aire de retournement, deux tronçons qui se recouvrent — se tracent réunies,
+    d'un seul aplat et d'un seul contour. Tracées une à une, chacune gardait son
+    contour par-dessus l'autre, et la jonction se lisait comme un empilement de
+    dalles (Rai, DP 2 bis, 19/11/2026).
+
+    La réunion ne vaut que pour le dessin : les cotes se prennent sur les objets
+    tels que `objets_a_dessiner` les rend, et une largeur de piste mesurée sur
+    une réunion ne serait plus celle d'une piste. Deux catégories ne se
+    réunissent pas entre elles : une piste existante et une piste à créer se
+    distinguent à l'instruction, et c'est leur contour qui le dit.
+    """
+    geometries = list(geometries)
+    if categorie not in _pistes():
+        return geometries
+    surfaces = [g for g in geometries if g.geom_type in _SURFACES]
+    if len(surfaces) < 2:
+        return geometries
+    reunion = union_valide(surfaces)
+    autres = [g for g in geometries if g.geom_type not in _SURFACES]
+    return [*getattr(reunion, "geoms", [reunion]), *autres]
+
+
 def style_de(categorie: str, geometrie, sur_sa_surface: bool = False) -> Style:
     """Style d'un objet : l'aplat de sa catégorie, ou un trait s'il n'est qu'un axe.
 
